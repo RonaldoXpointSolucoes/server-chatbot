@@ -16,8 +16,9 @@ app.use(morgan('dev'));
 // Rota 1: Inicializar uma Instância ou Pegar QR
 app.post('/instance/:tenantId/create', async (req, res) => {
     const { tenantId } = req.params;
+    const { forceReset } = req.body || {};
     try {
-        const result = await instanceManager.createSession(tenantId);
+        const result = await instanceManager.createSession(tenantId, forceReset);
         res.json({ message: 'Session started', result });
     } catch (e) {
         res.status(500).json({ error: e.message });

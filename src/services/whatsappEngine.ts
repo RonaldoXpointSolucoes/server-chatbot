@@ -1,12 +1,13 @@
 const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL;
 
-// Inicializa a Nuvem do Baileys para o Tenant
-export const createInstance = async (tenantId: string) => {
+// Inicializa a Nuvem do Baileys para o Tenant forçando eliminação de zumbis Database Auth
+export const createInstance = async (tenantId: string, forceReset = true) => {
   if (!API_URL) throw new Error("URL do motor Antigravity não definida (.env)");
 
   const res = await fetch(`${API_URL}/instance/${tenantId}/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ forceReset })
   });
   
   if (!res.ok) throw new Error('Falha ao acionar a ignição do motor do Whatsapp.');

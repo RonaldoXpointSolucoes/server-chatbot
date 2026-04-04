@@ -35,37 +35,56 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
   const checkQRStatus = async () => {
      try {
        const res = await fetchQrCodeState(tenantId);
-       setLoading(false);
-
+       
        if (res.connected) {
+         setLoading(false);
          setEvolutionConnection(true, tenantId);
          setTimeout(onClose, 1000);
          return;
        }
        
-       if (res.status === 'offline') {
-         setError('Buscando Instância e Analisando Cache...');
-         // Remover o return para manter o loop vivo caso demore 2s!
+       if (res.status === 'offline' || res.error) {
+         setLoading(false);
+         setError(res.error || 'A conexão com seu WhatsApp foi encerrada ou rejeitou no pareamento. Refaça!');
+         setQrBase64(null); // Esconde a imagem se o sv pifar
        }
 
        if (res.qrcode) {
+         setLoading(false);
          setQrBase64(res.qrcode);
        }
+       
      } catch (e) {
        console.error("Falha ao checar status QR do Motor Nativo:", e);
+       setError('O Motor Nativo Baileys recusou conexão.');
+       setLoading(false);
      }
   };
 
-  // Polling a cada 2.5s enquanto não conectado
+  // Polling e Timeout de 30s de Segurança
   useEffect(() => {
     let interval: any;
+    let fallbackTimeout: any;
+
     if (!evolutionConnected) {
-      interval = setInterval(() => {
-         checkQRStatus();
-      }, 2500);
+      if (loading && !qrBase64) {
+         // O loop de buscar QR comça se estamos ligando (loading = true) e n recebemos midia ainda.
+         interval = setInterval(() => {
+            checkQRStatus();
+         }, 3000);
+         
+         // Limite de tempo limite duro de 30 segundos solicitados pelo user 
+         fallbackTimeout = setTimeout(() => {
+             setLoading(false);
+             setError('TIMEOUT EXCEDIDO: O Motor Baileys demorou mais de 30 segundos e quebrou na inicialização. Verifique se o banco não retém chaves fantasmas ou se as portas WebSocket estão livres.');
+         }, 30000);
+      }
     }
-    return () => clearInterval(interval);
-  }, [evolutionConnected]);
+    return () => {
+       if(interval) clearInterval(interval);
+       if(fallbackTimeout) clearTimeout(fallbackTimeout);
+    };
+  }, [evolutionConnected, loading, qrBase64]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-300">
