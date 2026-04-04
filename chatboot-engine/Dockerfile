@@ -3,8 +3,8 @@ FROM node:20-alpine
 # Set working directory
 WORKDIR /app
 
-# Install OS dependencies needed by Baileys/Pino (if any, like ffmpeg later)
-RUN apk add --no-cache ffmpeg curl
+# Install OS dependencies needed by Baileys/Pino (if any, like ffmpeg later) and Git for NPM packages
+RUN apk add --no-cache ffmpeg curl git
 
 # Copy dependencies definitions
 COPY package*.json ./
