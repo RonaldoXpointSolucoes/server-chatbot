@@ -19,8 +19,16 @@ class InstanceManager {
      */
     async createSession(tenantId) {
         
+        // Proteção contra sessão ZUMBI presa na RAM:
+        // Se a Engine já existia mas deram trigger na UI pra 'Acionar', destrói a antiga pra obrigar o Baileys a disparar evento de QR zero-bala.
         if (this.sessions.has(tenantId)) {
-            return { status: 'already_connected', tenantId };
+            console.log(`[${tenantId}] Derrubando Instância Zumbi para recriar Motor novo!`);
+            const oldSock = this.sessions.get(tenantId);
+            try {
+                oldSock?.ws?.close(); // Corta o socket físico
+            } catch(e) {}
+            this.sessions.delete(tenantId);
+            this.qrs.delete(tenantId);
         }
 
         let store = this.stores.get(tenantId);
