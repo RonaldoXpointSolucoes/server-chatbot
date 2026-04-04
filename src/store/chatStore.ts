@@ -90,7 +90,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     state.addMessageLocally(contactId, { id: pseudoId, text, sender: 'human', timestamp: new Date() });
 
     try {
-      const { sendTextMessage } = await import('../services/evolution');
+      const { sendTextMessage } = await import('../services/whatsappEngine');
       // 1. Manda pra Evolution e deixa o webhook N8N replicar pro Supabase!
       await sendTextMessage(instanceName, contact.evolution_remote_jid, text);
       
@@ -137,7 +137,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
 
       // 2. Enviar via Evolution API
-      const { sendMediaMessage, sendWhatsAppAudio } = await import('../services/evolution');
+      const { sendMediaMessage, sendWhatsAppAudio } = await import('../services/whatsappEngine');
       
       if (mediaType === 'audio') {
         await sendWhatsAppAudio(instanceName, contact.evolution_remote_jid, publicUrl);
@@ -322,7 +322,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         // Se o banco ja sabe o nome da instancia pre-cadastrada dessa empresa, iniciamos o sync via api
         if (tenantData.evolution_api_instance) {
-           const { getInstanceConnectionState } = await import('../services/evolution');
+           const { getInstanceConnectionState } = await import('../services/whatsappEngine');
            const state = await getInstanceConnectionState(tenantData.evolution_api_instance);
            if (state?.instance?.state === 'open') {
              set({ evolutionConnected: true });
@@ -361,7 +361,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   syncEvolutionContacts: async (instanceName) => {
     try {
-      const { fetchRecentChats } = await import('../services/evolution');
+      const { fetchRecentChats } = await import('../services/whatsappEngine');
       const chats = await fetchRecentChats(instanceName);
       if(!chats || !Array.isArray(chats)) return;
 
@@ -449,7 +449,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!contact || !contact.evolution_remote_jid) return;
 
     try {
-      const { fetchChatMessages, fetchProfilePicture } = await import('../services/evolution');
+      const { fetchChatMessages, fetchProfilePicture } = await import('../services/whatsappEngine');
       // Pega a primeira pagina da evolution
       const remoteRecords = await fetchChatMessages(instanceName, contact.evolution_remote_jid, 1);
       

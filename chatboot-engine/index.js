@@ -43,19 +43,90 @@ app.get('/instance/:tenantId/qrcode', async (req, res) => {
     res.json({ status: 'not_initialized_or_fetching' });
 });
 
-// Rota 3: Envio de Mensagem Nativo (Substitui n8n e Evolution)
+// Rota 3: Envio de Mensagem Nativa
 app.post('/instance/:tenantId/send', async (req, res) => {
-    const { tenantId } = req.params;
-    const { number, text } = req.body; // number limpo, ex: 5511999999999
-    
-    if(!number || !text) return res.status(400).json({ error: 'Faltam number ou text' });
-    
-    const remoteJid = `${number}@s.whatsapp.net`;
     try {
+        const { tenantId } = req.params;
+        const { number, text } = req.body;
+        // JID Builder
+        const remoteJid = number.includes('@s.whatsapp.net') ? number : `${number}@s.whatsapp.net`;
         await instanceManager.sendMessage(tenantId, remoteJid, text);
-        res.json({ status: 'success', message: 'Mensagem ejetada no Whatsapp nativo.'});
-    } catch (e) {
-        res.status(500).json({ error: e.message });
+        res.json({ success: true, message: 'Disparo efetuado.' });
+    } catch(err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ==========================================
+// PARITY ROUTES (Mirror Evolution API Fetching)
+// ==========================================
+
+// Puxar Chats Recentes
+app.get('/instance/:tenantId/chats', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const store = instanceManager.stores.get(tenantId);
+        if(!store) return res.json([]);
+        
+        // Retorna top 30
+        const chats = store.chats.all().slice(0, 30);
+        res.json(chats);
+    } catch(err) {
+        res.json([]);
+    }
+});
+
+// Puxar Mensagens de Historico de um contato
+app.get('/instance/:tenantId/messages/:remoteJid', async (req, res) => {
+    try {
+        const { tenantId, remoteJid } = req.params;
+        const store = instanceManager.stores.get(tenantId);
+        if(!store) return res.json([]);
+        
+        const msgs = store.messages[remoteJid]?.array || [];
+        // Pega as ultimas 50
+        res.json(msgs.slice(-50));
+    } catch(err) {
+        res.json([]);
+    }
+});
+
+// Resgatar Foto de Perfil
+app.get('/instance/:tenantId/profilePic/:remoteJid', async (req, res) => {
+    try {
+        const { tenantId, remoteJid } = req.params;
+        const sock = instanceManager.sessions.get(tenantId);
+        if(!sock) return res.json({ url: null });
+        
+        const url = await sock.profilePictureUrl(remoteJid, 'image');
+        res.json({ url });
+    } catch(err) {
+        res.json({ url: null });
+    }
+});
+
+// Disparo de Mídia
+app.post('/instance/:tenantId/sendMedia', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const { number, mediaType, mediaUrl, mimetype, fileName, caption } = req.body;
+        
+        const sock = instanceManager.sessions.get(tenantId);
+        if(!sock) throw new Error('Servidor Local Offline');
+
+        const remoteJid = number.includes('@s.whatsapp.net') ? number : `${number}@s.whatsapp.net`;
+        
+        let msgPayload = {};
+        if (mediaType === 'image') msgPayload = { image: { url: mediaUrl }, caption: caption || '' };
+        else if (mediaType === 'video') msgPayload = { video: { url: mediaUrl }, caption: caption || '' };
+        else if (mediaType === 'audio') msgPayload = { audio: { url: mediaUrl }, mimetype: mimetype || 'audio/mp4', ptt: true };
+        else msgPayload = { document: { url: mediaUrl }, mimetype: mimetype || 'application/pdf', fileName: fileName || 'Documento' };
+
+        await sock.sendMessage(remoteJid, msgPayload);
+        res.json({ success: true, message: 'Mídia enfileirada e enviada.' });
+    } catch(err) {
+        console.error("Falha ao enviar midia via sock", err);
+        res.status(500).json({ error: err.message });
     }
 });
 

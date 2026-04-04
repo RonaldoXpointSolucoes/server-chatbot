@@ -1,4 +1,4 @@
-const { makeWASocket, DisconnectReason } = require('@whiskeysockets/baileys');
+const { makeWASocket, DisconnectReason, makeInMemoryStore } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const { useSupabaseAuthState } = require('./supaAuthState');
 const { supabase } = require('./supabase');
@@ -8,8 +8,10 @@ class InstanceManager {
     constructor() {
         // Guarda na RAM as instâncias online por Tenant ID
         this.sessions = new Map();
-        // Guarda buffers de QR Codes para a interface React consultar
+        // Guarda buffers de QR Codes
         this.qrs = new Map();
+        // Guarda o histórico sincronizado para simular a Evolution API
+        this.stores = new Map();
     }
 
     /**
@@ -21,6 +23,12 @@ class InstanceManager {
             return { status: 'already_connected', tenantId };
         }
 
+        let store = this.stores.get(tenantId);
+        if(!store) {
+            store = makeInMemoryStore({});
+            this.stores.set(tenantId, store);
+        }
+
         const { state, saveCreds } = await useSupabaseAuthState(supabase, tenantId);
 
         // Instanciamento Oficial do Motor Whatsapp
@@ -28,8 +36,10 @@ class InstanceManager {
             auth: state,
             printQRInTerminal: true, // Pra vermos no console Windows/Nuvem
             browser: ['Antigravity SaaS', 'Chrome', '10.0'],
+            syncFullHistory: false // Somente recentes parciais
         });
 
+        store.bind(sock.ev);
         this.sessions.set(tenantId, sock);
 
         // EVENTOS DE CONEXÃO
