@@ -29,7 +29,7 @@ class InstanceManager {
             this.stores.set(tenantId, store);
         }
 
-        const { state, saveCreds } = await useSupabaseAuthState(supabase, tenantId);
+        const { state, saveCreds, clearState } = await useSupabaseAuthState(supabase, tenantId);
 
         // Instanciamento Oficial do Motor Whatsapp
         const sock = makeWASocket({
@@ -58,7 +58,9 @@ class InstanceManager {
             }
 
             if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+                const isLoggedOut = (lastDisconnect.error instanceof Boom)?.output?.statusCode === DisconnectReason.loggedOut;
+                const shouldReconnect = !isLoggedOut;
+                
                 console.log(`[${tenantId}] Conexão fechada. Reconectar?`, shouldReconnect);
                 
                 this.sessions.delete(tenantId);
@@ -66,7 +68,8 @@ class InstanceManager {
                 if (shouldReconnect) {
                     this.createSession(tenantId);
                 } else {
-                    console.log(`[${tenantId}] LOGGED OUT. Excluindo base.`);
+                    console.log(`[${tenantId}] LOGGED OUT. Excluindo base e liberando state sujo.`);
+                    await clearState();
                 }
             } else if (connection === 'open') {
                 console.log(`[${tenantId}] CONEXÃO ABERTA E 100% OPERACIONAL!`);

@@ -66,6 +66,14 @@ const useSupabaseAuthState = async (supabase, tenantId) => {
         await writeData(creds, 'creds');
     }
 
+    const clearState = async () => {
+        try {
+            await supabase.from('wa_auth_states').delete().eq('tenant_id', tenantId);
+        } catch (error) {
+            console.error('Falha ao limpar state antigo', error);
+        }
+    };
+
     return {
         state: {
             creds,
@@ -103,7 +111,8 @@ const useSupabaseAuthState = async (supabase, tenantId) => {
         },
         saveCreds: () => {
             return writeData(creds, 'creds');
-        }
+        },
+        clearState
     }
 }
 

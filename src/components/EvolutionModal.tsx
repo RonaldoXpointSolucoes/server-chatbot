@@ -42,11 +42,17 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
          setTimeout(onClose, 1000);
          return;
        }
+       
+       if (res.status === 'offline') {
+         setError('Buscando Instância e Analisando Cache...');
+         // Remover o return para manter o loop vivo caso demore 2s!
+       }
+
        if (res.qrcode) {
          setQrBase64(res.qrcode);
        }
      } catch (e) {
-       // Silent poll errors
+       console.error("Falha ao checar status QR do Motor Nativo:", e);
      }
   };
 
