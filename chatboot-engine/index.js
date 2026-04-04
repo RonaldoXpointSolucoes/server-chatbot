@@ -24,17 +24,22 @@ app.post('/instance/:tenantId/create', async (req, res) => {
     }
 });
 
-// Rota 2: Verificar o QR Base64 para exibir na tela do React (SaaS)
+// Rota 2: Verificar o QR Base64 ou Se Conectou
 app.get('/instance/:tenantId/qrcode', async (req, res) => {
     const { tenantId } = req.params;
+    
+    // Se o user tá autenticado / logado
+    const sock = instanceManager.sessions.get(tenantId);
+    if(sock && sock.user) {
+        return res.json({ connected: true, status: 'open' });
+    }
+
+    // Se nâo tá logado, exibe QR se tiver algum pendente na fila
     const qrData = instanceManager.qrs.get(tenantId);
     if(qrData) {
         return res.json({ qrcode: qrData });
     }
-    const sock = instanceManager.sessions.get(tenantId);
-    if(sock) {
-        return res.json({ connected: true });
-    }
+    
     res.json({ status: 'not_initialized_or_fetching' });
 });
 

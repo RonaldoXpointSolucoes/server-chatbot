@@ -2,7 +2,7 @@ const { makeWASocket, DisconnectReason } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const { useSupabaseAuthState } = require('./supaAuthState');
 const { supabase } = require('./supabase');
-const qrcode = require('qrcode-terminal'); // Util p/ ver no console
+const QRCodeLib = require('qrcode');
 
 class InstanceManager {
     constructor() {
@@ -26,7 +26,7 @@ class InstanceManager {
         // Instanciamento Oficial do Motor Whatsapp
         const sock = makeWASocket({
             auth: state,
-            printQRInTerminal: true, // Pra vermos no console Windows
+            printQRInTerminal: true, // Pra vermos no console Windows/Nuvem
             browser: ['Antigravity SaaS', 'Chrome', '10.0'],
         });
 
@@ -37,9 +37,14 @@ class InstanceManager {
             const { connection, lastDisconnect, qr } = update;
             
             if (qr) {
-                // Guarda o QR provisório em texto pro painel react puxar via REST
-                this.qrs.set(tenantId, qr); 
-                console.log(`[${tenantId}] QR Code Aguardando leitura...`);
+                try {
+                    // Transmuta String Pura do Baileys para Imagem de Base64 consumível pelo Web-React
+                    const base64Image = await QRCodeLib.toDataURL(qr, { errorCorrectionLevel: 'H' });
+                    this.qrs.set(tenantId, base64Image); 
+                    console.log(`[${tenantId}] QR Code Limpo Gerado para API Local/Nuvem!`);
+                } catch(err) {
+                    console.error('Falha de transcrição QR', err);
+                }
             }
 
             if (connection === 'close') {
@@ -52,7 +57,6 @@ class InstanceManager {
                     this.createSession(tenantId);
                 } else {
                     console.log(`[${tenantId}] LOGGED OUT. Excluindo base.`);
-                    // Em produção deletariamos a session do banco tb p n entrar em loop
                 }
             } else if (connection === 'open') {
                 console.log(`[${tenantId}] CONEXÃO ABERTA E 100% OPERACIONAL!`);
