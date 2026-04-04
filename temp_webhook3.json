@@ -1,0 +1,15 @@
+{
+  "id": "cmnj5ae1794vfpl4xs02q9ywb",
+  "url": "https://yzbxsxabzncdzuxvlppt.supabase.co/functions/v1/evolution-webhook",
+  "headers": null,
+  "enabled": true,
+  "events": [
+    "MESSAGES_UPSERT",
+    "MESSAGES_UPDATE"
+  ],
+  "webhookByEvents": false,
+  "webhookBase64": false,
+  "createdAt": "2026-04-03T16:55:44.011Z",
+  "updatedAt": "2026-04-03T22:54:23.846Z",
+  "instanceId": "3485b72a-dd43-4fec-8ccb-89abc057651d"
+}

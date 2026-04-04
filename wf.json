@@ -1,0 +1,120 @@
+{
+  "nodes": [
+    {
+      "id": "2dbb5055-6677-4c31-893f-c672abdb1cc2",
+      "name": "Webhook Inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [ 0, 0 ],
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {},
+        "path": "chatboot-inbound",
+        "responseMode": "onReceived"
+      }
+    },
+    {
+      "id": "31ea41e0-b6f7-4632-a564-9cb3d077b949",
+      "name": "Process Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [ 220, 0 ],
+      "parameters": {
+        "jsCode": "const body = $input.item.json.body || $input.item.json;\nif (body?.data?.key?.fromMe) return [];\n\nconst remoteJid = body?.data?.key?.remoteJid || '';\nlet phone = remoteJid.includes('@') ? remoteJid.split('@')[0] : remoteJid;\nif (remoteJid.includes('@lid') && body?.data?.key?.remoteJidAlt) {\n   phone = body?.data?.key?.remoteJidAlt.split('@')[0];\n}\nconst msgText = body?.data?.message?.conversation || body?.data?.message?.extendedTextMessage?.text || '';\nif (!msgText) return [];\n\nreturn { json: { tenant: body?.instance || '', remote_jid: remoteJid, phone: phone, message: msgText, senderName: body?.data?.pushName || 'Cliente' } };"
+      }
+    },
+    {
+      "id": "node-get-tenant",
+      "name": "Get Tenant UUID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 440, 0 ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://yzbxsxabzncdzuxvlppt.supabase.co/rest/v1/tenants",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "evolution_instance_name", "value": "eq.{{$json.tenant}}" },
+            { "name": "select", "value": "id" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k" },
+            { "name": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-upsert-contact",
+      "name": "Upsert Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 660, 0 ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://yzbxsxabzncdzuxvlppt.supabase.co/rest/v1/contacts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k" },
+            { "name": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k" },
+            { "name": "Prefer", "value": "resolution=merge-duplicates,return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "tenant_id", "value": "={{ $('Get Tenant UUID').item.json[0].id }}" },
+            { "name": "phone", "value": "={{ $('Process Message').item.json.phone }}" },
+            { "name": "evolution_remote_jid", "value": "={{ $('Process Message').item.json.remote_jid }}" },
+            { "name": "name", "value": "={{ $('Process Message').item.json.senderName }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-insert-message",
+      "name": "Insert Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 860, 0 ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://yzbxsxabzncdzuxvlppt.supabase.co/rest/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k" },
+            { "name": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "contact_id", "value": "={{ $json[0].id }}" },
+            { "name": "text_content", "value": "={{ $('Process Message').item.json.message }}" },
+            { "name": "sender_type", "value": "client" }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Inbound": {
+      "main": [ [ { "node": "Process Message", "type": "main", "index": 0 } ] ]
+    },
+    "Process Message": {
+      "main": [ [ { "node": "Get Tenant UUID", "type": "main", "index": 0 } ] ]
+    },
+    "Get Tenant UUID": {
+      "main": [ [ { "node": "Upsert Contact", "type": "main", "index": 0 } ] ]
+    },
+    "Upsert Contact": {
+      "main": [ [ { "node": "Insert Message", "type": "main", "index": 0 } ] ]
+    }
+  }
+}

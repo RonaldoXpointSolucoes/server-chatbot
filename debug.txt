@@ -1,0 +1,3 @@
+Supabase CLI 1.131.3
+Bundling evolution-webhook
+failed to inspect docker image: error during connect: Get "http://%2F%2F.%2Fpipe%2FdockerDesktopLinuxEngine/v1.24/images/public.ecr.aws/supabase/edge-runtime:v1.29.1/json": open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.

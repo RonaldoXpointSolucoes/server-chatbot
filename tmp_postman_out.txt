@@ -1,0 +1,157 @@
+
+--- Send Message/Send Media URL ---
+{{baseUrl}}/message/sendMedia/{{instance}}
+{
+    "number": "{{remoteJid}}",
+    "mediatype": "image", // image, video or document
+    "mimetype": "image/png",
+    "caption": "Teste de caption",
+    "media": "https://s3.amazonaws.com/atendai/company-3708fcdf-954b-48f8-91ff-25babaccac67/1712605171932.jpeg", /* url or base64 */
+    "fileName": "Imagem.png"
+    // options
+    // "delay": 1200,
+    // "quoted": {
+    //     // payload message or key.id only for get message in database
+    //     "key": {
+    //         "id": " MESSAGE_ID"
+    //     },
+    //     "message": {
+    //         "conversation": "CONTENT_MESSAGE"
+    //     }
+    // },
+    // "mentionsEveryOne": false,
+    // "mentioned": [
+    //     "{{remoteJid}}"
+    // ]
+}
+
+--- Send Message/Send Media File ---
+{{baseUrl}}/message/sendMedia/{{instance}}
+
+--- Send Message/Send Narrated Audio ---
+{{baseUrl}}/message/sendWhatsAppAudio/{{instance}}
+{
+    "number": "{{remoteJid}}",
+    "audio": "https://evolution-api.com/files/narratedaudio.mp3" /* url or base64 */
+    // options
+    // "delay": 1200,
+    // "quoted": {
+    //     // payload message or key.id only for get message in database
+    //     "key": {
+    //         "id": " MESSAGE_ID"
+    //     },
+    //     "message": {
+    //         "conversation": "CONTENT_MESSAGE"
+    //     }
+    // },
+    // "mentionsEveryOne": false,
+    // "mentioned": [
+    //     "{{remoteJid}}"
+    // ],
+    // "encoding": true
+}
+
+--- Chat/Read Messages ---
+{{baseUrl}}/chat/markMessageAsRead/{{instance}}
+{
+  "readMessages": [
+    {
+      "remoteJid": "123@s.whatsapp.net",
+      "fromMe": false,
+      "id": "80C4CE9B72F797DBC6ECD8D19B247FC9"
+    }
+  ]
+}
+
+--- Chat/Delete Message ---
+{{baseUrl}}/chat/deleteMessageForEveryone/{{instance}}
+{
+  "id": "id",
+  "remoteJid": "remoteJid",
+  "fromMe": true,
+  // optional
+  "participant": "paticipant"
+}
+
+--- Chat/Get Base64 From Media Message ---
+{{baseUrl}}/chat/getBase64FromMediaMessage/{{instance}}
+/*
+  In this endpoint it is possible to extract the Base64 of the media 
+  received in the messages, passing the message ID as a parameter.
+  Make sure that the received message is stored in MongoDB or in a file,
+  otherwise the error 400 - Bad Request will be displayed.
+  If the media type is audio, the mimetype audio/ogg is returned by default. 
+  If you need an MP4 file, check the "convertToMp4" option as "true"
+*/
+{
+    // payload message or key.id only for get message in database
+    "message": {
+        "key": {
+            "id": "3EB0F4A1F841F02958FB74"
+        }
+    },
+    "convertToMp4": false
+}
+
+--- Chat/Update Message ---
+{{baseUrl}}/chat/updateMessage/{{instance}}
+{
+    "number": "{{remoteJid}}",
+    "key":  {
+        "remoteJid": "123@s.whatsapp.net",
+        "fromMe": true,
+        "id": "3EB04DC69D97835D7CC6F12776D25766FBC224E2"
+    },
+    "text": "new message"
+}
+
+--- Chat/Find Messages ---
+{{baseUrl}}/chat/findMessages/{{instance}}
+/*
+  Each of these properties are optional.
+  With mongodb disabled, only the "key.id" property is available.
+  Remove all comments before submitting the request.
+*/
+{
+    "where": {
+        "key": {
+            "remoteJid": "{{remoteJid}}"
+        }
+    },
+    // optional
+    "page": 1,
+    "offset": 10
+}
+
+--- Chat/Find Status Message ---
+{{baseUrl}}/chat/findStatusMessage/{{instance}}
+/*
+  Each of these properties are optional.
+  With mongodb disabled, only the "id" property is available.
+  Remove all comments before submitting the request.
+*/
+{
+  "where": {
+    "remoteJid": "123@s.whatsapp.net",
+    "id": "BAE5959535174C7E"
+  },
+  // optional
+  "page": 1,
+  "offset": 10
+}
+
+--- Integrations/Storage/S3/Get Media ---
+{{baseUrl}}/s3/getMedia/{{instance}}
+{
+    // "id": "",
+    // "type": "",
+    // "messageId": ""
+}
+
+--- Integrations/Storage/S3/Get Media Url ---
+{{baseUrl}}/s3/getMediaUrl/{{instance}}
+{
+    "id": "clykhoqq70003pmm88bb6eejd"
+    // "type": "",
+    // "messageId": ""
+}

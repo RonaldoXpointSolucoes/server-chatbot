@@ -1,0 +1,14 @@
+[
+  {
+    "id": "11ed2698-74d7-4a85-bc6b-0cc14c6e2b7c",
+    "name": "Ronaldo Clemente",
+    "phone": "5511975960999",
+    "tenant_id": null
+  },
+  {
+    "id": "a8620463-d29f-4632-aa0b-8be9801892f1",
+    "name": "Ronaldo Clemente",
+    "phone": "5511975960999",
+    "tenant_id": "dd323318-c6f4-476b-ab10-f6b2890a6cf3"
+  }
+]
