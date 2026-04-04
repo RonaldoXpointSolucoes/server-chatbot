@@ -76,8 +76,15 @@ class InstanceManager {
                 if (shouldReconnect) {
                     this.createSession(tenantId);
                 } else {
-                    console.log(`[${tenantId}] LOGGED OUT. Excluindo base e liberando state sujo.`);
-                    await clearState();
+                    console.log(`[${tenantId}] LOGGED OUT CATASTRÓFICO. Excluindo base e liberando state sujo...`);
+                    // Limpar a sujeira e reiniciar no modo RAW para emergir o QRCODE Base64 na mesma hora!!
+                    clearState().then(() => {
+                        console.log(`[${tenantId}] Base limpa. Engatando Motor novamente no Zero Grau...`);
+                        this.createSession(tenantId);
+                    }).catch(err => {
+                        console.error('Falha ao limpar banco de dados:', err);
+                        this.createSession(tenantId); // tenta igual
+                    });
                 }
             } else if (connection === 'open') {
                 console.log(`[${tenantId}] CONEXÃO ABERTA E 100% OPERACIONAL!`);
