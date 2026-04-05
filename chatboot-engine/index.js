@@ -74,9 +74,11 @@ app.post('/instance/:tenantId/send', async (req, res) => {
 
         // Anti-Connection Closed Protector
         if (sock && (!sock.user || !sock.isConnectionFullyOpen)) {
+            if (instanceManager.qrs.has(tenantId)) {
+                 throw new Error("Instância desconectada. WhatsApp requer Pareamento. Por favor, acesse o painel e leia o QR Code novamente.");
+            }
             throw new Error("Conexão ao WhatsApp sendo reestabelecida (Handshake). Aguarde cerca de 10 segundos e tente reenviar. Se o erro persistir o celular está sem internet.");
         }
-
         // JID Builder
         const remoteJid = number.includes('@s.whatsapp.net') ? number : `${number}@s.whatsapp.net`;
         await instanceManager.sendMessage(tenantId, remoteJid, text);
