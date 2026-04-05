@@ -178,7 +178,7 @@ export default function ChatDashboard() {
         
         {/* Header do Sidebar */}
         <div className="h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 relative">
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80">v1.0.6</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80">v1.0.7</span>
           <div className="w-10 h-10 rounded-full bg-[#00a884]/20 flex items-center justify-center text-[#00a884] font-bold shadow-inner">
             RA
           </div>
