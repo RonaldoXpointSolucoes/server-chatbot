@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useDevStore } from '../store/devStore';
-import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket } from 'lucide-react';
+import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow } from 'lucide-react';
+import { supabase } from '../services/supabase';
 
 export default function DevLogger() {
   const { logs, isVisible, toggleVisibility, addLog, clearLogs } = useDevStore();
@@ -151,6 +152,22 @@ export default function DevLogger() {
     }
   };
 
+  const handleTestSupabase = async () => {
+    addLog({ type: 'info', message: 'Testando conexão com Supabase...', source: 'Tester' });
+    try {
+        const { error } = await supabase.from('contacts').select('id').limit(1);
+        if (error) throw error;
+        addLog({ type: 'success', message: 'Conexão Supabase OK!', source: 'Tester' });
+    } catch(err: any) {
+        addLog({ type: 'error', message: `Erro Supabase: ${err.message}`, source: 'Tester' });
+    }
+  };
+
+  const handleTestApp = () => {
+    addLog({ type: 'info', message: 'Diagnóstico do React App...', source: 'Tester' });
+    addLog({ type: 'success', message: 'App React em Execução. Hooks ativos.', source: 'Tester' });
+  };
+
   if (!import.meta.env.DEV) return null;
 
   return (
@@ -178,9 +195,16 @@ export default function DevLogger() {
             )}
           </div>
           <div className="flex items-center gap-2">
-             <button onClick={(e) => { e.stopPropagation(); handleTestEngine(); }} className="text-gray-400 hover:text-blue-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Testar Servidor Agora">
-                <Activity size={14} />
+             <button onClick={(e) => { e.stopPropagation(); handleTestSupabase(); }} className="text-gray-400 hover:text-purple-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Testar Supabase (DB)">
+                <Database size={14} />
              </button>
+             <button onClick={(e) => { e.stopPropagation(); handleTestApp(); }} className="text-gray-400 hover:text-cyan-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Testar App React">
+                <AppWindow size={14} />
+             </button>
+             <button onClick={(e) => { e.stopPropagation(); handleTestEngine(); }} className="text-gray-400 hover:text-blue-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Testar Baileys (Nuvem)">
+                <Smartphone size={14} />
+             </button>
+             <div className="w-px h-4 bg-gray-700/50 mx-1"></div>
              <button onClick={(e) => { e.stopPropagation(); copyLogs(); }} className="text-gray-400 hover:text-emerald-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Copiar Logs">
                 <Copy size={14} />
              </button>

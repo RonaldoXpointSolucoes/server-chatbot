@@ -67,6 +67,7 @@ class InstanceManager {
         });
 
         store.bind(sock.ev);
+        sock.isConnectionFullyOpen = false; // Propriedade Customizada Anti-Timeout
         this.sessions.set(tenantId, sock);
 
         // EVENTOS DE CONEXÃO
@@ -121,6 +122,7 @@ class InstanceManager {
                 }
             } else if (connection === 'open') {
                 console.log(`[${tenantId}] CONEXÃO ABERTA E 100% OPERACIONAL!`);
+                sock.isConnectionFullyOpen = true; // Libera disparo
                 this.qrs.delete(tenantId); // Limpa QR
                 
                 try {
@@ -165,7 +167,16 @@ class InstanceManager {
         const sock = this.sessions.get(tenantId);
         if(!sock) throw new Error('WhatsApp Instância NÂO está online para este Tenant.');
         
-        const res = await sock.sendMessage(remoteJid, { text });
+        let res;
+        try {
+            res = await sock.sendMessage(remoteJid, { text });
+        } catch (e) {
+            console.error('Falha interna no motor Baileys ao enviar:', e);
+            if (e.message === 'Timed Out' || e.message === 'Connection Closed') {
+                throw new Error('Connection Timeout: O Celular do WhatsApp demorou muito para responder o disparo. A tela está apagada ou ele se desconectou do Wifi/4G. Acorde a tela do aparelho e tente novamente.');
+            }
+            throw e;
+        }
         
         try {
             const whatsappIdId = remoteJid.replace('@s.whatsapp.net', '').replace('@lid', '');

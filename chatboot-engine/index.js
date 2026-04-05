@@ -68,8 +68,8 @@ app.post('/instance/:tenantId/send', async (req, res) => {
         }
 
         // Anti-Connection Closed Protector
-        if (sock && !sock.user) {
-            throw new Error("Motor Baileys em fase de Handshake (Conectando ao WhatsApp). Tente enviar novamente em 2 a 5 segundos.");
+        if (sock && (!sock.user || !sock.isConnectionFullyOpen)) {
+            throw new Error("Conexão ao WhatsApp sendo reestabelecida (Handshake). Aguarde cerca de 10 segundos e tente reenviar. Se o erro persistir o celular está sem internet.");
         }
 
         // JID Builder
