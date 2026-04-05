@@ -407,23 +407,38 @@ app.post('/instance/:tenantId/pairing-code', async (req, res) => {
 
 // Listar Todas Instâncias
 app.get('/instance', (req, res) => {
-    const instances = Array.from(instanceManager.sessions.keys()).map(tenantId => ({
-        instanceName: tenantId,
-        status: 'open'
-    }));
+    const instances = Array.from(instanceManager.sessions.keys()).map(tenantId => {
+        const sock = instanceManager.sessions.get(tenantId);
+        const isQr = instanceManager.qrs.has(tenantId);
+        let currentStatus = 'connecting';
+        if (isQr) currentStatus = 'qr_ready';
+        else if (sock && sock.user && sock.isConnectionFullyOpen) currentStatus = 'connected';
+        else if (!sock) currentStatus = 'offline';
+        
+        return {
+            instanceName: tenantId,
+            status: currentStatus,
+            user: sock?.user || null
+        };
+    });
     res.json(instances);
 });
 
 // Global Health
 const packageJson = require('./package.json');
-const ENGINE_START_TIME = new Date().toISOString();
+const fs = require('fs');
+let ENGINE_COMPILE_TIME = '05/04/2026, 00:20:00';
+try {
+   const stat = fs.statSync(__filename);
+   ENGINE_COMPILE_TIME = stat.mtime.toLocaleString('pt-BR');
+} catch(e) {}
 
 app.get('/debug/healthz', (req, res) => {
     res.json({
         uptime: process.uptime(),
         memoryUsage: process.memoryUsage(),
         engineVersion: packageJson.version + '-Stable',
-        compileDate: ENGINE_START_TIME,
+        compileDate: ENGINE_COMPILE_TIME,
         changelog: [
             "Correção do erro 500 no WebHook enviando 'Connection Closed'",
             "Adicionado Lazy Load para restaurar o Socket em caso de limpeza de memória no Node",

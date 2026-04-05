@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
-import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link, PlusCircle, Key, LogOut, RefreshCcw, UserCircle2 } from 'lucide-react';
+import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link, PlusCircle, LogOut, RefreshCcw, UserCircle2 } from 'lucide-react';
 import { createInstance, fetchQrCodeState, fetchEngineStatus, logoutEngine, reconnectEngine, clearEngineStore, syncEngineContacts, forceEnginePresence } from '../services/whatsappEngine';
 import { supabase } from '../services/supabase';
 
@@ -22,7 +22,6 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
   const [existingInstances, setExistingInstances] = useState<any[]>([]);
   
   const [customName, setCustomName] = useState<string>('');
-  const [apiKey, setApiKey] = useState<string>('');
   const [activePollingId, setActivePollingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -73,10 +72,9 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
     setQrBase64(null);
 
     const nameStr = customName.trim();
-    const keyStr = apiKey.trim();
 
-    if (!nameStr || !keyStr) {
-      setError('Nome e API Key são OBRIGATÓRIOS para a Nuvem Antigravity.');
+    if (!nameStr) {
+      setError('O Nome da Instância é OBRIGATÓRIO (Ex: WhatsApp Vendas).');
       setLoading(false);
       return;
     }
@@ -84,12 +82,13 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
     try {
         const newEngineId = uuidv4();
         const cId = sessionStorage.getItem('current_tenant_id');
+        const randomToken = uuidv4().replace(/-/g, '').substring(0, 32); 
         
         const { error: dbErr } = await supabase.from('whatsapp_instances').insert({
           id: newEngineId,
           name: nameStr,
           status: 'offline',
-          access_token: keyStr,
+          access_token: randomToken,
           ...(cId ? { tenant_id: cId } : {})
         });
 
@@ -100,6 +99,7 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
         await createInstance(newEngineId);
         setActivePollingId(newEngineId);
         checkQRStatus(newEngineId, false);
+        setCustomName('');
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Erro de comunicação com o sistema.');
@@ -382,24 +382,6 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                          placeholder="Ex: WhatsApp Operacional"
                          className="w-full bg-white dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-2xl p-3 text-sm text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-all"
                        />
-                    </div>
-                    <div className="w-full mb-2">
-                       <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase tracking-tight flex items-center gap-1">
-                          API Key
-                          <span className="text-red-500">*</span>
-                       </label>
-                       <div className="relative">
-                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                           <Key size={14} className="text-gray-400" />
-                         </div>
-                         <input 
-                           type="password" 
-                           value={apiKey}
-                           onChange={e => setApiKey(e.target.value)}
-                           placeholder="Cole sua API Key gerada"
-                           className="w-full bg-white dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-2xl py-3 pl-9 pr-3 text-sm text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-all font-mono"
-                         />
-                       </div>
                     </div>
                     <button 
                       onClick={handleGenerateNew}

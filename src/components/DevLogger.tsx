@@ -281,7 +281,7 @@ export default function DevLogger() {
                    <span className="font-bold text-blue-500 mb-2 block">Motor Baileys: Endpoints Globais:</span>
                    <div className="grid grid-cols-1 gap-2">
                      {(() => {
-                        const myTenant = sessionStorage.getItem('tenantId') || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+                        const myTenant = sessionStorage.getItem('current_tenant_id') || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
                         return [
                          { name: 'Root / App Status (GET)', path: '/' },
                          { name: 'Motor Health Check (GET)', path: '/debug/healthz' },

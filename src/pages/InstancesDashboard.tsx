@@ -86,8 +86,8 @@ export default function InstancesDashboard() {
       
       // Validação Cirúrgica NATIVA (Corrige os Falsos Positivos do Banco)
       const liveInstances = await Promise.all(instancesData.map(async (inst) => {
-          // Se o banco acha que está online, nós vamos duvidar e validar na Engine.
-          if (inst.status === 'online') {
+          // Se o banco acha que está online/conectado, nós vamos duvidar e validar na Engine.
+          if (inst.status === 'online' || inst.status === 'connected' || inst.status === 'connecting') {
               try {
                   const res = await fetch(`${ENGINE_URL}/instance/${inst.id}/status`);
                   if (res.ok) {
@@ -206,7 +206,17 @@ export default function InstancesDashboard() {
     if (!window.confirm('Isto fará logoff do WhatsApp atual mas manterá a instância. Deseja Continuar?')) return;
     // O delete sem apagar do banco. O /delete agora apaga tudo se feito via painel se não mudarmos
     await supabase.from('whatsapp_instances').update({ status: 'offline', phone_number: null, profile_picture_url: null }).eq('id', id);
-    await fetch(`${ENGINE_URL}/instance/${id}/delete`, { method: 'DELETE' }); 
+    await fetch(`${ENGINE_URL}/instance/${id}/logout`, { method: 'POST' }).catch(() => {}); 
+  };
+
+  const fireEngineAction = async (id: string, action: string, successMsg: string) => {
+    try {
+       const res = await fetch(`${ENGINE_URL}/instance/${id}/${action}`, { method: 'POST' });
+       const data = await res.json();
+       alert(data.message || successMsg);
+    } catch(err) {
+       alert('Erro de comunicação central com a Engine');
+    }
   };
 
   const handleConnect = async (id: string) => {
@@ -497,11 +507,20 @@ export default function InstancesDashboard() {
                         <button disabled className="flex-1 bg-[#00a884]/20 text-[#00a884] font-bold py-3.5 px-4 rounded-[14px] flex justify-center items-center gap-2 cursor-default border border-[#00a884]/30">
                            Conectado
                          </button>
-                         <button onClick={() => handleConnect(inst.id)} className="px-4 py-3.5 bg-gray-100 dark:bg-[#202c33] hover:dark:bg-white/10 text-gray-700 dark:text-white font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-gray-200 dark:border-white/5">
+                         <button onClick={() => fireEngineAction(inst.id, 'sync-contacts', 'Sincronizado!')} className="px-3 py-3.5 bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-blue-500/20 hover:border-blue-500" title="Ler Contatos Recentes">
+                           <RefreshCcw size={18} /> Sync
+                         </button>
+                         <button onClick={() => fireEngineAction(inst.id, 'presence', 'Status forçado!')} className="px-3 py-3.5 bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-emerald-500/20 hover:border-emerald-500" title="Avisar que está online para todos">
+                           <Signal size={18} /> Forçar ON
+                         </button>
+                         <button onClick={() => { if(window.confirm('Purgar Cache? As conversas de hoje serão apagadas da RAM temporária do servidor.')) fireEngineAction(inst.id, 'clear-store', 'Cache Limpo') }} className="px-3 py-3.5 bg-gray-500/10 hover:bg-gray-500 hover:text-white text-gray-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-gray-500/20 hover:border-gray-500" title="Apagar Histórico em Memória">
+                           <Trash2 size={18} /> Limpar Mem.
+                         </button>
+                         <button onClick={() => fireEngineAction(inst.id, 'reconnect', 'Reiniciando...')} className="px-3 py-3.5 bg-gray-100 dark:bg-[#202c33] hover:dark:bg-white/10 text-gray-700 dark:text-white font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-gray-200 dark:border-white/5">
                            Reiniciar
                          </button>
-                         <button onClick={() => handleDisconnect(inst.id)} className="px-4 py-3.5 bg-orange-500/10 hover:bg-orange-500 hover:text-white text-orange-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-orange-500/20 hover:border-orange-500">
-                           Deslogar
+                         <button onClick={() => handleDisconnect(inst.id)} className="px-3 py-3.5 bg-orange-500/10 hover:bg-orange-500 hover:text-white text-orange-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-orange-500/20 hover:border-orange-500">
+                           Desparear
                          </button>
                      </>
                   )}
