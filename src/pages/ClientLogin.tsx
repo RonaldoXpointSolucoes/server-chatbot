@@ -10,8 +10,8 @@ const supabase = createClient(
 );
 
 export default function ClientLogin() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('ronaldo.xpointsolucoes@gmail.com');
+  const [password, setPassword] = useState('Xx@gh03360102');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const navigate = useNavigate();

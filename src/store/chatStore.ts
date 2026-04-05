@@ -91,11 +91,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const { sendTextMessage } = await import('../services/whatsappEngine');
-      // 1. Manda pra Evolution e deixa o webhook N8N replicar pro Supabase!
+      // 1. Manda pra Baileys Engine Local
       await sendTextMessage(instanceName, contact.evolution_remote_jid, text);
       
-    } catch(err) {
+    } catch(err: any) {
       console.error(err);
+      
+      // Reverter mensagem otimista e alertar o usuario
+      set((s) => ({
+        contacts: s.contacts.map(c => {
+          if (c.id === contactId) {
+            return { ...c, messages: c.messages.filter(m => m.id !== pseudoId) };
+          }
+          return c;
+        })
+      }));
+      
+      if (err.message === 'Failed to fetch') {
+         alert('Falha crítica de comunicação com o Motor Baileys Local na Porta 9000. Verifique se o terminal do servidor node está rodando (node index.js).');
+      } else if (err.message === 'Connection Closed') {
+         alert('Conexão instável com o WhatsApp (Connection Closed). O motor Baileys está tentando reconectar em segundo plano. Aguarde 5 segundos e tente novamente.');
+      } else {
+         alert('Erro ao enviar mensagem: ' + err.message);
+      }
     }
   },
 
@@ -322,14 +340,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         // Se o banco ja sabe o nome da instancia pre-cadastrada dessa empresa, iniciamos o sync via api
         if (tenantData.evolution_api_instance) {
-           const { getInstanceConnectionState } = await import('../services/whatsappEngine');
+           const { getInstanceConnectionState, createInstance } = await import('../services/whatsappEngine');
            const state = await getInstanceConnectionState(tenantData.evolution_api_instance);
+           
            if (state?.instance?.state === 'open') {
              set({ evolutionConnected: true });
              get().syncEvolutionContacts(tenantData.evolution_api_instance);
            } else {
-             // Cai pro modal mas de forma justificada
-             set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp foi encerrada ou expirada de forma remota. Por favor, conecte novamente relendo o QR Code.' });
+             // O motor node pode ter reiniciado. Vamos consultar o Supabase para ter a verdade absoluta
+             const { data: instData } = await supabase.from('whatsapp_instances')
+                .select('status')
+                .eq('id', tenantData.evolution_api_instance)
+                .single();
+
+             if (instData && (instData.status === 'connected' || instData.status === 'connecting')) {
+                // Instância tem credenciais válidas. Desperta o motor em background
+                await createInstance(tenantData.evolution_api_instance, false).catch(() => {});
+                set({ evolutionConnected: true, modalReason: null });
+                get().syncEvolutionContacts(tenantData.evolution_api_instance);
+             } else {
+                // Cai pro modal mas de forma justificada
+                set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp foi encerrada ou expirada de forma remota. Por favor, conecte novamente relendo o QR Code.' });
+             }
            }
         } else {
            // Nenhuma instnacia na base, empresa recem-chegada
@@ -371,7 +403,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
          
          chats.forEach((chat) => {
              const remoteJid = chat.remoteJid || chat.id;
-             if(!remoteJid || (!remoteJid.includes('@s.whatsapp.net') && !remoteJid.includes('@g.us'))) return;
+             if(!remoteJid || remoteJid === 'status@broadcast') return;
              
              const phone = remoteJid.split('@')[0];
              let existingIndex = updatedContacts.findIndex(c => 
@@ -380,7 +412,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
              );
 
              // Tenta pegar o nome de exibição do Wpp ou formata o telefone
-             let finalName = chat.pushName || chat.name;
+             let finalName = chat.pushName || chat.name || chat.lastMessage?.pushName;
              if (!finalName) {
                 if (phone.startsWith('55') && phone.length >= 12) {
                   finalName = `+55 (${phone.substring(2,4)}) ${phone.substring(4, phone.length - 4)}-${phone.substring(phone.length - 4)}`;
@@ -401,8 +433,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
              }
 
              const rawTimestamp = chat.lastMessage?.messageTimestamp 
-                ? chat.lastMessage.messageTimestamp * 1000 
-                : chat.updatedAt ? new Date(chat.updatedAt).getTime() : Date.now();
+                ? (typeof chat.lastMessage.messageTimestamp === 'object' ? chat.lastMessage.messageTimestamp.low * 1000 : chat.lastMessage.messageTimestamp * 1000) 
+                : chat.conversationTimestamp ? chat.conversationTimestamp * 1000 : chat.updatedAt ? new Date(chat.updatedAt).getTime() : Date.now();
 
              if(existingIndex === -1) {
                 updatedContacts.push({

@@ -1,4 +1,10 @@
-require('dotenv').config();
+const nodeCrypto = require('crypto');
+if (!globalThis.crypto) {
+    globalThis.crypto = nodeCrypto.webcrypto;
+}
+
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -49,10 +55,56 @@ app.post('/instance/:tenantId/send', async (req, res) => {
     try {
         const { tenantId } = req.params;
         const { number, text } = req.body;
+        
+        let sock = instanceManager.sessions.get(tenantId);
+        if(!sock) {
+            console.log(`[LAZY LOAD] Restaurando motor em memória para SEND em ${tenantId}`);
+            try {
+               await instanceManager.createSession(tenantId);
+               sock = instanceManager.sessions.get(tenantId);
+            } catch(e) {
+               console.error("Falha fatal no LAZY LOAD", e);
+            }
+        }
+
+        // Anti-Connection Closed Protector
+        if (sock && !sock.user) {
+            throw new Error("Motor Baileys em fase de Handshake (Conectando ao WhatsApp). Tente enviar novamente em 2 a 5 segundos.");
+        }
+
         // JID Builder
         const remoteJid = number.includes('@s.whatsapp.net') ? number : `${number}@s.whatsapp.net`;
         await instanceManager.sendMessage(tenantId, remoteJid, text);
         res.json({ success: true, message: 'Disparo efetuado.' });
+    } catch(err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Rota para Deletar Instância
+app.delete('/instance/:tenantId/delete', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const sock = instanceManager.sessions.get(tenantId);
+        
+        if (sock) {
+            try { sock.logout('User requested deletion'); } catch(e) {}
+            try { sock.ws?.close(); } catch(e) {}
+            instanceManager.sessions.delete(tenantId);
+            instanceManager.qrs.delete(tenantId);
+            instanceManager.stores.delete(tenantId);
+        }
+        
+        const { supabase } = require('./supabase');
+        
+        // Limpar auth states
+        await supabase.from('wa_auth_states').delete().eq('tenant_id', tenantId);
+        
+        // Limpar da nova base permanentemente
+        await supabase.from('whatsapp_instances').delete().eq('id', tenantId);
+        
+        console.log(`[${tenantId}] Instância EXCLUÍDA do servidor e banco.`);
+        res.json({ success: true, message: 'Instância completamente deletada.' });
     } catch(err) {
         res.status(500).json({ error: err.message });
     }
@@ -66,12 +118,51 @@ app.post('/instance/:tenantId/send', async (req, res) => {
 app.get('/instance/:tenantId/chats', async (req, res) => {
     try {
         const { tenantId } = req.params;
-        const store = instanceManager.stores.get(tenantId);
+        
+        let store = instanceManager.stores.get(tenantId);
+        if(!store) {
+            // Lazy load se o backend reiniciou mas o frontend ainda está pedindo chats
+            console.log(`[LAZY LOAD] Restaurando motor em memória para ${tenantId}`);
+            try {
+                await instanceManager.createSession(tenantId);
+                store = instanceManager.stores.get(tenantId);
+            } catch (err) {
+                console.error("Falha no lazy load", err);
+            }
+        }
         if(!store) return res.json([]);
         
-        // Retorna top 30
-        const chats = store.chats.all().slice(0, 30);
-        res.json(chats);
+        // Retorna top 50 recem interagidos
+        const rawChats = store.chats.all().sort((a,b) => (b.conversationTimestamp || 0) - (a.conversationTimestamp || 0)).slice(0, 50);
+        
+        // Enriquecer com a ultima mensagem e com o NOME DO CONTATO
+        const enrichedChats = rawChats.map(chat => {
+            const chatMsgs = store.messages[chat.id]?.array || [];
+            
+            // Busca dados de Contato na raiz do proprio Node Memory Store
+            const contactData = store.contacts[chat.id];
+            
+            let resolvedName = chat.pushName || chat.name;
+            if (contactData) {
+                resolvedName = contactData.name || contactData.notify || contactData.verifiedName || resolvedName;
+            }
+            if (!resolvedName && chatMsgs.length > 0) {
+                resolvedName = chatMsgs[chatMsgs.length - 1]?.pushName || resolvedName;
+            }
+            
+            chat.pushName = resolvedName;
+            chat.name = resolvedName;
+
+            if(chatMsgs.length > 0) {
+               return {
+                  ...chat,
+                  lastMessage: chatMsgs[chatMsgs.length - 1]
+               };
+            }
+            return chat;
+        });
+
+        res.json(enrichedChats);
     } catch(err) {
         res.json([]);
     }
@@ -85,8 +176,8 @@ app.get('/instance/:tenantId/messages/:remoteJid', async (req, res) => {
         if(!store) return res.json([]);
         
         const msgs = store.messages[remoteJid]?.array || [];
-        // Pega as ultimas 50
-        res.json(msgs.slice(-50));
+        // Pega as ultimas 150 para que a janela de chat do front-end fique rica
+        res.json(msgs.slice(-150));
     } catch(err) {
         res.json([]);
     }
@@ -129,6 +220,61 @@ app.post('/instance/:tenantId/sendMedia', async (req, res) => {
         console.error("Falha ao enviar midia via sock", err);
         res.status(500).json({ error: err.message });
     }
+});
+
+// ==========================================
+// ROTA PARA PAIRING CODE (LOGAR SEM QR, COM NUMERO)
+// ==========================================
+app.post('/instance/:tenantId/pairing-code', async (req, res) => {
+    const { tenantId } = req.params;
+    const { forceReset, phoneNumber } = req.body || {};
+    try {
+        const result = await instanceManager.createSession(tenantId, forceReset, true, phoneNumber);
+        res.json({ message: 'Session started for Pairing Code generation', result });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ==========================================
+// FERRAMENTAS SRE - DEBUG NATIVO
+// ==========================================
+
+// Global Health
+app.get('/debug/healthz', (req, res) => {
+    res.json({
+        uptime: process.uptime(),
+        memoryUsage: process.memoryUsage(),
+        engineVersion: '2.0.1-Stable',
+        compileDate: '2026-04-05T00:20:00-03:00',
+        changelog: [
+            "Correção do erro 500 no WebHook enviando 'Connection Closed'",
+            "Adicionado Lazy Load para restaurar o Socket em caso de limpeza de memória no Node",
+            "Refatoração profunda da integração React <-> Node via Baileys API"
+        ],
+        activeTenantsLoaded: Array.from(instanceManager.sessions.keys()),
+        qrsOrPairingsPending: Array.from(instanceManager.qrs.keys())
+    });
+});
+
+// Tenant Health
+app.get('/debug/tenant/:tenantId', (req, res) => {
+    const { tenantId } = req.params;
+    const sock = instanceManager.sessions.get(tenantId);
+    if(!sock) return res.json({ status: 'offline', tenantId });
+
+    const store = instanceManager.stores.get(tenantId);
+    
+    res.json({
+        tenantId,
+        status: sock.user ? 'authenticated' : 'awaiting_auth',
+        me: sock.user || null,
+        RAM_Store: {
+            contactsCount: store && store.contacts ? Object.keys(store.contacts).length : 0,
+            chatsCount: store && store.chats ? store.chats.all().length : 0,
+            messagesCachedCount: store && store.messages ? Object.keys(store.messages).length : 0
+        }
+    });
 });
 
 // Inicialização Global

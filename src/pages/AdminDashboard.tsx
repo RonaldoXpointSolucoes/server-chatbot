@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2 } from 'lucide-react';
+import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2, Smartphone } from 'lucide-react';
 import { cn } from './ChatDashboard';
 import { Navigate } from 'react-router-dom';
 import { createClient } from '@supabase/supabase-js';
@@ -114,8 +114,9 @@ export default function AdminDashboard() {
   return (
     <div className="flex h-[100dvh] w-full bg-[#f0f2f5] dark:bg-[#111b21] font-sans text-[#111b21] dark:text-[#e9edef]">
       {/* Sidebar Admin */}
-      <aside className="w-64 flex flex-col bg-white dark:bg-[#202c33] border-r border-black/5 dark:border-white/5 z-10 shadow-lg">
-        <div className="h-16 flex items-center px-6 border-b border-black/5 dark:border-white/5 gap-3">
+      <aside className="w-64 flex flex-col bg-white dark:bg-[#202c33] border-r border-black/5 dark:border-white/5 z-10 shadow-lg relative">
+        <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80">v1.0.2</span>
+        <div className="h-16 flex items-center px-6 border-b border-black/5 dark:border-white/5 gap-3 mt-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00a884] to-[#018b6e] flex items-center justify-center text-white shadow-md">
             <Shield size={18} />
           </div>
@@ -124,17 +125,24 @@ export default function AdminDashboard() {
 
         <nav className="flex-1 py-4 px-3 space-y-1">
           {[
-            { id: 'overview', icon: LayoutDashboard, label: 'Visão Geral' },
-            { id: 'companies', icon: Building, label: 'Empresas' },
-            { id: 'plans', icon: ScrollText, label: 'Planos de Uso' },
-            { id: 'billing', icon: CreditCard, label: 'Faturamento' },
+            { id: 'overview', icon: LayoutDashboard, label: 'Visão Geral', path: null },
+            { id: 'companies', icon: Building, label: 'Empresas', path: null },
+            { id: 'plans', icon: ScrollText, label: 'Planos de Uso', path: null },
+            { id: 'instances', icon: Smartphone, label: 'Gerenciador de Instâncias', path: '/instances' },
+            { id: 'billing', icon: CreditCard, label: 'Faturamento', path: null },
           ].map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id as TabType)}
+                onClick={() => {
+                  if (item.path) {
+                    navigate(item.path);
+                  } else {
+                    setActiveTab(item.id as TabType);
+                  }
+                }}
                 className={cn(
                   "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-200 group relative",
                   isActive 

@@ -1,0 +1,55 @@
+[
+  {
+    "id": "150547344662594@lid",
+    "ts": 1775354389,
+    "lastMsg": {
+      "key": {
+        "remoteJid": "150547344662594@lid",
+        "fromMe": false,
+        "id": "ACF3517CDA5B046067F8FD14CB46A983"
+      },
+      "messageTimestamp": 1775354389,
+      "pushName": "Ronaldo Clemente",
+      "broadcast": false,
+      "message": {
+        "conversation": "Oi",
+        "messageContextInfo": {
+          "deviceListMetadata": {
+            "senderTimestamp": "1775340266",
+            "recipientKeyHash": "vP3UKl+fotmkNA==",
+            "recipientTimestamp": "1775349727"
+          },
+          "deviceListMetadataVersion": 2,
+          "messageSecret": "GOTBBqnLqZJOKmVSq1728pRK32YMRrk6e3kYnsVWjMk="
+        }
+      },
+      "status": 4
+    }
+  },
+  {
+    "id": "99858694332446@lid",
+    "lastMsg": {
+      "key": {
+        "remoteJid": "99858694332446@lid",
+        "fromMe": true,
+        "id": "A5EA1751321701E9ABB244F6E3C3B743"
+      },
+      "messageTimestamp": "1757432661",
+      "status": "PENDING",
+      "messageStubType": "E2E_ENCRYPTED"
+    }
+  },
+  {
+    "id": "99574572154928@lid",
+    "lastMsg": {
+      "key": {
+        "remoteJid": "99574572154928@lid",
+        "fromMe": true,
+        "id": "A57244E8CF995861716DF97B29BABF12"
+      },
+      "messageTimestamp": "1761960914",
+      "status": "PENDING",
+      "messageStubType": "E2E_ENCRYPTED"
+    }
+  }
+]
