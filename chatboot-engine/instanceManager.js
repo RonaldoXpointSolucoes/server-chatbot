@@ -56,7 +56,7 @@ class InstanceManager {
         const { version, isLatest } = await fetchLatestBaileysVersion();
         console.log(`[${tenantId}] WhatsApp Web Core Engine Version: ${version.join('.')} (Latest: ${isLatest})`);
 
-        const { default: NodeCache } = require('node-cache');
+        const NodeCache = require('node-cache');
         const msgRetryCounterCache = new NodeCache();
 
         const sock = makeWASocket({
