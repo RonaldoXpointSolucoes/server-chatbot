@@ -56,14 +56,14 @@ class InstanceManager {
         const { version, isLatest } = await fetchLatestBaileysVersion();
         console.log(`[${tenantId}] WhatsApp Web Core Engine Version: ${version.join('.')} (Latest: ${isLatest})`);
 
-        // Instanciamento Oficial do Motor Whatsapp
         const sock = makeWASocket({
             auth: state,
             printQRInTerminal: true, // Pra vermos no console Windows/Nuvem
             version: version, // Resolve o 405 Method Not Allowed forçando última versão WA Web
             browser: Browsers.macOS('Desktop'), // Camufla a assinatura na RAM
-            syncFullHistory: true, // Força a sincronização do histórico no momento da primeira conexão QR
-            generateHighQualityLinkPreview: false // Desativa para salvar RAM
+            syncFullHistory: false, // Desativado para evitar sobrecarga (TimeOut 500) e erro na Stream (xml-not-well-formed)
+            generateHighQualityLinkPreview: false, // Desativa para salvar RAM
+            markOnlineOnConnect: true // Marca como online assim que conecta
         });
 
         store.bind(sock.ev);
