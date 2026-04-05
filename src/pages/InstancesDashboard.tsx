@@ -239,33 +239,51 @@ export default function InstancesDashboard() {
   };
 
   const pollQrCode = (id: string) => {
+    let secondsElapsed = 0;
     const interval = setInterval(async () => {
       try {
+        secondsElapsed += 2;
+
         const res = await fetch(`${ENGINE_URL}/instance/${id}/qrcode`);
         const data = await res.json();
         
-        if (data.qrcode) {
-          setQrCode(data.qrcode);
-          setQrLoading(false);
-        } else if (data.connected) {
+        if (data.connected) {
           setQrLoading(false);
           setShowQrModal(null);
           setSuccessConnectId(id);
-          setTimeout(() => {
-            setSuccessConnectId(null);
-          }, 2000);
+          setTimeout(() => setSuccessConnectId(null), 2000);
           clearInterval(interval);
           fetchInstances();
         } else if (data.status === 'offline') {
            setQrLoading(false);
            clearInterval(interval);
+        } else if (data.qrcode) {
+          // Previne que a Imagem pisque a cada 2 segundos no DOM injetando só se for string diferente
+          setQrCode(prevQr => {
+            if(prevQr !== data.qrcode) return data.qrcode;
+            return prevQr;
+          });
+          setQrLoading(false);
         }
+
+        // Caso não ocorra sucesso a cada 30 segundos, RE-SOLICITA QR Novo (força Engine Restart)
+        if (secondsElapsed >= 30) {
+          secondsElapsed = 0; // Renova ciclo da UI
+          console.log('[UI] 30 Segundos Ociosos. Renovando QR Code do Motor via API...');
+          setQrLoading(true);
+          await fetch(`${ENGINE_URL}/instance/${id}/create`, { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ forceReset: true })
+          }).catch(() => {});
+        }
+
       } catch (e) {
         clearInterval(interval);
       }
-    }, 3000);
+    }, 2000);
 
-    setTimeout(() => { clearInterval(interval); }, 120000);
+    setTimeout(() => { clearInterval(interval); }, 180000); // Timeout max de 3 mins
   };
 
   const toggleSetting = async (id: string, currentSettings: any, key: string) => {

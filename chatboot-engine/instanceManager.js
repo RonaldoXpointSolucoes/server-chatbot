@@ -1,6 +1,8 @@
-const { makeWASocket, DisconnectReason, makeInMemoryStore } = require('@whiskeysockets/baileys');
+const { makeWASocket, DisconnectReason, makeInMemoryStore, useMultiFileAuthState, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
-const { useSupabaseAuthState } = require('./supaAuthState');
+const pino = require('pino');
+const fs = require('fs');
+const path = require('path');
 const { supabase } = require('./supabase');
 const QRCodeLib = require('qrcode');
 
@@ -51,7 +53,18 @@ class InstanceManager {
             this.stores.set(tenantId, store);
         }
 
-        const { state, saveCreds, clearState } = await useSupabaseAuthState(supabase, tenantId);
+        const sessionPath = path.join(__dirname, 'sessions', tenantId);
+        const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+        
+        const clearState = async () => {
+            try {
+                if (fs.existsSync(sessionPath)) {
+                    fs.rmSync(sessionPath, { recursive: true, force: true });
+                }
+            } catch (error) {
+                console.error(`[${tenantId}] Falha ao deletar pasta local (File System):`, error);
+            }
+        };
         const { fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
         const { version, isLatest } = await fetchLatestBaileysVersion();
         console.log(`[${tenantId}] WhatsApp Web Core Engine Version: ${version.join('.')} (Latest: ${isLatest})`);
@@ -59,15 +72,25 @@ class InstanceManager {
         const NodeCache = require('node-cache');
         const msgRetryCounterCache = new NodeCache();
 
+        const logger = pino({ level: 'silent' });
+
         const sock = makeWASocket({
-            auth: state,
-            printQRInTerminal: true, // Pra vermos no console Windows/Nuvem
-            version: version, // Resolve o 405 Method Not Allowed forçando última versão WA Web
-            browser: Browsers.macOS('Desktop'), // Camufla a assinatura na RAM
-            syncFullHistory: false, // Desativado para evitar sobrecarga (TimeOut 500) e erro na Stream (xml-not-well-formed)
+            auth: {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, logger),
+            },
+            logger,
+            version: version, // Essencial! Resolve o 405 Method Not Allowed
+            browser: Browsers.ubuntu('Chrome'), // Usa a assinatura estável e padrão testada pela lib
+            syncFullHistory: false, // Desativado para evitar sobrecarga
             generateHighQualityLinkPreview: false, // Desativa para salvar RAM
-            markOnlineOnConnect: true, // Marca como online assim que conecta
+            // printQRInTerminal: falso porque a env não tem terminal dependency e forçava overhead nos logs
+            markOnlineOnConnect: false, // PREVINE erro no WS de gerar pacote 'presence' pra contas não autenticadas!
             msgRetryCounterCache,
+            // qrTimeout: 60000, => Deixa a lib gerenciar
+            // connectTimeoutMs: 60000, 
+            // keepAliveIntervalMs: 15000,
+            defaultQueryTimeoutMs: 60000,
             getMessage: async (key) => {
                 if (store) {
                     const msg = await store.loadMessage(key.remoteJid, key.id);
@@ -108,18 +131,28 @@ class InstanceManager {
                 const errStatus = lastDisconnect?.error?.output?.statusCode;
                 const isLoggedOut = errStatus === DisconnectReason.loggedOut;
                 
+                // Identificar erros comuns de rede/restrição em que DEVE haver reconexão proativa da maquina
+                const isTransient = errStatus === DisconnectReason.connectionClosed || 
+                                    errStatus === DisconnectReason.connectionLost || 
+                                    errStatus === DisconnectReason.timedOut || 
+                                    errStatus === 408;
+
                 // Tratar sessão corrompida (Bad Decrypt / XML Stream Error)
                 const errMsg = lastDisconnect?.error?.message || '';
                 const isCorrupt = errMsg.includes('xml-not-well-formed') || errStatus === 500 || errStatus === 515;
                 
-                const shouldReconnect = !isLoggedOut && !isCorrupt;
+                const shouldReconnect = isTransient || (!isLoggedOut && !isCorrupt);
                 
-                console.log(`[${tenantId}] Conexão fechada. Reconectar?`, shouldReconnect, isCorrupt ? '(Foi barrado por corrupção de sessão/criptografia)' : '');
+                console.log(`[${tenantId}] Conexão fechada [code: ${errStatus}]. Reconectar?`, shouldReconnect, isCorrupt ? '(Foi barrado por corrupção de sessão/criptografia)' : '');
                 
                 this.sessions.delete(tenantId);
                 
                 if (shouldReconnect) {
-                    this.createSession(tenantId);
+                    // Delay para impedir loop infinito ("QR trocando rapido / Fallback Flood")
+                    console.log(`[${tenantId}] Aguardando 4 segundos de atraso (Delay-Boot) antes do Restart...`);
+                    setTimeout(() => {
+                        this.createSession(tenantId);
+                    }, 4000);
                 } else {
                     console.log(`[${tenantId}] LOGGED OUT OU SESSÃO CORROMPIDA. Excluindo base e liberando state sujo...`);
                     // Limpar a sujeira e reiniciar no modo RAW para emergir o QRCODE Base64 na mesma hora!!
