@@ -56,6 +56,9 @@ class InstanceManager {
         const { version, isLatest } = await fetchLatestBaileysVersion();
         console.log(`[${tenantId}] WhatsApp Web Core Engine Version: ${version.join('.')} (Latest: ${isLatest})`);
 
+        const { default: NodeCache } = require('node-cache');
+        const msgRetryCounterCache = new NodeCache();
+
         const sock = makeWASocket({
             auth: state,
             printQRInTerminal: true, // Pra vermos no console Windows/Nuvem
@@ -63,7 +66,15 @@ class InstanceManager {
             browser: Browsers.macOS('Desktop'), // Camufla a assinatura na RAM
             syncFullHistory: false, // Desativado para evitar sobrecarga (TimeOut 500) e erro na Stream (xml-not-well-formed)
             generateHighQualityLinkPreview: false, // Desativa para salvar RAM
-            markOnlineOnConnect: true // Marca como online assim que conecta
+            markOnlineOnConnect: true, // Marca como online assim que conecta
+            msgRetryCounterCache,
+            getMessage: async (key) => {
+                if (store) {
+                    const msg = await store.loadMessage(key.remoteJid, key.id);
+                    return msg?.message || undefined;
+                }
+                return { conversation: 'hello' };
+            }
         });
 
         store.bind(sock.ev);
@@ -166,48 +177,48 @@ class InstanceManager {
     async sendMessage(tenantId, remoteJid, text) {
         const sock = this.sessions.get(tenantId);
         if(!sock) throw new Error('WhatsApp Instância NÂO está online para este Tenant.');
-        
-        let res;
-        try {
-            res = await sock.sendMessage(remoteJid, { text });
-        } catch (e) {
-            console.error('Falha interna no motor Baileys ao enviar:', e);
-            if (e.message === 'Timed Out' || e.message === 'Connection Closed') {
-                throw new Error('Connection Timeout: O Celular do WhatsApp demorou muito para responder o disparo. A tela está apagada ou ele se desconectou do Wifi/4G. Acorde a tela do aparelho e tente novamente.');
-            }
-            throw e;
-        }
+        if(!sock.isConnectionFullyOpen) throw new Error('Connection Timeout: O Celular do WhatsApp demorou muito para responder o disparo. A tela está apagada ou ele se desconectou.');
+
+        const { generateMessageID } = require('@whiskeysockets/baileys');
+        const msgId = generateMessageID();
+
+        // 1. Salvar Imediatamente no Supabase para o Front-end Atualizar via Realtime
+        const whatsappIdId = remoteJid.replace('@s.whatsapp.net', '').replace('@lid', '');
         
         try {
-            const whatsappIdId = remoteJid.replace('@s.whatsapp.net', '').replace('@lid', '');
-            const msgId = res?.key?.id;
+            const { data: contactData } = await supabase
+              .from('contacts')
+              .select('id')
+              .eq('whatsapp_id', whatsappIdId)
+              .eq('tenant_id', tenantId)
+              .single();
 
-            if (msgId) {
-                const { data: contactData } = await supabase
-                  .from('contacts')
-                  .select('id')
-                  .eq('whatsapp_id', whatsappIdId)
-                  .eq('tenant_id', tenantId)
-                  .single();
-
-                if (contactData) {
-                    await supabase.from('messages').upsert([{
-                       contact_id: contactData.id,
-                       whatsapp_id: msgId,
-                       text_content: text,
-                       sender_type: 'human',
-                       status: 'SENT',
-                       company_id: tenantId,
-                       tenant_id: tenantId
-                    }], { onConflict: 'whatsapp_id', ignoreDuplicates: true });
-                }
+            if (contactData) {
+                await supabase.from('messages').upsert([{
+                   contact_id: contactData.id,
+                   whatsapp_id: msgId,
+                   text_content: text,
+                   sender_type: 'human',
+                   status: 'SENT',
+                   company_id: tenantId,
+                   tenant_id: tenantId
+                }], { onConflict: 'whatsapp_id', ignoreDuplicates: true });
             }
         } catch (e) {
-            console.error('Core Engine Falha ao persistir sendMessage no Supabase:', e);
+            console.error('Core Engine Falha ao pré-persistir sendMessage no Supabase:', e);
         }
 
-        return { success: true, messageId: res?.key?.id };
+        // 2. Disparar Motor Baileys no Background (Fire and Forget)
+        // Isso impede a UI de congelar por 60s em caso de handshake/sincronização pendente.
+        sock.sendMessage(remoteJid, { text }, { messageId: msgId })
+            .catch(e => {
+                console.error('Falha assíncrona no motor ao enviar mensagem no background:', e);
+                // Opcional: Se falhar criticamente, marcar como erro no banco no futuro
+            });
+
+        return { success: true, messageId: msgId };
     }
+
 
     /**
      * Motor nativo enviando dados para o BD Supabase (A grande mágica)
