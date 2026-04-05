@@ -62,6 +62,11 @@ app.post('/instance/:tenantId/send', async (req, res) => {
             try {
                await instanceManager.createSession(tenantId);
                sock = instanceManager.sessions.get(tenantId);
+               let attempts = 0;
+               while (sock && !sock.isConnectionFullyOpen && attempts < 15) {
+                   await new Promise(resolve => setTimeout(resolve, 1000));
+                   attempts++;
+               }
             } catch(e) {
                console.error("Falha fatal no LAZY LOAD", e);
             }
@@ -203,8 +208,21 @@ app.post('/instance/:tenantId/sendMedia', async (req, res) => {
         const { tenantId } = req.params;
         const { number, mediaType, mediaUrl, mimetype, fileName, caption } = req.body;
         
-        const sock = instanceManager.sessions.get(tenantId);
-        if(!sock) throw new Error('Servidor Local Offline');
+        let sock = instanceManager.sessions.get(tenantId);
+        if(!sock) {
+            console.log(`[LAZY LOAD MEDIA] Restaurando motor em memória para SEND MEDIA em ${tenantId}`);
+            await instanceManager.createSession(tenantId);
+            sock = instanceManager.sessions.get(tenantId);
+            let attempts = 0;
+            while (sock && !sock.isConnectionFullyOpen && attempts < 15) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
+            }
+        }
+        
+        if(!sock || (!sock.user || !sock.isConnectionFullyOpen)) {
+            throw new Error('Servidor Local Offline ou Restabelecendo Conexão (Aguarde 10seg)');
+        }
 
         const remoteJid = number.includes('@s.whatsapp.net') ? number : `${number}@s.whatsapp.net`;
         
@@ -299,4 +317,23 @@ app.get('/debug/tenant/:tenantId', (req, res) => {
 app.listen(PORT, async () => {
     console.log(`📡 [ANTIGRAVITY WHATSAPP ENGINE] Online na Porta ${PORT}`);
     console.log(`>>> Sem intermediários, conexão Postgres direta via Baileys.`);
+    
+    // Auto-Restore Active Engines
+    try {
+        const { supabase } = require('./supabase');
+        const { data: instances } = await supabase
+            .from('whatsapp_instances')
+            .select('id')
+            .in('status', ['connected', 'connecting']);
+            
+        if (instances && instances.length > 0) {
+            console.log(`[BOOT UP] Auto-Restarting ${instances.length} instâncias conectadas...`);
+            for (const inst of instances) {
+                instanceManager.createSession(inst.id).catch(e => console.error(`Failed to auto-restart ${inst.id}`, e));
+                await new Promise(resolve => setTimeout(resolve, 1500)); // Stagger to avoid rate limits
+            }
+        }
+    } catch (e) {
+        console.error('Falha ao tentar Auto-Restart das instâncias conectadas.', e);
+    }
 });
