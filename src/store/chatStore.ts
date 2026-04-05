@@ -541,20 +541,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
              // Prepara p/ gravar no DB (Sincronizando de fato o histórico com o PostgreSQL)
              if (!contact.id.includes('temp-')) {
+                 const currentTenantId = get().tenantInfo?.id;
                  dbMessagesToInsert.push({
                     contact_id: contact.id,
                     text_content: textContent,
                     sender_type: isFromMe ? 'human' : 'client',
                     whatsapp_id: msgId,
-                    timestamp: timestamp.toISOString()
+                    timestamp: timestamp.toISOString(),
+                    ...(currentTenantId && { tenant_id: currentTenantId })
                  });
              }
           });
 
-          if (dbMessagesToInsert.length > 0) {
+          const uniqueDbMessages = Array.from(new Map(dbMessagesToInsert.map(m => [m.whatsapp_id, m])).values());
+
+          if (uniqueDbMessages.length > 0) {
              (async () => {
                 try {
-                  await supabase.from('messages').upsert(dbMessagesToInsert, { onConflict: 'whatsapp_id', ignoreDuplicates: true });
+                  await supabase.from('messages').upsert(uniqueDbMessages, { onConflict: 'whatsapp_id', ignoreDuplicates: true });
                   console.log('Histórico gravado no Supabase para', contact.name);
                 } catch(e) {
                   console.warn(e);
