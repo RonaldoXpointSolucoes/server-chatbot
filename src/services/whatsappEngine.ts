@@ -79,12 +79,49 @@ export const fetchProfilePicture = async (tenantId: string, remoteJid: string) =
   return data?.url || null;
 };
 
+export const fetchEngineStatus = async (tenantId: string) => {
+  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/status`);
+  if (!res.ok) throw new Error('Falha ao checar status');
+  return res.json();
+};
+
+export const logoutEngine = async (tenantId: string) => {
+  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/logout`, { method: 'POST' });
+  if (!res.ok) throw new Error('Falha no logout nativo');
+  return res.json();
+};
+
+export const reconnectEngine = async (tenantId: string) => {
+  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/reconnect`, { method: 'POST' });
+  if (!res.ok) throw new Error('Falha no reconnect nativo');
+  return res.json();
+};
+
 export const getInstanceConnectionState = async (tenantId: string) => {
   try {
-     const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/qrcode`);
-     const data = await res.json();
-     return { instance: { state: data.connected ? 'open' : 'connecting' } };
+     const data = await fetchEngineStatus(tenantId);
+     if (data.status === 'connected') return { instance: { state: 'open' } };
+     if (data.status === 'connecting') return { instance: { state: 'connecting' } };
+     return { instance: { state: 'offline' } };
   } catch(e) {
      return { instance: { state: 'offline' } };
   }
+};
+
+export const syncEngineContacts = async (tenantId: string) => {
+  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/sync-contacts`, { method: 'POST' });
+  if (!res.ok) throw new Error('Falha no sync');
+  return res.json();
+};
+
+export const clearEngineStore = async (tenantId: string) => {
+  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/clear-store`, { method: 'POST' });
+  if (!res.ok) throw new Error('Falha no limpar store');
+  return res.json();
+};
+
+export const forceEnginePresence = async (tenantId: string) => {
+  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/presence`, { method: 'POST' });
+  if (!res.ok) throw new Error('Falha na presenca');
+  return res.json();
 };

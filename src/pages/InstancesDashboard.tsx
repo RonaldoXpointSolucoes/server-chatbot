@@ -81,10 +81,34 @@ export default function InstancesDashboard() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setInstances(data || []);
       
-      if (data && data.length > 0) {
-        data.forEach(inst => fetchStats(inst.id));
+      const instancesData = data || [];
+      
+      // Validação Cirúrgica NATIVA (Corrige os Falsos Positivos do Banco)
+      const liveInstances = await Promise.all(instancesData.map(async (inst) => {
+          // Se o banco acha que está online, nós vamos duvidar e validar na Engine.
+          if (inst.status === 'online') {
+              try {
+                  const res = await fetch(`${ENGINE_URL}/instance/${inst.id}/status`);
+                  if (res.ok) {
+                     const statusData = await res.json();
+                     if (statusData.status !== 'connected') {
+                         return { ...inst, status: 'offline' }; // Sobrescreve em memória
+                     }
+                  } else {
+                     return { ...inst, status: 'offline' }; 
+                  }
+              } catch(e) {
+                 return { ...inst, status: 'offline' };
+              }
+          }
+          return inst;
+      }));
+
+      setInstances(liveInstances);
+      
+      if (liveInstances.length > 0) {
+        liveInstances.forEach(inst => fetchStats(inst.id));
       }
     } catch (e) {
       console.error('Error fetching instances:', e);

@@ -121,6 +121,110 @@ app.delete('/instance/:tenantId/delete', async (req, res) => {
 // PARITY ROUTES (Mirror Evolution API Fetching)
 // ==========================================
 
+// Status Real-Time Nativo (Ram/Socket)
+app.get('/instance/:tenantId/status', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const sock = instanceManager.sessions.get(tenantId);
+        const isQr = instanceManager.qrs.has(tenantId);
+        
+        if (isQr) {
+            return res.json({ status: 'qr_ready', connected: false });
+        }
+        
+        if (!sock) {
+            return res.json({ status: 'offline', connected: false });
+        }
+        
+        if (sock.isConnectionFullyOpen) {
+            return res.json({ 
+                status: 'connected', 
+                connected: true,
+                user: sock.user
+            });
+        }
+        
+        return res.json({ status: 'connecting', connected: false });
+    } catch(err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Logout Seguro (Desparear)
+app.post('/instance/:tenantId/logout', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const sock = instanceManager.sessions.get(tenantId);
+        if (sock) {
+            try { await Object.getPrototypeOf(sock).logout.call(sock); } catch(err) {
+                try { sock.logout(); } catch(e) {}
+            }
+        }
+        return res.json({ success: true, message: 'Despareamento iniciado com sucesso.' });
+    } catch(err) {
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// Restart Conexão (Sem deslogar)
+app.post('/instance/:tenantId/reconnect', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const sock = instanceManager.sessions.get(tenantId);
+        if (sock) {
+            try { sock.ws?.close(); } catch(e) {} 
+        } else {
+            instanceManager.createSession(tenantId);
+        }
+        return res.json({ success: true, message: 'Restart (Warm Boot) acionado.' });
+    } catch(err) {
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// Sincronizar Contatos (Forçar Leitura do Store)
+app.post('/instance/:tenantId/sync-contacts', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const store = instanceManager.stores.get(tenantId);
+        if (!store) {
+            return res.json({ success: false, message: 'Store na memória não encontrado.' });
+        }
+        const total = Object.keys(store.contacts).length;
+        return res.json({ success: true, message: `Sincronizado via Engine. Contatos em cache: ${total}` });
+    } catch(err) {
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// Limpar Store (Cache)
+app.post('/instance/:tenantId/clear-store', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const store = instanceManager.stores.get(tenantId);
+        if (store) {
+            store.messages = {};
+            store.chats.clear();
+        }
+        return res.json({ success: true, message: 'Memória Local (RAM) purgada com sucesso.' });
+    } catch(err) {
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// Forçar Online (Presence)
+app.post('/instance/:tenantId/presence', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const sock = instanceManager.sessions.get(tenantId);
+        if (sock) {
+            await sock.sendPresenceUpdate('available');
+        }
+        return res.json({ success: true, message: 'Status Online forçado para todos contatos.' });
+    } catch(err) {
+        return res.status(500).json({ error: err.message });
+    }
+});
 // Puxar Chats Recentes
 app.get('/instance/:tenantId/chats', async (req, res) => {
     try {

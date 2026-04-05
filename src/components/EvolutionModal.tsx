@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
-import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link, PlusCircle, Key } from 'lucide-react';
-import { createInstance, fetchQrCodeState } from '../services/whatsappEngine';
+import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link, PlusCircle, Key, LogOut, RefreshCcw, UserCircle2 } from 'lucide-react';
+import { createInstance, fetchQrCodeState, fetchEngineStatus, logoutEngine, reconnectEngine, clearEngineStore, syncEngineContacts, forceEnginePresence } from '../services/whatsappEngine';
 import { supabase } from '../services/supabase';
 
 function uuidv4() {
@@ -16,6 +16,7 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(false);
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [engineUser, setEngineUser] = useState<any>(null);
   
   const [tab, setTab] = useState<'existing' | 'new'>('existing');
   const [existingInstances, setExistingInstances] = useState<any[]>([]);
@@ -114,7 +115,14 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
          setLoading(false);
          setEvolutionConnection(true, engineId);
          useChatStore.getState().syncEvolutionContacts(engineId);
-         setTimeout(onClose, 1000);
+         
+         // Fetch profile from /status
+         try {
+           const status = await fetchEngineStatus(engineId);
+           if (status.user) setEngineUser(status.user);
+         } catch(e) {}
+         
+         if (isInitialCheck) setTimeout(onClose, 1000);
          return;
        }
        
@@ -138,6 +146,23 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
        setLoading(false);
      }
   };
+
+  useEffect(() => {
+    // If modal opens and we are marked as connected, let's double check reality and load user
+    if (evolutionConnected && useChatStore.getState().connectedInstanceName) {
+       fetchEngineStatus(useChatStore.getState().connectedInstanceName!)
+         .then(st => {
+             if (st.connected) setEngineUser(st.user || null);
+             else {
+                // False positive spotted
+                setEvolutionConnection(false, null);
+             }
+         })
+         .catch(() => {});
+    }
+  }, [evolutionConnected]);
+
+
 
   useEffect(() => {
     let interval: any;
@@ -181,15 +206,106 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
 
         {evolutionConnected ? (
           <div className="flex flex-col w-full animate-in zoom-in slide-in-from-bottom-4 duration-500 delay-150">
-            <div className="flex flex-col items-center bg-emerald-500/10 p-6 rounded-3xl border border-emerald-500/20 mb-2">
-              <div className="w-20 h-20 rounded-full bg-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.3)] border-2 border-emerald-500/50 flex items-center justify-center mb-4">
-                 <CheckCircle size={40} className="text-emerald-500 drop-shadow-md" />
-              </div>
-              <h3 className="font-bold text-lg text-emerald-700 dark:text-emerald-400">Motor Ativado</h3>
-              <div className="flex justify-center items-center gap-2 mt-3 text-xs font-medium text-gray-600 dark:text-gray-300">
+            <div className="flex flex-col items-center bg-emerald-500/10 p-6 rounded-3xl border border-emerald-500/20 mb-2 relative overflow-hidden backdrop-blur-md">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
+              
+              {engineUser ? (
+                 <div className="w-20 h-20 rounded-full bg-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.3)] border-2 border-emerald-500/50 flex items-center justify-center mb-4 overflow-hidden">
+                    <UserCircle2 size={40} className="text-emerald-500 drop-shadow-md" />
+                 </div>
+              ) : (
+                 <div className="w-20 h-20 rounded-full bg-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.3)] border-2 border-emerald-500/50 flex items-center justify-center mb-4">
+                    <CheckCircle size={40} className="text-emerald-500 drop-shadow-md" />
+                 </div>
+              )}
+              
+              <h3 className="font-bold text-lg text-emerald-700 dark:text-emerald-400">
+                {engineUser?.name || 'Motor Ativado'}
+              </h3>
+              
+              {engineUser?.id && (
+                 <p className="text-[10px] bg-white/50 dark:bg-black/40 px-2 py-0.5 rounded text-gray-500 mt-1 font-mono">
+                    +{engineUser.id.split(':')[0]}
+                 </p>
+              )}
+
+              <div className="flex justify-center items-center gap-2 mt-4 text-xs font-medium text-gray-600 dark:text-gray-300">
                   <span className="flex items-center gap-1 text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
-                    <Signal size={14} className="animate-pulse" /> Online
+                    <Signal size={14} className="animate-pulse" /> NATIVO BAILLEYS CORE
                   </span>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-2 w-full mt-6">
+                 <button 
+                   onClick={async () => {
+                      if (!confirm("Tem certeza que deseja deslogar seu aparelho da engine?")) return;
+                      setLoading(true);
+                      await logoutEngine(useChatStore.getState().connectedInstanceName!);
+                      setEvolutionConnection(false, null);
+                      setLoading(false);
+                      setQrBase64(null);
+                      setEngineUser(null);
+                   }}
+                   className="flex col-span-1 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-red-500/10 hover:text-red-500 border border-transparent hover:border-red-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
+                 >
+                    <LogOut size={18} className="group-hover:text-red-500 text-gray-400 transition-colors" />
+                    Deslogar Aparelho
+                 </button>
+                 
+                 <button 
+                   onClick={async () => {
+                      setLoading(true);
+                      await reconnectEngine(useChatStore.getState().connectedInstanceName!);
+                      setTimeout(() => {
+                         setLoading(false);
+                         alert("Protocolo WS reiniciado pela Engine.");
+                      }, 2000);
+                   }}
+                   className="flex col-span-1 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-emerald-500/10 hover:text-emerald-500 border border-transparent hover:border-emerald-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
+                 >
+                    <RefreshCcw size={18} className="group-hover:text-emerald-500 text-gray-400 animate-in spin-in transition-colors" />
+                    Warm Boot (Restart)
+                 </button>
+
+                 <button 
+                   onClick={async () => {
+                      setLoading(true);
+                      const r = await syncEngineContacts(useChatStore.getState().connectedInstanceName!);
+                      setLoading(false);
+                      alert(r.message);
+                   }}
+                   className="flex col-span-1 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-emerald-500/10 hover:text-emerald-500 border border-transparent hover:border-emerald-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
+                 >
+                    <UserCircle2 size={18} className="group-hover:text-emerald-500 text-gray-400 transition-colors" />
+                    Sincronizar Contatos
+                 </button>
+
+                 <button 
+                   onClick={async () => {
+                      setLoading(true);
+                      const r = await forceEnginePresence(useChatStore.getState().connectedInstanceName!);
+                      setLoading(false);
+                      alert(r.message);
+                   }}
+                   className="flex col-span-1 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-emerald-500/10 hover:text-emerald-500 border border-transparent hover:border-emerald-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
+                 >
+                    <Signal size={18} className="group-hover:text-emerald-500 text-gray-400 transition-colors" />
+                    Forçar Online
+                 </button>
+                 
+                 <button 
+                   onClick={async () => {
+                      if (!confirm("Isso apagará o cache de mensagens em RAM. Deseja prosseguir?")) return;
+                      setLoading(true);
+                      const r = await clearEngineStore(useChatStore.getState().connectedInstanceName!);
+                      setLoading(false);
+                      alert(r.message);
+                   }}
+                   className="flex col-span-2 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-orange-500/10 hover:text-orange-500 border border-transparent hover:border-orange-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
+                 >
+                    <AlertCircle size={18} className="group-hover:text-orange-500 text-gray-400 transition-colors" />
+                    Limpar RAM (Memory Leak Prevention)
+                 </button>
               </div>
             </div>
           </div>
