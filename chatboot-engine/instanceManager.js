@@ -105,17 +105,23 @@ class InstanceManager {
             }
 
             if (connection === 'close') {
-                const isLoggedOut = (lastDisconnect.error instanceof Boom)?.output?.statusCode === DisconnectReason.loggedOut;
-                const shouldReconnect = !isLoggedOut;
+                const errStatus = lastDisconnect?.error?.output?.statusCode;
+                const isLoggedOut = errStatus === DisconnectReason.loggedOut;
                 
-                console.log(`[${tenantId}] Conexão fechada. Reconectar?`, shouldReconnect);
+                // Tratar sessão corrompida (Bad Decrypt / XML Stream Error)
+                const errMsg = lastDisconnect?.error?.message || '';
+                const isCorrupt = errMsg.includes('xml-not-well-formed') || errStatus === 500 || errStatus === 515;
+                
+                const shouldReconnect = !isLoggedOut && !isCorrupt;
+                
+                console.log(`[${tenantId}] Conexão fechada. Reconectar?`, shouldReconnect, isCorrupt ? '(Foi barrado por corrupção de sessão/criptografia)' : '');
                 
                 this.sessions.delete(tenantId);
                 
                 if (shouldReconnect) {
                     this.createSession(tenantId);
                 } else {
-                    console.log(`[${tenantId}] LOGGED OUT CATASTRÓFICO. Excluindo base e liberando state sujo...`);
+                    console.log(`[${tenantId}] LOGGED OUT OU SESSÃO CORROMPIDA. Excluindo base e liberando state sujo...`);
                     // Limpar a sujeira e reiniciar no modo RAW para emergir o QRCODE Base64 na mesma hora!!
                     
                     await supabase.from('whatsapp_instances').update({
