@@ -280,11 +280,16 @@ export default function DevLogger() {
                 <div className="bg-black/40 rounded-lg p-2 border border-blue-500/10 mt-1 animate-in fade-in slide-in-from-top-2">
                    <span className="font-bold text-blue-500 mb-2 block">Motor Baileys: Endpoints Globais:</span>
                    <div className="grid grid-cols-1 gap-2">
-                     {[
-                       { name: 'Root / App Status (GET)', path: '/' },
-                       { name: 'Motor Health Check (GET)', path: '/debug/healthz' },
-                       { name: 'Listar Todas Instâncias (GET)', path: '/instance' },
-                     ].map((ep, idx) => (
+                     {(() => {
+                        const myTenant = sessionStorage.getItem('tenantId') || localStorage.getItem('tenantId') || 'Ronaldo-Comercial';
+                        return [
+                         { name: 'Root / App Status (GET)', path: '/' },
+                         { name: 'Motor Health Check (GET)', path: '/debug/healthz' },
+                         { name: 'Listar Todas Instâncias (GET)', path: '/instance' },
+                         { name: 'Listar Conversas/Chats da Instância (GET)', path: `/instance/${myTenant}/chats` },
+                         { name: 'Listar Contatos/Agenda da Instância (GET)', path: `/instance/${myTenant}/contacts` },
+                       ];
+                     })().map((ep, idx) => (
                         <div key={idx} className="flex justify-between items-center bg-gray-800/50 p-1.5 rounded border border-gray-700/50">
                            <span className="text-gray-300 font-mono text-[10px] break-all max-w-[65%]">{ep.name} <br/><span className="opacity-50">{engineUrl}{ep.path}</span></span>
                            <a 

@@ -188,6 +188,29 @@ app.get('/instance/:tenantId/messages/:remoteJid', async (req, res) => {
     }
 });
 
+// Puxar Contatos/Agenda
+app.get('/instance/:tenantId/contacts', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const store = instanceManager.stores.get(tenantId);
+        if(!store) return res.json([]);
+        
+        // Pega todos os contatos e retorna aumetados
+        const allContacts = store.contacts;
+        const mapped = Object.values(allContacts)
+          .filter(c => c.id && !c.id.endsWith('@g.us')) // Tira os grupos
+          .map(c => ({
+              id: c.id,
+              name: c.name || c.notify || c.verifiedName || null,
+              imgUrl: c.imgUrl || null
+          }));
+          
+        res.json(mapped);
+    } catch(err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Resgatar Foto de Perfil
 app.get('/instance/:tenantId/profilePic/:remoteJid', async (req, res) => {
     try {
@@ -276,17 +299,30 @@ app.post('/instance/:tenantId/pairing-code', async (req, res) => {
 // FERRAMENTAS SRE - DEBUG NATIVO
 // ==========================================
 
+// Listar Todas Instâncias
+app.get('/instance', (req, res) => {
+    const instances = Array.from(instanceManager.sessions.keys()).map(tenantId => ({
+        instanceName: tenantId,
+        status: 'open'
+    }));
+    res.json(instances);
+});
+
 // Global Health
+const packageJson = require('./package.json');
+const ENGINE_START_TIME = new Date().toISOString();
+
 app.get('/debug/healthz', (req, res) => {
     res.json({
         uptime: process.uptime(),
         memoryUsage: process.memoryUsage(),
-        engineVersion: '2.0.1-Stable',
-        compileDate: '2026-04-05T00:20:00-03:00',
+        engineVersion: packageJson.version + '-Stable',
+        compileDate: ENGINE_START_TIME,
         changelog: [
             "Correção do erro 500 no WebHook enviando 'Connection Closed'",
             "Adicionado Lazy Load para restaurar o Socket em caso de limpeza de memória no Node",
-            "Refatoração profunda da integração React <-> Node via Baileys API"
+            "Refatoração profunda da integração React <-> Node via Baileys API",
+            "Tratamento automático contra Loops de Bad Decrypt Criptográficos na base local"
         ],
         activeTenantsLoaded: Array.from(instanceManager.sessions.keys()),
         qrsOrPairingsPending: Array.from(instanceManager.qrs.keys())
