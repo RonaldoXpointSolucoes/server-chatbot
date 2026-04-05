@@ -68,7 +68,7 @@ export const fetchRecentChats = async (tenantId: string) => {
   return res.json();
 };
 
-export const fetchChatMessages = async (tenantId: string, remoteJid: string, page = 1) => {
+export const fetchChatMessages = async (tenantId: string, remoteJid: string, page: number = 1) => { console.log(page);
   const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/messages/${encodeURIComponent(remoteJid)}`);
   return res.json();
 };

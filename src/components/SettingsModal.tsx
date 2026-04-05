@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Server, Database, Save, Loader2, X, CheckCircle } from 'lucide-react';
+import { Settings, Database, Save, Loader2, X, CheckCircle } from 'lucide-react';
 import { useSettingsStore } from '../store/settingsStore';
 import { setInstanceWebhook } from '../services/evolution';
 import { useChatStore } from '../store/chatStore';
