@@ -222,6 +222,24 @@ app.post('/instance/:tenantId/sendMedia', async (req, res) => {
     }
 });
 
+// Invocar Função Nativa (Tester / Universal API)
+app.post('/instance/:tenantId/invoke', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const { method, args } = req.body;
+
+        if (!method) {
+            return res.status(400).json({ error: 'O método (method) é obrigatório no corpo da requisição.' });
+        }
+
+        const result = await instanceManager.invokeMethod(tenantId, method, args || []);
+        res.json(result);
+    } catch (err) {
+        console.error(`Falha ao invocar ${req.body?.method}:`, err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ==========================================
 // ROTA PARA PAIRING CODE (LOGAR SEM QR, COM NUMERO)
 // ==========================================

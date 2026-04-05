@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { 
-  Rocket, 
+  Rocket, Play, X, KeySquare, 
+ 
   MessageCircle, 
   Image as ImageIcon, 
   Users, 
@@ -52,6 +53,8 @@ const engineFeatures = [
     border: 'border-amber-500/20',
     title: 'Autenticação Resiliente',
     description: 'Gestão de conexão Multi-Device com o novo recurso de Pairing Code (sem QR) da Baileys, ideal para SaaS e automações cloud.',
+    testMethod: 'requestPairingCode',
+    testArgs: '[\n  "5521999999999"\n]',
     code: `// Conexão via Paring Code (Sem Câmera)
 const { state, saveCreds } = await useMultiFileAuthState('auth_info')
 const sock = makeWASocket({
@@ -72,6 +75,8 @@ console.log("Seu Pairing Code:", code)`
     border: 'border-pink-500/20',
     title: 'Disparo de Mídias Livres',
     description: 'O método sendMessage permite montar buffers ou URLs dinâmicas para enviar Fotos, Vídeos, Documentos e Áudios Nativos (PTT).',
+    testMethod: 'sendMessage',
+    testArgs: '[\n  "5521999999999@s.whatsapp.net",\n  {\n    "text": "Teste de Mídias via Tester!"\n  }\n]',
     code: `// Envio de Imagem Otimizada com Legenda
 await sock.sendMessage(jid, { 
     image: { url: 'https://exemplo.com/hero.jpg' }, 
@@ -93,6 +98,8 @@ await sock.sendMessage(jid, {
     border: 'border-blue-500/20',
     title: 'Administração Absoluta',
     description: 'Sua engine no controle. Crie grupos, promova administradores, altere decrições ou expulse usuários maliciosos automaticamente.',
+    testMethod: 'groupCreate',
+    testArgs: '[\n  "QG de Testes",\n  ["5521999999999@s.whatsapp.net"]\n]',
     code: `// Criação de um novo QG da Empresa
 const group = await sock.groupCreate("QG Lançamento", ["55219999@s.whatsapp.net"])
 console.log("Grupo Criado ID:", group.id)
@@ -129,6 +136,8 @@ await sock.sendPresenceUpdate('paused', jid)`
     border: 'border-indigo-500/20',
     title: 'Reações, Citações e Deletes',
     description: 'Ações diretas sobre mensagens enviadas para aumentar o poder das automações: emojis rápidos, revogação de mensagens e marcações.',
+    testMethod: 'sendMessage',
+    testArgs: '[\n  "5521999999999@s.whatsapp.net",\n  {\n    "react": {\n      "text": "🚀",\n      "key": { "remoteJid": "5521999999999@s.whatsapp.net", "fromMe": true, "id": "12345" }\n    }\n  }\n]',
     code: `// Reagir a uma mensagem enviada
 await sock.sendMessage(jid, { 
     react: { text: "🔥", key: messageKey } 
@@ -150,6 +159,8 @@ await sock.sendMessage(jid, { text: 'Perfeito!' }, { quoted: msg })`
     border: 'border-violet-500/20',
     title: 'Acessos Essenciais da API',
     description: 'Colete dados cruciais da rede, como validar de quem é um número, descobrir a foto de perfil oficial, ou bloquear contas.',
+    testMethod: 'onWhatsApp',
+    testArgs: '[\n  "5521999999999"\n]',
     code: `// Validar se número realmente tem WhatsApp
 const id = await sock.onWhatsApp("5521999999999")
 if (id[0]?.exists) { ... }
@@ -168,6 +179,8 @@ await sock.updateBlockStatus(jid, 'block')`
     border: 'border-cyan-500/20',
     title: 'Sincronização de Leitura',
     description: 'Assuma o controle dos "Checks Azuis". Marque mensagens como lidas nativamente informando diretamente os servidores do WhatsApp.',
+    testMethod: 'readMessages',
+    testArgs: '[\n  [\n    { "remoteJid": "5521999999999@s.whatsapp.net", "id": "MSGID", "fromMe": false }\n  ]\n]',
     code: `// Transformar o Check cinza em Azul
 await sock.readMessages([message.key])
 
@@ -185,6 +198,8 @@ sock.ev.on('messages.upsert', async (m) => {
     border: 'border-fuchsia-500/20',
     title: 'Enquetes Nativas V2',
     description: 'Gere enquetes interativas (Polls) para engajar clientes ou membros de um grupo, com configuração para voto único ou múltiplo.',
+    testMethod: 'sendMessage',
+    testArgs: '[\n  "5521999999999@s.whatsapp.net",\n  {\n    "poll": {\n      "name": "Qual o melhor framework?",\n      "values": ["React", "Vue", "Svelte"],\n      "selectableCount": 1\n    }\n  }\n]',
     code: `// Enviar Enquete Simples de Múltipla Escolha
 await sock.sendMessage(jid, {
     poll: {
@@ -739,7 +754,57 @@ const options = {
 
 export default function BaileysFeatures() {
   const navigate = useNavigate();
+
   const [activeTab, setActiveTab] = useState<'engine' | 'fazerai'>('engine');
+  
+  // Tester State
+  const [testModalOpen, setTestModalOpen] = useState(false);
+  const [testMethod, setTestMethod] = useState('');
+  const [testArgs, setTestArgs] = useState('');
+  const [testResponse, setTestResponse] = useState<string | null>(null);
+  const [testLoading, setTestLoading] = useState(false);
+
+  const openTester = (method: string, args: string) => {
+    setTestMethod(method);
+    setTestArgs(args);
+    setTestResponse(null);
+    setTestModalOpen(true);
+  };
+
+  const handleRunTest = async () => {
+    const tenantId = sessionStorage.getItem('tenantId') || localStorage.getItem('tenantId');
+    if (!tenantId) {
+      setTestResponse(JSON.stringify({ error: 'Nenhum tenantId encontrado no storage. Logue no CRM primeiro.' }, null, 2));
+      return;
+    }
+
+    setTestLoading(true);
+    setTestResponse('');
+
+    try {
+      let parsedArgs = [];
+      try {
+        parsedArgs = JSON.parse(testArgs);
+      } catch (e) {
+        throw new Error('JSON Inválido nos argumentos. Verifique a sintaxe.');
+      }
+
+      const backendUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+      const res = await fetch(`${backendUrl}/instance/${tenantId}/invoke`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ method: testMethod, args: parsedArgs })
+      });
+
+      const data = await res.json();
+      setTestResponse(JSON.stringify(data, null, 2));
+    } catch (err: any) {
+      setTestResponse(JSON.stringify({ error: err.message || 'Falha ao comunicar com o servidor' }, null, 2));
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
 
   const currentFeatures = activeTab === 'engine' ? engineFeatures : fazerAiFeatures;
 
@@ -817,8 +882,21 @@ export default function BaileysFeatures() {
                </div>
 
                {/* Editor Glass Code */}
+
                <div className="mt-auto pt-6">
+                 {/* Test Button */}
+                 {activeTab === 'engine' && (feature as any).testMethod && (
+                    <div className="mb-4">
+                      <button
+                        onClick={() => openTester((feature as any).testMethod, (feature as any).testArgs)}
+                        className="w-full py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-semibold flex items-center justify-center gap-2 transition-all"
+                      >
+                        <Play size={16} /> Executar Teste no Servidor
+                      </button>
+                    </div>
+                  )}
                  <div className="bg-black/40 rounded-2xl border border-white/5 overflow-hidden shadow-inner">
+
                    <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-white/[0.02]">
                        <div className="flex gap-1.5">
                          <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
@@ -858,6 +936,83 @@ export default function BaileysFeatures() {
         background: rgba(16, 185, 129, 0.4);
       }
     `}} />
+
+      {/* Modal de Testes Universais Baileys */}
+      {testModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setTestModalOpen(false)}></div>
+          
+          <div className="bg-[#0f141a] border border-white/10 p-6 rounded-3xl shadow-2xl w-full max-w-3xl relative z-10 flex flex-col gap-4 animate-in zoom-in-95 duration-200">
+            <button 
+              onClick={() => setTestModalOpen(false)}
+              className="absolute top-4 right-4 bg-white/5 hover:bg-white/10 p-2 rounded-full transition-colors"
+            >
+              <X size={20} className="text-gray-400" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2.5 bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-emerald-400">
+                <KeySquare size={24} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold text-white">Tester da API</h2>
+                <p className="text-gray-400 text-sm">Testando endpoint genérico no Servidor Ativo</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-semibold text-gray-300">Método Baileys</label>
+              <input
+                type="text"
+                value={testMethod}
+                onChange={(e) => setTestMethod(e.target.value)}
+                className="bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-colors placeholder-gray-600 font-mono"
+                placeholder="Ex: sendMessage"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-semibold text-gray-300">Argumentos (Formato JSON Array)</label>
+              <textarea
+                value={testArgs}
+                onChange={(e) => setTestArgs(e.target.value)}
+                rows={6}
+                className="bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-colors placeholder-gray-600 font-mono text-sm leading-relaxed"
+                placeholder="Ex:\n[\n  \'123@s.whatsapp.net\',\n  { \'text\': \'Olá\' }\n]"
+              />
+            </div>
+
+            <button
+              onClick={handleRunTest}
+              disabled={testLoading}
+              className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all flex justify-center items-center gap-2 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {testLoading ? (
+                <>Processando no Motor...</>
+              ) : (
+                <>
+                  <Play size={20} /> Disparar Execução
+                </>
+              )}
+            </button>
+
+            {/* Console de Resposta */}
+            <div className="mt-4 flex flex-col gap-2">
+               <label className="text-sm font-semibold text-gray-300">Retorno do Node.js (JSON)</label>
+               <div className="bg-black/80 border border-white/10 rounded-xl p-4 overflow-auto max-h-60 h-40">
+                  {testResponse ? (
+                    <pre className="text-emerald-400 font-mono text-xs whitespace-pre-wrap">
+                      {testResponse}
+                    </pre>
+                  ) : (
+                    <p className="text-gray-600 font-mono text-xs">O resultado aparecerá aqui...</p>
+                  )}
+               </div>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }

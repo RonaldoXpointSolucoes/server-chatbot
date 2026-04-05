@@ -115,7 +115,7 @@ export default function AdminDashboard() {
     <div className="flex h-[100dvh] w-full bg-[#f0f2f5] dark:bg-[#111b21] font-sans text-[#111b21] dark:text-[#e9edef]">
       {/* Sidebar Admin */}
       <aside className="w-64 flex flex-col bg-white dark:bg-[#202c33] border-r border-black/5 dark:border-white/5 z-10 shadow-lg relative">
-        <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80">v1.0.2</span>
+        <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80">v1.0.6</span>
         <div className="h-16 flex items-center px-6 border-b border-black/5 dark:border-white/5 gap-3 mt-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00a884] to-[#018b6e] flex items-center justify-center text-white shadow-md">
             <Shield size={18} />

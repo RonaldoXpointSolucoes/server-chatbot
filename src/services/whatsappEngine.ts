@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL;
+const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim();
 
 // Inicializa a Nuvem do Baileys para o Tenant forçando eliminação de zumbis Database Auth
 export const createInstance = async (tenantId: string, forceReset = false) => {

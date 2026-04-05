@@ -20,6 +20,8 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+
 export default function InstancesDashboard() {
   const [instances, setInstances] = useState<WhatsAppInstance[]>([]);
   const [stats, setStats] = useState<Record<string, { contacts: number, messages: number }>>({});
@@ -39,18 +41,6 @@ export default function InstancesDashboard() {
   const [activeInstanceId, setActiveInstanceId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('');
 
-  // Proteção Escudo: Bloqueia a montagem do componente se não estiver logado
-  const tenantId = sessionStorage.getItem('current_tenant_id');
-  if (!tenantId || tenantId === 'undefined') {
-    return (
-      <div className="flex h-screen bg-[#0b141a] items-center justify-center flex-col">
-        <AlertCircle size={64} className="text-red-500 mb-4 animate-pulse" />
-        <h1 className="text-2xl font-bold text-white mb-2">Acesso Negado</h1>
-        <p className="text-gray-400 mb-6">Você precisa realizar o login corporativo primeiro.</p>
-        <button onClick={() => window.location.href = '/'} className="bg-red-500 px-6 py-2 rounded-lg text-white font-bold hover:bg-red-600">Fazer Login</button>
-      </div>
-    );
-  }
 
   useEffect(() => {
     fetchInstances();
@@ -165,7 +155,7 @@ export default function InstancesDashboard() {
     try {
       setLoading(true);
       await supabase.from('whatsapp_instances').delete().eq('id', deletingInstance.id);
-      await fetch(`http://localhost:9000/instance/${deletingInstance.id}/delete`, { method: 'DELETE' }).catch(() => {});
+      await fetch(`${ENGINE_URL}/instance/${deletingInstance.id}/delete`, { method: 'DELETE' }).catch(() => {});
       fetchInstances();
     } catch (e) {
       console.error(e);
@@ -192,7 +182,7 @@ export default function InstancesDashboard() {
     if (!window.confirm('Isto fará logoff do WhatsApp atual mas manterá a instância. Deseja Continuar?')) return;
     // O delete sem apagar do banco. O /delete agora apaga tudo se feito via painel se não mudarmos
     await supabase.from('whatsapp_instances').update({ status: 'offline', phone_number: null, profile_picture_url: null }).eq('id', id);
-    await fetch(`http://localhost:9000/instance/${id}/delete`, { method: 'DELETE' }); 
+    await fetch(`${ENGINE_URL}/instance/${id}/delete`, { method: 'DELETE' }); 
   };
 
   const handleConnect = async (id: string) => {
@@ -201,7 +191,7 @@ export default function InstancesDashboard() {
     setQrLoading(true);
 
     try {
-      await fetch(`http://localhost:9000/instance/${id}/create`, { 
+      await fetch(`${ENGINE_URL}/instance/${id}/create`, { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ forceReset: true })
@@ -217,7 +207,7 @@ export default function InstancesDashboard() {
   const pollQrCode = (id: string) => {
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`http://localhost:9000/instance/${id}/qrcode`);
+        const res = await fetch(`${ENGINE_URL}/instance/${id}/qrcode`);
         const data = await res.json();
         
         if (data.qrcode) {

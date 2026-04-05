@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useDevStore } from '../store/devStore';
-import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow } from 'lucide-react';
+import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network } from 'lucide-react';
 import { supabase } from '../services/supabase';
 
 export default function DevLogger() {
@@ -11,6 +11,9 @@ export default function DevLogger() {
   const [lastPing, setLastPing] = useState<Date | null>(null);
   const [serverMeta, setServerMeta] = useState<any>(null);
   const [showChangelog, setShowChangelog] = useState(false);
+  const [showEndpoints, setShowEndpoints] = useState(false);
+  
+  const engineUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
   const checkEngineStatus = async () => {
     try {
@@ -42,7 +45,6 @@ export default function DevLogger() {
 
   // Hook globally to capture fetch API errors and console.error
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
 
     const originalConsoleError = console.error;
     const originalConsoleWarn = console.warn;
@@ -168,12 +170,27 @@ export default function DevLogger() {
     addLog({ type: 'success', message: 'App React em Execução. Hooks ativos.', source: 'Tester' });
   };
 
-  if (!import.meta.env.DEV) return null;
-
   return (
-    <div className={`fixed z-[9999] right-4 sm:right-8 transition-all duration-300 ease-in-out ${isVisible ? 'top-4' : '-top-[450px]'}`}>
-      <div className="bg-[#0b141a]/95 backdrop-blur-2xl border border-gray-700/50 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] w-[90vw] sm:w-[580px] flex flex-col max-h-[85vh]">
-        {/* Header */}
+    <>
+      {/* Floating Indicator when closed */}
+      {!isVisible && (
+        <button 
+           onClick={(e) => { e.stopPropagation(); toggleVisibility(); }}
+           className={`fixed top-4 right-4 z-[9999] text-white p-3 rounded-full shadow-xl transition-all ${engineStatus === 'online' ? 'bg-emerald-600 hover:bg-emerald-500 hover:shadow-emerald-500/20' : 'bg-red-600 hover:bg-red-500 animate-pulse hover:shadow-red-500/20'} cursor-pointer`}
+           title="Abrir DevLogger"
+        >
+          <Terminal size={20} />
+          {logs.filter(l => l.type === 'error').length > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-800 w-5 h-5 rounded-full text-[10px] flex items-center justify-center font-bold shadow-sm border border-red-400 animate-bounce">
+              {logs.filter(l => l.type === 'error').length}
+            </span>
+          )}
+        </button>
+      )}
+
+      <div className={`fixed z-[9999] right-4 sm:right-8 transition-all duration-300 ease-in-out ${isVisible ? 'top-4' : '-top-[650px]'}`}>
+        <div className="bg-[#0b141a]/95 backdrop-blur-2xl border border-gray-700/50 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] w-[90vw] sm:w-[580px] flex flex-col max-h-[85vh]">
+          {/* Header */}
         <div 
           className="flex items-center justify-between p-3 border-b border-gray-700/50 cursor-pointer bg-black/20 rounded-t-2xl hover:bg-black/30 transition-colors"
           onClick={toggleVisibility}
@@ -248,23 +265,45 @@ export default function DevLogger() {
                  </ul>
               </div>
             )}
+            
+            <div className="flex items-center justify-between font-mono mt-2 pt-2 border-t border-gray-700/30">
+               <span className="opacity-80">Ferramentas Dev:</span>
+               <button 
+                 onClick={(e) => { e.stopPropagation(); setShowEndpoints(!showEndpoints); }}
+                 className="flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors bg-blue-900/20 px-2 py-0.5 rounded-md border border-blue-500/20"
+               >
+                 <Network size={12} /> Root Endpoints <ChevronDown size={12} className={`transition-transform ${showEndpoints ? 'rotate-180' : ''}`}/>
+               </button>
+             </div>
+             
+             {showEndpoints && (
+                <div className="bg-black/40 rounded-lg p-2 border border-blue-500/10 mt-1 animate-in fade-in slide-in-from-top-2">
+                   <span className="font-bold text-blue-500 mb-2 block">Motor Baileys: Endpoints Globais:</span>
+                   <div className="grid grid-cols-1 gap-2">
+                     {[
+                       { name: 'Root / App Status (GET)', path: '/' },
+                       { name: 'Motor Health Check (GET)', path: '/debug/healthz' },
+                       { name: 'Listar Todas Instâncias (GET)', path: '/instance' },
+                     ].map((ep, idx) => (
+                        <div key={idx} className="flex justify-between items-center bg-gray-800/50 p-1.5 rounded border border-gray-700/50">
+                           <span className="text-gray-300 font-mono text-[10px] break-all max-w-[65%]">{ep.name} <br/><span className="opacity-50">{engineUrl}{ep.path}</span></span>
+                           <a 
+                              href={`${engineUrl}${ep.path}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-400 hover:text-white bg-blue-500/20 px-2 py-1 rounded transition-colors flex items-center gap-1"
+                              onClick={(e) => e.stopPropagation()}
+                           >
+                             <span className="text-[10px] whitespace-nowrap">Testar Req</span> <ExternalLink size={10} />
+                           </a>
+                        </div>
+                     ))}
+                   </div>
+                </div>
+             )}
           </div>
         )}
 
-        {/* Floating Indicator when closed */}
-        {!isVisible && (
-          <button 
-             onClick={(e) => { e.stopPropagation(); toggleVisibility(); }}
-             className={`absolute -bottom-12 right-4 text-white p-3 rounded-full shadow-xl transition-all ${engineStatus === 'online' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-red-600 hover:bg-red-500 animate-pulse'}`}
-          >
-            <Terminal size={20} />
-            {logs.filter(l => l.type === 'error').length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-800 w-4 h-4 rounded-full text-[9px] flex items-center justify-center font-bold shadow-sm border border-red-400">
-                {logs.filter(l => l.type === 'error').length}
-              </span>
-            )}
-          </button>
-        )}
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 font-mono text-xs custom-scrollbar min-h-[250px] max-h-[500px]">
@@ -313,5 +352,6 @@ export default function DevLogger() {
         </div>
       </div>
     </div>
+    </>
   );
 }

@@ -1,5 +1,6 @@
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import ProtectedRoute from './components/ProtectedRoute';
 import ChatDashboard from './pages/ChatDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminLogin from './pages/AdminLogin';
@@ -16,17 +17,23 @@ export default function App() {
       <Routes>
         {/* Rota do Cliente Comum */}
         <Route path="/" element={<ClientLogin />} />
-        <Route path="/chat" element={<ChatDashboard />} />
+        
+        {/* Rotas Privadas (Client SaaS) */}
+        <Route element={<ProtectedRoute role="client" />}>
+          <Route path="/chat" element={<ChatDashboard />} />
+          <Route path="/instances" element={<InstancesDashboard />} />
+        </Route>
 
         {/* Gerenciamento Master SaaS */}
         <Route path="/admin/login" element={<AdminLogin />} />
-        <Route path="/admin/*" element={<AdminDashboard />} />
+        
+        {/* Rotas Privadas (App Master Admin) */}
+        <Route element={<ProtectedRoute role="admin" />}>
+          <Route path="/admin/*" element={<AdminDashboard />} />
+        </Route>
 
         {/* Vitrine Baileys V6 */}
         <Route path="/features" element={<BaileysFeatures />} />
-
-        {/* Gerenciador de Instâncias */}
-        <Route path="/instances" element={<InstancesDashboard />} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

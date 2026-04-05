@@ -268,6 +268,30 @@ class InstanceManager {
             console.error('Core Engine Falha ao popular Msg', e);
         }
     }
+
+    /**
+     * Teste Global de Recurso: Invoca um método nativo no socket do Baileys dinamicamente
+     */
+    async invokeMethod(tenantId, method, args) {
+        const sock = this.sessions.get(tenantId);
+        if (!sock) throw new Error('WhatsApp Instância NÃO está online para este Tenant.');
+        
+        if (typeof sock[method] !== 'function') {
+            throw new Error(`Método '${method}' não encontrado no objeto socket do Baileys.`);
+        }
+
+        try {
+            console.log(`[${tenantId} INVOKE] Iniciando -> ${method} com args:`, JSON.stringify(args));
+            
+            // Usando apply ou spread para invocar os parâmetros desestruturados a partir do JSON Array
+            const result = await sock[method](...(Array.isArray(args) ? args : []));
+            
+            return { success: true, method, result };
+        } catch (e) {
+            console.error(`Falha interna no invokeMethod [${method}]:`, e);
+            throw new Error(`Erro ao executar ${method}: ` + (e.message || e.toString()));
+        }
+    }
 }
 
 module.exports = new InstanceManager();
