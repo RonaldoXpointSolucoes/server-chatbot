@@ -9,10 +9,13 @@ COPY . .
 WORKDIR /app/baileys-core
 RUN npm install
 RUN npm run build
+RUN npm pack
 
 # Then install dependencies in server
 WORKDIR /app/server
 RUN npm install
+# Ensure we install the packed tarball exactly
+RUN npm install /app/baileys-core/baileys-*.tgz
 
 ENV PORT=9000
 EXPOSE 9000
