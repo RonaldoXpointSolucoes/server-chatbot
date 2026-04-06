@@ -471,6 +471,16 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                          className="w-full bg-white dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-2xl p-3 text-sm text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-all"
                        />
                     </div>
+                    <div className="w-full mb-4">
+                       <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase tracking-tight">ApiKey da Instância</label>
+                       <input 
+                         type="text" 
+                         value={customApiKey}
+                         onChange={e => setCustomApiKey(e.target.value)}
+                         placeholder="Deixe em branco para auto-gerar"
+                         className="w-full bg-white dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-2xl p-3 text-sm text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-all font-mono"
+                       />
+                    </div>
                     <button 
                       onClick={handleGenerateNew}
                       className="bg-emerald-500 hover:bg-emerald-400 w-full text-white px-6 py-4 rounded-2xl text-sm font-bold transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 mt-4"

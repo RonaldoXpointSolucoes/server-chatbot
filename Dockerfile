@@ -8,6 +8,7 @@ COPY . .
 # We need to install dependencies in baileys-core if any
 WORKDIR /app/baileys-core
 RUN npm install
+RUN npm run build
 
 # Then install dependencies in server
 WORKDIR /app/server
