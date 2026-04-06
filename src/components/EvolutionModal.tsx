@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link, PlusCircle, LogOut, RefreshCcw, UserCircle2 } from 'lucide-react';
-import { createInstance, fetchQrCodeState, fetchEngineStatus, logoutEngine, reconnectEngine, clearEngineStore, syncEngineContacts, forceEnginePresence } from '../services/whatsappEngine';
+import { createInstance, fetchEngineStatus, logoutEngine, reconnectEngine, clearEngineStore, syncEngineContacts, forceEnginePresence } from '../services/whatsappEngine';
 import { supabase } from '../services/supabase';
 
 function uuidv4() {
@@ -49,7 +49,6 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
     setQrBase64(null);
     try {
       if (inst.connection_status === 'connected' || inst.status === 'connected') {
-          await createInstance(inst.id, false).catch(() => {});
           useChatStore.getState().updateTenantInstance(inst.id);
           setEvolutionConnection(true, inst.id);
           useChatStore.getState().syncEvolutionContacts(inst.id);
@@ -57,9 +56,12 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
           setTimeout(onClose, 1000);
           return;
       }
-      await createInstance(inst.id, false);
+      
+      const cId = sessionStorage.getItem('current_tenant_id');
+      if (!cId) throw new Error("Tenant não identificado");
+
       setActivePollingId(inst.id);
-      checkQRStatus(inst.id, false);
+      await createInstance(cId, inst.id);
     } catch(err: any) {
       setError(err.message || "Erro ao conectar motor.");
       setLoading(false);
@@ -82,23 +84,22 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
     try {
         const newEngineId = uuidv4();
         const cId = sessionStorage.getItem('current_tenant_id');
-        const randomToken = uuidv4().replace(/-/g, '').substring(0, 32); 
+        if (!cId) throw new Error("Tenant não identificado");
         
         const { error: dbErr } = await supabase.from('whatsapp_instances').insert({
           id: newEngineId,
-          name: nameStr,
+          display_name: nameStr,
           status: 'offline',
-          access_token: randomToken,
-          ...(cId ? { tenant_id: cId } : {})
+          tenant_id: cId
         });
 
         if (dbErr) throw new Error('Falha ao registrar instância. ' + dbErr.message);
 
         useChatStore.getState().updateTenantInstance(newEngineId);
-
-        await createInstance(newEngineId);
+        
         setActivePollingId(newEngineId);
-        checkQRStatus(newEngineId, false);
+        await createInstance(cId, newEngineId);
+        
         setCustomName('');
     } catch (err: any) {
       console.error(err);
@@ -107,76 +108,63 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const checkQRStatus = async (engineId: string, isInitialCheck = false) => {
-     try {
-       const res = await fetchQrCodeState(engineId);
-       
-       if (res.connected) {
-         setLoading(false);
-         setEvolutionConnection(true, engineId);
-         useChatStore.getState().syncEvolutionContacts(engineId);
-         
-         // Fetch profile from /status
-         try {
-           const status = await fetchEngineStatus(engineId);
-           if (status.user) setEngineUser(status.user);
-         } catch(e) {}
-         
-         if (isInitialCheck) setTimeout(onClose, 1000);
-         return;
-       }
-       
-       if (res.status === 'offline' || res.error) {
-         if (!isInitialCheck) {
-           setLoading(false);
-           setError(res.error || 'A conexão com seu WhatsApp foi encerrada ou rejeitou no pareamento. Refaça!');
-           setQrBase64(null); 
-         }
-       }
+  // SUBSCRIPTION DO REALTIME DE CONEXÃO
+  useEffect(() => {
+    if (!activePollingId) return;
+    
+    const tenantId = sessionStorage.getItem('current_tenant_id');
+    const channelName = `tenant:${tenantId}:instance:${activePollingId}`;
+    
+    console.log(`[Realtime] Inscrito no canal: ${channelName}`);
+    const channel = supabase.channel(channelName);
 
-       if (res.qrcode) {
-         setLoading(false);
-         setQrBase64(res.qrcode);
-       }
-     } catch (e) {
-       console.error("Falha ao checar status QR do Motor Nativo:", e);
-       if (!isInitialCheck) {
-         setError('O Motor Nativo Baileys recusou conexão.');
-       }
-       setLoading(false);
-     }
-  };
+    channel
+      .on('broadcast', { event: 'instance.qr_updated' }, (payload: any) => {
+          if (payload.payload?.qr_code) {
+             setQrBase64(payload.payload.qr_code);
+             setLoading(false);
+          }
+      })
+      .on('broadcast', { event: 'instance.status' }, (payload: any) => {
+          const st = payload.payload?.status;
+          if (st === 'offline') {
+             setError(payload.payload?.reason ? `Falha com código: ${payload.payload.reason}` : 'A conexão caiu ou foi rejeitada.');
+             setLoading(false);
+             setQrBase64(null);
+          } else if (st === 'connected') {
+             setLoading(false);
+             setQrBase64(null);
+             setEvolutionConnection(true, activePollingId);
+             useChatStore.getState().syncEvolutionContacts(activePollingId);
+             setTimeout(onClose, 1000);
+          }
+      })
+      .subscribe((status) => {
+          console.log(`[Realtime] Status inscrição modal:`, status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activePollingId]);
 
   useEffect(() => {
-    // If modal opens and we are marked as connected, let's double check reality and load user
+    // If modal opens and we are marked as connected, let's load user from v2 status
     if (evolutionConnected && useChatStore.getState().connectedInstanceName) {
-       fetchEngineStatus(useChatStore.getState().connectedInstanceName!)
-         .then(st => {
-             if (st.connected) setEngineUser(st.user || null);
-             else {
-                // False positive spotted
-                setEvolutionConnection(false, null);
-             }
-         })
-         .catch(() => {});
+       const cId = sessionStorage.getItem('current_tenant_id');
+       if(cId) {
+          fetchEngineStatus(cId, useChatStore.getState().connectedInstanceName!)
+            .then(st => {
+                if (st?.data?.status === 'connected' && st?.data?.whatsapp_instance_runtime?.user_profile) {
+                    setEngineUser(st.data.whatsapp_instance_runtime.user_profile);
+                } else if(st?.data?.status !== 'connected') {
+                    setEvolutionConnection(false, null);
+                }
+            })
+            .catch(() => {});
+       }
     }
   }, [evolutionConnected]);
-
-
-
-  useEffect(() => {
-    let interval: any;
-    if (!evolutionConnected) {
-      if ((loading || qrBase64) && activePollingId) {
-         interval = setInterval(() => {
-            checkQRStatus(activePollingId);
-         }, 3000);
-      }
-    }
-    return () => {
-       if (interval) clearInterval(interval);
-    };
-  }, [evolutionConnected, loading, qrBase64, activePollingId]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-300">
@@ -238,9 +226,11 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
               <div className="grid grid-cols-2 gap-2 w-full mt-6">
                  <button 
                    onClick={async () => {
+                      const cId = sessionStorage.getItem('current_tenant_id');
                       if (!confirm("Tem certeza que deseja deslogar seu aparelho da engine?")) return;
+                      if (!cId) return;
                       setLoading(true);
-                      await logoutEngine(useChatStore.getState().connectedInstanceName!);
+                      await logoutEngine(cId, useChatStore.getState().connectedInstanceName!);
                       setEvolutionConnection(false, null);
                       setLoading(false);
                       setQrBase64(null);
@@ -254,8 +244,10 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                  
                  <button 
                    onClick={async () => {
+                      const cId = sessionStorage.getItem('current_tenant_id');
+                      if (!cId) return;
                       setLoading(true);
-                      await reconnectEngine(useChatStore.getState().connectedInstanceName!);
+                      await reconnectEngine(cId, useChatStore.getState().connectedInstanceName!);
                       setTimeout(() => {
                          setLoading(false);
                          alert("Protocolo WS reiniciado pela Engine.");
@@ -269,10 +261,12 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
 
                  <button 
                    onClick={async () => {
+                      const cId = sessionStorage.getItem('current_tenant_id');
+                      if (!cId) return;
                       setLoading(true);
-                      const r = await syncEngineContacts(useChatStore.getState().connectedInstanceName!);
+                      const r = await syncEngineContacts(cId, useChatStore.getState().connectedInstanceName!);
                       setLoading(false);
-                      alert(r.message);
+                      alert(r.message || "OK");
                    }}
                    className="flex col-span-1 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-emerald-500/10 hover:text-emerald-500 border border-transparent hover:border-emerald-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
                  >
@@ -282,10 +276,12 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
 
                  <button 
                    onClick={async () => {
+                      const cId = sessionStorage.getItem('current_tenant_id');
+                      if (!cId) return;
                       setLoading(true);
-                      const r = await forceEnginePresence(useChatStore.getState().connectedInstanceName!);
+                      const r = await forceEnginePresence(cId, useChatStore.getState().connectedInstanceName!);
                       setLoading(false);
-                      alert(r.message);
+                      alert(r.message || "OK");
                    }}
                    className="flex col-span-1 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-emerald-500/10 hover:text-emerald-500 border border-transparent hover:border-emerald-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
                  >
@@ -295,11 +291,13 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                  
                  <button 
                    onClick={async () => {
+                      const cId = sessionStorage.getItem('current_tenant_id');
                       if (!confirm("Isso apagará o cache de mensagens em RAM. Deseja prosseguir?")) return;
+                      if (!cId) return;
                       setLoading(true);
-                      const r = await clearEngineStore(useChatStore.getState().connectedInstanceName!);
+                      const r = await clearEngineStore(cId, useChatStore.getState().connectedInstanceName!);
                       setLoading(false);
-                      alert(r.message);
+                      alert(r.message || "OK");
                    }}
                    className="flex col-span-2 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-orange-500/10 hover:text-orange-500 border border-transparent hover:border-orange-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
                  >

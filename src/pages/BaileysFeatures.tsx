@@ -457,9 +457,12 @@ export default function BaileysFeatures() {
       }
 
       const backendUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-      const res = await fetch(`${backendUrl}/instance/${tenantId}/invoke`, {
+      const res = await fetch(`${backendUrl}/api/v1/instances/${tenantId}/invoke`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'x-tenant-id': tenantId
+        },
         body: JSON.stringify({ method: testMethod, args: parsedArgs })
       });
 

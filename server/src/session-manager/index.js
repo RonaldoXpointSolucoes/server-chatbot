@@ -1,0 +1,112 @@
+import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
+import { useSupabaseAuthState } from './auth.js';
+import eventProcessor from '../event-processor/index.js';
+import pino from 'pino';
+import { supabase } from '../supabase.js';
+
+class SessionManager {
+    constructor() {
+        this.sessions = new Map();
+        this.logger = pino({ level: 'silent' });
+    }
+
+    async createSession(tenantId, instanceId) {
+        if (this.sessions.has(instanceId)) {
+            console.log(`[SessionManager] Sessão ${instanceId} já estava em memória.`);
+            return this.sessions.get(instanceId).sock;
+        }
+
+        console.log(`[SessionManager] Iniciando sessão para Instance: ${instanceId} | Tenant: ${tenantId}`);
+
+        try {
+            const { state, saveCreds } = await useSupabaseAuthState(tenantId, instanceId);
+            const { version, isLatest } = await fetchLatestBaileysVersion();
+            
+            console.log(`[SessionManager] Usando WA v${version.join('.')}, isLatest: ${isLatest}`);
+
+            // workaround for pure ESM makeWASocket if it's default exported vs destructured
+            const createSocket = makeWASocket.default ? makeWASocket.default : makeWASocket;
+
+            const sock = createSocket({
+                version,
+                logger: this.logger,
+                printQRInTerminal: false,
+                auth: state,
+                browser: ['Mac OS', 'Desktop', '1.0.0'],
+                generateHighQualityLinkPreview: true,
+                syncFullHistory: true
+            });
+
+            sock.ev.on('creds.update', saveCreds);
+
+            sock.ev.on('connection.update', async (update) => {
+                await eventProcessor.handleConnectionUpdate(tenantId, instanceId, update);
+
+                const { connection, lastDisconnect } = update;
+                if (connection === 'close') {
+                    const status = lastDisconnect?.error?.output?.statusCode;
+                    const loggedOut = status === DisconnectReason.loggedOut;
+
+                    this.sessions.delete(instanceId);
+
+                    if (loggedOut) {
+                        console.log(`[SessionManager] Instância ${instanceId} desconectada (Logged Out).`);
+                        await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
+                        await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
+                        await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
+                    } else {
+                        console.log(`[SessionManager] Instância ${instanceId} fechou. Motivo: ${status}. Tentando reconectar em 5s...`);
+                        setTimeout(() => this.createSession(tenantId, instanceId), 5000);
+                    }
+                }
+            });
+
+            sock.ev.on('messaging-history.set', async (history) => {
+                await eventProcessor.handleMessagingHistorySet(tenantId, instanceId, sock, history);
+            });
+
+            sock.ev.on('chats.upsert', async (chats) => {
+                await eventProcessor.handleChatsUpsert(tenantId, instanceId, sock, chats);
+            });
+
+            sock.ev.on('chats.update', async (updates) => {
+                await eventProcessor.handleChatsUpdate(tenantId, instanceId, sock, updates);
+            });
+
+            sock.ev.on('messages.upsert', async (m) => {
+                await eventProcessor.handleMessageUpsert(tenantId, instanceId, sock, m);
+            });
+            
+            this.sessions.set(instanceId, { sock, tenantId });
+
+            await supabase.from('whatsapp_instances').update({
+                assigned_node_id: 'worker-1',
+                lease_until: new Date(Date.now() + 60000).toISOString()
+            }).eq('id', instanceId);
+
+            return sock;
+        } catch (error) {
+            console.error(`[SessionManager] Falha ao inciar sessão ${instanceId}`, error);
+            throw error;
+        }
+    }
+
+    getSocket(instanceId) {
+        return this.sessions.get(instanceId)?.sock;
+    }
+
+    async closeSession(instanceId) {
+        const data = this.sessions.get(instanceId);
+        if (data && data.sock) {
+            try { data.sock.ws.close(); } catch(e){}
+            this.sessions.delete(instanceId);
+            
+            await supabase.from('whatsapp_instances').update({
+                status: 'offline',
+                assigned_node_id: null
+            }).eq('id', instanceId);
+        }
+    }
+}
+
+export default new SessionManager();

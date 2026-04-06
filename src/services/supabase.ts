@@ -30,7 +30,8 @@ export type ContactRow = {
   notes?: string;
   tags?: any[];
   phone: string;
-  evolution_remote_jid: string;
+  evolution_remote_jid?: string; // Mantido como optional para retrocompatibilidade
+  whatsapp_jid?: string;
   bot_status: 'active' | 'paused';
   created_at: string;
 }

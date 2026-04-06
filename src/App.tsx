@@ -1,6 +1,7 @@
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import ChatDashboard from './pages/ChatDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminLogin from './pages/AdminLogin';
@@ -20,7 +21,7 @@ export default function App() {
         
         {/* Rotas Privadas (Client SaaS) */}
         <Route element={<ProtectedRoute role="client" />}>
-          <Route path="/chat" element={<ChatDashboard />} />
+          <Route path="/chat" element={<ErrorBoundary><ChatDashboard /></ErrorBoundary>} />
           <Route path="/instances" element={<InstancesDashboard />} />
         </Route>
 

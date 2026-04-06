@@ -28,7 +28,6 @@ export default function InstancesDashboard() {
   const [loading, setLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [newInstanceName, setNewInstanceName] = useState('');
-  const [newApiKey, setNewApiKey] = useState('');
   const [showQrModal, setShowQrModal] = useState<string | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
@@ -89,10 +88,12 @@ export default function InstancesDashboard() {
           // Se o banco acha que está online/conectado, nós vamos duvidar e validar na Engine.
           if (inst.status === 'online' || inst.status === 'connected' || inst.status === 'connecting') {
               try {
-                  const res = await fetch(`${ENGINE_URL}/instance/${inst.id}/status`);
+                  const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/status`, {
+                      headers: { 'x-tenant-id': tenantId! }
+                  });
                   if (res.ok) {
                      const statusData = await res.json();
-                     if (statusData.status !== 'connected') {
+                     if (statusData.data?.status !== 'connected') {
                          return { ...inst, status: 'offline' }; // Sobrescreve em memória
                      }
                   } else {
@@ -135,12 +136,9 @@ export default function InstancesDashboard() {
 
   const handleCreateInstance = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newInstanceName.trim()) {
+    const nameStr = newInstanceName.trim();
+    if (!nameStr) {
        alert("Nome é obrigatório.");
-       return;
-    }
-    if (!newApiKey.trim()) {
-       alert("API Key é obrigatória no ambiente de nuvem.");
        return;
     }
     
@@ -150,9 +148,8 @@ export default function InstancesDashboard() {
       
       const tenantId = sessionStorage.getItem('current_tenant_id');
       const { error } = await supabase.from('whatsapp_instances').insert([{
-        name: newInstanceName,
+        display_name: nameStr,
         status: 'offline',
-        access_token: newApiKey.trim(),
         settings: defaultSettings,
         tenant_id: tenantId
       }]);
@@ -160,7 +157,6 @@ export default function InstancesDashboard() {
       if (error) throw error;
       setIsCreating(false);
       setNewInstanceName('');
-      setNewApiKey('');
       fetchInstances();
     } catch (e) {
       alert('Falha ao criar instância!');
@@ -178,8 +174,11 @@ export default function InstancesDashboard() {
     if (!deletingInstance) return;
     try {
       setLoading(true);
-      await supabase.from('whatsapp_instances').delete().eq('id', deletingInstance.id);
-      await fetch(`${ENGINE_URL}/instance/${deletingInstance.id}/delete`, { method: 'DELETE' }).catch(() => {});
+      const tenantId = sessionStorage.getItem('current_tenant_id');
+      await fetch(`${ENGINE_URL}/api/v1/instances/${deletingInstance.id}`, { 
+          method: 'DELETE',
+          headers: { 'x-tenant-id': tenantId! }
+      }).catch(() => {});
       fetchInstances();
     } catch (e) {
       console.error(e);
@@ -205,13 +204,20 @@ export default function InstancesDashboard() {
   const handleDisconnect = async (id: string) => {
     if (!window.confirm('Isto fará logoff do WhatsApp atual mas manterá a instância. Deseja Continuar?')) return;
     // O delete sem apagar do banco. O /delete agora apaga tudo se feito via painel se não mudarmos
-    await supabase.from('whatsapp_instances').update({ status: 'offline', phone_number: null, profile_picture_url: null }).eq('id', id);
-    await fetch(`${ENGINE_URL}/instance/${id}/logout`, { method: 'POST' }).catch(() => {}); 
+    const tenantId = sessionStorage.getItem('current_tenant_id');
+    await fetch(`${ENGINE_URL}/api/v1/instances/${id}/disconnect`, { 
+        method: 'POST',
+        headers: { 'x-tenant-id': tenantId! }
+    }).catch(() => {}); 
   };
 
   const fireEngineAction = async (id: string, action: string, successMsg: string) => {
     try {
-       const res = await fetch(`${ENGINE_URL}/instance/${id}/${action}`, { method: 'POST' });
+       const tenantId = sessionStorage.getItem('current_tenant_id');
+       const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/${action}`, { 
+           method: 'POST',
+           headers: { 'x-tenant-id': tenantId! }
+       });
        const data = await res.json();
        alert(data.message || successMsg);
     } catch(err) {
@@ -225,10 +231,11 @@ export default function InstancesDashboard() {
     setQrLoading(true);
 
     try {
-      await fetch(`${ENGINE_URL}/instance/${id}/create`, { 
+      const tenantId = sessionStorage.getItem('current_tenant_id');
+      await fetch(`${ENGINE_URL}/api/v1/instances/connect`, { 
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ forceReset: true })
+        headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId! },
+        body: JSON.stringify({ instanceId: id })
       });
       pollQrCode(id);
     } catch(err) {
@@ -243,24 +250,28 @@ export default function InstancesDashboard() {
     const interval = setInterval(async () => {
       try {
         secondsElapsed += 2;
-
-        const res = await fetch(`${ENGINE_URL}/instance/${id}/qrcode`);
-        const data = await res.json();
+        const tenantId = sessionStorage.getItem('current_tenant_id');
+        const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/status`, {
+            headers: { 'x-tenant-id': tenantId! }
+        });
+        const respJson = await res.json();
+        const data = respJson.data;
         
-        if (data.connected) {
+        if (data && data.status === 'connected') {
           setQrLoading(false);
           setShowQrModal(null);
           setSuccessConnectId(id);
           setTimeout(() => setSuccessConnectId(null), 2000);
           clearInterval(interval);
           fetchInstances();
-        } else if (data.status === 'offline') {
+        } else if (data && data.status === 'offline') {
            setQrLoading(false);
            clearInterval(interval);
-        } else if (data.qrcode) {
+        } else if (data && data.whatsapp_instance_runtime && data.whatsapp_instance_runtime[0]?.qr_code) {
           // Previne que a Imagem pisque a cada 2 segundos no DOM injetando só se for string diferente
+          const qrSrc = data.whatsapp_instance_runtime[0].qr_code;
           setQrCode(prevQr => {
-            if(prevQr !== data.qrcode) return data.qrcode;
+            if(prevQr !== qrSrc) return qrSrc;
             return prevQr;
           });
           setQrLoading(false);
@@ -271,10 +282,10 @@ export default function InstancesDashboard() {
           secondsElapsed = 0; // Renova ciclo da UI
           console.log('[UI] 30 Segundos Ociosos. Renovando QR Code do Motor via API...');
           setQrLoading(true);
-          await fetch(`${ENGINE_URL}/instance/${id}/create`, { 
+          await fetch(`${ENGINE_URL}/api/v1/instances/connect`, { 
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ forceReset: true })
+            headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId! },
+            body: JSON.stringify({ instanceId: id })
           }).catch(() => {});
         }
 
@@ -331,22 +342,11 @@ export default function InstancesDashboard() {
                <h2 className="text-2xl font-bold dark:text-white mb-6">Criar Conexão</h2>
                <form onSubmit={handleCreateInstance}>
                  <div className="space-y-4">
-                   <div>
+                    <div>
                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nome da Instância</label>
                      <input required autoFocus value={newInstanceName} onChange={e => setNewInstanceName(e.target.value)} type="text" placeholder="Ex: Comercial 1" className="w-full bg-gray-100 dark:bg-black/20 border border-gray-200 dark:border-white/10 rounded-2xl p-3 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"/>
                    </div>
-                   <div className="mb-6">
-                <label className="block text-sm font-semibold text-gray-300 mb-2">API Key de Conexão <span className="text-red-500">*</span></label>
-                <input
-                  type="password"
-                  value={newApiKey}
-                  onChange={(e) => setNewApiKey(e.target.value)}
-                  placeholder="Defina a Chave da API"
-                  className="w-full bg-black/50 border border-[#2a3942] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-colors"
-                  required
-                />
-                <p className="text-xs text-gray-500 mt-2 flex items-center gap-1"><AlertCircle size={12}/> Essa chave será obrigatória para conectar a Evolution ao seu FrontEnd.</p>
-              </div>     <div className="flex gap-3 mt-6">
+                      <div className="flex gap-3 mt-6">
                      <button type="button" onClick={() => setIsCreating(false)} className="flex-1 bg-gray-100 dark:bg-black/30 hover:bg-gray-200 dark:hover:bg-black/50 text-gray-800 dark:text-white font-semibold py-3 rounded-2xl transition-all">Cancelar</button>
                      <button type="submit" className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-3 rounded-2xl transition-all shadow-md">Criar</button>
                    </div>
@@ -441,13 +441,13 @@ export default function InstancesDashboard() {
 
                 {/* Instancias List Card */}
                   <div className="p-4 sm:p-6 pb-4 border-b border-[#2a3942]/50 flex flex-col gap-3">
-                    {/* Exibir chave da API segura */}
+                    {/* Exibir o UUID da Instância como info útil (já que a evolution auth caiu) */}
                     <div className="bg-black/30 p-3 rounded-xl border border-white/5 flex items-center justify-between gap-3 group/token">
-                       <span className="text-xs text-gray-400 uppercase tracking-widest font-bold font-mono">API_KEY</span>
-                       <div className="flex-1 text-right font-mono text-sm tracking-wide text-emerald-400/80 group-hover/token:text-emerald-400 transition-colors">
-                          {showToken[inst.id] ? inst.access_token : '••••••••••••••••••••••••••••'}
+                       <span className="text-xs text-gray-400 uppercase tracking-widest font-bold font-mono">CONNECTION ID</span>
+                       <div className="flex-1 text-right font-mono text-[10px] sm:text-xs tracking-wide text-emerald-400/80 group-hover/token:text-emerald-400 transition-colors truncate">
+                          {showToken[inst.id] ? inst.id : '••••••••-••••-••••-••••-••••••••••••'}
                        </div>
-                       <button onClick={() => setShowToken(prev => ({...prev, [inst.id]: !prev[inst.id]}))} className="text-gray-500 hover:text-emerald-400 transition-colors pl-2">
+                       <button onClick={() => setShowToken(prev => ({...prev, [inst.id]: !prev[inst.id]}))} className="text-gray-500 hover:text-emerald-400 transition-colors pl-2 shrink-0">
                           {showToken[inst.id] ? <EyeOff size={16} /> : <EyeIcon size={16} />}
                        </button>
                     </div>

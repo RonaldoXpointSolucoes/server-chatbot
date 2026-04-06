@@ -65,17 +65,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   modalReason: null,
   isSubscribed: false, // Previne double-subscribe do react 18
   
-  setEvolutionConnection: (status, instanceName) => set((state) => {
-    if (status && instanceName) {
-      localStorage.setItem('@ChatBoot:evolutionInstance', instanceName);
-    } else if (!status) {
-      localStorage.removeItem('@ChatBoot:evolutionInstance');
-    }
-    return { 
-      evolutionConnected: status, 
-      connectedInstanceName: status && instanceName ? instanceName : (status ? state.connectedInstanceName : null) 
-    };
-  }),
 
   setActiveChat: (id) => set({ activeChatId: id }),
 
@@ -92,7 +81,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const { sendTextMessage } = await import('../services/whatsappEngine');
       // 1. Manda pra Baileys Engine Local
-      await sendTextMessage(instanceName, contact.evolution_remote_jid, text);
+      if (!state.tenantInfo) return;
+      await sendTextMessage(state.tenantInfo.id, instanceName, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), text);
       
     } catch(err: any) {
       console.error(err);
@@ -133,37 +123,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
 
     try {
-      // 1. Upload pro Supabase
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${state.tenantInfo.id}/${contactId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-      
-      const { error: uploadError } = await supabase.storage
-        .from('chat_media')
-        .upload(fileName, file);
+      const formData = new FormData();
+      formData.append('media', file);
+      // Pega o jid. Padrão: DDI + NUMERO + @s.whatsapp.net
+      const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
+      formData.append('jid', jid);
+      formData.append('messageType', mediaType);
+      if (file.name) formData.append('caption', file.name);
 
-      if (uploadError) throw uploadError;
+      // Chamada HTTP pro Node (único dono do upload Supabase e Baileys)
+      const res = await fetch(`http://localhost:9000/api/v1/instances/${instanceName}/send-media`, {
+        method: 'POST',
+        headers: {
+          'x-tenant-id': state.tenantInfo.id
+        },
+        body: formData
+      });
 
-      // Pegar URL Publica
-      const { data: { publicUrl } } = supabase.storage.from('chat_media').getPublicUrl(fileName);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao processar mídia no servidor');
 
-      // Atualiza o local message com o public url
-      set((s) => ({
-        contacts: s.contacts.map(c => c.id === contactId ? {
-          ...c,
-          messages: c.messages.map(m => m.id === pseudoId ? { ...m, mediaUrl: publicUrl } : m)
-        } : c)
-      }));
-
-      // 2. Enviar via Evolution API
-      const { sendMediaMessage, sendWhatsAppAudio } = await import('../services/whatsappEngine');
-      
-      if (mediaType === 'audio') {
-        await sendWhatsAppAudio(instanceName, contact.evolution_remote_jid, publicUrl);
-      } else {
-        await sendMediaMessage(instanceName, contact.evolution_remote_jid, mediaType, publicUrl, file.type, file.name);
+      if (data.media_url) {
+        set((s) => ({
+          contacts: s.contacts.map(c => c.id === contactId ? {
+            ...c,
+            messages: c.messages.map(m => m.id === pseudoId ? { ...m, mediaUrl: data.media_url } : m)
+          } : c)
+        }));
       }
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('Falha ao upar/enviar media:', err);
     }
   },
@@ -204,12 +193,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   upsertContactLocally: (contact) => {
     set((state) => {
       // 1. Resolvemos os dois principais identificadores unicos independentes (JID ou Telefone Formatado/Puro)
-      const contactPhoneMatch = contact.phone || (contact.evolution_remote_jid ? contact.evolution_remote_jid.split('@')[0] : null);
+      const contactPhoneMatch = contact.phone || (contact.whatsapp_jid ? contact.whatsapp_jid.split('@')[0] : null);
 
       let targetIndex = state.contacts.findIndex(c => 
          c.id === contact.id ||
-         c.evolution_remote_jid === contact.evolution_remote_jid || 
-         c.phone === contactPhoneMatch
+         (c.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) || 
+         (c.phone && c.phone === contactPhoneMatch)
       );
 
       if (targetIndex !== -1) {
@@ -240,7 +229,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(contact.name || contact.phone)}&background=random&color=fff`, // Avatar ui-avatars idêntico ao Chatwoot
           messages: [],
           unread: 0,
-          lastMsgTimestamp: Date.now()
+          // usa lastMsgTimestamp para a sidebar saber quem eh primeiro
+          lastMsgTimestamp: new Date(contact.created_at || Date.now()).getTime()
         };
         return { contacts: [...state.contacts, newContact] };
       }
@@ -274,45 +264,66 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchInitialData: async () => {
-    // 1. Puxa os contatos nativos do Tenant Atual no DB p/ os UUIDs e Nomes Oficiais serem os reais (sem duplicatas baseada em temp-)
     const tenant = get().tenantInfo;
     if (!tenant) return;
 
     try {
+       // Puxa contatos
        const { data: dbContacts } = await supabase.from('contacts').select('*').eq('tenant_id', tenant.id);
+       
+       // Puxa conversas do tenant ordernadas
+       const { data: dbConvs } = await supabase.from('conversations').select('*').eq('tenant_id', tenant.id).order('last_message_at', { ascending: false });
+
        if (dbContacts && dbContacts.length > 0) {
-           // Injeta inteligentemente todos os dbContacts no store, preservando quem ja existia
            set((s) => {
                const newContacts = [...s.contacts];
                
                dbContacts.forEach(dbC => {
-                  const phoneMatch = dbC.phone || (dbC.evolution_remote_jid ? dbC.evolution_remote_jid.split('@')[0] : null);
+                  const phoneMatch = dbC.phone || (dbC.whatsapp_jid ? dbC.whatsapp_jid.split('@')[0] : null);
                   const idx = newContacts.findIndex(c => 
                      c.id === dbC.id || 
-                     c.evolution_remote_jid === dbC.evolution_remote_jid || 
+                     c.whatsapp_jid === dbC.whatsapp_jid || 
                      c.phone === phoneMatch
                   );
                   
                   const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(dbC.name || dbC.phone)}&background=random&color=fff`;
+                  
+                  // Busca conversa associada a este contato
+                  const conv = dbConvs?.find(cv => cv.contact_id === dbC.id);
+
+                  const preview = conv?.last_message_preview || '';
+                  const unread = conv?.unread_count || 0;
+                  const ts = conv?.last_message_at ? new Date(conv.last_message_at).getTime() : new Date(dbC.created_at).getTime();
 
                   if (idx !== -1) {
-                     // Atualiza os dados base, mas preserva mensagens e avatar se for real
                      const existing = newContacts[idx];
                      newContacts[idx] = {
                         ...existing,
                         ...dbC,
-                        id: dbC.id, // garante ID real do banco
+                        id: dbC.id,
                         name: dbC.name || existing.name,
-                        avatar: existing.avatar?.includes('ui-avatars') ? fallbackAvatar : (existing.avatar || fallbackAvatar)
+                        avatar: existing.avatar?.includes('ui-avatars') ? fallbackAvatar : (existing.avatar || fallbackAvatar),
+                        unread: unread,
+                        lastMsgTimestamp: ts,
+                        messages: existing.messages || [],
                      };
+                     
+                     // Injeta um preview fake se messages tiver vazio e tem preview no banco 
+                     if (newContacts[idx].messages.length === 0 && preview) {
+                        newContacts[idx].messages = [{
+                           id: 'preview-' + conv.id,
+                           text: preview,
+                           sender: 'client',
+                           timestamp: new Date(ts)
+                        }];
+                     }
                   } else {
-                     // Insere fresco
                      newContacts.push({
                         ...dbC,
                         avatar: fallbackAvatar,
-                        messages: [],
-                        unread: 0,
-                        lastMsgTimestamp: new Date(dbC.created_at).getTime()
+                        messages: preview ? [{ id: 'preview-' + conv.id, text: preview, sender: 'client', timestamp: new Date(ts) }] : [],
+                        unread: unread,
+                        lastMsgTimestamp: ts
                      });
                   }
                });
@@ -338,241 +349,100 @@ export const useChatStore = create<ChatState>((set, get) => ({
            connectedInstanceName: tenantData.evolution_api_instance || null
         });
 
-        // Se o banco ja sabe o nome da instancia pre-cadastrada dessa empresa, iniciamos o sync via api
         if (tenantData.evolution_api_instance) {
-           const { getInstanceConnectionState, createInstance } = await import('../services/whatsappEngine');
-           const state = await getInstanceConnectionState(tenantData.evolution_api_instance);
+           const { fetchEngineStatus, createInstance } = await import('../services/whatsappEngine');
+           const stateRes = await fetchEngineStatus(tenantData.id, tenantData.evolution_api_instance);
            
-           if (state?.instance?.state === 'open') {
-             set({ evolutionConnected: true });
-             get().syncEvolutionContacts(tenantData.evolution_api_instance);
+           if (stateRes?.data?.status === 'connected') {
+             set({ evolutionConnected: true, modalReason: null });
+             get().fetchInitialData();
            } else {
-             // O motor node pode ter reiniciado. Vamos consultar o Supabase para ter a verdade absoluta
-             const { data: instData } = await supabase.from('whatsapp_instances')
-                .select('status')
-                .eq('id', tenantData.evolution_api_instance)
-                .single();
-
+             const instData = stateRes?.data;
+ 
              if (instData && (instData.status === 'connected' || instData.status === 'connecting')) {
-                // Instância tem credenciais válidas. Desperta o motor em background
-                await createInstance(tenantData.evolution_api_instance, false).catch(() => {});
+                await createInstance(tenantData.id, tenantData.evolution_api_instance).catch(() => {});
                 set({ evolutionConnected: true, modalReason: null });
-                get().syncEvolutionContacts(tenantData.evolution_api_instance);
+                get().fetchInitialData();
              } else {
-                // Cai pro modal mas de forma justificada
                 set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp foi encerrada ou expirada de forma remota. Por favor, conecte novamente relendo o QR Code.' });
              }
            }
         } else {
-           // Nenhuma instnacia na base, empresa recem-chegada
            set({ evolutionConnected: false, modalReason: 'Seja bem-vindo a sua plataforma! Crie a primeira conexão do seu número de WhatsApp comercial agora mesmo.' });
         }
       }
     } catch (e) {
-      console.error('Erro pegando config SaaS', e);
+      console.error(e);
+      set({ evolutionConnected: false, modalReason: 'Houve uma falha fatal na validação da sua empresa. Entre em contato com o suporte.' });
     }
   },
 
-  updateTenantInstance: async (newInst: string) => {
+  setEvolutionConnection: async (status, newInst) => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
     
-    // Salva globalmente no SaaS Database que a empresa X está operando pela instância Y
     await supabase.from('companies').update({ evolution_api_instance: newInst }).eq('id', tenant.id);
     
     set({ 
-       connectedInstanceName: newInst, 
-       tenantInfo: { ...tenant, evolution_api_instance: newInst },
+       connectedInstanceName: newInst || null, 
+       tenantInfo: { ...tenant, evolution_api_instance: newInst || null },
        modalReason: null
     });
+  },
+
+  updateTenantInstance: async (newInst: string) => {
+    get().setEvolutionConnection(true, newInst);
   },
 
   setModalReason: (reason) => {
     set({ modalReason: reason });
   },
 
-  syncEvolutionContacts: async (instanceName) => {
-    try {
-      const { fetchRecentChats } = await import('../services/whatsappEngine');
-      const chats = await fetchRecentChats(instanceName);
-      if(!chats || !Array.isArray(chats)) return;
-
-      // Mapeia histórico da Evolution e injeta nativamente na UI
-      set((currentState) => {
-         const updatedContacts = [...currentState.contacts];
-         
-         chats.forEach((chat) => {
-             const remoteJid = chat.remoteJid || chat.id;
-             if(!remoteJid || remoteJid === 'status@broadcast') return;
-             
-             const phone = remoteJid.split('@')[0];
-             let existingIndex = updatedContacts.findIndex(c => 
-                c.evolution_remote_jid === remoteJid || 
-                (c.phone && c.phone === phone)
-             );
-
-             // Tenta pegar o nome de exibição do Wpp ou formata o telefone
-             let finalName = chat.pushName || chat.name || chat.lastMessage?.pushName;
-             if (!finalName) {
-                if (phone.startsWith('55') && phone.length >= 12) {
-                  finalName = `+55 (${phone.substring(2,4)}) ${phone.substring(4, phone.length - 4)}-${phone.substring(phone.length - 4)}`;
-                } else {
-                  finalName = phone;
-                }
-             }
-
-             // Tenta pegar a foto de perfil real armazenada no cache da evolution ou usa iniciais do nome
-             const realAvatar = chat.profilePicUrl || chat.profilePictureUrl || chat.picture;
-             const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName)}&background=random&color=fff`;
-
-             // Tenta resgatar a ultima mensagem real pra nao ficar texto vazio ou mock
-             let lastMsgText = "Nova conversa...";
-             const lm = chat.lastMessage?.message || chat.message;
-             if (lm) {
-                lastMsgText = lm.conversation || lm.extendedTextMessage?.text || lm.text || (lm.videoMessage ? "📷 Vídeo" : lm.imageMessage ? "📷 Imagem" : lm.audioMessage ? "🎵 Áudio" : lastMsgText);
-             }
-
-             const rawTimestamp = chat.lastMessage?.messageTimestamp 
-                ? (typeof chat.lastMessage.messageTimestamp === 'object' ? chat.lastMessage.messageTimestamp.low * 1000 : chat.lastMessage.messageTimestamp * 1000) 
-                : chat.conversationTimestamp ? chat.conversationTimestamp * 1000 : chat.updatedAt ? new Date(chat.updatedAt).getTime() : Date.now();
-
-             if(existingIndex === -1) {
-                updatedContacts.push({
-                    id: chat.id || `temp-${remoteJid}`, // ID temporario pro UI
-                    tenant_id: 'local',
-                    name: finalName,
-                    phone,
-                    evolution_remote_jid: remoteJid,
-                    bot_status: 'active',
-                    created_at: new Date().toISOString(),
-                    avatar: realAvatar || fallbackAvatar,
-                    messages: lastMsgText !== "Nova conversa..." ? [
-                      { id: chat.lastMessage?.key?.id || `msg-${Date.now()}`, text: lastMsgText, sender: 'client', timestamp: new Date(rawTimestamp) }
-                    ] : [],
-                    unread: chat.unreadCount || 0,
-                    lastMsgTimestamp: rawTimestamp
-                });
-             } else {
-                // Atualiza o já existente
-                const currentC = updatedContacts[existingIndex];
-                updatedContacts[existingIndex] = {
-                   ...currentC,
-                   name: currentC.name === currentC.phone ? finalName : currentC.name, // Preserva nome nativo
-                   avatar: realAvatar || fallbackAvatar, // Injeta a foto verdadeira do zap ou a inicial do nome corrigido
-                   messages: currentC.messages.length === 0 && lastMsgText !== "Nova conversa..." 
-                     ? [{ id: chat.lastMessage?.key?.id || `msg-${Date.now()}`, text: lastMsgText, sender: 'client', timestamp: new Date(rawTimestamp) }] 
-                     : currentC.messages,
-                   unread: chat.unreadCount || currentC.unread || 0,
-                   lastMsgTimestamp: rawTimestamp
-                };
-             }
-         });
-
-         return { contacts: updatedContacts };
-      });
-      
-    } catch(err) {
-      console.warn("Erro ao sincronizar histórico nativo de chats:", err);
-    }
+  syncEvolutionContacts: async (_instanceName) => {
+    get().fetchInitialData();
   },
 
-  loadHistoricalMessages: async (contactId, instanceName) => {
-    const contact = get().contacts.find(c => c.id === contactId);
-    if (!contact || !contact.evolution_remote_jid) return;
-
+  loadHistoricalMessages: async (contactId, _instanceName) => {
     try {
-      const { fetchChatMessages, fetchProfilePicture } = await import('../services/whatsappEngine');
-      // Pega a primeira pagina da evolution
-      const remoteRecords = await fetchChatMessages(instanceName, contact.evolution_remote_jid, 1);
-      
-      // Busca inteligentemente a foto do usuario oficial via API Evolution, substituindo o mock (ui-avatars) se disponivel
-      if (contact.avatar && contact.avatar.includes('ui-avatars.com')) {
-         fetchProfilePicture(instanceName, contact.evolution_remote_jid).then(imgUrl => {
-            if(imgUrl) {
-               set((s) => {
-                  const updated = [...s.contacts];
-                  const idx = updated.findIndex(c => c.id === contactId);
-                  if(idx !== -1) updated[idx].avatar = imgUrl;
-                  return { contacts: updated };
-               });
-            }
-         }).catch(e => console.warn("Avatar fetch ignored", e));
-      }
+        const tenant = get().tenantInfo;
+        if (!tenant) return;
+        
+        // Puxa conversa pra este contato (mesmo que n exista msg)
+        const { data: conv } = await supabase.from('conversations').select('id').eq('tenant_id', tenant.id).eq('contact_id', contactId).single();
+        if (!conv) return;
 
-      if (!remoteRecords || remoteRecords.length === 0) return;
-
-      // Injeta apenas na Interface Visual (para não torrar o Supabase gravando o passado inteiro)
-      set((state) => {
-         const newContacts = [...state.contacts];
-         const index = newContacts.findIndex(c => c.id === contactId);
-         if(index === -1) return state;
-
-         const currentMsgs = newContacts[index].messages;
-         const historyMsgs: MessageType[] = [];
-
-          // Evolution / baileys message record interpretation
-          const dbMessagesToInsert: any[] = [];
-
-          remoteRecords.forEach((msg: any) => {
-             // Isolamento rigoroso para garantir que NUNCA mescle mensagens (redundância caso o backend retorne o histórico global)
-             const msgRemoteJid = msg.key?.remoteJid || msg.remoteJid || msg.key?.remoteJidAlt;
-             if (msgRemoteJid && msgRemoteJid !== contact.evolution_remote_jid && msgRemoteJid !== contact.evolution_remote_jid.replace('@s.whatsapp.net', '@lid')) return;
-
-             const isFromMe = msg.key?.fromMe || msg.pushName === undefined;
-             // Evolution v1 e v2 structures
-             const textContent = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.textContent || msg.text || "";
-             if(!textContent) return; // ignora midia no mvp
-             
-             const msgId = msg.key?.id || msg.id || msg.messageId;
-             if(!msgId) return;
-
-             // Se ja existe nao duplica na interface
-             if(currentMsgs.some(m => m.whatsapp_id === msgId || m.id === msgId)) return;
-
-             const timestamp = msg.messageTimestamp ? new Date(msg.messageTimestamp * 1000) : msg.createdAt ? new Date(msg.createdAt) : new Date();
-
-             historyMsgs.push({
-                id: msgId,
-                whatsapp_id: msgId,
-                text: textContent,
-                sender: isFromMe ? 'human' : 'client', // No historico nativo tratamos human
-                timestamp
-             });
-
-             // Prepara p/ gravar no DB (Sincronizando de fato o histórico com o PostgreSQL)
-             if (!contact.id.includes('temp-')) {
-                 const currentTenantId = get().tenantInfo?.id;
-                 dbMessagesToInsert.push({
-                    contact_id: contact.id,
-                    text_content: textContent,
-                    sender_type: isFromMe ? 'human' : 'client',
-                    whatsapp_id: msgId,
-                    timestamp: timestamp.toISOString(),
-                    ...(currentTenantId && { tenant_id: currentTenantId })
-                 });
-             }
-          });
-
-          const uniqueDbMessages = Array.from(new Map(dbMessagesToInsert.map(m => [m.whatsapp_id, m])).values());
-
-          if (uniqueDbMessages.length > 0) {
-             (async () => {
-                try {
-                  await supabase.from('messages').upsert(uniqueDbMessages, { onConflict: 'whatsapp_id', ignoreDuplicates: true });
-                  console.log('Histórico gravado no Supabase para', contact.name);
-                } catch(e) {
-                  console.warn(e);
-                }
-             })();
-          }
-
-          // Ordena cronologicamente e junta
-          newContacts[index].messages = [...historyMsgs, ...currentMsgs].sort((a,b) => a.timestamp.getTime() - b.timestamp.getTime());
-
-          return { contacts: newContacts };
-       });
-    } catch (err) {
-      console.warn("Erro ao puxar histórico do wpp web", err);
+        // Limpar unread 
+        await supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id);
+        
+        const { data: msgs } = await supabase.from('messages')
+               .select('*')
+               .eq('tenant_id', tenant.id)
+               .eq('conversation_id', conv.id)
+               .order('timestamp', { ascending: true })
+               .limit(200);
+               
+        if (msgs) {
+           set((s) => {
+              const updated = [...s.contacts];
+              const idx = updated.findIndex(c => c.id === contactId);
+              if (idx !== -1) {
+                  updated[idx].unread = 0;
+                  updated[idx].messages = msgs.map(m => ({
+                      id: m.id,
+                      whatsapp_id: m.whatsapp_message_id,
+                      text: m.text_content,
+                      sender: m.sender_type,
+                      mediaUrl: m.media_url,
+                      mediaType: m.message_type,
+                      status: m.status,
+                      timestamp: new Date(m.timestamp)
+                  }));
+              }
+              return { contacts: updated };
+           });
+        }
+    } catch(err) {
+        console.error("Erro carregando history:", err);
     }
   },
 
@@ -587,48 +457,63 @@ export const useChatStore = create<ChatState>((set, get) => ({
     channel
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
         const m = payload.new as any;
-        
-        // Puxa o JID real do contato via UUID (já que o DB tem UUID mas a UI exibe instâncias por JID)
-        const { data: contactRow } = await supabase.from('contacts').select('evolution_remote_jid').eq('id', m.contact_id).single();
-        if(!contactRow || !contactRow.evolution_remote_jid) return;
+        if (m.sender_type === 'human' || m.sender_type === 'bot' || m.sender_type === 'system') return; // Ignore echoes already updated
 
-        const currentState = get() as any;
-        const targetContact = currentState.contacts.find((c: any) => c.evolution_remote_jid === contactRow.evolution_remote_jid);
+        let targetContactId = m.conversation_id ? null : m.contact_id;
         
-        if (targetContact) {
-            get().addMessageLocally(targetContact.id, {
-              id: m.id,
-              whatsapp_id: m.whatsapp_id,
-              text: m.text_content,
-              sender: m.sender_type,
-              mediaUrl: m.media_url,
-              mediaType: m.media_type,
-              timestamp: new Date(m.timestamp)
-            });
-
-            // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele
-            set((s) => {
-               const u = [...s.contacts];
-               const i = u.findIndex(c => c.id === targetContact.id);
-               if (i !== -1) {
-                  u[i].lastMsgTimestamp = new Date(m.timestamp).getTime();
-                  if (s.activeChatId !== targetContact.id && m.sender_type !== 'bot' && m.sender_type !== 'human') {
-                      u[i].unread = (u[i].unread || 0) + 1;
-                  }
-               }
-               return { contacts: u };
-            });
+        if (m.conversation_id && !targetContactId) {
+             const { data: conv } = await supabase.from('conversations').select('contact_id').eq('id', m.conversation_id).single();
+             if (conv) targetContactId = conv.contact_id;
         }
+
+        if (!targetContactId) return;
+
+        const { data: cData } = await supabase.from('contacts').select('*').eq('id', targetContactId).single();
+        if (!cData) return;
+
+        const currentState = get();
+        const targetContactLocally = currentState.contacts.find((c: any) => c.id === targetContactId || (c.whatsapp_jid && c.whatsapp_jid === cData.whatsapp_jid) || c.phone === cData.phone);
+        
+        if (!targetContactLocally) {
+           get().upsertContactLocally(cData as any);
+        }
+
+        const cid = targetContactLocally ? targetContactLocally.id : cData.id;
+
+        get().addMessageLocally(cid, {
+          id: m.id,
+          whatsapp_id: m.whatsapp_message_id,
+          text: m.text_content,
+          sender: m.sender_type || 'client',
+          mediaUrl: m.media_url,
+          mediaType: m.message_type,
+          status: m.status,
+          timestamp: new Date(m.timestamp)
+        });
+
+        // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele
+        set((s) => {
+           let u = [...s.contacts];
+           const i = u.findIndex(c => c.id === cid);
+           if (i !== -1) {
+              u[i].lastMsgTimestamp = new Date(m.timestamp).getTime();
+              if (s.activeChatId !== cid) {
+                  u[i].unread = (u[i].unread || 0) + 1;
+              }
+           }
+           return { contacts: u };
+        });
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, async (payload) => {
         const m = payload.new as any;
         set((s) => {
            let updatedContacts = [...s.contacts];
-           const cIndex = updatedContacts.findIndex(c => c.id === m.contact_id);
-           if (cIndex !== -1) {
-              const mIndex = updatedContacts[cIndex].messages.findIndex(msg => msg.id === m.id || msg.whatsapp_id === m.whatsapp_id);
-              if (mIndex !== -1) {
-                 updatedContacts[cIndex].messages[mIndex].status = m.status;
+           // Tenta achar com fallback iterando as mensagens para bypassar conversa ausente no state.
+           for (let i = 0; i < updatedContacts.length; i++) {
+              const msgIndex = updatedContacts[i].messages.findIndex(msg => msg.id === m.id || (m.whatsapp_message_id && msg.whatsapp_id === m.whatsapp_message_id));
+              if (msgIndex !== -1) {
+                  updatedContacts[i].messages[msgIndex].status = m.status;
+                  break;
               }
            }
            return { contacts: updatedContacts };
@@ -636,7 +521,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, (payload) => {
         if(payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          get().upsertContactLocally(payload.new as ContactRow);
+           get().upsertContactLocally(payload.new as ContactRow);
         }
       })
       .subscribe((_status, err) => {

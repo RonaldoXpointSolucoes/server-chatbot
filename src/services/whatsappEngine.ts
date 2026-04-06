@@ -1,127 +1,88 @@
 const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim();
 
-// Inicializa a Nuvem do Baileys para o Tenant forçando eliminação de zumbis Database Auth
-export const createInstance = async (tenantId: string, forceReset = false) => {
+export const createInstance = async (tenantId: string, instanceId: string) => {
   if (!API_URL) throw new Error("URL do motor Antigravity não definida (.env)");
 
-  const res = await fetch(`${API_URL}/instance/${tenantId}/create`, {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/connect`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ forceReset })
+    headers: { 
+      'Content-Type': 'application/json',
+      'x-tenant-id': tenantId
+    }
   });
   
   if (!res.ok) throw new Error('Falha ao acionar a ignição do motor do Whatsapp.');
   return res.json();
 };
 
-// Capturar QR Code da tela do Servidor
-// Se "connected: true", a sessão já está engatada.
-export const fetchQrCodeState = async (tenantId: string) => {
-  const res = await fetch(`${API_URL}/instance/${tenantId}/qrcode`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' }
-  });
-  
-  if (!res.ok) throw new Error('Falha na comunicação com a Antigravity Engine');
-  return res.json();
-};
-
-// Disparo Nativo de Texto
-export const sendNativeMessage = async (tenantId: string, number: string, text: string) => {
-  const res = await fetch(`${API_URL}/instance/${tenantId}/send`, {
+export const sendNativeMessage = async (tenantId: string, instanceId: string, number: string, text: string) => {
+  // Mock ou endpoint de mensagens (Apenas atualizar para as URLs corretas se houver uso no UI)
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ number, text })
+    headers: { 
+      'Content-Type': 'application/json',
+      'x-tenant-id': tenantId
+    },
+    body: JSON.stringify({ method: 'sendMessage', args: [number, { text }] })
   });
-
-  if (!res.ok) {
-    let errMsg = "Falha ao injetar mensagem nativa";
-    try {
-      const data = await res.json();
-      if (data.error) errMsg = data.error;
-    } catch (e) {}
-    throw new Error(errMsg);
-  }
+  if (!res.ok) throw new Error("Falha ao injetar mensagem nativa");
   return res.json();
 };
 
 export const sendTextMessage = sendNativeMessage;
 
-// Disparo Nativo de Mídia
-export const sendMediaMessage = async (tenantId: string, number: string, mediaType: string, mediaUrl: string, mimetype?: string, fileName?: string) => {
-  const res = await fetch(`${API_URL}/instance/${tenantId}/sendMedia`, {
+export const logoutEngine = async (tenantId: string, instanceId: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/disconnect`, { 
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ number, mediaType, mediaUrl, mimetype, fileName })
+    headers: { 'x-tenant-id': tenantId }
   });
-  if (!res.ok) throw new Error(`Falha de Mídia`);
-  return res.json();
-};
-
-export const sendWhatsAppAudio = async (tenantId: string, number: string, mediaUrl: string) => {
-  return sendMediaMessage(tenantId, number, 'audio', mediaUrl, 'audio/mp4');
-};
-
-// Histórico
-export const fetchRecentChats = async (tenantId: string) => {
-  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/chats`);
-  return res.json();
-};
-
-export const fetchChatMessages = async (tenantId: string, remoteJid: string, page: number = 1) => { console.log(page);
-  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/messages/${encodeURIComponent(remoteJid)}`);
-  return res.json();
-};
-
-export const fetchProfilePicture = async (tenantId: string, remoteJid: string) => {
-  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/profilePic/${encodeURIComponent(remoteJid)}`);
-  const data = await res.json();
-  return data?.url || null;
-};
-
-export const fetchEngineStatus = async (tenantId: string) => {
-  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/status`);
-  if (!res.ok) throw new Error('Falha ao checar status');
-  return res.json();
-};
-
-export const logoutEngine = async (tenantId: string) => {
-  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/logout`, { method: 'POST' });
   if (!res.ok) throw new Error('Falha no logout nativo');
   return res.json();
 };
 
-export const reconnectEngine = async (tenantId: string) => {
-  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/reconnect`, { method: 'POST' });
+export const reconnectEngine = async (tenantId: string, instanceId: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/connect`, { 
+    method: 'POST',
+    headers: { 'x-tenant-id': tenantId }
+  });
   if (!res.ok) throw new Error('Falha no reconnect nativo');
   return res.json();
 };
 
-export const getInstanceConnectionState = async (tenantId: string) => {
-  try {
-     const data = await fetchEngineStatus(tenantId);
-     if (data.status === 'connected') return { instance: { state: 'open' } };
-     if (data.status === 'connecting') return { instance: { state: 'connecting' } };
-     return { instance: { state: 'offline' } };
-  } catch(e) {
-     return { instance: { state: 'offline' } };
-  }
+export const fetchEngineStatus = async (tenantId: string, instanceId: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/status`, {
+    headers: { 'x-tenant-id': tenantId }
+  });
+  if (!res.ok) throw new Error('Falha ao checar status');
+  return res.json();
 };
 
-export const syncEngineContacts = async (tenantId: string) => {
-  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/sync-contacts`, { method: 'POST' });
+export const syncEngineContacts = async (tenantId: string, instanceId: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, { 
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId },
+    body: JSON.stringify({ method: 'syncContacts', args: [] })
+  });
   if (!res.ok) throw new Error('Falha no sync');
   return res.json();
 };
 
-export const clearEngineStore = async (tenantId: string) => {
-  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/clear-store`, { method: 'POST' });
+export const clearEngineStore = async (tenantId: string, instanceId: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, { 
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId },
+    body: JSON.stringify({ method: 'clearStore', args: [] })
+  });
   if (!res.ok) throw new Error('Falha no limpar store');
   return res.json();
 };
 
-export const forceEnginePresence = async (tenantId: string) => {
-  const res = await fetch(`${API_URL}/instance/${encodeURIComponent(tenantId)}/presence`, { method: 'POST' });
+export const forceEnginePresence = async (tenantId: string, instanceId: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, { 
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId },
+    body: JSON.stringify({ method: 'sendPresenceUpdate', args: ['available'] })
+  });
   if (!res.ok) throw new Error('Falha na presenca');
   return res.json();
 };

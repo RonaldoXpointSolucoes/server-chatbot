@@ -170,15 +170,17 @@ export default function ChatDashboard() {
         onClose={() => setIsSettingsOpen(false)}
       />
 
-      {/* Sidebar */}
-      <div 
-        className="w-[30%] min-w-[320px] max-w-[420px] flex flex-col border-r border-[#d1d7db] dark:border-[#222d34] bg-white dark:bg-[#111b21] z-10 shadow-sm"
+      {/* Left Sidebar */}
+      <div className={cn(
+        "w-full sm:w-[30%] sm:min-w-[320px] sm:max-w-[400px] border-r border-[#d1d7db] dark:border-[#222d34] flex flex-col bg-white dark:bg-[#111b21] transition-all",
+        activeChatId ? "hidden sm:flex" : "flex"
+      )}
         onClick={() => setActiveDropdown(null)} // fecha qq dropdown ao clicar fora
       >
         
-        {/* Header do Sidebar */}
-        <div className="h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 relative">
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v1.0.11 | Deploy: 05/04/2026 15:35</span>
+        {/* Header da Sidebar */}
+        <div className="h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 sm:px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0">
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v1.0.13 | Deploy: 05/04/2026 21:51</span>
           <div className="w-10 h-10 rounded-full bg-[#00a884]/20 flex items-center justify-center text-[#00a884] font-bold shadow-inner">
             RA
           </div>
@@ -247,7 +249,12 @@ export default function ChatDashboard() {
              return (
               <div 
                 key={contact.id}
-                onClick={() => setActiveChat(contact.id)}
+                onClick={() => {
+                  setActiveChat(contact.id);
+                  if (connectedInstanceName) {
+                    useChatStore.getState().loadHistoricalMessages(contact.id, connectedInstanceName);
+                  }
+                }}
                 className={cn(
                   "group flex items-center gap-3 px-3 py-3 cursor-pointer transition-colors border-b border-[#f2f2f2] dark:border-[#222d34] overflow-visible",
                   activeChatId === contact.id ? "bg-[#f0f2f5] dark:bg-[#2a3942]" : "hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]"
@@ -318,8 +325,12 @@ export default function ChatDashboard() {
 
       {/* Main Chat Area */}
       {activeChat ? (
-        <div className="flex-1 min-w-0 flex flex-col relative bg-[#efeae2] dark:bg-[#0b141a]">
-          <div className="absolute inset-0 opacity-[0.06] dark:opacity-5 mix-blend-multiply pointer-events-none" style={{ backgroundImage: "url('https://static.whatsapp.net/rsrc.php/v3/yO/r/Fs2BDBXhB6v.png')" }}></div>
+        <div className={cn("flex-1 flex flex-col relative w-full h-full max-w-[100vw] overflow-hidden min-w-0 bg-[#efeae2] dark:bg-[#0b141a]", !activeChatId && "hidden sm:flex")} style={{
+           backgroundImage: 'url("https://w7.pngwing.com/pngs/946/407/png-transparent-whatsapp-background-theme-pattern-design.png")',
+           backgroundSize: 'cover',
+           backgroundBlendMode: 'overlay',
+           opacity: 0.95
+        }}>
           
           {/* Chat Header */}
           <div className="h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-10 shadow-sm border-l border-white/5">
@@ -350,7 +361,7 @@ export default function ChatDashboard() {
 
           {/* Chat Messages */}
           <div className="flex-1 overflow-y-auto p-4 z-10 flex flex-col gap-2">
-            {activeChat.messages?.map((msg) => {
+            {activeChat.messages?.filter(m => m.text || m.mediaUrl).map((msg) => {
                const isMe = msg.sender === 'human' || msg.sender === 'bot';
                
                if (msg.sender === 'system') {
@@ -381,25 +392,36 @@ export default function ChatDashboard() {
                         </div>
                       )}
                       
-                      {/* Media Render */}
+                      {/* Media Render Premium Elements */}
                       {msg.mediaUrl && msg.mediaType === 'image' && (
-                         <img src={msg.mediaUrl} alt="Imagem" className="max-w-full h-auto max-h-[300px] rounded-lg mb-1 object-contain bg-black/5" />
+                         <div className="relative group overflow-hidden rounded-xl border border-black/5 dark:border-white/5 mb-1 bg-black/5 dark:bg-black/20">
+                           <img src={msg.mediaUrl} alt="Imagem" className="max-w-full h-auto max-h-[350px] object-cover hover:scale-[1.02] transition-transform duration-300" />
+                         </div>
                       )}
+                      
                       {msg.mediaUrl && (msg.mediaType === 'video' || msg.mediaUrl.endsWith('.mp4')) && (
-                         <video src={msg.mediaUrl} controls className="max-w-full max-h-[300px] rounded-lg mb-1 bg-black/5" />
+                         <div className="relative group overflow-hidden rounded-xl border border-black/5 dark:border-white/5 mb-1 bg-black/5 dark:bg-black/20">
+                           <video src={msg.mediaUrl} controls className="max-w-full max-h-[350px] object-contain rounded-xl" />
+                         </div>
                       )}
+                      
                       {msg.mediaUrl && msg.mediaType === 'audio' && (
-                         <audio src={msg.mediaUrl} controls className="max-w-[240px] h-10 mb-1" />
+                         <div className="flex items-center gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-[#1d272b] dark:to-[#172124] p-2 rounded-2xl mb-1 border border-emerald-100/50 dark:border-emerald-900/30">
+                            <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] h-10 custom-audio" />
+                         </div>
                       )}
+                      
                       {msg.mediaUrl && msg.mediaType === 'document' && (
-                         <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 bg-black/5 dark:bg-white/5 p-3 rounded-lg mb-1 hover:bg-black/10 transition-colors">
-                            <FileText size={24} className="text-[#00a884]" />
-                            <span className="text-sm truncate underline max-w-[200px]">{msg.text || 'Documento Anexado'}</span>
+                         <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 hover:shadow-md transition-all duration-300 border border-gray-200 dark:border-gray-700/50 group">
+                            <div className="bg-[#00a884]/10 p-2 text-[#00a884] rounded-lg group-hover:scale-110 transition-transform">
+                              <FileText size={20} />
+                            </div>
+                            <span className="text-[14px] font-medium truncate max-w-[180px] text-gray-700 dark:text-gray-200">{msg.text || 'Documento Anexado'}</span>
                          </a>
                       )}
                       
                       {(!msg.mediaUrl || (msg.text && msg.mediaType !== 'document')) && (
-                         <span className="text-[14px] leading-relaxed block pr-8 whitespace-pre-wrap break-words break-all sm:break-normal word-break shadow-none">{msg.text}</span>
+                         <span className="text-[14px] leading-[1.4] block pr-10 whitespace-pre-wrap break-words break-all sm:break-normal word-break shadow-none mt-1">{msg.text}</span>
                       )}
                       
                       <div className="absolute right-2 bottom-1 flex items-center gap-1 text-[9px] text-[#54656f] dark:text-gray-400">
