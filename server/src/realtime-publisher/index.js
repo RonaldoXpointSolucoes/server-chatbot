@@ -14,9 +14,9 @@ class RealtimePublisher {
       const channel = supabase.channel(channelName);
       
       const timeout = setTimeout(() => {
-        supabase.removeChannel(channel);
+        try { supabase.removeChannel(channel); } catch(e) {}
         reject(new Error('Timeout subscribing to channel: ' + channelName));
-      }, 5000);
+      }, 15000);
 
       channel.subscribe((status) => {
         if (status === 'SUBSCRIBED') {
@@ -25,7 +25,7 @@ class RealtimePublisher {
           resolve(channel);
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           clearTimeout(timeout);
-          supabase.removeChannel(channel);
+          try { supabase.removeChannel(channel); } catch(e) {}
           this.channels.delete(channelName);
           reject(new Error('Failed to subscribe: ' + status));
         }

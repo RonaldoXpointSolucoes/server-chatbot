@@ -11,6 +11,13 @@ import sessionManager from './session-manager/index.js';
 const app = express();
 const PORT = process.env.PORT || 9000;
 
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
