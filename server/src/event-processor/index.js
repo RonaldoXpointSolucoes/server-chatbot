@@ -274,14 +274,25 @@ class EventProcessor {
                 tsDate = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts.low * 1000);
             }
 
-            // Tenta inserir conversation c/ unread
-            await supabase.from('conversations').upsert({
-                tenant_id: tenantId,
-                contact_id: contact.id,
-                status: 'bot',
-                unread_count: chat.unreadCount || 0
-                // Ignorando novos campos de schema não aplicados para não quebrar bulk upsert se sql nao rodou no Supabase User db
-            }, { onConflict: 'id', ignoreDuplicates: true }); 
+            // Busca se já existe conversa
+            const { data: conv } = await supabase.from('conversations')
+                .select('id')
+                .eq('tenant_id', tenantId)
+                .eq('contact_id', contact.id)
+                .limit(1);
+
+            if (!conv || conv.length === 0) {
+                await supabase.from('conversations').insert({
+                    tenant_id: tenantId,
+                    contact_id: contact.id,
+                    status: 'bot',
+                    unread_count: chat.unreadCount || 0
+                });
+            } else {
+                await supabase.from('conversations').update({
+                    unread_count: chat.unreadCount || 0
+                }).eq('id', conv[0].id);
+            }
         }
 
         // O Bulk de messages normalmente é processado pelo array gigante messages. 

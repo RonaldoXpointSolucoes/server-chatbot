@@ -34,6 +34,7 @@ interface ChatState {
   tenantInfo: TenantInfo | null;
   modalReason: string | null;
   isSubscribed: boolean;
+  isSyncingHistory: Record<string, boolean>;
   setEvolutionConnection: (status: boolean, instanceName?: string | null) => void;
   setActiveChat: (id: string | null) => void;
   setBotStatus: (contactId: string, status: 'active' | 'paused') => Promise<void>;
@@ -66,6 +67,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   tenantInfo: null,
   modalReason: null,
   isSubscribed: false, // Previne double-subscribe do react 18
+  isSyncingHistory: {},
   
 
   setActiveChat: (id) => set({ activeChatId: id }),
@@ -118,13 +120,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
 
-    // Atualiza otimista (Sem URL ainda)
+    // Atualiza otimista (Render Instantâneo Premium)
     const pseudoId = 'optimistic-media-' + Math.random().toString();
+    const tempUrl = URL.createObjectURL(file);
     state.addMessageLocally(contactId, { 
       id: pseudoId, 
       text: file.name, 
       sender: 'human', 
       mediaType: mediaType,
+      mediaUrl: tempUrl,
       timestamp: new Date() 
     });
 
@@ -301,39 +305,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!tenant) return;
 
     try {
-       // Puxa conversas do tenant ordernadas (Limita a 300)
+       // 1. Puxa contatos (prioriza os fixados)
+       const { data: dbContacts } = await supabase.from('contacts')
+           .select('*')
+           .eq('tenant_id', tenant.id)
+           .order('is_pinned', { ascending: false })
+           .order('created_at', { ascending: false })
+           .limit(300);
+           
+       if (!dbContacts || dbContacts.length === 0) return;
+
+       const contactIds = dbContacts.map(c => c.id);
+
+       // 2. Puxa conversas desses contatos
        const { data: dbConvs } = await supabase.from('conversations')
           .select('*')
           .eq('tenant_id', tenant.id)
-          .order('last_message_at', { ascending: false })
-          .limit(300);
-          
-       if (!dbConvs || dbConvs.length === 0) {
-           // Fallback: se não tiver conversas ativas, carrega 300 contatos base
-           const { data: emptyContacts } = await supabase.from('contacts')
-               .select('*')
-               .eq('tenant_id', tenant.id)
-               .order('created_at', { ascending: false })
-               .limit(300);
-               
-           if (emptyContacts) {
-               set({ contacts: emptyContacts.map(c => ({
-                   ...c,
-                   avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(c.name || c.phone)}&background=random&color=fff`,
-                   messages: [],
-                   unread: 0,
-                   lastMsgTimestamp: new Date(c.created_at).getTime()
-               }))});
-           }
-           return;
-       }
-
-       const contactIds = dbConvs.map(c => c.contact_id);
-
-       // Puxa os contatos referentes a essas conversas recentes
-       const { data: dbContacts } = await supabase.from('contacts')
-          .select('*')
-          .in('id', contactIds);
+          .in('contact_id', contactIds);
 
        if (dbContacts && dbContacts.length > 0) {
            set((s) => {
@@ -473,7 +461,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     get().fetchInitialData();
   },
 
-  loadHistoricalMessages: async (contactId, _instanceName) => {
+  loadHistoricalMessages: async (contactId, instanceName) => {
     try {
         const tenant = get().tenantInfo;
         if (!tenant) return;
@@ -483,11 +471,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
               .select('id')
               .eq('tenant_id', tenant.id)
               .eq('contact_id', contactId)
-              .order('last_message_at', { ascending: false })
+              .order('last_message_at', { ascending: false, nullsFirst: false })
               .limit(1);
         
-        const conv = convs && convs.length > 0 ? convs[0] : null;
-        if (!conv) return;
+        let conv = convs && convs.length > 0 ? convs[0] : null;
+
+        if (!conv) {
+             const { data: newConv } = await supabase.from('conversations').insert({
+                 tenant_id: tenant.id,
+                 contact_id: contactId,
+                 unread_count: 0,
+                 status: 'open',
+                 last_message_at: new Date().toISOString()
+             }).select('id').single();
+             if (newConv) conv = newConv;
+             else return;
+        }
 
         // Limpar unread 
         await supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id);
@@ -499,8 +498,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                .order('timestamp', { ascending: false })
                .limit(100);
                
-        if (msgs) {
-           const orderedMsgs = msgs.reverse();
+        const handleMapping = (messagesArray: any[]) => {
+           const orderedMsgs = messagesArray.reverse();
            set((s) => {
               const updated = [...s.contacts];
               const idx = updated.findIndex(c => c.id === contactId);
@@ -519,6 +518,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
               }
               return { contacts: updated };
            });
+        };
+
+        if (msgs && msgs.length === 0) {
+            // Conversa vazia no Supabase. Inicia sync-history on demand
+            if (!get().isSyncingHistory[contactId]) {
+                set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: true } }));
+                try {
+                    const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+                    const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+                    await fetch(`${API_URL}/api/v1/conversations/${conv.id}/sync-history`, {
+                        method: 'POST',
+                        headers: { 
+                           'Content-Type': 'application/json',
+                           'x-tenant-id': tenant.id,
+                           'apikey': instDataDB?.api_key || ''
+                        },
+                        body: JSON.stringify({ instanceId: instanceName })
+                    });
+                    
+                    // Supabase deve ter sido populado pelo Node
+                    const { data: fetchNewMsgs } = await supabase.from('messages')
+                       .select('*')
+                       .eq('tenant_id', tenant.id)
+                       .eq('conversation_id', conv.id)
+                       .order('timestamp', { ascending: false })
+                       .limit(100);
+                       
+                    if (fetchNewMsgs) handleMapping(fetchNewMsgs);
+
+                } catch (err) {
+                    console.error("Falha ao sincronizar histórico da Baileys (on demand):", err);
+                } finally {
+                    set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: false } }));
+                }
+            }
+        } else if (msgs) {
+           handleMapping(msgs);
         }
     } catch(err) {
         console.error("Erro carregando history:", err);
@@ -530,7 +566,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (state.isSubscribed) return; // React 18 protection
     set({ isSubscribed: true } as any);
 
-    const channel = supabase.channel('realtime_chat');
+    const channelName = 'realtime_chat';
+    // HMR fallback: Remove o canal caso já exista no cache do Supabase Client para evitar "cannot add callback after subscribe"
+    const existingChannel = supabase.getChannels().find(c => c.topic === `realtime:${channelName}`);
+    if (existingChannel) {
+        supabase.removeChannel(existingChannel);
+    }
+    
+    const channel = supabase.channel(channelName);
     
     // Escuta novas mensagens
     channel

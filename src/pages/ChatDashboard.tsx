@@ -33,7 +33,8 @@ export default function ChatDashboard() {
     setModalReason,
     tenantInfo,
     updateContactName,
-    deleteContact
+    deleteContact,
+    isSyncingHistory
   } = useChatStore();
 
   // Execucao Incial Reativa
@@ -396,6 +397,15 @@ export default function ChatDashboard() {
 
           {/* Chat Messages */}
           <div className="flex-1 overflow-y-auto p-4 z-10 flex flex-col gap-2">
+            {isSyncingHistory[activeChat.id] && (
+               <div className="flex justify-center my-4 animate-in fade-in duration-300">
+                  <span className="bg-white dark:bg-[#202c33] text-[#54656f] dark:text-[#8696a0] text-xs px-4 py-2 rounded-full flex items-center gap-2 shadow-sm border border-black/5 dark:border-white/5">
+                     <span className="w-4 h-4 border-2 border-t-transparent border-[#00a884] rounded-full animate-spin"></span>
+                     Sincronizando histórico anterior...
+                  </span>
+               </div>
+            )}
+            
             {activeChat.messages?.filter(m => m.text || m.mediaUrl).map((msg) => {
                const isMe = msg.sender === 'human' || msg.sender === 'bot';
                
@@ -525,9 +535,6 @@ export default function ChatDashboard() {
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#222d34] border-l border-white/5 relative z-10">
-          <div className="absolute top-5 right-6 text-[11px] uppercase tracking-wider text-[#54656f] dark:text-[#8696a0] font-bold flex items-center gap-1.5 pointer-events-none opacity-80 mix-blend-luminosity">
-             <Building2 size={13} className="text-[#00a884]" /> EMPRESA: {tenantName}
-          </div>
           <Bot size={80} className="text-gray-300 dark:text-[#2a3942] mb-6" />
           <h1 className="text-3xl font-light text-[#54656f] dark:text-[#8696a0]">SaaS Multi-Agente Híbrido</h1>
           <div className="text-sm text-[#54656f] dark:text-[#8696a0] mt-2 flex items-center gap-2"><div className="w-2 h-2 bg-[#00a884] rounded-full animate-pulse"></div> Conectado com banco de dados</div>
