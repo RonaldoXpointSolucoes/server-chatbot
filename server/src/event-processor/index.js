@@ -357,14 +357,24 @@ class EventProcessor {
             if (connection === 'close') {
                 const reason = lastDisconnect?.error?.output?.statusCode;
                 const loggedOut = reason === 401;
+                const isTransient = [408, 428, 440, 503, 515].includes(reason);
 
-                await supabase.from('whatsapp_instances')
-                    .update({ status: 'offline', last_error: `Code: ${reason}` })
-                    .eq('id', instanceId);
-                
-                payload.status = 'offline';
-                payload.reason = reason;
-                if(loggedOut) payload.loggedOut = true;
+                if (isTransient) {
+                    await supabase.from('whatsapp_instances')
+                        .update({ status: 'connecting', last_error: `Reconnecting (Code: ${reason})` })
+                        .eq('id', instanceId);
+                    
+                    payload.status = 'connecting';
+                    payload.reason = reason;
+                } else {
+                    await supabase.from('whatsapp_instances')
+                        .update({ status: 'offline', last_error: `Code: ${reason}` })
+                        .eq('id', instanceId);
+                    
+                    payload.status = 'offline';
+                    payload.reason = reason;
+                    if(loggedOut) payload.loggedOut = true;
+                }
             }
 
             if (connection === 'open') {

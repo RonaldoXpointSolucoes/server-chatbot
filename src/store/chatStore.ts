@@ -277,11 +277,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!tenant) return;
 
     try {
-       // Puxa contatos
-       const { data: dbContacts } = await supabase.from('contacts').select('*').eq('tenant_id', tenant.id);
-       
-       // Puxa conversas do tenant ordernadas
-       const { data: dbConvs } = await supabase.from('conversations').select('*').eq('tenant_id', tenant.id).order('last_message_at', { ascending: false });
+       // Puxa conversas do tenant ordernadas (Limita a 40)
+       const { data: dbConvs } = await supabase.from('conversations')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .order('last_message_at', { ascending: false })
+          .limit(40);
+          
+       if (!dbConvs || dbConvs.length === 0) {
+           // Fallback: se não tiver conversas ativas, carrega 40 contatos base
+           const { data: emptyContacts } = await supabase.from('contacts')
+               .select('*')
+               .eq('tenant_id', tenant.id)
+               .order('created_at', { ascending: false })
+               .limit(40);
+               
+           if (emptyContacts) {
+               set({ contacts: emptyContacts.map(c => ({
+                   ...c,
+                   avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(c.name || c.phone)}&background=random&color=fff`,
+                   messages: [],
+                   unread: 0,
+                   lastMsgTimestamp: new Date(c.created_at).getTime()
+               }))});
+           }
+           return;
+       }
+
+       const contactIds = dbConvs.map(c => c.contact_id);
+
+       // Puxa os contatos referentes a essas conversas recentes
+       const { data: dbContacts } = await supabase.from('contacts')
+          .select('*')
+          .in('id', contactIds);
 
        if (dbContacts && dbContacts.length > 0) {
            set((s) => {
