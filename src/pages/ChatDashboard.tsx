@@ -180,7 +180,7 @@ export default function ChatDashboard() {
         
         {/* Header da Sidebar */}
         <div className="h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 sm:px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0">
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v1.0.17 | Deploy: 05/04/2026 23:01</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v1.0.18 | Deploy: 06/04/2026 08:15</span>
           <div className="w-10 h-10 rounded-full bg-[#00a884]/20 flex items-center justify-center text-[#00a884] font-bold shadow-inner">
             RA
           </div>
