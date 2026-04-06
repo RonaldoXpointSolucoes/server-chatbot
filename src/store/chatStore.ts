@@ -82,7 +82,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { sendTextMessage } = await import('../services/whatsappEngine');
       // 1. Manda pra Baileys Engine Local
       if (!state.tenantInfo) return;
-      await sendTextMessage(state.tenantInfo.id, instanceName, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), text);
+      
+      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+      const apiKey = instDataDB?.api_key || '';
+
+      await sendTextMessage(state.tenantInfo.id, instanceName, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), text, apiKey);
       
     } catch(err: any) {
       console.error(err);
@@ -132,10 +136,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (file.name) formData.append('caption', file.name);
 
       // Chamada HTTP pro Node (único dono do upload Supabase e Baileys)
-      const res = await fetch(`http://localhost:9000/api/v1/instances/${instanceName}/send-media`, {
+      const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+      const apiKey = instDataDB?.api_key || '';
+
+      const res = await fetch(`${API_URL}/api/v1/instances/${instanceName}/send-media`, {
         method: 'POST',
         headers: {
-          'x-tenant-id': state.tenantInfo.id
+          'x-tenant-id': state.tenantInfo.id,
+          'apikey': apiKey
         },
         body: formData
       });
@@ -351,21 +360,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         if (tenantData.evolution_api_instance) {
            const { fetchEngineStatus, createInstance } = await import('../services/whatsappEngine');
-           const stateRes = await fetchEngineStatus(tenantData.id, tenantData.evolution_api_instance);
            
-           if (stateRes?.data?.status === 'connected') {
-             set({ evolutionConnected: true, modalReason: null });
-             get().fetchInitialData();
-           } else {
-             const instData = stateRes?.data;
- 
-             if (instData && (instData.status === 'connected' || instData.status === 'connecting')) {
-                await createInstance(tenantData.id, tenantData.evolution_api_instance).catch(() => {});
-                set({ evolutionConnected: true, modalReason: null });
-                get().fetchInitialData();
+           // Buscar API Key correta do banco
+           const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', tenantData.evolution_api_instance).single();
+           const apiKey = instDataDB?.api_key || '';
+
+           try {
+             const stateRes = await fetchEngineStatus(tenantData.id, tenantData.evolution_api_instance, apiKey);
+             
+             if (stateRes?.data?.status === 'connected') {
+               set({ evolutionConnected: true, modalReason: null });
+               get().fetchInitialData();
              } else {
-                set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp foi encerrada ou expirada de forma remota. Por favor, conecte novamente relendo o QR Code.' });
+               const instData = stateRes?.data;
+   
+               if (instData && (instData.status === 'connected' || instData.status === 'connecting')) {
+                  await createInstance(tenantData.id, tenantData.evolution_api_instance, apiKey).catch(() => {});
+                  set({ evolutionConnected: true, modalReason: null });
+                  get().fetchInitialData();
+               } else {
+                  set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp foi encerrada ou expirada de forma remota. Por favor, conecte novamente relendo o QR Code.' });
+               }
              }
+           } catch (e: any) {
+             console.error("Erro ao checar status no motor:", e);
+             set({ evolutionConnected: false, modalReason: `Oops! Falha de comunicação com o Whatsapp. Talvez o motor esteja offline. Detalhe: ${e.message}` });
            }
         } else {
            set({ evolutionConnected: false, modalReason: 'Seja bem-vindo a sua plataforma! Crie a primeira conexão do seu número de WhatsApp comercial agora mesmo.' });

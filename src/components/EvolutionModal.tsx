@@ -154,6 +154,16 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
     console.log(`[Realtime] Inscrito no canal: ${channelName}`);
     const channel = supabase.channel(channelName);
 
+    // Timeout de segurança contra loop infinito
+    const timeoutId = setTimeout(() => {
+        if (loading) {
+           setError("Erro: Timeout de Conexão. O Motor não respondeu em 20 segundos. Verifique as chaves ou se a engine está online.");
+           setLoading(false);
+           setQrBase64(null);
+           setActivePollingId(null);
+        }
+    }, 20000); // 20s timeout
+
     channel
       .on('broadcast', { event: 'instance.qr_updated' }, (payload: any) => {
           if (payload.payload?.qr_code) {
@@ -167,9 +177,11 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
              setError(payload.payload?.reason ? `Falha com código: ${payload.payload.reason}` : 'A conexão caiu ou foi rejeitada.');
              setLoading(false);
              setQrBase64(null);
+             setActivePollingId(null);
           } else if (st === 'connected') {
              setLoading(false);
              setQrBase64(null);
+             setActivePollingId(null);
              setEvolutionConnection(true, activePollingId);
              useChatStore.getState().syncEvolutionContacts(activePollingId);
              setTimeout(onClose, 1000);
@@ -180,9 +192,10 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
       });
 
     return () => {
+      clearTimeout(timeoutId);
       supabase.removeChannel(channel);
     };
-  }, [activePollingId]);
+  }, [activePollingId, loading]);
 
   useEffect(() => {
     // If modal opens and we are marked as connected, let's load user from v2 status
