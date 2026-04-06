@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { 
   Rocket, Play, X, KeySquare, 
- 
   MessageCircle, 
   Image as ImageIcon, 
   Users, 
@@ -12,15 +11,9 @@ import {
   ChevronLeft,
   ShieldCheck,
   Radio,
-  Server,
   CheckCheck,
   Globe,
-  Link,
-  Edit3,
-  Bell,
-  Database,
   UserCheck,
-  Trash2,
   Pin,
   Timer,
   UserCog,
@@ -30,17 +23,7 @@ import {
   AtSign,
   Tv,
   Forward,
-  Eraser,
-  PowerOff,
-  CheckCircle2,
-  ListChecks,
-  Fingerprint,
-  Info,
-  Smartphone,
-  MailCheck,
-  ShieldAlert,
-  Cpu,
-  Repeat
+  Eraser
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 

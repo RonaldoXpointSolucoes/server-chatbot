@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
-import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link, PlusCircle, LogOut, RefreshCcw, UserCircle2 } from 'lucide-react';
+import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link, PlusCircle, LogOut, RefreshCcw, UserCircle2, Trash2 } from 'lucide-react';
 import { createInstance, fetchEngineStatus, logoutEngine, reconnectEngine, clearEngineStore, syncEngineContacts, forceEnginePresence } from '../services/whatsappEngine';
 import { supabase } from '../services/supabase';
 
@@ -22,7 +22,9 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
   const [existingInstances, setExistingInstances] = useState<any[]>([]);
   
   const [customName, setCustomName] = useState<string>('');
+  const [customApiKey, setCustomApiKey] = useState<string>('');
   const [activePollingId, setActivePollingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchExistingInstances();
@@ -61,9 +63,36 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
       if (!cId) throw new Error("Tenant não identificado");
 
       setActivePollingId(inst.id);
-      await createInstance(cId, inst.id);
+      await createInstance(cId, inst.id, inst.api_key || '');
     } catch(err: any) {
       setError(err.message || "Erro ao conectar motor.");
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteInstance = async (id: string) => {
+    const cId = sessionStorage.getItem('current_tenant_id');
+    if (!cId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      // Tenta deslogar da memória para limpeza, mas ignora se falhar
+      const inst = existingInstances.find(i => i.id === id);
+      const key = inst?.api_key || '';
+      await logoutEngine(cId, id, key).catch(() => {});
+      
+      const { error: dbErr } = await supabase.from('whatsapp_instances').delete().eq('id', id);
+      if (dbErr) throw dbErr;
+      
+      setConfirmDeleteId(null);
+      await fetchExistingInstances();
+      // Se a instância apagada estiver conectada agora, damos logout local
+      if (useChatStore.getState().connectedInstanceName === id) {
+          setEvolutionConnection(false, null);
+      }
+    } catch (err: any) {
+      setError("Erro ao excluir: " + err.message);
+    } finally {
       setLoading(false);
     }
   };
@@ -81,6 +110,11 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
       return;
     }
 
+    let finalApiKey = customApiKey.trim();
+    if (!finalApiKey) {
+        finalApiKey = 'sk_' + Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
     try {
         const newEngineId = uuidv4();
         const cId = sessionStorage.getItem('current_tenant_id');
@@ -90,7 +124,8 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
           id: newEngineId,
           display_name: nameStr,
           status: 'offline',
-          tenant_id: cId
+          tenant_id: cId,
+          api_key: finalApiKey
         });
 
         if (dbErr) throw new Error('Falha ao registrar instância. ' + dbErr.message);
@@ -98,9 +133,10 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
         useChatStore.getState().updateTenantInstance(newEngineId);
         
         setActivePollingId(newEngineId);
-        await createInstance(cId, newEngineId);
+        await createInstance(cId, newEngineId, finalApiKey);
         
         setCustomName('');
+        setCustomApiKey('');
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Erro de comunicação com o sistema.');
@@ -152,8 +188,9 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
     // If modal opens and we are marked as connected, let's load user from v2 status
     if (evolutionConnected && useChatStore.getState().connectedInstanceName) {
        const cId = sessionStorage.getItem('current_tenant_id');
-       if(cId) {
-          fetchEngineStatus(cId, useChatStore.getState().connectedInstanceName!)
+       const currInst = existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
+       if(cId && currInst && currInst.api_key) {
+          fetchEngineStatus(cId, useChatStore.getState().connectedInstanceName!, currInst.api_key)
             .then(st => {
                 if (st?.data?.status === 'connected' && st?.data?.whatsapp_instance_runtime?.user_profile) {
                     setEngineUser(st.data.whatsapp_instance_runtime.user_profile);
@@ -230,7 +267,8 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                       if (!confirm("Tem certeza que deseja deslogar seu aparelho da engine?")) return;
                       if (!cId) return;
                       setLoading(true);
-                      await logoutEngine(cId, useChatStore.getState().connectedInstanceName!);
+                      const currInst = existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
+                      await logoutEngine(cId, useChatStore.getState().connectedInstanceName!, currInst?.api_key || '');
                       setEvolutionConnection(false, null);
                       setLoading(false);
                       setQrBase64(null);
@@ -247,7 +285,8 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                       const cId = sessionStorage.getItem('current_tenant_id');
                       if (!cId) return;
                       setLoading(true);
-                      await reconnectEngine(cId, useChatStore.getState().connectedInstanceName!);
+                      const currInst = existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
+                      await reconnectEngine(cId, useChatStore.getState().connectedInstanceName!, currInst?.api_key || '');
                       setTimeout(() => {
                          setLoading(false);
                          alert("Protocolo WS reiniciado pela Engine.");
@@ -264,7 +303,8 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                       const cId = sessionStorage.getItem('current_tenant_id');
                       if (!cId) return;
                       setLoading(true);
-                      const r = await syncEngineContacts(cId, useChatStore.getState().connectedInstanceName!);
+                      const currInst = existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
+                      const r = await syncEngineContacts(cId, useChatStore.getState().connectedInstanceName!, currInst?.api_key || '');
                       setLoading(false);
                       alert(r.message || "OK");
                    }}
@@ -279,7 +319,8 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                       const cId = sessionStorage.getItem('current_tenant_id');
                       if (!cId) return;
                       setLoading(true);
-                      const r = await forceEnginePresence(cId, useChatStore.getState().connectedInstanceName!);
+                      const currInst = existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
+                      const r = await forceEnginePresence(cId, useChatStore.getState().connectedInstanceName!, currInst?.api_key || '');
                       setLoading(false);
                       alert(r.message || "OK");
                    }}
@@ -295,7 +336,8 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                       if (!confirm("Isso apagará o cache de mensagens em RAM. Deseja prosseguir?")) return;
                       if (!cId) return;
                       setLoading(true);
-                      const r = await clearEngineStore(cId, useChatStore.getState().connectedInstanceName!);
+                      const currInst = existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
+                      const r = await clearEngineStore(cId, useChatStore.getState().connectedInstanceName!, currInst?.api_key || '');
                       setLoading(false);
                       alert(r.message || "OK");
                    }}
@@ -349,22 +391,70 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                 </div>
 
                 {tab === 'existing' ? (
-                  <div className="w-full flex flex-col gap-3 min-h-[160px] max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
+                  <div className="w-full flex flex-col gap-3 min-h-[160px] max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
                      {existingInstances.length > 0 ? existingInstances.map(inst => (
-                        <button 
-                           key={inst.id}
-                           onClick={() => handleConnectExisting(inst)}
-                           className="flex items-center justify-between w-full p-4 rounded-2xl bg-white/50 dark:bg-black/40 hover:bg-white dark:hover:bg-black/60 border border-transparent hover:border-emerald-500/30 transition-all text-left shadow-sm group"
-                        >
-                           <div>
-                              <h4 className="font-bold text-sm text-gray-800 dark:text-white">{inst.name}</h4>
-                              <p className="text-[10px] text-gray-500 mt-1 font-mono">{inst.phone_number ? `+${inst.phone_number}` : 'Aguardando Número'}</p>
-                           </div>
-                           <Link size={16} className="text-gray-400 group-hover:text-emerald-500 transition-colors" />
-                        </button>
+                        <div key={inst.id} className="relative z-10">
+                           {confirmDeleteId === inst.id ? (
+                              <div className="flex flex-col w-full p-4 rounded-3xl bg-red-500/10 border border-red-500/30 animate-in zoom-in-95 duration-200">
+                                 <p className="text-xs font-semibold text-red-600 dark:text-red-400 mb-3 text-center">Excluir instância permanentemente?</p>
+                                 <div className="flex gap-2 w-full">
+                                    <button 
+                                      onClick={() => setConfirmDeleteId(null)}
+                                      className="flex-1 py-2 rounded-xl text-xs font-bold text-gray-600 bg-white/50 hover:bg-white dark:bg-black/30 dark:hover:bg-black/50 transition-all border border-transparent"
+                                    >
+                                      Cancelar
+                                    </button>
+                                    <button 
+                                      onClick={() => handleDeleteInstance(inst.id)}
+                                      className="flex-1 py-2 rounded-xl text-xs font-bold text-white bg-red-500 hover:bg-red-600 shadow-md shadow-red-500/20 transition-all"
+                                    >
+                                      Sim, Excluir
+                                    </button>
+                                 </div>
+                              </div>
+                           ) : (
+                              <div className="flex items-center justify-between w-full h-[72px] rounded-3xl bg-white/40 dark:bg-[#1A252C]/60 backdrop-blur-md border border-white/50 dark:border-white/5 shadow-sm hover:shadow-md transition-all group overflow-hidden pl-5 pr-2">
+                                 <button 
+                                    onClick={() => handleConnectExisting(inst)}
+                                    className="flex-1 flex flex-col items-start justify-center h-full focus:outline-none"
+                                 >
+                                    <div className="flex items-center gap-2">
+                                       <h4 className="font-bold text-[13px] text-gray-800 dark:text-white drop-shadow-sm line-clamp-1">{inst.display_name || 'Instância sem nome'}</h4>
+                                       {(inst.connection_status === 'connected' || inst.status === 'connected') && (
+                                         <span className="flex items-center justify-center w-4 h-4 bg-emerald-500/20 rounded-full">
+                                            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                                         </span>
+                                       )}
+                                    </div>
+                                    <p className="text-[10px] text-gray-500 font-mono flex items-center gap-1 mt-0.5 opacity-80 group-hover:opacity-100 transition-opacity">
+                                       {inst.phone_number ? `+${inst.phone_number}` : 'Aguardando Sincronização'}
+                                    </p>
+                                 </button>
+                                 
+                                 <div className="flex items-center gap-1 opacity-80">
+                                    <button 
+                                       onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(inst.id); }}
+                                       className="w-10 h-10 flex items-center justify-center rounded-2xl text-gray-400 hover:text-red-500 hover:bg-red-500/10 transition-all focus:outline-none"
+                                       title="Excluir Instância"
+                                    >
+                                       <Trash2 size={16} />
+                                    </button>
+                                    <button 
+                                       onClick={() => handleConnectExisting(inst)}
+                                       className="w-10 h-10 flex items-center justify-center rounded-2xl text-gray-400 hover:text-emerald-500 hover:bg-emerald-500/10 transition-all focus:outline-none bg-white/20 dark:bg-black/10"
+                                       title="Conectar"
+                                    >
+                                       <Link size={16} />
+                                    </button>
+                                 </div>
+                              </div>
+                           )}
+                        </div>
                      )) : (
-                        <div className="m-auto text-center text-gray-500 text-sm py-8 border-2 border-dashed border-gray-300 dark:border-gray-800 rounded-2xl w-full">
-                           Nenhuma Instância encontrada.
+                        <div className="m-auto flex flex-col items-center justify-center text-gray-400 text-xs py-10 px-4 border-2 border-dashed border-gray-300 dark:border-gray-700/50 rounded-3xl w-full bg-white/20 dark:bg-black/10 backdrop-blur-sm">
+                           <Smartphone size={32} className="mb-2 opacity-50 text-emerald-500" />
+                           <span className="font-medium text-gray-500">Nenhuma Instância encontrada.</span>
+                           <button onClick={() => setTab('new')} className="mt-3 text-emerald-600 hover:underline font-bold">Criar sua primeira instância</button>
                         </div>
                      )}
                   </div>

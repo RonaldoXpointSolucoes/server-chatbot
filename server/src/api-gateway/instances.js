@@ -8,8 +8,31 @@ const router = express.Router();
 
 const requireTenant = async (req, res, next) => {
     const tenantId = req.headers['x-tenant-id'];
+    const apiKey = req.headers['apikey'];
+
     if (!tenantId) return res.status(400).json({ error: 'x-tenant-id header missing' });
     req.tenantId = tenantId;
+
+    const instanceId = req.params.instanceId;
+    if (instanceId) {
+        if (!apiKey) return res.status(401).json({ error: 'apikey header missing. Access denied.' });
+        
+        const { data, error } = await supabase
+            .from('whatsapp_instances')
+            .select('api_key')
+            .eq('id', instanceId)
+            .eq('tenant_id', tenantId)
+            .single();
+            
+        if (error || !data) return res.status(404).json({ error: 'Instance not found or unauthorized' });
+        
+        // Se a instância tiver uma API key registrada, verifica.
+        // Considerando a restrição estrita proativa solicitada na regra:
+        if (data.api_key && data.api_key !== apiKey) {
+            return res.status(401).json({ error: 'Invalid API Key provided for this instance' });
+        }
+    }
+
     next();
 };
 
