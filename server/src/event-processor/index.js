@@ -81,12 +81,15 @@ class EventProcessor {
                 if (!contact) continue;
 
                 // 2. Garante Conversa
-                let { data: conversation } = await supabase
+                let { data: conversations, error: convQueryErr } = await supabase
                     .from('conversations')
                     .select('id, unread_count')
                     .eq('tenant_id', tenantId)
                     .eq('contact_id', contact.id)
-                    .single();
+                    .order('last_message_at', { ascending: false, nullsFirst: false })
+                    .limit(1);
+
+                let conversation = conversations && conversations.length > 0 ? conversations[0] : null;
 
                 const textMessage = this.extractTextFromMessage(msg);
                 const msgType = this.extractTypeFromMessage(msg);
@@ -204,14 +207,17 @@ class EventProcessor {
 
                 let finalSavedMsg = savedMsg;
                 if(msgErr) {
+                    console.error('[EventProcessor] ERRO DB MESSAGE INSERT:', msgErr, 'Payload:', msgPayload);
                     if (msgErr.code !== '23505') {
                         // tenta sem instance_id
-                        const { data: fallbackMsg } = await supabase.from('messages').insert({
+                        const { data: fallbackMsg, error: fallbackErr } = await supabase.from('messages').insert({
                             tenant_id: tenantId, conversation_id: conversation.id, direction, message_type: msgType, 
                             status: 'delivered', text_content: textMessage, whatsapp_message_id: msg.key.id, 
                             sender_type: senderType, timestamp: tsDate.toISOString(), raw_payload: msg, 
                             media_url: mediaUrl, media_metadata: mediaMetadata
                         }).select('*').single();
+                        
+                        if (fallbackErr) console.error('[EventProcessor] ERRO DB MESSAGE FALLBACK:', fallbackErr);
                         finalSavedMsg = fallbackMsg;
                     }
                 }

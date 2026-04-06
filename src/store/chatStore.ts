@@ -17,6 +17,7 @@ export type ContactType = ContactRow & {
   messages: MessageType[];
   unread: number;
   lastMsgTimestamp: number; // novo campo para ordernar realista
+  is_pinned?: boolean;
 };
 
 export interface TenantInfo {
@@ -54,6 +55,7 @@ interface ChatState {
   uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean) => Promise<void>;
   updateContactName: (contactId: string, newName: string) => Promise<void>;
   deleteContact: (contactId: string) => Promise<void>;
+  togglePinContact: (contactId: string) => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -273,25 +275,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  togglePinContact: async (contactId) => {
+    const contact = get().contacts.find(c => c.id === contactId);
+    if (!contact) return;
+    const newStatus = !contact.is_pinned;
+
+    // Atualiza otimista UI
+    set((state) => ({
+      contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_pinned: newStatus } : c)
+    }));
+
+    try {
+      await supabase.from('contacts').update({ is_pinned: newStatus }).eq('id', contactId);
+    } catch (e) {
+      console.error('Erro ao fixar contato no DB:', e);
+      // Reverter alteração otimista
+      set((state) => ({
+        contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_pinned: !newStatus } : c)
+      }));
+    }
+  },
+
   fetchInitialData: async () => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
 
     try {
-       // Puxa conversas do tenant ordernadas (Limita a 40)
+       // Puxa conversas do tenant ordernadas (Limita a 300)
        const { data: dbConvs } = await supabase.from('conversations')
           .select('*')
           .eq('tenant_id', tenant.id)
           .order('last_message_at', { ascending: false })
-          .limit(40);
+          .limit(300);
           
        if (!dbConvs || dbConvs.length === 0) {
-           // Fallback: se não tiver conversas ativas, carrega 40 contatos base
+           // Fallback: se não tiver conversas ativas, carrega 300 contatos base
            const { data: emptyContacts } = await supabase.from('contacts')
                .select('*')
                .eq('tenant_id', tenant.id)
                .order('created_at', { ascending: false })
-               .limit(40);
+               .limit(300);
                
            if (emptyContacts) {
                set({ contacts: emptyContacts.map(c => ({
@@ -456,7 +479,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!tenant) return;
         
         // Puxa conversa pra este contato (mesmo que n exista msg)
-        const { data: conv } = await supabase.from('conversations').select('id').eq('tenant_id', tenant.id).eq('contact_id', contactId).single();
+        const { data: convs } = await supabase.from('conversations')
+              .select('id')
+              .eq('tenant_id', tenant.id)
+              .eq('contact_id', contactId)
+              .order('last_message_at', { ascending: false })
+              .limit(1);
+        
+        const conv = convs && convs.length > 0 ? convs[0] : null;
         if (!conv) return;
 
         // Limpar unread 
@@ -466,16 +496,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
                .select('*')
                .eq('tenant_id', tenant.id)
                .eq('conversation_id', conv.id)
-               .order('timestamp', { ascending: true })
-               .limit(200);
+               .order('timestamp', { ascending: false })
+               .limit(100);
                
         if (msgs) {
+           const orderedMsgs = msgs.reverse();
            set((s) => {
               const updated = [...s.contacts];
               const idx = updated.findIndex(c => c.id === contactId);
               if (idx !== -1) {
                   updated[idx].unread = 0;
-                  updated[idx].messages = msgs.map(m => ({
+                  updated[idx].messages = orderedMsgs.map(m => ({
                       id: m.id,
                       whatsapp_id: m.whatsapp_message_id,
                       text: m.text_content,
@@ -505,7 +536,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     channel
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
         const m = payload.new as any;
-        if (m.sender_type === 'human' || m.sender_type === 'bot' || m.sender_type === 'system') return; // Ignore echoes already updated
+        if (m.sender_type === 'bot' || m.sender_type === 'system') return; // Ignore echoes that don't need realtime sync
 
         let targetContactId = m.conversation_id ? null : m.contact_id;
         

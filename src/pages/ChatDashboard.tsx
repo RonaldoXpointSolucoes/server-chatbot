@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import EvolutionModal from '../components/EvolutionModal';
 import { DeleteModal, RenameModal } from '../components/ChatModals';
@@ -231,7 +231,11 @@ export default function ChatDashboard() {
              <p className="text-xs text-center p-6 text-gray-400">Nenhuma conversa encontrada ou aguardando conexão web-socket...</p>
           )}
 
-          {[...contacts].sort((a,b) => b.lastMsgTimestamp - a.lastMsgTimestamp).map((contact) => {
+          {[...contacts].sort((a,b) => {
+             if (a.is_pinned && !b.is_pinned) return -1;
+             if (!a.is_pinned && b.is_pinned) return 1;
+             return b.lastMsgTimestamp - a.lastMsgTimestamp;
+          }).map((contact) => {
              const lastMsg = contact.messages?.[contact.messages.length - 1];
              const timeDisplay = lastMsg 
                ? (isToday(lastMsg.timestamp) ? format(lastMsg.timestamp, 'HH:mm') 
@@ -265,7 +269,8 @@ export default function ChatDashboard() {
                   <div className="flex justify-between items-center mb-0.5">
                     <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate">{contact.name || contact.phone}</span>
                     <div className="flex items-center gap-1">
-                      <span className={cn("text-[11px] font-medium min-w-fit ml-1", contact.unread > 0 ? "text-[#00a884]" : "text-[#54656f] dark:text-[#8696a0]")}>
+                      <span className={cn("text-[11px] font-medium min-w-fit ml-1 flex items-center gap-1", contact.unread > 0 ? "text-[#00a884]" : "text-[#54656f] dark:text-[#8696a0]")}>
+                        {contact.is_pinned && <Pin size={12} className="text-[#00a884] rotate-45 fill-current opacity-80" />}
                         {timeDisplay}
                       </span>
                       
@@ -282,7 +287,14 @@ export default function ChatDashboard() {
                         </button>
                         
                         {activeDropdown === contact.id && (
-                          <div className="absolute right-0 top-6 w-36 bg-white dark:bg-[#233138] border border-black/5 dark:border-white/5 rounded-xl shadow-xl py-2 z-50 animate-in fade-in zoom-in-95 duration-100">
+                          <div className="absolute right-0 top-6 w-44 bg-white dark:bg-[#233138] border border-black/5 dark:border-white/5 rounded-xl shadow-xl py-2 z-[99] animate-in fade-in zoom-in-95 duration-100">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); useChatStore.getState().togglePinContact(contact.id); setActiveDropdown(null); }}
+                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                            >
+                              <Pin size={14} className={contact.is_pinned ? "rotate-45" : ""} />
+                              {contact.is_pinned ? "Desafixar conversa" : "Fixar no topo"}
+                            </button>
                             <button 
                               onClick={(e) => { e.stopPropagation(); setContactToEdit({id: contact.id, name: contact.name}); setActiveDropdown(null); }}
                               className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors"
@@ -364,15 +376,22 @@ export default function ChatDashboard() {
               </div>
             </div>
 
-            {/* Controle da IA */}
-            {activeChat.bot_status === 'paused' && (
-              <button 
-                onClick={() => setBotStatus(activeChat.id, 'active')}
-                className="flex items-center gap-2 text-xs font-bold text-[#00a884] bg-[#00a884]/10 hover:bg-[#00a884]/20 px-3 py-1.5 rounded-full transition-colors border border-[#00a884]/30"
-              >
-                <Power size={13} /> Devolver para IA
-              </button>
-            )}
+            {/* Right Header Area */}
+            <div className="flex items-center gap-4">
+              <div className="text-[11px] uppercase tracking-wider text-[#54656f] dark:text-[#8696a0] font-bold flex items-center gap-1.5 pointer-events-none opacity-80 mix-blend-luminosity">
+                <Building2 size={13} className="text-[#00a884]" /> EMPRESA: {tenantName}
+              </div>
+              
+              {/* Controle da IA */}
+              {activeChat.bot_status === 'paused' && (
+                <button 
+                  onClick={() => setBotStatus(activeChat.id, 'active')}
+                  className="flex items-center gap-2 text-xs font-bold text-[#00a884] bg-[#00a884]/10 hover:bg-[#00a884]/20 px-3 py-1.5 rounded-full transition-colors border border-[#00a884]/30"
+                >
+                  <Power size={13} /> Devolver para IA
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Chat Messages */}
@@ -506,16 +525,15 @@ export default function ChatDashboard() {
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#222d34] border-l border-white/5 relative z-10">
+          <div className="absolute top-5 right-6 text-[11px] uppercase tracking-wider text-[#54656f] dark:text-[#8696a0] font-bold flex items-center gap-1.5 pointer-events-none opacity-80 mix-blend-luminosity">
+             <Building2 size={13} className="text-[#00a884]" /> EMPRESA: {tenantName}
+          </div>
           <Bot size={80} className="text-gray-300 dark:text-[#2a3942] mb-6" />
           <h1 className="text-3xl font-light text-[#54656f] dark:text-[#8696a0]">SaaS Multi-Agente Híbrido</h1>
           <div className="text-sm text-[#54656f] dark:text-[#8696a0] mt-2 flex items-center gap-2"><div className="w-2 h-2 bg-[#00a884] rounded-full animate-pulse"></div> Conectado com banco de dados</div>
         </div>
       )}
 
-      {/* Marca D'Água / Rodapé da Empresa Logada */}
-      <div className="absolute bottom-4 right-6 text-[11px] uppercase tracking-wider text-[#54656f] dark:text-[#8696a0] font-bold flex items-center gap-1.5 z-50 pointer-events-none opacity-80 mix-blend-luminosity">
-         <Building2 size={13} className="text-[#00a884]" /> EMPRESA: {tenantName}
-      </div>
     </div>
   );
 }

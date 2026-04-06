@@ -19,7 +19,7 @@ interface DevStore {
 
 export const useDevStore = create<DevStore>((set) => ({
   logs: [],
-  isVisible: true,
+  isVisible: false,
   addLog: (log) => set((state) => {
     const newLog: LogEntry = {
       ...log,
