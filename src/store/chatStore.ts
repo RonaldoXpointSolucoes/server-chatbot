@@ -51,7 +51,7 @@ interface ChatState {
   addMessageLocally: (contactId: string, msg: MessageType) => void;
   upsertContactLocally: (contact: ContactRow) => void;
   sendHumanMessage: (contactId: string, text: string, instanceName: string) => Promise<void>;
-  uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string) => Promise<void>;
+  uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean) => Promise<void>;
   updateContactName: (contactId: string, newName: string) => Promise<void>;
   deleteContact: (contactId: string) => Promise<void>;
 }
@@ -111,7 +111,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  uploadAndSendMedia: async (contactId, file, mediaType, instanceName) => {
+  uploadAndSendMedia: async (contactId, file, mediaType, instanceName, isPtt) => {
     const state = get();
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
@@ -134,6 +134,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       formData.append('jid', jid);
       formData.append('messageType', mediaType);
       if (file.name) formData.append('caption', file.name);
+      if (isPtt) formData.append('ptt', 'true');
 
       // Chamada HTTP pro Node (único dono do upload Supabase e Baileys)
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';

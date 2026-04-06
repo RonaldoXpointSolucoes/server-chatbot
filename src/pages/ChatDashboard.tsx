@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import EvolutionModal from '../components/EvolutionModal';
 import { DeleteModal, RenameModal } from '../components/ChatModals';
@@ -127,7 +127,7 @@ export default function ChatDashboard() {
          mediaRecorder.onstop = async () => {
             const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
             const file = new File([audioBlob], 'audio_record.webm', { type: 'audio/webm' });
-            await useChatStore.getState().uploadAndSendMedia(activeChatId, file, 'audio', connectedInstanceName);
+            await useChatStore.getState().uploadAndSendMedia(activeChatId, file, 'audio', connectedInstanceName, true);
          };
 
          mediaRecorder.start();
@@ -180,7 +180,7 @@ export default function ChatDashboard() {
         
         {/* Header da Sidebar */}
         <div className="h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 sm:px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0">
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v1.0.21 | Deploy: 06/04/2026 14:50</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v1.0.22 | Deploy: 06/04/2026 16:07</span>
           <div className="w-10 h-10 rounded-full bg-[#00a884]/20 flex items-center justify-center text-[#00a884] font-bold shadow-inner">
             RA
           </div>
@@ -301,14 +301,30 @@ export default function ChatDashboard() {
                     </div>
                   </div>
                   <div className="flex text-[13px] text-[#54656f] dark:text-[#8696a0] truncate mt-0.5 items-center justify-between">
-                    <div className="flex items-center gap-1 truncate w-full pr-2">
+                    <div className="flex items-center gap-1.5 truncate w-full pr-2">
                        {isMe && (
                            lastMsg?.status === 'READ' ? <CheckCheck size={14} className="text-[#53bdeb] shrink-0" /> : 
                            lastMsg?.status === 'DELIVERY_ACK' || lastMsg?.status === 'SERVER_ACK' ? <CheckCheck size={14} className="text-gray-400 shrink-0" /> :
                            <Check size={14} className="text-gray-400 shrink-0" />
                        )}
                        {contact.bot_status === 'paused' ? <span className="w-2 h-2 rounded-full bg-yellow-500 shrink-0 mr-1" /> : !isMe && <Bot size={13} className="text-[#00a884] shrink-0" />}
-                       <span className="truncate">{lastMsg?.text || 'Nova conversa...'}</span>
+                       
+                       {/* Renderiza indicador de midia estilo WhatsApp Web */}
+                       {(() => {
+                           if (!lastMsg) return <span className="truncate">Nova conversa...</span>;
+                           let icon = null;
+                           if (lastMsg.mediaType === 'image') icon = <Camera size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
+                           else if (lastMsg.mediaType === 'video') icon = <Video size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
+                           else if (lastMsg.mediaType === 'audio') icon = <Mic size={13} className={cn("shrink-0", lastMsg.status === 'READ' && isMe ? "text-[#53bdeb]" : "text-[#00a884]")} />;
+                           else if (lastMsg.mediaType === 'document') icon = <FileText size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
+                           
+                           return (
+                              <div className="flex items-center gap-1 truncate w-full">
+                                {icon}
+                                <span className={cn("truncate", icon ? "" : "ml-0")}>{lastMsg.text || 'Nova conversa...'}</span>
+                              </div>
+                           );
+                       })()}
                     </div>
                     {contact.unread > 0 && (
                       <div className="bg-[#00a884] text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0 shadow-sm">
@@ -406,8 +422,8 @@ export default function ChatDashboard() {
                       )}
                       
                       {msg.mediaUrl && msg.mediaType === 'audio' && (
-                         <div className="flex items-center gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-[#1d272b] dark:to-[#172124] p-2 rounded-2xl mb-1 border border-emerald-100/50 dark:border-emerald-900/30">
-                            <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] h-10 custom-audio" />
+                         <div className="flex items-center gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-[#1d272b] dark:to-[#172124] p-1.5 rounded-3xl mb-1 border border-emerald-100/50 dark:border-emerald-900/30">
+                            <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] sm:max-w-[260px] h-10 custom-audio" />
                          </div>
                       )}
                       
