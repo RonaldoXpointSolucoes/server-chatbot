@@ -53,6 +53,19 @@ function interceptConsole() {
   console.error = (...args) => capture('error', originalError, args);
 }
 
+export function addLog(level, message) {
+  const logEntry = {
+    type: 'log',
+    id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+    timestamp: new Date().toISOString(),
+    level,
+    message: typeof message === 'string' ? message : JSON.stringify(message)
+  };
+  logBuffer.push(logEntry);
+  if (logBuffer.length > MAX_LOGS) logBuffer.shift();
+  broadcast(logEntry);
+}
+
 // Inicializamos a interceptação global
 interceptConsole();
 

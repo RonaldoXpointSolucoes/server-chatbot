@@ -1,13 +1,29 @@
 import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import { useSupabaseAuthState } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
+import { addLog } from '../system-logger.js';
 import pino from 'pino';
 import { supabase } from '../supabase.js';
 
 class SessionManager {
     constructor() {
         this.sessions = new Map();
-        this.logger = pino({ level: 'silent' });
+        
+        // Pino stream configurado para enviar logs para nosso SSE e para o stdout
+        const pinoStream = {
+            write: (msg) => {
+                try {
+                    const parsed = JSON.parse(msg);
+                    const lvl = parsed.level >= 50 ? 'error' : parsed.level >= 40 ? 'warn' : 'info';
+                    addLog(lvl, `[Baileys] ${parsed.msg || ''} ${JSON.stringify(parsed, (k,v) => ['msg','level','time','pid','hostname'].includes(k) ? undefined : v)}`);
+                } catch(e) {
+                    addLog('info', `[Baileys] ${msg.trim()}`);
+                }
+                process.stdout.write(msg);
+            }
+        };
+
+        this.logger = pino({ level: 'trace' }, pinoStream);
     }
 
     async createSession(tenantId, instanceId) {

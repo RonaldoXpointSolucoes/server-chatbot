@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Terminal as TerminalIcon, X, Trash2, Pause, Play, Maximize2, Minimize2 } from 'lucide-react';
+import { Terminal as TerminalIcon, X, Trash2, Pause, Play, Maximize2, Minimize2, Copy, Check } from 'lucide-react';
 import clsx from 'clsx';
 
 interface LogEntry {
@@ -19,8 +19,17 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   const [isPaused, setIsPaused] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
   
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const handleCopyLogs = () => {
+    const textToCopy = logs.map(log => `[${new Date(log.timestamp).toLocaleTimeString()}] ${log.message}`).join('\n');
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    }).catch(err => console.error('Failed to copy logs', err));
+  };
   const logsRef = useRef(logs);
   logsRef.current = logs;
 
@@ -107,6 +116,13 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
             title={isPaused ? "Retomar" : "Pausar"}
           >
             {isPaused ? <Play className="w-4 h-4 text-yellow-400" /> : <Pause className="w-4 h-4" />}
+          </button>
+          <button 
+            onClick={handleCopyLogs}
+            className="p-1.5 hover:bg-white/10 rounded-md text-white/70 hover:text-white transition-colors"
+            title="Copiar Logs"
+          >
+            {isCopied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
           </button>
           <button 
             onClick={() => setLogs([])}
