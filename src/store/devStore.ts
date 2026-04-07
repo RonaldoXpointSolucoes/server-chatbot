@@ -12,14 +12,17 @@ export interface LogEntry {
 interface DevStore {
   logs: LogEntry[];
   isVisible: boolean;
+  isEnabled: boolean;
   addLog: (log: Omit<LogEntry, 'id' | 'timestamp'>) => void;
   clearLogs: () => void;
   toggleVisibility: () => void;
+  toggleEnabled: () => void;
 }
 
 export const useDevStore = create<DevStore>((set) => ({
   logs: [],
   isVisible: false,
+  isEnabled: false,
   addLog: (log) => set((state) => {
     const newLog: LogEntry = {
       ...log,
@@ -30,5 +33,6 @@ export const useDevStore = create<DevStore>((set) => ({
     return { logs: [newLog, ...state.logs].slice(0, 100) };
   }),
   clearLogs: () => set({ logs: [] }),
-  toggleVisibility: () => set((state) => ({ isVisible: !state.isVisible }))
+  toggleVisibility: () => set((state) => ({ isVisible: !state.isVisible })),
+  toggleEnabled: () => set((state) => ({ isEnabled: !state.isEnabled }))
 }));

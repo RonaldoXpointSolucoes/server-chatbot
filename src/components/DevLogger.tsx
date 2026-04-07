@@ -5,7 +5,7 @@ import { supabase } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 
 export default function DevLogger() {
-  const { logs, isVisible, toggleVisibility, addLog, clearLogs } = useDevStore();
+  const { logs, isVisible, isEnabled, toggleVisibility, addLog, clearLogs } = useDevStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   
   const [engineStatus, setEngineStatus] = useState<'online' | 'offline' | 'checking'>('checking');
@@ -136,10 +136,10 @@ export default function DevLogger() {
   }, [addLog]);
 
   useEffect(() => {
-    if (isVisible && bottomRef.current) {
+    if (isVisible && isEnabled && bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [logs, isVisible]);
+  }, [logs, isVisible, isEnabled]);
 
   const copyLogs = () => {
     const textStr = logs.map(l => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.type.toUpperCase()}] ${l.source}: ${l.message}\n${l.details ? JSON.stringify(l.details) : ''}`).join('\n\n');
@@ -172,6 +172,10 @@ export default function DevLogger() {
     addLog({ type: 'info', message: `Diagnóstico do React App...\n🔗 Host local ativo: ${window.location.origin}`, source: 'Tester' });
     addLog({ type: 'success', message: `App React em Execução. Hooks ativos.\nHost: ${window.location.origin}`, source: 'Tester' });
   };
+
+  if (!isEnabled) {
+    return null;
+  }
 
   return (
     <>

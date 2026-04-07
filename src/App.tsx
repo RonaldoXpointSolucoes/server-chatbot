@@ -9,11 +9,13 @@ import ClientLogin from './pages/ClientLogin';
 import BaileysFeatures from './pages/BaileysFeatures';
 import InstancesDashboard from './pages/InstancesDashboard';
 import DevLogger from './components/DevLogger';
+import { InstallPWA } from './components/InstallPWA';
 
 // Provedor Global de Rotas
 export default function App() {
   return (
     <BrowserRouter>
+      <InstallPWA />
       <DevLogger />
       <Routes>
         {/* Rota do Cliente Comum */}

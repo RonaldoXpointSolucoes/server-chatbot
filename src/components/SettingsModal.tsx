@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Database, Save, Loader2, X, CheckCircle } from 'lucide-react';
+import { Settings, Database, Save, Loader2, X, CheckCircle, Terminal } from 'lucide-react';
 import { useSettingsStore } from '../store/settingsStore';
 import { setInstanceWebhook } from '../services/evolution';
 import { useChatStore } from '../store/chatStore';
+import { useDevStore } from '../store/devStore';
 
 export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
   const { webhookEngine, setWebhookEngine } = useSettingsStore();
   const { tenantInfo } = useChatStore();
+  const { isEnabled: isDevLoggerEnabled, toggleEnabled: toggleDevLogger } = useDevStore();
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
 
@@ -93,6 +95,25 @@ export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> =
             <div className="w-5 h-5 rounded-full mt-2 flex items-center justify-center text-emerald-500">
                <CheckCircle className="w-5 h-5" />
             </div>
+          </label>
+
+          {/* DevLogger Toggle */}
+          <label className="flex items-center justify-between p-4 rounded-xl border border-slate-700 bg-slate-800/50 cursor-pointer hover:bg-slate-800 transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-500/10 rounded-lg">
+                <Terminal className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <h3 className="font-medium text-slate-200">Terminal DevLogger</h3>
+                <p className="text-xs text-slate-400">Console e monitoramento avançado do sistema</p>
+              </div>
+            </div>
+            <button
+              onClick={toggleDevLogger}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isDevLoggerEnabled ? 'bg-blue-500' : 'bg-slate-600'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isDevLoggerEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
           </label>
 
         </div>

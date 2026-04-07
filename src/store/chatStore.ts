@@ -600,7 +600,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         body: JSON.stringify({ instanceId: instanceName })
                     });
                     
-                    // Supabase deve ter sido populado pelo Node
+                    // Supabase deve ter sido populado pelo Node. Aguarda 1.0s para propagação de DB/replica
+                    await new Promise(r => setTimeout(r, 1000));
+                    
                     const { data: fetchNewMsgs } = await supabase.from('messages')
                        .select('*')
                        .eq('tenant_id', tenant.id)
