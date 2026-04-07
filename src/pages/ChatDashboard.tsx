@@ -135,7 +135,8 @@ export default function ChatDashboard() {
          mediaRecorder.ondataavailable = e => audioChunksRef.current.push(e.data);
          mediaRecorder.onstop = async () => {
             const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-            const file = new File([audioBlob], 'audio_record.webm', { type: 'audio/webm' });
+            const fileName = `audio_record_${Date.now()}.webm`;
+            const file = new File([audioBlob], fileName, { type: 'audio/webm' });
             await useChatStore.getState().uploadAndSendMedia(activeChatId, file, 'audio', connectedInstanceName, true);
          };
 
