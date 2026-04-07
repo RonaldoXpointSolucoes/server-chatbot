@@ -8,6 +8,7 @@ import { supabase } from '../supabase.js';
 class SessionManager {
     constructor() {
         this.sessions = new Map();
+        this.connectingState = new Map();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -32,8 +33,23 @@ class SessionManager {
             return this.sessions.get(instanceId).sock;
         }
 
+        if (this.connectingState.has(instanceId)) {
+            return this.connectingState.get(instanceId);
+        }
+
         console.log(`[SessionManager] Iniciando sessão para Instance: ${instanceId} | Tenant: ${tenantId}`);
 
+        const promise = this._createSessionInner(tenantId, instanceId);
+        this.connectingState.set(instanceId, promise);
+        
+        try {
+            return await promise;
+        } finally {
+            this.connectingState.delete(instanceId);
+        }
+    }
+
+    async _createSessionInner(tenantId, instanceId) {
         try {
             const { state, saveCreds } = await useSupabaseAuthState(tenantId, instanceId);
             const { version, isLatest } = await fetchLatestBaileysVersion();
