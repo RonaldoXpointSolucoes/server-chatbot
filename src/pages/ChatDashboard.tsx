@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import EvolutionModal from '../components/EvolutionModal';
-import { DeleteModal, RenameModal } from '../components/ChatModals';
+import { DeleteModal, RenameModal, NewChatModal } from '../components/ChatModals';
 import { SettingsModal } from '../components/SettingsModal';
 import ThemeToggle from '../components/ThemeToggle';
 
@@ -34,7 +34,10 @@ export default function ChatDashboard() {
     tenantInfo,
     updateContactName,
     deleteContact,
-    isSyncingHistory
+    isSyncingHistory,
+    markAllAsRead,
+    togglePinContact,
+    toggleFavorite
   } = useChatStore();
 
   // Execucao Incial Reativa
@@ -59,6 +62,11 @@ export default function ChatDashboard() {
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [contactToEdit, setContactToEdit] = useState<{id: string; name: string} | null>(null);
   const [contactToDelete, setContactToDelete] = useState<{id: string; name: string} | null>(null);
+  const [isNewChatOpen, setIsNewChatOpen] = useState(false);
+  
+  // Estados para Filtros
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState<'all' | 'unread' | 'favorite' | 'labels'>('all');
   
   const activeChat = contacts.find(c => c.id === activeChatId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -171,6 +179,18 @@ export default function ChatDashboard() {
         onClose={() => setIsSettingsOpen(false)}
       />
 
+      <NewChatModal 
+        isOpen={isNewChatOpen}
+        onClose={() => setIsNewChatOpen(false)}
+        contacts={contacts}
+        onStartChat={(contactId) => {
+          setActiveChat(contactId);
+          if (connectedInstanceName) {
+            useChatStore.getState().loadHistoricalMessages(contactId, connectedInstanceName);
+          }
+        }}
+      />
+
       {/* Left Sidebar */}
       <div className={cn(
         "w-full sm:w-[30%] sm:min-w-[320px] sm:max-w-[400px] border-r border-[#d1d7db] dark:border-[#222d34] flex flex-col bg-white dark:bg-[#111b21] transition-all",
@@ -179,21 +199,60 @@ export default function ChatDashboard() {
         onClick={() => setActiveDropdown(null)} // fecha qq dropdown ao clicar fora
       >
         
-        {/* Header da Sidebar */}
-        <div className="h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 sm:px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0">
+        {/* Header Premium da Sidebar */}
+        <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v1.0.22 | Deploy: 06/04/2026 16:07</span>
-          <div className="w-10 h-10 rounded-full bg-[#00a884]/20 flex items-center justify-center text-[#00a884] font-bold shadow-inner">
-            RA
-          </div>
-          <div className="flex gap-4 text-[#54656f] dark:text-[#aebac1]">
-            <button onClick={() => setShowEvolutionQR(true)} className="group relative" title={tenantInfo?.evolution_api_instance ? "Conectado" : "Conectar WhatsApp"}>
-               <Smartphone size={20} className={cn("cursor-pointer transition-colors", evolutionConnected ? "text-[#00a884]" : "text-red-500 hover:text-red-600")} />
-               {!evolutionConnected && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span>}
-            </button>
-            <Users size={20} className="cursor-pointer hover:text-[#00a884] transition-colors" />
-            <Bot size={20} className="cursor-pointer hover:text-[#00a884] transition-colors" />
-            <ThemeToggle />
-            <Settings size={20} className="cursor-pointer hover:text-indigo-400 transition-colors" onClick={() => setIsSettingsOpen(true)} />
+          
+          <div className="flex items-center justify-between w-full mt-2">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-400 flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-[#202c33]">
+              RA
+            </div>
+            
+            <div className="flex gap-3 text-[#54656f] dark:text-[#aebac1] items-center">
+              <button onClick={() => setShowEvolutionQR(true)} className="group relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" title={tenantInfo?.evolution_api_instance ? "Conectado" : "Conectar WhatsApp"}>
+                <Smartphone size={20} className={cn("cursor-pointer transition-colors", evolutionConnected ? "text-[#00a884]" : "text-red-500 hover:text-red-600")} />
+                {!evolutionConnected && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
+              </button>
+              
+              <button className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all text-[#00a884]" onClick={() => setIsNewChatOpen(true)}>
+                <MessageSquarePlus size={20} />
+              </button>
+              
+              <ThemeToggle />
+              
+              {/* Menu de Opções Avançadas */}
+              <div className="relative">
+                <button 
+                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveDropdown(activeDropdown === 'sidebar-menu' ? null : 'sidebar-menu');
+                  }}
+                >
+                  <MoreVertical size={20} />
+                </button>
+                {activeDropdown === 'sidebar-menu' && (
+                  <div className="absolute right-0 top-12 w-56 bg-white dark:bg-[#233138] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 dark:border-[#304046] py-2 z-50 animate-in fade-in zoom-in-95 duration-200">
+                    <button className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3">
+                      <Star size={18} className="text-yellow-500" />
+                      <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Favoritas</span>
+                    </button>
+                    <button className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3">
+                      <Tag size={18} className="text-blue-500" />
+                      <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Etiquetas</span>
+                    </button>
+                    <button onClick={() => { markAllAsRead(); setActiveDropdown(null); }} className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3">
+                      <CheckCheck size={18} className="text-[#00a884]" />
+                      <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Marcar todas lidas</span>
+                    </button>
+                    <button onClick={() => setIsSettingsOpen(true)} className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3">
+                      <Settings size={18} />
+                      <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Configurações</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -214,15 +273,33 @@ export default function ChatDashboard() {
           </div>
         )}
 
-        {/* Search */}
-        <div className="h-12 border-b border-[#f2f2f2] dark:border-[#222d34] flex items-center px-3 gap-2">
-          <div className="flex w-full bg-[#f0f2f5] dark:bg-[#202c33] px-3 py-1.5 rounded-xl items-center gap-2 group transition-all">
+        {/* Search e Filtros */}
+        <div className="flex flex-col border-b border-[#f2f2f2] dark:border-[#222d34] px-3 py-2 gap-3 bg-white dark:bg-[#111b21]">
+          <div className="flex w-full bg-[#f0f2f5] dark:bg-[#202c33] px-3 py-2 rounded-xl items-center gap-2 group transition-all ring-1 ring-transparent focus-within:ring-[#00a884]/50 shadow-inner">
             <Search size={18} className="text-[#54656f] dark:text-[#aebac1] group-focus-within:text-[#00a884] transition-colors" />
             <input 
               type="text" 
               placeholder="Pesquisar chat ou contato" 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className="bg-transparent border-none outline-none text-sm w-full dark:text-[#d1d7db] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1]"
             />
+          </div>
+          
+          {/* Pills Filters (Glassmorphism inspired) */}
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+             <button onClick={() => setFilterType('all')} className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'all' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+               Tudo
+             </button>
+             <button onClick={() => setFilterType('unread')} className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'unread' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+               Não Lidas
+             </button>
+             <button onClick={() => setFilterType('favorite')} className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'favorite' ? "bg-yellow-500/10 text-yellow-600 ring-1 ring-yellow-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+               <Star size={14} className={filterType === 'favorite' ? "fill-yellow-600" : ""} /> Favoritas
+             </button>
+             <button onClick={() => setFilterType('labels')} className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'labels' ? "bg-blue-500/10 text-blue-600 ring-1 ring-blue-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+               <Tag size={14} /> Etiquetas
+             </button>
           </div>
         </div>
 
@@ -232,7 +309,17 @@ export default function ChatDashboard() {
              <p className="text-xs text-center p-6 text-gray-400">Nenhuma conversa encontrada ou aguardando conexão web-socket...</p>
           )}
 
-          {[...contacts].sort((a,b) => {
+          {contacts.filter(c => {
+             // Busca em texto
+             if (searchTerm && !c.name?.toLowerCase().includes(searchTerm.toLowerCase()) && !c.whatsapp_jid?.includes(searchTerm)) {
+               return false;
+             }
+             // Filtros de Pills
+             if (filterType === 'unread' && c.unread <= 0) return false;
+             if (filterType === 'favorite' && !c.is_favorite) return false;
+             if (filterType === 'labels' && !(c.conv_labels && c.conv_labels.length > 0)) return false;
+             return true;
+          }).sort((a,b) => {
              if (a.is_pinned && !b.is_pinned) return -1;
              if (!a.is_pinned && b.is_pinned) return 1;
              return b.lastMsgTimestamp - a.lastMsgTimestamp;
@@ -290,11 +377,18 @@ export default function ChatDashboard() {
                         {activeDropdown === contact.id && (
                           <div className="absolute right-0 top-6 w-44 bg-white dark:bg-[#233138] border border-black/5 dark:border-white/5 rounded-xl shadow-xl py-2 z-[99] animate-in fade-in zoom-in-95 duration-100">
                             <button 
-                              onClick={(e) => { e.stopPropagation(); useChatStore.getState().togglePinContact(contact.id); setActiveDropdown(null); }}
+                              onClick={(e) => { e.stopPropagation(); togglePinContact(contact.id); setActiveDropdown(null); }}
                               className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
                             >
                               <Pin size={14} className={contact.is_pinned ? "rotate-45" : ""} />
                               {contact.is_pinned ? "Desafixar conversa" : "Fixar no topo"}
+                            </button>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); toggleFavorite(contact.id); setActiveDropdown(null); }}
+                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                            >
+                              <Star size={14} className={contact.is_favorite ? "text-yellow-500 fill-yellow-500" : "text-gray-400"} />
+                              {contact.is_favorite ? "Remover dos favoritos" : "Favoritar"}
                             </button>
                             <button 
                               onClick={(e) => { e.stopPropagation(); setContactToEdit({id: contact.id, name: contact.name}); setActiveDropdown(null); }}

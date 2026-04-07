@@ -125,3 +125,67 @@ export function DeleteModal({ isOpen, onClose, contactName, onConfirm }: DeleteM
     </div>
   );
 }
+
+// -- Nova Conversa Modal
+export interface NewChatModalProps extends BaseModalProps {
+  contacts: any[];
+  onStartChat: (contactId: string) => void;
+}
+
+export function NewChatModal({ isOpen, onClose, contacts, onStartChat }: NewChatModalProps) {
+  const [search, setSearch] = useState('');
+
+  if (!isOpen) return null;
+
+  const filtered = contacts.filter(c => 
+    c.name?.toLowerCase().includes(search.toLowerCase()) || 
+    c.whatsapp_jid?.includes(search)
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
+      <div 
+        className="bg-white dark:bg-[#202c33] border border-white/20 dark:border-white/5 rounded-3xl p-6 w-[90%] max-w-md shadow-2xl flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef] flex items-center gap-2">
+            Nova Conversa
+          </h2>
+          <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-white/5 transition-colors">
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+        
+        <input 
+          type="text" 
+          placeholder="Pesquisar contatos..." 
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-full px-4 py-3 mb-4 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+          autoFocus
+        />
+
+        <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar flex flex-col gap-2">
+          {filtered.length === 0 ? (
+             <div className="text-center text-sm text-gray-500 py-8">Nenhum contato encontrado.</div>
+          ) : (
+             filtered.map(c => (
+               <div 
+                 key={c.id} 
+                 onClick={() => { onStartChat(c.id); onClose(); }}
+                 className="flex items-center gap-3 p-3 rounded-xl hover:bg-[#f0f2f5] dark:hover:bg-[#111b21] cursor-pointer transition-colors"
+               >
+                 <img src={c.avatar} alt={c.name} className="w-12 h-12 rounded-full object-cover shadow-sm bg-gray-200" />
+                 <div className="flex flex-col flex-1 min-w-0">
+                    <span className="font-semibold text-[#111b21] dark:text-[#e9edef] truncate">{c.name}</span>
+                    <span className="text-sm text-gray-500 truncate">{c.whatsapp_jid}</span>
+                 </div>
+               </div>
+             ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

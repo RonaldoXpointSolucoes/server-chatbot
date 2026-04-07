@@ -25,6 +25,7 @@ export type ContactRow = {
   tenant_id: string;
   name: string;
   push_name?: string;
+  profile_picture_url?: string;
   email?: string;
   document?: string;
   notes?: string;

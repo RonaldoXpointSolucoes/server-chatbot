@@ -18,6 +18,8 @@ export type ContactType = ContactRow & {
   unread: number;
   lastMsgTimestamp: number; // novo campo para ordernar realista
   is_pinned?: boolean;
+  is_favorite?: boolean;
+  conv_labels?: any[];
 };
 
 export interface TenantInfo {
@@ -57,6 +59,11 @@ interface ChatState {
   updateContactName: (contactId: string, newName: string) => Promise<void>;
   deleteContact: (contactId: string) => Promise<void>;
   togglePinContact: (contactId: string) => Promise<void>;
+  toggleFavorite: (contactId: string) => Promise<void>;
+  markAllAsRead: () => Promise<void>;
+  // Opcional para as etiquetas
+  // labels: any[];
+  // fetchLabels: () => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -300,6 +307,50 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  toggleFavorite: async (contactId) => {
+    const contact = get().contacts.find(c => c.id === contactId);
+    if (!contact) return;
+    const newStatus = !contact.is_favorite;
+
+    // Otimista
+    set((state) => ({
+      contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_favorite: newStatus } : c)
+    }));
+    
+    // Obter conversation. Pq favorites fica na conversation
+    const tenant = get().tenantInfo;
+    if(tenant) {
+      try {
+        const { data: conv } = await supabase.from('conversations').select('id').eq('contact_id', contactId).eq('tenant_id', tenant.id).order('last_message_at', { ascending: false }).limit(1).single();
+        if(conv) {
+          await supabase.from('conversations').update({ is_favorite: newStatus }).eq('id', conv.id);
+        }
+      } catch (e) {
+        console.error('Erro no Favorite:', e);
+         set((state) => ({
+            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_favorite: !newStatus } : c)
+         }));
+      }
+    }
+  },
+
+  markAllAsRead: async () => {
+    // UI Otimista
+    set((state) => ({
+      contacts: state.contacts.map(c => ({...c, unread: 0}))
+    }));
+    
+    const tenant = get().tenantInfo;
+    if(tenant) {
+      const activeContacts = get().contacts.filter(c => c.unread > 0);
+      try {
+         await supabase.from('conversations').update({ unread_count: 0 }).eq('tenant_id', tenant.id).gt('unread_count', 0);
+      } catch(e) {
+         console.error('Erro ao marcar_todas_lidas: ', e);
+      }
+    }
+  },
+
   fetchInitialData: async () => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
@@ -342,6 +393,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                   const preview = conv?.last_message_preview || '';
                   const unread = conv?.unread_count || 0;
+                  const isFavorite = conv?.is_favorite || false;
                   const ts = conv?.last_message_at ? new Date(conv.last_message_at).getTime() : new Date(dbC.created_at).getTime();
 
                   if (idx !== -1) {
@@ -351,8 +403,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         ...dbC,
                         id: dbC.id,
                         name: dbC.name || existing.name,
-                        avatar: existing.avatar?.includes('ui-avatars') ? fallbackAvatar : (existing.avatar || fallbackAvatar),
+                        avatar: dbC.profile_picture_url || (existing.avatar?.includes('ui-avatars') ? fallbackAvatar : (existing.avatar || fallbackAvatar)),
                         unread: unread,
+                        is_favorite: isFavorite,
                         lastMsgTimestamp: ts,
                         messages: existing.messages || [],
                      };
@@ -369,9 +422,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   } else {
                      newContacts.push({
                         ...dbC,
-                        avatar: fallbackAvatar,
+                        avatar: dbC.profile_picture_url || fallbackAvatar,
                         messages: preview ? [{ id: 'preview-' + conv.id, text: preview, sender: 'client', timestamp: new Date(ts) }] : [],
                         unread: unread,
+                        is_favorite: isFavorite,
                         lastMsgTimestamp: ts
                      });
                   }

@@ -43,7 +43,7 @@ class EventProcessor {
                 // 1. Garante Contato
                 let { data: contact } = await supabase
                     .from('contacts')
-                    .select('id')
+                    .select('id, profile_picture_url')
                     .eq('tenant_id', tenantId)
                     .eq('phone', phone)
                     .single();
@@ -56,19 +56,19 @@ class EventProcessor {
                         phone: phone,
                         name: pushName,
                         whatsapp_jid: jid
-                    }).select('id').single();
+                    }).select('id, profile_picture_url').single();
                     
                     // Supabase retorna erro se a coluna instance_id não existir na tabela contacts, então fazemos fallback
                     if (error && error.code === 'PGRST204') {
                         // try without instance_id
                         const fallback = await supabase.from('contacts').insert({
                             tenant_id: tenantId, phone: phone, name: pushName, whatsapp_jid: jid
-                        }).select('id').single();
+                        }).select('id, profile_picture_url').single();
                         contact = fallback.data;
                     } else if (error) {
                          // Pode ser conflito
                          if (error.code === '23505') {
-                            const ext = await supabase.from('contacts').select('id').eq('tenant_id', tenantId).eq('phone', phone).single();
+                            const ext = await supabase.from('contacts').select('id, profile_picture_url').eq('tenant_id', tenantId).eq('phone', phone).single();
                             contact = ext.data;
                          } else {
                             throw error;
@@ -79,6 +79,17 @@ class EventProcessor {
                 }
 
                 if (!contact) continue;
+
+                // Tenta puxar a imagem de perfil no background se existir
+                if (sock && jid && !jid.includes('@g.us')) {
+                    sock.profilePictureUrl(jid, 'image')
+                        .then(async (url) => {
+                            if (url && url !== contact.profile_picture_url) {
+                                await supabase.from('contacts').update({ profile_picture_url: url }).eq('id', contact.id);
+                            }
+                        })
+                        .catch(() => {});
+                }
 
                 // 2. Garante Conversa
                 let { data: conversations, error: convQueryErr } = await supabase
