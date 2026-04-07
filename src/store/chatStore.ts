@@ -477,13 +477,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         let conv = convs && convs.length > 0 ? convs[0] : null;
 
         if (!conv) {
-             const { data: newConv } = await supabase.from('conversations').insert({
+             const { data: newConv, error: insertErr } = await supabase.from('conversations').insert({
                  tenant_id: tenant.id,
                  contact_id: contactId,
                  unread_count: 0,
                  status: 'open',
                  last_message_at: new Date().toISOString()
              }).select('id').single();
+             if (insertErr) {
+                 console.error("[chatStore] ERRO AO INSERIR NOVA CONVERSA:", insertErr);
+                 return;
+             }
              if (newConv) conv = newConv;
              else return;
         }

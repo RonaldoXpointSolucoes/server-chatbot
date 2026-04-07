@@ -145,29 +145,30 @@ export default function DevLogger() {
   };
 
   const handleTestEngine = async () => {
-    addLog({ type: 'info', message: 'Testando conexão manual com o Motor Baileys...', source: 'Tester' });
+    addLog({ type: 'info', message: `Testando conexão manual com o Motor Baileys...\n🔗 URL alvo: ${engineUrl}`, source: 'Tester' });
     const isOnline = await checkEngineStatus();
     if (isOnline) {
-       addLog({ type: 'success', message: 'Verificação do Engine Concluída com Sucesso!', source: 'Tester' });
+       addLog({ type: 'success', message: `Verificação do Engine Concluída com Sucesso!\n🔗 URL: ${engineUrl}\n📦 Versão: ${serverMeta?.engineVersion || 'Desconhecida'}\n🚀 Compilado em: ${serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString() : 'Desconhecida'}`, source: 'Tester' });
     } else {
-       addLog({ type: 'error', message: 'FALHA DE COMUNICAÇÃO: O Motor Baileys parece estar OFF-LINE.', source: 'Tester' });
+       addLog({ type: 'error', message: `FALHA DE COMUNICAÇÃO: O Motor Baileys parece estar OFF-LINE.\n🔗 URL: ${engineUrl}`, source: 'Tester' });
     }
   };
 
   const handleTestSupabase = async () => {
-    addLog({ type: 'info', message: 'Testando conexão com Supabase...', source: 'Tester' });
+    const sbUrl = import.meta.env.VITE_SUPABASE_URL || 'URL não encontrada';
+    addLog({ type: 'info', message: `Testando conexão com Supabase...\n🔗 URL alvo: ${sbUrl}`, source: 'Tester' });
     try {
         const { error } = await supabase.from('contacts').select('id').limit(1);
         if (error) throw error;
-        addLog({ type: 'success', message: 'Conexão Supabase OK!', source: 'Tester' });
+        addLog({ type: 'success', message: `Conexão Supabase OK!\n🔗 URL: ${sbUrl}`, source: 'Tester' });
     } catch(err: any) {
-        addLog({ type: 'error', message: `Erro Supabase: ${err.message}`, source: 'Tester' });
+        addLog({ type: 'error', message: `Erro Supabase: ${err.message}\n🔗 URL: ${sbUrl}`, source: 'Tester' });
     }
   };
 
   const handleTestApp = () => {
-    addLog({ type: 'info', message: 'Diagnóstico do React App...', source: 'Tester' });
-    addLog({ type: 'success', message: 'App React em Execução. Hooks ativos.', source: 'Tester' });
+    addLog({ type: 'info', message: `Diagnóstico do React App...\n🔗 Host local ativo: ${window.location.origin}`, source: 'Tester' });
+    addLog({ type: 'success', message: `App React em Execução. Hooks ativos.\nHost: ${window.location.origin}`, source: 'Tester' });
   };
 
   return (

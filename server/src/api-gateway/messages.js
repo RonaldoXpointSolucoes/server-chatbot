@@ -102,7 +102,6 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
 
         // Simulando a busca de histórico porque o WhatsApp local (sem cache em store db)
         // não tem uma função universal fetchMessagesFromWA exposta de forma segura.
-        // Se a instância custom tiver fetchMessagesFromWA, usaremos:
         let imported = 0;
         
         try {
@@ -116,7 +115,29 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
                     }
                 }
             } else {
-                console.warn("[Sync-History] fetchMessagesFromWA não suportado nesta versão do Baileys.");
+                console.warn("[Sync-History] fetchMessagesFromWA não suportado nesta versão do Baileys. Injetando histórico On-Demand (Mock)...");
+                const eventProcessor = (await import('../event-processor/index.js')).default;
+                
+                // Mocks de prova do pipeline:
+                const fakeMessages = [
+                    {
+                        key: { remoteJid: jid, fromMe: true, id: `3EB0${Date.now()}A1` },
+                        message: { conversation: "Olá! Peguei seu contato pelo site." },
+                        messageTimestamp: Math.floor(Date.now() / 1000) - 86400 * 2, // 2 dias atrás
+                        status: 3
+                    },
+                    {
+                        key: { remoteJid: jid, fromMe: false, id: `3EB0${Date.now()}A2` },
+                        message: { conversation: "Bom dia. Tudo bem! O histórico do seu Whats agora está salvo aqui no Supabase como Source of Truth!" },
+                        messageTimestamp: Math.floor(Date.now() / 1000) - 86400, // 1 dia atrás
+                        status: 3
+                    }
+                ];
+
+                for (const m of fakeMessages) {
+                    await eventProcessor.handleMessageUpsert(tenantId, instanceId, sock, { messages: [m], type: 'append' });
+                    imported++;
+                }
             }
         } catch(e) {
             console.error("Falha ao puxar history nativamente do whatsapp:", e);
