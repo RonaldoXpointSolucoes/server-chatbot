@@ -90,4 +90,22 @@ router.get('/stream', (req, res) => {
   });
 });
 
+// Endpoint para alterar o nível de debug do Baileys dinamicamente
+router.post('/level', async (req, res) => {
+  try {
+    const { level } = req.body;
+    if (level === 'trace' || level === 'info') {
+      const sm = await import('./session-manager/index.js');
+      if (sm.default && sm.default.logger) {
+        sm.default.logger.level = level;
+      }
+      res.json({ success: true, level });
+    } else {
+      res.status(400).json({ error: 'Nível inválido. Use "info" ou "trace".' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

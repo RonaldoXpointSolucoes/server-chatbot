@@ -24,7 +24,7 @@ class SessionManager {
             }
         };
 
-        this.logger = pino({ level: 'trace' }, pinoStream);
+        this.logger = pino({ level: 'info' }, pinoStream);
     }
 
     async createSession(tenantId, instanceId) {

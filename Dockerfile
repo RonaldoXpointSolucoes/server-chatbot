@@ -14,9 +14,9 @@ RUN npm pack
 
 # Then install dependencies in server
 WORKDIR /app/server
-RUN npm install
+RUN npm install --legacy-peer-deps
 # Ensure we install the packed tarball exactly
-RUN npm install /app/baileys-core/baileys-*.tgz
+RUN npm install /app/baileys-core/baileys-*.tgz --legacy-peer-deps
 
 ENV PORT=9000
 EXPOSE 9000
