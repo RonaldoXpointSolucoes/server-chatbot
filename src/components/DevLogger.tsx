@@ -261,14 +261,47 @@ export default function DevLogger() {
                  <Rocket size={12} /> Novidades <ChevronDown size={12} className={`transition-transform ${showChangelog ? 'rotate-180' : ''}`}/>
                </button>
             </div>
-            {showChangelog && serverMeta.changelog && (
-              <div className="bg-black/40 rounded-lg p-2 border border-emerald-500/10 mt-1 animate-in fade-in slide-in-from-top-2">
-                 <span className="font-bold text-emerald-500 mb-1 block">O que há de novo:</span>
-                 <ul className="list-disc pl-4 space-y-1 text-gray-300 opacity-90">
-                    {serverMeta.changelog.map((logItem: string, idx: number) => (
-                       <li key={idx}>{logItem}</li>
-                    ))}
-                 </ul>
+            {showChangelog && (serverMeta.changelog || serverMeta.history) && (
+              <div className="mt-2 animate-in fade-in slide-in-from-top-2 relative overflow-hidden rounded-2xl bg-white/5 dark:bg-black/40 backdrop-blur-3xl border border-emerald-500/20 shadow-[0_0_30px_rgba(16,185,129,0.1)] transition-all duration-500">
+                 {/* Efeito Glow Interno */}
+                 <div className="absolute -top-10 -right-10 w-32 h-32 bg-emerald-500/20 rounded-full blur-3xl"></div>
+                 
+                 <div className="p-4 relative z-10">
+                   <div className="flex items-center gap-2 mb-3">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg ring-2 ring-emerald-500/20">
+                         <Rocket size={14} className="text-white animate-pulse" />
+                      </div>
+                      <div>
+                        <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300 block text-sm">Novidades na v{serverMeta.engineVersion}</span>
+                        <span className="text-[10px] text-gray-400">
+                          Deploy de {serverMeta.history && serverMeta.history[0] ? new Date(serverMeta.history[0].compile_date).toLocaleString('pt-BR') : 'Hoje'}
+                        </span>
+                      </div>
+                   </div>
+
+                   <ul className="space-y-2 mt-2">
+                      {serverMeta.changelog && serverMeta.changelog.map((logItem: string, idx: number) => (
+                         <li key={idx} className="flex items-start gap-2 text-gray-300 text-[11px] leading-relaxed group">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/60 mt-1.5 group-hover:bg-emerald-400 group-hover:shadow-[0_0_8px_rgba(52,211,153,0.8)] transition-all flex-shrink-0"></span>
+                            <span className="opacity-90 group-hover:opacity-100 transition-opacity">{logItem}</span>
+                         </li>
+                      ))}
+                   </ul>
+
+                   {serverMeta.history && serverMeta.history.length > 1 && (
+                     <div className="mt-4 pt-3 border-t border-white/5 dark:border-white/10">
+                        <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider mb-2 block">Histórico de Versões</span>
+                        <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
+                          {serverMeta.history.slice(1, 5).map((h: any, i: number) => (
+                            <div key={i} className="flex-shrink-0 bg-black/20 px-2 py-1.5 rounded-lg border border-gray-700/50 flex flex-col items-center justify-center min-w-[70px]">
+                               <span className="text-emerald-400 font-mono text-[10px] font-bold">{h.version}</span>
+                               <span className="text-gray-500 text-[8px]">{new Date(h.compile_date).toLocaleDateString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                     </div>
+                   )}
+                 </div>
               </div>
             )}
             

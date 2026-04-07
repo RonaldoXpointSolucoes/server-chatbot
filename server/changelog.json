@@ -1,0 +1,9 @@
+{
+  "version": "1.0.26",
+  "changelog": [
+    "✅ UI Premium no Card de Novidades (Glassmorphism & Animação)",
+    "✅ Integração nativa de Release Notes via /debug/healthz",
+    "✅ Novo Endpoint de Registro de Server Releases com leitura estática",
+    "✅ Melhoria sistêmica da barra lateral e versões sincronizadas"
+  ]
+}

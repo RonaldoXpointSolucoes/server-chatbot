@@ -16,6 +16,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
 
+let serverChangelog = [];
+try {
+   const clPath = path.join(__dirname, '../changelog.json');
+   if (fs.existsSync(clPath)) {
+      const cls = JSON.parse(fs.readFileSync(clPath, 'utf8'));
+      if(cls.changelog && Array.isArray(cls.changelog)) {
+          serverChangelog = cls.changelog;
+      }
+   }
+} catch(e) {
+   console.warn("Changelog notice:", e.message);
+}
+
 const ENGINE_VERSION = packageJson.version;
 const COMPILE_DATE = new Date().toISOString();
 
@@ -34,12 +47,27 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
 
-app.get('/debug/healthz', (req, res) => res.json({ 
-    status: 'ok', 
-    uptime: process.uptime(),
-    engineVersion: ENGINE_VERSION,
-    compileDate: COMPILE_DATE
-}));
+app.get('/debug/healthz', async (req, res) => {
+    // Tenta ler o historico de releases para o front (data e hora reais do banco se possível)
+    let releaseHistory = [];
+    try {
+        const { data: dbReleases } = await supabase.from('server_releases')
+            .select('*')
+            .order('compile_date', { ascending: false })
+            .limit(10);
+            
+        releaseHistory = dbReleases || [];
+    } catch(err) { /* ignore */ }
+
+    return res.json({ 
+        status: 'ok', 
+        uptime: process.uptime(),
+        engineVersion: ENGINE_VERSION,
+        compileDate: COMPILE_DATE,
+        changelog: serverChangelog, // Retornando as novidades!
+        history: releaseHistory
+    });
+});
 app.get('/debug/readyz', async (req, res) => {
     const { error } = await supabase.from('tenants').select('id').limit(1);
     if (error) return res.status(503).json({ status: 'error_db', detail: error.message });
@@ -52,14 +80,25 @@ app.use('/api/v1/system/logs', systemLogger);
 app.listen(PORT, async () => {
     console.log(`[Antigravity V2] Node.js Server online na porta ${PORT}`);
     
-    // Registrar o deploy no banco
+    // Registrar o deploy no banco Supabase
     try {
-        await supabase.from('server_releases').insert([{
+        // Tenta com a coluna novidades "changelog_details", se falhar, tenta sem.
+        const { error: err1 } = await supabase.from('server_releases').insert([{
             version: ENGINE_VERSION,
             compile_date: COMPILE_DATE,
-            environment: 'production'
+            environment: 'production',
+            changelog_notes: JSON.stringify(serverChangelog)
         }]);
-        console.log(`[Auditoria] Deploy registrado: ${ENGINE_VERSION}`);
+
+        if (err1 && err1.message.includes('column')) {
+            // Se a coluna "changelog_notes" não existir, envia apenas o essencial (fallback)
+            await supabase.from('server_releases').insert([{
+                version: ENGINE_VERSION,
+                compile_date: COMPILE_DATE,
+                environment: 'production'
+            }]);
+        }
+        console.log(`[Auditoria] Deploy registrado: ${ENGINE_VERSION} e População Novidades Executada!`);
     } catch(err) {
         console.error("[Auditoria] Falha ao registrar deploy", err.message);
     }
