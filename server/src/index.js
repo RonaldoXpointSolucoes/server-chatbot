@@ -8,6 +8,16 @@ import apiGateway from './api-gateway/index.js';
 import systemLogger from './system-logger.js';
 import { supabase } from './supabase.js';
 import sessionManager from './session-manager/index.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
+
+const ENGINE_VERSION = packageJson.version;
+const COMPILE_DATE = new Date().toISOString();
 
 const app = express();
 const PORT = process.env.PORT || 9000;
@@ -24,7 +34,12 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
 
-app.get('/debug/healthz', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+app.get('/debug/healthz', (req, res) => res.json({ 
+    status: 'ok', 
+    uptime: process.uptime(),
+    engineVersion: ENGINE_VERSION,
+    compileDate: COMPILE_DATE
+}));
 app.get('/debug/readyz', async (req, res) => {
     const { error } = await supabase.from('tenants').select('id').limit(1);
     if (error) return res.status(503).json({ status: 'error_db', detail: error.message });
@@ -37,6 +52,18 @@ app.use('/api/v1/system/logs', systemLogger);
 app.listen(PORT, async () => {
     console.log(`[Antigravity V2] Node.js Server online na porta ${PORT}`);
     
+    // Registrar o deploy no banco
+    try {
+        await supabase.from('server_releases').insert([{
+            version: ENGINE_VERSION,
+            compile_date: COMPILE_DATE,
+            environment: 'production'
+        }]);
+        console.log(`[Auditoria] Deploy registrado: ${ENGINE_VERSION}`);
+    } catch(err) {
+        console.error("[Auditoria] Falha ao registrar deploy", err.message);
+    }
+
     try {
         console.log("[Worker Boot] Buscando instâncias pendentes...");
         const { data: activeLeases } = await supabase

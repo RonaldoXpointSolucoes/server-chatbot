@@ -27,14 +27,14 @@ export default function DevLogger() {
         setServerMeta(data);
         setEngineStatus('online');
         setLastPing(new Date());
-        return true;
+        return data;
       } else {
         setEngineStatus('offline');
-        return false;
+        return null;
       }
     } catch {
       setEngineStatus('offline');
-      return false;
+      return null;
     }
   };
 
@@ -148,9 +148,9 @@ export default function DevLogger() {
 
   const handleTestEngine = async () => {
     addLog({ type: 'info', message: `Testando conexão manual com o Motor Baileys...\n🔗 URL alvo: ${engineUrl}`, source: 'Tester' });
-    const isOnline = await checkEngineStatus();
-    if (isOnline) {
-       addLog({ type: 'success', message: `Verificação do Engine Concluída com Sucesso!\n🔗 URL: ${engineUrl}\n📦 Versão: ${serverMeta?.engineVersion || 'Desconhecida'}\n🚀 Compilado em: ${serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString() : 'Desconhecida'}`, source: 'Tester' });
+    const metaData = await checkEngineStatus();
+    if (metaData) {
+       addLog({ type: 'success', message: `Verificação do Engine Concluída com Sucesso!\n🔗 URL: ${engineUrl}\n📦 Versão: ${metaData.engineVersion || 'Desconhecida'}\n🚀 Compilado em: ${metaData.compileDate ? new Date(metaData.compileDate).toLocaleString('pt-BR') : 'Desconhecida'}`, source: 'Tester' });
     } else {
        addLog({ type: 'error', message: `FALHA DE COMUNICAÇÃO: O Motor Baileys parece estar OFF-LINE.\n🔗 URL: ${engineUrl}`, source: 'Tester' });
     }
@@ -247,11 +247,11 @@ export default function DevLogger() {
                <div className="flex items-center gap-3 opacity-80">
                  <div className="flex items-center gap-1.5 text-blue-300 bg-blue-900/20 px-2 py-0.5 rounded-md border border-blue-500/20">
                     <Layers size={12} />
-                    <span>Engine: {serverMeta.engineVersion}</span>
+                    <span>Engine: {serverMeta?.engineVersion || 'Desconhecido'}</span>
                  </div>
                  <div className="flex items-center gap-1.5 text-orange-300 bg-orange-900/20 px-2 py-0.5 rounded-md border border-orange-500/20">
                     <Calendar size={12} />
-                    <span>Compilação: {new Date(serverMeta.compileDate).toLocaleString()}</span>
+                    <span>Compilação: {serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString('pt-BR') : 'Indisponível'}</span>
                  </div>
                </div>
                <button 
