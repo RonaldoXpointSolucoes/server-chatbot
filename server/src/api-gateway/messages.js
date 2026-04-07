@@ -92,13 +92,19 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
         // Identifica a conversa / JID no Supabase
         const { data: convData, error: convErr } = await supabase
             .from('conversations')
-            .select('contact_id')
+            .select('contact_id, contacts(phone)')
             .eq('id', conversationId)
             .eq('tenant_id', tenantId)
             .single();
 
         if (convErr || !convData) return res.status(404).json({ error: 'Conversation not found' });
-        const jid = convData.contact_id;
+        
+        let jid = '';
+        if (convData.contacts && convData.contacts.phone) {
+            jid = `${convData.contacts.phone}@s.whatsapp.net`;
+        } else {
+            return res.status(400).json({ error: 'Contact phone not found' });
+        }
 
         // Simulando a busca de histórico porque o WhatsApp local (sem cache em store db)
         // não tem uma função universal fetchMessagesFromWA exposta de forma segura.
