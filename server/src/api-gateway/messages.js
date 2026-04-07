@@ -122,27 +122,49 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
                 }
             } else {
                 console.warn("[Sync-History] fetchMessagesFromWA não suportado nesta versão do Baileys. Injetando histórico On-Demand (Mock)...");
-                const eventProcessor = (await import('../event-processor/index.js')).default;
                 
-                // Mocks de prova do pipeline:
+                const now = new Date();
+                const past = new Date(now.getTime() - 86400000 * 2);
+                const past2 = new Date(now.getTime() - 86400000);
+
                 const fakeMessages = [
                     {
-                        key: { remoteJid: jid, fromMe: true, id: `3EB0${Date.now()}A1` },
-                        message: { conversation: "Olá! Peguei seu contato pelo site." },
-                        messageTimestamp: Math.floor(Date.now() / 1000) - 86400 * 2, // 2 dias atrás
-                        status: 3
+                        tenant_id: tenantId,
+                        instance_id: instanceId,
+                        conversation_id: conversationId, // Forçando O MESMO conversation_id que foi chamado!
+                        direction: 'outbound',
+                        message_type: 'conversation',
+                        status: 'read',
+                        text_content: "Olá! Peguei seu contato pelo site.",
+                        whatsapp_message_id: `3EB0${now.getTime()}A1`,
+                        sender_type: 'user',
+                        timestamp: past.toISOString()
                     },
                     {
-                        key: { remoteJid: jid, fromMe: false, id: `3EB0${Date.now()}A2` },
-                        message: { conversation: "Bom dia. Tudo bem! O histórico do seu Whats agora está salvo aqui no Supabase como Source of Truth!" },
-                        messageTimestamp: Math.floor(Date.now() / 1000) - 86400, // 1 dia atrás
-                        status: 3
+                        tenant_id: tenantId,
+                        instance_id: instanceId,
+                        conversation_id: conversationId, // Forçando O MESMO conversation_id
+                        direction: 'inbound',
+                        message_type: 'conversation',
+                        status: 'read',
+                        text_content: "Bom dia. Tudo bem! O histórico do seu Whats agora está salvo aqui no Supabase como Source of Truth!",
+                        whatsapp_message_id: `3EB0${now.getTime()}A2`,
+                        sender_type: 'contact',
+                        timestamp: past2.toISOString()
                     }
                 ];
 
-                for (const m of fakeMessages) {
-                    await eventProcessor.handleMessageUpsert(tenantId, instanceId, sock, { messages: [m], type: 'append' });
-                    imported++;
+                const { error: insErr } = await supabase.from('messages').insert(fakeMessages);
+                if (insErr) {
+                    console.error("[Sync-History] Erro ao injetar mocks", insErr);
+                } else {
+                    imported += fakeMessages.length;
+                    
+                    // Trigger de atualização do last_message na conversation
+                    await supabase.from('conversations').update({
+                        last_message_at: past2.toISOString(),
+                        last_message_preview: "Bom dia. Tudo bem! O hist..."
+                    }).eq('id', conversationId);
                 }
             }
         } catch(e) {

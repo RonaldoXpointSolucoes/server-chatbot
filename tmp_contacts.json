@@ -1,0 +1,22 @@
+[
+  {
+    "id": "1d5c7505-74cb-49b8-807e-f9dd6b9a1bce",
+    "tenant_id": "8b1e427b-2321-4ea7-9d7e-90f7d5cbad21",
+    "name": "Ronaldo Melo",
+    "phone": "554188636269",
+    "whatsapp_jid": "554188636269@s.whatsapp.net",
+    "created_at": "2026-04-06T17:48:22.784124+00:00",
+    "instance_id": null,
+    "is_pinned": false
+  },
+  {
+    "id": "af53f7d6-3fc7-4c44-b572-b89ce197313d",
+    "tenant_id": "8b1e427b-2321-4ea7-9d7e-90f7d5cbad21",
+    "name": "Ronaldo Clemente",
+    "phone": "150547344662594",
+    "whatsapp_jid": "150547344662594@lid",
+    "created_at": "2026-04-06T17:48:08.343661+00:00",
+    "instance_id": null,
+    "is_pinned": true
+  }
+]
