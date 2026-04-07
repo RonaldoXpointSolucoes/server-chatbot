@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, Database, Save, Loader2, X, CheckCircle, Terminal } from 'lucide-react';
 import { useSettingsStore } from '../store/settingsStore';
-import { setInstanceWebhook } from '../services/evolution';
 import { useChatStore } from '../store/chatStore';
 import { useDevStore } from '../store/devStore';
 
@@ -30,18 +29,12 @@ export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> =
         throw new Error('Instância do WhatsApp não encontrada (Tenant).');
       }
 
-      const instanceName = tenantInfo.evolution_api_instance;
-      const urlSupabase = import.meta.env.VITE_SUPABASE_WEBHOOK_URL;
-
-      if (!urlSupabase) {
-        throw new Error('URL base do webhook via Supabase não está configurada no .env.');
-      }
-
-      await setInstanceWebhook(instanceName, urlSupabase);
-
-      setStatusMsg('Integração nativa ativada e sincronizada com sucesso!');
+      // O backend em Baileys Nativo é integrado diretamente ao Supabase Database via 'eventProcessor'.
+      // Portanto, não há endpoint REST '/webhook/set' nem requisições externas de webhook.
       
-      // Fecha apos delay
+      setStatusMsg('Integração nativa ativada e otimizada (Cloud Direct DB)!');
+      
+      // Fecha apontecisamente apos o feedback
       setTimeout(() => {
         onClose();
         setStatusMsg('');
@@ -49,7 +42,7 @@ export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> =
 
     } catch (err: any) {
       console.error(err);
-      setStatusMsg(err.message || 'Erro ao definir webhook da Cloud Function');
+      setStatusMsg(err.message || 'Erro de configuração.');
     } finally {
       setIsSaving(false);
     }
