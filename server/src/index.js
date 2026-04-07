@@ -5,6 +5,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import apiGateway from './api-gateway/index.js';
+import systemLogger from './system-logger.js';
 import { supabase } from './supabase.js';
 import sessionManager from './session-manager/index.js';
 
@@ -31,6 +32,7 @@ app.get('/debug/readyz', async (req, res) => {
 });
 
 app.use('/api', apiGateway);
+app.use('/api/v1/system/logs', systemLogger);
 
 app.listen(PORT, async () => {
     console.log(`[Antigravity V2] Node.js Server online na porta ${PORT}`);

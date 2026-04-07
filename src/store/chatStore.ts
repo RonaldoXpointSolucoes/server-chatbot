@@ -166,17 +166,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao processar mídia no servidor');
 
+      console.log('[uploadAndSendMedia] Resposta do server:', data);
+      
       if (data.media_url) {
         set((s) => ({
           contacts: s.contacts.map(c => c.id === contactId ? {
             ...c,
+            // Procura o pseudoId e substitui a url temporaria
             messages: c.messages.map(m => m.id === pseudoId ? { ...m, mediaUrl: data.media_url } : m)
           } : c)
         }));
       }
 
     } catch (err: any) {
-      console.error('Falha ao upar/enviar media:', err);
+      console.error('[uploadAndSendMedia] Falha crítica:', err);
+      // Se der erro, pelo menos mostramos no componente que a media deu erro
+      // Não removemos para o dev ver onde falhou
     }
   },
 
@@ -637,6 +642,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     channel
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
         const m = payload.new as any;
+        console.log('[Realtime] Message INSERT:', m);
+
         if (m.sender_type === 'bot' || m.sender_type === 'system') return; // Ignore echoes that don't need realtime sync
 
         let targetContactId = m.conversation_id ? null : m.contact_id;
@@ -676,23 +683,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
            let u = [...s.contacts];
            const i = u.findIndex(c => c.id === cid);
            if (i !== -1) {
-              u[i].lastMsgTimestamp = new Date(m.timestamp).getTime();
+              const updatedContact = { ...u[i] };
+              updatedContact.lastMsgTimestamp = new Date(m.timestamp).getTime();
               if (s.activeChatId !== cid) {
-                  u[i].unread = (u[i].unread || 0) + 1;
+                  updatedContact.unread = (updatedContact.unread || 0) + 1;
               }
+              u[i] = updatedContact;
            }
            return { contacts: u };
         });
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, async (payload) => {
         const m = payload.new as any;
+        console.log('[Realtime] Message UPDATE:', m);
         set((s) => {
            let updatedContacts = [...s.contacts];
            // Tenta achar com fallback iterando as mensagens para bypassar conversa ausente no state.
            for (let i = 0; i < updatedContacts.length; i++) {
               const msgIndex = updatedContacts[i].messages.findIndex(msg => msg.id === m.id || (m.whatsapp_message_id && msg.whatsapp_id === m.whatsapp_message_id));
               if (msgIndex !== -1) {
-                  updatedContacts[i].messages[msgIndex].status = m.status;
+                  const newMessages = [...updatedContacts[i].messages];
+                  newMessages[msgIndex] = { ...newMessages[msgIndex], status: m.status };
+                  updatedContacts[i] = { ...updatedContacts[i], messages: newMessages };
                   break;
               }
            }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useDevStore } from '../store/devStore';
 import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network } from 'lucide-react';
 import { supabase } from '../services/supabase';
+import { ServerLogsTerminal } from './ServerLogsTerminal';
 
 export default function DevLogger() {
   const { logs, isVisible, toggleVisibility, addLog, clearLogs } = useDevStore();
@@ -11,6 +12,7 @@ export default function DevLogger() {
   const [lastPing, setLastPing] = useState<Date | null>(null);
   const [serverMeta, setServerMeta] = useState<any>(null);
   const [showChangelog, setShowChangelog] = useState(false);
+  const [showServerLogs, setShowServerLogs] = useState(false);
   const [showEndpoints, setShowEndpoints] = useState(false);
   
   const engineUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
@@ -213,6 +215,9 @@ export default function DevLogger() {
             )}
           </div>
           <div className="flex items-center gap-2">
+             <button onClick={(e) => { e.stopPropagation(); setShowServerLogs(!showServerLogs); }} className="text-gray-400 hover:text-green-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Abrir Server Terminal SSE">
+                <Terminal size={14} />
+             </button>
              <button onClick={(e) => { e.stopPropagation(); handleTestSupabase(); }} className="text-gray-400 hover:text-purple-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Testar Supabase (DB)">
                 <Database size={14} />
              </button>
@@ -357,7 +362,8 @@ export default function DevLogger() {
           <div ref={bottomRef} />
         </div>
       </div>
-    </div>
+      </div>
+      <ServerLogsTerminal isOpen={showServerLogs} onClose={() => setShowServerLogs(false)} />
     </>
   );
 }

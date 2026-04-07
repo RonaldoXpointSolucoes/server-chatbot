@@ -2,6 +2,13 @@ import express from 'express';
 import sessionManager from '../session-manager/index.js';
 import { supabase } from '../supabase.js';
 import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
 const router = express.Router();
@@ -114,8 +121,52 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
             return res.status(400).json({ error: 'Missing file, jid or messageType' });
         }
 
-        // Upload to Supabase Storage First
+        // Convert WebM to OGG Opus if it's an audio note
         const timestamp = Date.now();
+        console.log(`[send-media] Received request! messageType: ${messageType}, file: ${file.originalname}, mime: ${file.mimetype}, size: ${file.buffer.length}`);
+        
+        if (messageType === 'audio' && (file.mimetype.includes('webm') || file.originalname.endsWith('.webm'))) {
+            try {
+                console.log(`[send-media] Starting ffmpeg conversion to ogg...`);
+                const tempInput = path.join(os.tmpdir(), `in_${timestamp}.webm`);
+                const tempOutput = path.join(os.tmpdir(), `out_${timestamp}.ogg`);
+                
+                fs.writeFileSync(tempInput, file.buffer);
+                
+                await new Promise((resolve, reject) => {
+                    ffmpeg(tempInput)
+                        .audioCodec('libopus')
+                        .format('ogg')
+                        .on('end', () => {
+                            console.log(`[send-media] Conversion finished!`);
+                            resolve();
+                        })
+                        .on('error', (err, stdout, stderr) => {
+                            console.error(`[send-media] FFMPEG ERROR:`, stderr);
+                            reject(err);
+                        })
+                        .save(tempOutput);
+                });
+                
+                const convertedBuffer = fs.readFileSync(tempOutput);
+                console.log(`[send-media] Read converted buffer, size is: ${convertedBuffer.length}`);
+                
+                // Sobrescreve as propriedades do arquivo com a versão convertida
+                file.buffer = convertedBuffer;
+                file.mimetype = 'audio/ogg; codecs=opus';
+                file.originalname = file.originalname.replace('.webm', '.ogg');
+                
+                // Clean up temp files
+                try { fs.unlinkSync(tempInput); } catch (e) {}
+                try { fs.unlinkSync(tempOutput); } catch (e) {}
+                
+            } catch (err) {
+                console.error('Error converting WebM to OGG:', err);
+                return res.status(500).json({ error: 'Failed to convert audio file format' });
+            }
+        }
+
+        // Upload to Supabase Storage First
         const ext = file.originalname.split('.').pop() || 'tmp';
         const safeName = file.originalname.replace(/[^a-zA-Z0-9.\-]/g, '_');
         const storagePath = `tenant_${tenantId}/instance_${instanceId}/${jid}/${timestamp}_${safeName}`;

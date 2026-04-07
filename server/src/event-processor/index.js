@@ -2,7 +2,7 @@ import { supabase } from '../supabase.js';
 import realtime from '../realtime-publisher/index.js';
 import qrcode from 'qrcode';
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
-
+import fs from 'fs';
 
 class EventProcessor {
     
@@ -16,11 +16,14 @@ class EventProcessor {
         return jid === 'status@broadcast' || (jid && jid.endsWith('@newsletter'));
     }
 
-    // Processa uma matriz de mensagens (seja vinda de history ou de upsert em tempo real)
     async handleMessageUpsert(tenantId, instanceId, sock, m) {
         if (!m.messages || m.messages.length === 0) return;
 
         for (const msg of m.messages) {
+            try {
+                fs.appendFileSync('event_debug.log', new Date().toISOString() + ' RAW PAYLOAD: ' + JSON.stringify(msg) + '\n');
+            } catch(e){}
+
             const jid = msg.key.remoteJid;
             
             // Ignora status e grupos por enquanto
