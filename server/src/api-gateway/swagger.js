@@ -19,13 +19,13 @@ const options = {
     },
     servers: [
       {
-        url: '{protocol}://{host}',
-        description: 'Servidor API',
-        variables: {
-            protocol: { enum: ['http', 'https'], default: 'http' },
-            host: { default: 'localhost:3000' }
-        }
+        url: '/',
+        description: 'Servidor Atual (Auto)'
       },
+      {
+        url: 'http://localhost:3000',
+        description: 'Servidor Local (Dev)'
+      }
     ],
   },
   apis: [path.join(__dirname, './public-rest.js')], 
