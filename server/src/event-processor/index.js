@@ -20,6 +20,7 @@ class EventProcessor {
         if (!m.messages || m.messages.length === 0) return;
 
         for (const msg of m.messages) {
+            console.log(`[EventProcessor] CHEGOU AQUI: tenant=${tenantId} inst=${instanceId} jid=${msg?.key?.remoteJid} id=${msg?.key?.id} type=${m.type}`);
             try {
                 fs.appendFileSync('event_debug.log', new Date().toISOString() + ' RAW PAYLOAD: ' + JSON.stringify(msg) + '\n');
             } catch(e){}

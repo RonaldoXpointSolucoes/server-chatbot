@@ -1,7 +1,15 @@
 import { supabase } from '../supabase.js';
 import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
 
+// Cache global por instância para não estrangular a rede nas leituras
+const sessionCaches = new Map();
+
 export async function useSupabaseAuthState(tenantId, instanceId) {
+    if (!sessionCaches.has(instanceId)) {
+        sessionCaches.set(instanceId, new Map());
+    }
+    const memCache = sessionCaches.get(instanceId);
+
     const { data: credsData } = await supabase
         .from('wa_auth_credentials')
         .select('creds_data')
@@ -27,54 +35,61 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
             keys: {
                 get: async (type, ids) => {
                     const data = {};
-                    const keysToFetch = ids.map(id => `${type}-${id}`);
+                    const fetchNames = [];
                     
-                    if (keysToFetch.length === 0) return data;
-                    
-                    const { data: keysFromDb, error } = await supabase
-                        .from('wa_auth_keys')
-                        .select('key_name, key_data')
-                        .eq('instance_id', instanceId)
-                        .in('key_name', keysToFetch);
-
-                    if (error) {
-                        console.error(`[${instanceId}] Erro GET keys:`, error);
-                        return data;
+                    for (const id of ids) {
+                        const name = `${type}-${id}`;
+                        if (memCache.has(name)) {
+                            // Restaura cópia serializada
+                            let cv = memCache.get(name);
+                            if (type === 'app-state-sync-key' && cv && cv.target) {
+                                cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
+                            }
+                            data[id] = cv;
+                        } else {
+                            fetchNames.push(name);
+                        }
                     }
 
-                    for (const dbKey of (keysFromDb || [])) {
-                        const [, id] = dbKey.key_name.split('-');
-                        const parsedData = JSON.parse(JSON.stringify(dbKey.key_data), BufferJSON.reviver);
-                        
-                        if (type === 'app-state-sync-key' && parsedData) {
-                            if (parsedData.target) {
-                                data[id] = {
-                                    ...parsedData,
-                                    target: Buffer.from(parsedData.target, 'base64')
-                                };
-                                continue;
+                    if (fetchNames.length > 0) {
+                        const { data: keysFromDb, error } = await supabase
+                            .from('wa_auth_keys')
+                            .select('key_name, key_data')
+                            .eq('instance_id', instanceId)
+                            .in('key_name', fetchNames);
+                            
+                        if (!error && keysFromDb) {
+                            for (const dbKey of keysFromDb) {
+                                const parsed = JSON.parse(JSON.stringify(dbKey.key_data), BufferJSON.reviver);
+                                memCache.set(dbKey.key_name, parsed);
+                                
+                                const id = dbKey.key_name.split('-')[1];
+                                if (type === 'app-state-sync-key' && parsed && parsed.target) {
+                                    data[id] = { ...parsed, target: Buffer.from(parsed.target, 'base64') };
+                                } else {
+                                    data[id] = parsed;
+                                }
                             }
                         }
-                        
-                        data[id] = parsedData;
                     }
 
                     return data;
                 },
                 set: async (data) => {
                     const keysToUpsert = [];
+                    const keysToDelete = [];
+                    
                     for (const category in data) {
                         for (const id in data[category]) {
                             const val = data[category][id];
                             const name = `${category}-${id}`;
                             const isNull = !val;
+                            
                             if (isNull) {
-                                await supabase
-                                  .from('wa_auth_keys')
-                                  .delete()
-                                  .eq('instance_id', instanceId)
-                                  .eq('key_name', name);
+                                memCache.delete(name);
+                                keysToDelete.push(name);
                             } else {
+                                memCache.set(name, val);
                                 keysToUpsert.push({
                                     instance_id: instanceId,
                                     tenant_id: tenantId,
@@ -85,13 +100,17 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                         }
                     }
 
+                    if (keysToDelete.length > 0) {
+                        supabase.from('wa_auth_keys')
+                            .delete()
+                            .eq('instance_id', instanceId)
+                            .in('key_name', keysToDelete)
+                            .catch(e => console.error(`[${instanceId}] Erro DEL keys:`, e.message));
+                    }
                     if (keysToUpsert.length > 0) {
-                        const { error } = await supabase
-                            .from('wa_auth_keys')
-                            .upsert(keysToUpsert, { onConflict: 'instance_id, key_name' });
-                        if(error) {
-                            console.error(`[${instanceId}] Erro ao gravar WA_AUTH_KEYS:`, error);
-                        }
+                        supabase.from('wa_auth_keys')
+                            .upsert(keysToUpsert, { onConflict: 'instance_id, key_name' })
+                            .catch(e => console.error(`[${instanceId}] Erro UPSERT keys:`, e.message));
                     }
                 }
             }
