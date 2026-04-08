@@ -66,7 +66,10 @@ class SessionManager {
                 auth: state,
                 browser: ['Mac OS', 'Desktop', '1.0.0'],
                 generateHighQualityLinkPreview: true,
-                syncFullHistory: true
+                syncFullHistory: true,
+                connectTimeoutMs: 60000,
+                keepAliveIntervalMs: 30000,
+                defaultQueryTimeoutMs: 60000
             });
 
             sock.ev.on('creds.update', saveCreds);

@@ -29,13 +29,37 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
         });
     }
 
+    // Pre-load absoluto de todas as chaves para a RAM (Evita congestionar a rede e previne o Timeout 408)
+    if (memCache.size === 0) {
+        let hasMore = true;
+        let page = 0;
+        while (hasMore) {
+            const { data: allKeys, error } = await supabase
+                .from('wa_auth_keys')
+                .select('key_name, key_data')
+                .eq('instance_id', instanceId)
+                .range(page * 1000, (page + 1) * 1000 - 1);
+            
+            if (error || !allKeys || allKeys.length === 0) {
+                hasMore = false;
+            } else {
+                for (const dbKey of allKeys) {
+                    const parsed = JSON.parse(JSON.stringify(dbKey.key_data), BufferJSON.reviver);
+                    memCache.set(dbKey.key_name, parsed);
+                }
+                if (allKeys.length < 1000) hasMore = false;
+                page++;
+            }
+        }
+        console.log(`[SessionManager] Carregadas ${memCache.size} chaves em RAM para a instância ${instanceId}`);
+    }
+
     return {
         state: {
             creds,
             keys: {
                 get: async (type, ids) => {
                     const data = {};
-                    const fetchNames = [];
                     
                     for (const id of ids) {
                         const name = `${type}-${id}`;
@@ -46,31 +70,8 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                                 cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
                             }
                             data[id] = cv;
-                        } else {
-                            fetchNames.push(name);
                         }
-                    }
-
-                    if (fetchNames.length > 0) {
-                        const { data: keysFromDb, error } = await supabase
-                            .from('wa_auth_keys')
-                            .select('key_name, key_data')
-                            .eq('instance_id', instanceId)
-                            .in('key_name', fetchNames);
-                            
-                        if (!error && keysFromDb) {
-                            for (const dbKey of keysFromDb) {
-                                const parsed = JSON.parse(JSON.stringify(dbKey.key_data), BufferJSON.reviver);
-                                memCache.set(dbKey.key_name, parsed);
-                                
-                                const id = dbKey.key_name.split('-')[1];
-                                if (type === 'app-state-sync-key' && parsed && parsed.target) {
-                                    data[id] = { ...parsed, target: Buffer.from(parsed.target, 'base64') };
-                                } else {
-                                    data[id] = parsed;
-                                }
-                            }
-                        }
+                        // Se não tem na RAM, enviamos undefined e o Baileys gerará uma nova. Sem queries Supabase no meio da crypto!
                     }
 
                     return data;
