@@ -15,7 +15,27 @@ const options = {
     info: {
       title: 'Antigravity ChatBoot API',
       version: packageJson.version,
-      description: 'API RESTful completa para envio de mensagens, mídias e gestão de instâncias de WhatsApp.',
+      description: `
+**🚀 Bem-vindo à API RESTful do Antigravity ChatBoot**
+
+Esta documentação interativa (Swagger) permite que você teste as rotas de conexão do motor Baileys, evios de mensagens e mídias de forma segura e imediata.
+
+---
+
+### 💡 Dicas de Uso
+
+1. **Autenticação 🔑**
+   Alguns endpoints sensíveis requerem o cabeçalho \`apikey\`. O valor desse cabeçalho é a chave da instância, visível no banco de dados Supabase na tabela de instâncias.
+
+2. **Entendendo as Rotas 🔄**
+   - **\`POST /instance/create\`**: Crie novas conexões. Vai retornar o \`qrcode\` ou indicar se já está conectado na sessão.
+   - **\`POST /message/sendText\`**: Disparador direto. Basta preencher o \`number\` (Ex: \`5511999999999\`) e a propriedade \`text\`.
+
+3. **Status do Servidor HTTPS 🌐**
+   O menu drop-down *Servers* agora reconhece de forma dinâmica o seu DNS na Nuvem (Coolify) sem problemas de "localhost".
+
+> **Aviso de Testes:** As ações tomadas por essa tela afetam as camadas reais do seu motor NodeJS. As mensagens que você disparar por aqui chegarão nos celulares destinatários.
+`,
     },
     servers: [
       {
