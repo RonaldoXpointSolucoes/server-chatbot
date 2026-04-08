@@ -5,7 +5,7 @@ import EvolutionModal from '../components/EvolutionModal';
 import { DeleteModal, RenameModal, NewChatModal } from '../components/ChatModals';
 import { SettingsModal } from '../components/SettingsModal';
 import ThemeToggle from '../components/ThemeToggle';
-
+import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -16,7 +16,7 @@ export function cn(...inputs: (string | undefined | null | false)[]) {
 
 export default function ChatDashboard() {
   const tenantName = sessionStorage.getItem('current_tenant_name');
-
+  const { isEnabled: isDevLoggerEnabled } = useDevStore();
   const {  
     contacts, 
     activeChatId, 
@@ -246,7 +246,13 @@ export default function ChatDashboard() {
                       <CheckCheck size={18} className="text-[#00a884]" />
                       <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Marcar todas lidas</span>
                     </button>
-                    <button onClick={() => setIsSettingsOpen(true)} className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3">
+                    {isDevLoggerEnabled && (
+                      <a href="/swagger/teste.html" target="_blank" rel="noopener noreferrer" className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 border-t border-gray-100 dark:border-[#304046]">
+                        <Terminal size={18} className="text-blue-500" />
+                        <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Swagger / API Docs</span>
+                      </a>
+                    )}
+                    <button onClick={() => setIsSettingsOpen(true)} className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 border-t border-gray-100 dark:border-[#304046]">
                       <Settings size={18} />
                       <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Configurações</span>
                     </button>

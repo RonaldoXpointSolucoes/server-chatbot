@@ -43,7 +43,8 @@ const requireApiKey = async (req, res, next) => {
     next();
 };
 
-router.use(requireApiKey);
+// Middleware global removido para não inferir em sub-rotas
+// router.use(requireApiKey);
 
 /**
  * @swagger
@@ -142,7 +143,7 @@ router.post('/instance/create', async (req, res) => {
  *       200:
  *         description: Base64 do QR Code da instância no estado "connecting/qr_ready".
  */
-router.get('/instance/:name/qrcode', async (req, res) => {
+router.get('/instance/:name/qrcode', requireApiKey, async (req, res) => {
     try {
         const { id, status } = req.instanceData;
         if (status === 'connected') return res.status(400).json({ error: 'Instance already connected.' });
@@ -183,7 +184,7 @@ router.get('/instance/:name/qrcode', async (req, res) => {
  *         schema:
  *           type: string
  */
-router.get('/instance/:name/status', async (req, res) => {
+router.get('/instance/:name/status', requireApiKey, async (req, res) => {
     res.json({
         instance: req.params.name,
         state: req.instanceData.status
@@ -208,7 +209,7 @@ router.get('/instance/:name/status', async (req, res) => {
  *         schema:
  *           type: string
  */
-router.delete('/instance/:name', async (req, res) => {
+router.delete('/instance/:name', requireApiKey, async (req, res) => {
     try {
         const { id } = req.instanceData;
         const sock = sessionManager.getSocket(id);
@@ -250,7 +251,7 @@ router.delete('/instance/:name', async (req, res) => {
  *               instance:
  *                 type: string
  */
-router.post('/message/sendText', async (req, res) => {
+router.post('/message/sendText', requireApiKey, async (req, res) => {
     try {
         const { number, text } = req.body;
         const { id, tenant_id } = req.instanceData;
@@ -305,7 +306,7 @@ router.post('/message/sendText', async (req, res) => {
  *                 type: string
  *                 format: binary
  */
-router.post('/message/sendMedia', upload.single('file'), async (req, res) => {
+router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (req, res) => {
     try {
         const { number, mediatype, instance } = req.body;
         const { id, tenant_id } = req.instanceData;

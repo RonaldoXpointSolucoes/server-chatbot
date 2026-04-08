@@ -238,6 +238,10 @@ export default function DevLogger() {
              <button onClick={(e) => { e.stopPropagation(); clearLogs(); }} className="text-gray-400 hover:text-red-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Limpar Logs">
                 <Trash2 size={14} />
              </button>
+             <div className="w-px h-4 bg-gray-700/50 mx-1"></div>
+             <a href={`${engineUrl}/swagger/teste.html`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30 px-2 py-1 rounded text-[10px] font-bold transition-colors flex items-center gap-1" title="Abrir Documentação da API">
+                API Docs
+             </a>
              <button className="text-gray-400 hover:text-white transition-colors ml-1">
                {isVisible ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
              </button>

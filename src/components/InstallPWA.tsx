@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Download, X, Smartphone } from 'lucide-react';
-import { cn } from '../lib/utils';
 
 // Tipagem para o evento beforeinstallprompt
 interface BeforeInstallPromptEvent extends Event {
@@ -60,12 +59,12 @@ export function InstallPWA() {
 
   return (
     <div className="fixed bottom-6 left-0 right-0 z-50 flex justify-center px-4 animate-in fade-in slide-in-from-bottom-10 duration-500">
-      <div className={cn(
+      <div className={[
         "relative overflow-hidden w-full max-w-md",
         "bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl",
         "border border-white/20 dark:border-white/10 shadow-2xl",
         "rounded-3xl p-6 transition-all"
-      )}>
+      ].filter(Boolean).join(" ")}>
         <button 
           onClick={onDismiss}
           className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-200/50 dark:hover:bg-slate-800/50 transition-colors text-slate-500 dark:text-slate-400"
@@ -89,11 +88,11 @@ export function InstallPWA() {
             <div className="flex gap-3">
               <button
                 onClick={onClick}
-                className={cn(
+                className={[
                   "flex-1 flex items-center justify-center gap-2",
                   "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/20",
                   "rounded-2xl py-2.5 px-4 font-medium transition-all"
-                )}
+                ].filter(Boolean).join(" ")}
               >
                 <Download className="w-4 h-4" />
                 Instalar App
