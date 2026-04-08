@@ -450,4 +450,99 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
     }
 });
 
+/**
+ * @swagger
+ * /instance/{name}/chats:
+ *   get:
+ *     tags: [Instance]
+ *     summary: Obter a lista de conversas da instância
+ *     parameters:
+ *       - in: path
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "Teste"
+ *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "sk_cd31511433a155678ade719569eaa0ff"
+ *     responses:
+ *       200:
+ *         description: Lista de conversas com dados do contato
+ *       400:
+ *         description: Parâmetros Ausentes
+ *       401:
+ *         description: ApiKey Inválida
+ *       500:
+ *         description: Erro interno de processamento
+ */
+router.get('/instance/:name/chats', requireApiKey, async (req, res) => {
+    try {
+        const { id } = req.instanceData;
+        
+        const { data, error } = await supabase
+            .from('conversations')
+            .select(`
+                *,
+                contact:contacts(*)
+            `)
+            .eq('instance_id', id)
+            .order('last_message_at', { ascending: false });
+
+        if (error) throw error;
+        res.json({ chats: data });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * @swagger
+ * /instance/{name}/contacts:
+ *   get:
+ *     tags: [Instance]
+ *     summary: Obter a lista de contatos da instância
+ *     parameters:
+ *       - in: path
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "Teste"
+ *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "sk_cd31511433a155678ade719569eaa0ff"
+ *     responses:
+ *       200:
+ *         description: Lista de contatos da instância
+ *       400:
+ *         description: Parâmetros Ausentes
+ *       401:
+ *         description: ApiKey Inválida
+ *       500:
+ *         description: Erro interno de processamento
+ */
+router.get('/instance/:name/contacts', requireApiKey, async (req, res) => {
+    try {
+        const { id } = req.instanceData;
+        
+        const { data, error } = await supabase
+            .from('contacts')
+            .select('*')
+            .eq('instance_id', id)
+            .order('name', { ascending: true, nullsFirst: false });
+
+        if (error) throw error;
+        res.json({ contacts: data });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 export default router;
