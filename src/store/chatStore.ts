@@ -748,6 +748,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
            get().upsertContactLocally(payload.new as ContactRow);
         }
       })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'whatsapp_instances' }, async (payload) => {
+         const t = get().tenantInfo;
+         if (!t || !t.evolution_api_instance) return;
+         const inst = payload.new as any;
+         
+         // Sincroniza estado de conexao com o banco via Realtime
+         if (inst.id === t.evolution_api_instance) {
+            console.log('[Realtime] Instance Status Changed:', inst.status);
+            if (inst.status === 'connected') {
+               if (!get().evolutionConnected) {
+                  set({ evolutionConnected: true, modalReason: null });
+                  get().fetchInitialData();
+               }
+            } else if (inst.status === 'offline' || inst.status === 'connecting') {
+               if (get().evolutionConnected) {
+                  set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp caiu ou o servidor reiniciou. Tentando reconectar...' });
+               }
+            }
+         }
+      })
       .subscribe((_status, err) => {
          if (err) console.error("Realtime Error", err);
       });
