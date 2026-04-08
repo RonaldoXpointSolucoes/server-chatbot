@@ -5,6 +5,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import apiGateway from './api-gateway/index.js';
+import publicRestRoutes from './api-gateway/public-rest.js';
+import { setupSwagger } from './api-gateway/swagger.js';
 import systemLogger from './system-logger.js';
 import { supabase } from './supabase.js';
 import sessionManager from './session-manager/index.js';
@@ -73,6 +75,12 @@ app.get('/debug/readyz', async (req, res) => {
     if (error) return res.status(503).json({ status: 'error_db', detail: error.message });
     return res.json({ status: 'ready' });
 });
+
+// Setup Swagger UI (/swagger/teste.html)
+setupSwagger(app);
+
+// Rotas públicas formato REST (Evolution API style)
+app.use('/', publicRestRoutes);
 
 app.use('/api', apiGateway);
 app.use('/api/v1/system/logs', systemLogger);

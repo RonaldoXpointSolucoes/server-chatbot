@@ -1,0 +1,395 @@
+import express from 'express';
+import { supabase } from '../supabase.js';
+import sessionManager from '../session-manager/index.js';
+import multer from 'multer';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import ffmpeg from 'fluent-ffmpeg';
+
+const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
+
+// Middleware de autenticação genérica para rotas de instância já existente
+const requireApiKey = async (req, res, next) => {
+    // Para /instance/create, não exigimos apiKey da instância, pois ela ainda não existe
+    // MAS a create exigiria apikey global. Para simplificar, na criacao pegaremos apenas x-tenant-id 
+    if (req.path === '/instance/create') return next();
+
+    const apiKey = req.headers['apikey'];
+    if (!apiKey) return res.status(401).json({ error: 'ApiKey header is missing.' });
+
+    // Nas rotas Evolution-like, a identificação é pelo {name} no caso de GET/DELETE /instance/{name}
+    // E no body (instance) para POST /message/sendText
+    const instanceName = req.params.name || req.body.instance;
+    if (!instanceName) {
+        return res.status(400).json({ error: 'Instance name is missing in URL path or body ("instance").' });
+    }
+
+    // Valida no Banco pela ApiKey e Nome
+    const { data, error } = await supabase
+        .from('whatsapp_instances')
+        .select('id, tenant_id, status')
+        .eq('name', instanceName)
+        .eq('api_key', apiKey)
+        .single();
+
+    if (error || !data) {
+        return res.status(404).json({ error: 'Instance not found or unauthorized ApiKey.' });
+    }
+
+    req.instanceData = data; // { id, tenant_id, status }
+    next();
+};
+
+router.use(requireApiKey);
+
+/**
+ * @swagger
+ * /instance/create:
+ *   post:
+ *     tags: [Instance]
+ *     summary: Criar ou Inicializar uma instância WhatsApp
+ *     description: Cria uma nova instância atrelada ao tenant ou inicializa uma se usar o mesmo nome.
+ *     parameters:
+ *       - in: header
+ *         name: x-tenant-id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               instanceName:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Info da Instância e ApiKey Gerada
+ */
+router.post('/instance/create', async (req, res) => {
+    try {
+        const { instanceName } = req.body;
+        const tenantId = req.headers['x-tenant-id'];
+        
+        if (!instanceName || !tenantId) return res.status(400).json({ error: 'instanceName body and x-tenant-id header required.' });
+
+        // Checar se já existe
+        const { data: existing } = await supabase.from('whatsapp_instances')
+             .select('*').eq('name', instanceName).eq('tenant_id', tenantId).single();
+             
+        if (existing) {
+             // Inicia se não estiver rodando (opcional, só p/ não dar erro de já existe)
+             if (existing.status === 'offline') {
+                 await supabase.from('whatsapp_instances').update({ status: 'connecting' }).eq('id', existing.id);
+                 sessionManager.createSession(tenantId, existing.id).catch(console.error);
+             }
+             return res.json({ instance: existing });
+        }
+
+        const apiKey = crypto.randomBytes(32).toString('hex');
+
+        // Cria nova
+        const { data: newInstance, error } = await supabase.from('whatsapp_instances').insert({
+            tenant_id: tenantId,
+            name: instanceName,
+            status: 'connecting',
+            api_key: apiKey
+        }).select('*').single();
+
+        if (error) throw error;
+
+        // Tenta bootar
+        sessionManager.createSession(tenantId, newInstance.id).catch(console.error);
+
+        res.json({
+            instance: {
+                instanceName: newInstance.name,
+                instanceId: newInstance.id,
+                status: newInstance.status
+            },
+            hash: {
+                apikey: apiKey
+            }
+        });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * @swagger
+ * /instance/{name}/qrcode:
+ *   get:
+ *     tags: [Instance]
+ *     summary: Pegar QR Code
+ *     parameters:
+ *       - in: path
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Base64 do QR Code da instância no estado "connecting/qr_ready".
+ */
+router.get('/instance/:name/qrcode', async (req, res) => {
+    try {
+        const { id, status } = req.instanceData;
+        if (status === 'connected') return res.status(400).json({ error: 'Instance already connected.' });
+
+        const { data, error } = await supabase.from('whatsapp_instance_runtime')
+            .select('qr_code')
+            .eq('instance_id', id)
+            .single();
+
+        if (error || !data || !data.qr_code) return res.status(404).json({ error: 'QR Code not available yet. Try again in a few seconds.' });
+
+        return res.json({
+            instance: req.params.name,
+            qrcode: {
+                base64: data.qr_code
+            }
+        });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * @swagger
+ * /instance/{name}/status:
+ *   get:
+ *     tags: [Instance]
+ *     summary: Pegar o status da conexão da instância (online, offline, qr_ready)
+ *     parameters:
+ *       - in: path
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ */
+router.get('/instance/:name/status', async (req, res) => {
+    res.json({
+        instance: req.params.name,
+        state: req.instanceData.status
+    });
+});
+
+/**
+ * @swagger
+ * /instance/{name}:
+ *   delete:
+ *     tags: [Instance]
+ *     summary: Excluir a instância (Realiza Logout e remove do DB)
+ *     parameters:
+ *       - in: path
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ */
+router.delete('/instance/:name', async (req, res) => {
+    try {
+        const { id } = req.instanceData;
+        const sock = sessionManager.getSocket(id);
+        if (sock) {
+            try { await sock.logout(); } catch(e){}
+        }
+        await sessionManager.closeSession(id);
+        await supabase.from('whatsapp_instances').delete().eq('id', id);
+        
+        res.json({ status: 'SUCCESS', error: false, message: 'Instance deleted' });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * @swagger
+ * /message/sendText:
+ *   post:
+ *     tags: [Message]
+ *     summary: Enviar texto
+ *     parameters:
+ *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               number:
+ *                 type: string
+ *               text:
+ *                 type: string
+ *               instance:
+ *                 type: string
+ */
+router.post('/message/sendText', async (req, res) => {
+    try {
+        const { number, text } = req.body;
+        const { id, tenant_id } = req.instanceData;
+        
+        if (!number || !text) return res.status(400).json({ error: 'number and text are required in body' });
+
+        const sock = sessionManager.getSocket(id);
+        if (!sock) return res.status(400).json({ error: 'WhatsApp socket offline for this instance.' });
+        
+        const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+        const msgResult = await sock.sendMessage(remoteJid, { text });
+
+        // A mensagem também será processada no `messages.upsert` de forma nativa e registrada no front.
+        res.json({
+            key: msgResult.key,
+            message: msgResult.message,
+            messageTimestamp: msgResult.messageTimestamp,
+            status: "PENDING"
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * @swagger
+ * /message/sendMedia:
+ *   post:
+ *     tags: [Message]
+ *     summary: Enviar mídia por arquivo (Multipart)
+ *     parameters:
+ *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               number:
+ *                 type: string
+ *               mediatype:
+ *                 type: string
+ *                 description: audio, video, image, document
+ *               instance:
+ *                 type: string
+ *               file:
+ *                 type: string
+ *                 format: binary
+ */
+router.post('/message/sendMedia', upload.single('file'), async (req, res) => {
+    try {
+        const { number, mediatype, instance } = req.body;
+        const { id, tenant_id } = req.instanceData;
+        const file = req.file;
+
+        if (!file || !number || !mediatype || !instance) {
+            return res.status(400).json({ error: 'Missing file, number, mediatype or instance' });
+        }
+
+        const sock = sessionManager.getSocket(id);
+        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+        const timestamp = Date.now();
+        
+        // Conversão WEBM p/ AudioNativo se for Audio
+        if (mediatype === 'audio' && (file.mimetype.includes('webm') || file.originalname.endsWith('.webm'))) {
+            try {
+                const tempInput = path.join(os.tmpdir(), `in_${timestamp}.webm`);
+                const tempOutput = path.join(os.tmpdir(), `out_${timestamp}.ogg`);
+                fs.writeFileSync(tempInput, file.buffer);
+                
+                await new Promise((resolve, reject) => {
+                    ffmpeg(tempInput)
+                        .audioCodec('libopus')
+                        .format('ogg')
+                        .on('end', resolve)
+                        .on('error', reject)
+                        .save(tempOutput);
+                });
+                
+                file.buffer = fs.readFileSync(tempOutput);
+                file.mimetype = 'audio/ogg; codecs=opus';
+                file.originalname = file.originalname.replace('.webm', '.ogg');
+                try { fs.unlinkSync(tempInput); fs.unlinkSync(tempOutput); } catch(e){}
+            } catch(err) {
+                 console.error('Falha conversao opus', err);
+            }
+        }
+
+        // Upload to Supabase Storage First
+        const safeName = file.originalname.replace(/[^a-zA-Z0-9.\-]/g, '_');
+        const storagePath = `tenant_${tenant_id}/instance_${id}/${remoteJid}/${timestamp}_${safeName}`;
+
+        const { data: uploadData, error: uploadErr } = await supabase.storage
+            .from('chat_media')
+            .upload(storagePath, file.buffer, { contentType: file.mimetype, upsert: false });
+
+        let mediaUrl = '';
+        if (!uploadErr) {
+            const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(storagePath);
+            mediaUrl = publicUrlData.publicUrl;
+        }
+
+        // Prepare message payload
+        const sendPayload = {};
+        if (mediatype === 'image') sendPayload.image = file.buffer;
+        else if (mediatype === 'video') sendPayload.video = file.buffer;
+        else if (mediatype === 'audio') { sendPayload.audio = file.buffer; sendPayload.mimetype = file.mimetype; sendPayload.ptt = true; } // ptt=true force audio note
+        else if (mediatype === 'document') { sendPayload.document = file.buffer; sendPayload.mimetype = file.mimetype; sendPayload.fileName = file.originalname; }
+        else return res.status(400).json({ error: 'Unsupported mediatype' });
+
+        const msgResult = await sock.sendMessage(remoteJid, sendPayload);
+
+        // Armazena URL no eventProcessor (opcional, só p renderizar imagem no UI frontend se ele assinar o socket interno)
+        try {
+            const { EventProcessor } = await import('../event-processor/index.js');
+            if (EventProcessor?.pendingMediaCache && result?.key?.id) {
+                EventProcessor.pendingMediaCache.set(msgResult.key.id, mediaUrl);
+                setTimeout(() => EventProcessor.pendingMediaCache.delete(msgResult.key.id), 60000);
+            }
+        } catch(e) {}
+
+        res.json({
+            key: msgResult.key,
+            message: msgResult.message,
+            messageTimestamp: msgResult.messageTimestamp,
+            status: "PENDING",
+            media_url: mediaUrl
+        });
+
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+export default router;
