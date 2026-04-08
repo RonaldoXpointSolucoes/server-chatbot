@@ -26,7 +26,7 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
             instance_id: instanceId,
             tenant_id: tenantId,
             creds_data: JSON.parse(JSON.stringify(creds, BufferJSON.replacer))
-        });
+        }).throwOnError();
     }
 
     // Pre-load absoluto de todas as chaves para a RAM (Evita congestionar a rede e previne o Timeout 408)
@@ -102,26 +102,33 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                     }
 
                     if (keysToDelete.length > 0) {
-                        supabase.from('wa_auth_keys')
+                        const { error } = await supabase.from('wa_auth_keys')
                             .delete()
                             .eq('instance_id', instanceId)
-                            .in('key_name', keysToDelete)
-                            .catch(e => console.error(`[${instanceId}] Erro DEL keys:`, e.message));
+                            .in('key_name', keysToDelete);
+                        if (error) {
+                            console.error(`[${instanceId}] Erro DEL keys:`, error.message);
+                            throw new Error(error.message);
+                        }
                     }
                     if (keysToUpsert.length > 0) {
-                        supabase.from('wa_auth_keys')
-                            .upsert(keysToUpsert, { onConflict: 'instance_id, key_name' })
-                            .catch(e => console.error(`[${instanceId}] Erro UPSERT keys:`, e.message));
+                        const { error } = await supabase.from('wa_auth_keys')
+                            .upsert(keysToUpsert, { onConflict: 'instance_id, key_name' });
+                        if (error) {
+                            console.error(`[${instanceId}] Erro UPSERT keys:`, error.message);
+                            throw new Error(error.message);
+                        }
                     }
                 }
             }
         },
         saveCreds: async () => {
-             await supabase.from('wa_auth_credentials').upsert({
+             const { error } = await supabase.from('wa_auth_credentials').upsert({
                  instance_id: instanceId,
                  tenant_id: tenantId,
                  creds_data: JSON.parse(JSON.stringify(creds, BufferJSON.replacer))
              });
+             if (error) throw new Error(error.message);
         }
     }
 }

@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Plus, Smartphone, Loader2, RefreshCcw, Signal, Archive, MessageSquare, Users, AlertCircle, EyeIcon, EyeOff, Settings, Trash2, CheckCircle2, Building2, Key, User } from 'lucide-react';
+import { Smartphone, CheckCircle, Loader2, AlertCircle, RefreshCw, Key, Shield, MessageSquare, Terminal, Eye, Link, Unlink, Activity, ShieldAlert, Cpu, Network, FileDown, Lock, Server, Users, StopCircle, RefreshCcw, LogOut, Download, Clock, Zap, Building2, HelpCircle, Archive, Trash2, Edit3, Save, X, PlusCircle, Maximize2, MoreVertical, Copy, ArrowRight, Settings, CheckCircle2, ChevronRight, Phone, UserCircle2, Signal, Plus, EyeOff, EyeIcon, User } from 'lucide-react';
 
 interface WhatsAppInstance {
   id: string;
-  name: string;
+  display_name: string;
   status: string;
   phone_number: string | null;
   profile_picture_url: string | null;
   whatsapp_name?: string | null;
-  access_token?: string;
+  api_key?: string;
   settings?: Record<string, boolean>;
   created_at: string;
   updated_at: string;
@@ -89,7 +89,10 @@ export default function InstancesDashboard() {
           if (inst.status === 'online' || inst.status === 'connected' || inst.status === 'connecting') {
               try {
                   const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/status`, {
-                      headers: { 'x-tenant-id': tenantId! }
+                      headers: { 
+                        'x-tenant-id': tenantId!,
+                        'apikey': inst.api_key || '' 
+                      }
                   });
                   if (res.ok) {
                      const statusData = await res.json();
@@ -101,10 +104,10 @@ export default function InstancesDashboard() {
                          return { ...inst, status: 'offline' };
                      }
                   } else {
-                     return { ...inst, status: 'offline' }; 
+                     return inst; // Se engine não responder 200, confia no Supabase
                   }
               } catch(e) {
-                 return { ...inst, status: 'offline' };
+                 return inst; // Se o navegador falhar em atingir localhost (CORS), confia no Supabase em vez de forçar Offline
               }
           }
           return inst;
@@ -122,15 +125,15 @@ export default function InstancesDashboard() {
     }
   };
 
-  const fetchStats = async (tenantId: string) => {
+  const fetchStats = async (instanceId: string) => {
     try {
        const [contactsRes, messagesRes] = await Promise.all([
-          supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
-          supabase.from('messages').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId)
+          supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('instance_id', instanceId),
+          supabase.from('messages').select('*', { count: 'exact', head: true }).eq('instance_id', instanceId)
        ]);
        setStats(prev => ({
          ...prev,
-         [tenantId]: {
+         [instanceId]: {
            contacts: contactsRes.count || 0,
            messages: messagesRes.count || 0
          }
@@ -181,8 +184,15 @@ export default function InstancesDashboard() {
       const tenantId = sessionStorage.getItem('current_tenant_id');
       await fetch(`${ENGINE_URL}/api/v1/instances/${deletingInstance.id}`, { 
           method: 'DELETE',
-          headers: { 'x-tenant-id': tenantId! }
+          headers: { 
+            'x-tenant-id': tenantId!,
+            'apikey': deletingInstance.api_key || ''
+          }
       }).catch(() => {});
+      
+      // Remove do banco de dados local por precaução e reatividade
+      await supabase.from('whatsapp_instances').delete().eq('id', deletingInstance.id);
+      
       fetchInstances();
     } catch (e) {
       console.error(e);
@@ -205,22 +215,28 @@ export default function InstancesDashboard() {
     }
   };
 
-  const handleDisconnect = async (id: string) => {
+  const handleDisconnect = async (id: string, apiKey?: string) => {
     if (!window.confirm('Isto fará logoff do WhatsApp atual mas manterá a instância. Deseja Continuar?')) return;
     // O delete sem apagar do banco. O /delete agora apaga tudo se feito via painel se não mudarmos
     const tenantId = sessionStorage.getItem('current_tenant_id');
     await fetch(`${ENGINE_URL}/api/v1/instances/${id}/disconnect`, { 
         method: 'POST',
-        headers: { 'x-tenant-id': tenantId! }
+        headers: { 
+          'x-tenant-id': tenantId!,
+          'apikey': apiKey || ''
+        }
     }).catch(() => {}); 
   };
 
-  const fireEngineAction = async (id: string, action: string, successMsg: string) => {
+  const fireEngineAction = async (id: string, apiKey: string | undefined, action: string, successMsg: string) => {
     try {
        const tenantId = sessionStorage.getItem('current_tenant_id');
        const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/${action}`, { 
            method: 'POST',
-           headers: { 'x-tenant-id': tenantId! }
+           headers: { 
+             'x-tenant-id': tenantId!,
+             'apikey': apiKey || ''
+           }
        });
        const data = await res.json();
        alert(data.message || successMsg);
@@ -229,7 +245,7 @@ export default function InstancesDashboard() {
     }
   };
 
-  const handleConnect = async (id: string) => {
+  const handleConnect = async (id: string, apiKey?: string) => {
     setShowQrModal(id);
     setQrCode(null);
     setQrLoading(true);
@@ -238,10 +254,14 @@ export default function InstancesDashboard() {
       const tenantId = sessionStorage.getItem('current_tenant_id');
       await fetch(`${ENGINE_URL}/api/v1/instances/connect`, { 
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId! },
+        headers: { 
+          'Content-Type': 'application/json', 
+          'x-tenant-id': tenantId!,
+          'apikey': apiKey || ''
+        },
         body: JSON.stringify({ instanceId: id })
       });
-      pollQrCode(id);
+      pollQrCode(id, apiKey);
     } catch(err) {
       alert("Falha de rede ao contatar engine. Verifique a porta 9000");
       setQrLoading(false);
@@ -249,14 +269,17 @@ export default function InstancesDashboard() {
     }
   };
 
-  const pollQrCode = (id: string) => {
+  const pollQrCode = (id: string, apiKey?: string) => {
     let secondsElapsed = 0;
     const interval = setInterval(async () => {
       try {
         secondsElapsed += 2;
         const tenantId = sessionStorage.getItem('current_tenant_id');
         const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/status`, {
-            headers: { 'x-tenant-id': tenantId! }
+            headers: { 
+              'x-tenant-id': tenantId!,
+              'apikey': apiKey || ''
+            }
         });
         const respJson = await res.json();
         const data = respJson.data;
@@ -288,7 +311,11 @@ export default function InstancesDashboard() {
           setQrLoading(true);
           await fetch(`${ENGINE_URL}/api/v1/instances/connect`, { 
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId! },
+            headers: { 
+              'Content-Type': 'application/json', 
+              'x-tenant-id': tenantId!,
+              'apikey': apiKey || ''
+            },
             body: JSON.stringify({ instanceId: id })
           }).catch(() => {});
         }
@@ -368,7 +395,7 @@ export default function InstancesDashboard() {
                  <Trash2 size={32} className="text-red-500" />
                </div>
                <h2 className="text-2xl font-bold dark:text-white mb-2">Excluir Conexão?</h2>
-               <p className="text-gray-500 dark:text-gray-400 mb-8 font-medium">Esta ação removerá a instância <strong className="text-gray-800 dark:text-white">"{deletingInstance.name}"</strong> permanentemente do sistema.</p>
+               <p className="text-gray-500 dark:text-gray-400 mb-8 font-medium">Esta ação removerá a instância <strong className="text-gray-800 dark:text-white">"{deletingInstance.display_name}"</strong> permanentemente do sistema.</p>
                <div className="flex gap-3">
                  <button onClick={() => setDeletingInstance(null)} className="flex-1 bg-gray-100 dark:bg-black/30 hover:bg-gray-200 dark:hover:bg-black/50 text-gray-800 dark:text-white font-semibold py-3.5 rounded-2xl transition-all">Cancelar</button>
                  <button onClick={confirmDelete} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3.5 rounded-2xl transition-all shadow-md">Sim, excluir</button>
@@ -432,13 +459,18 @@ export default function InstancesDashboard() {
             {instances.map(inst => (
               <div key={inst.id} className="bg-white/80 dark:bg-[#111b21] backdrop-blur-2xl p-6 rounded-[2rem] shadow-sm border border-gray-200/60 dark:border-white/5 hover:border-emerald-500/30 transition-all flex flex-col group">
                 
-                {/* Cabeçalho */}
-                <div className="flex justify-between items-start mb-6">
-                  <div className="flex flex-col">
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white truncate pr-2">{inst.name}</h3>
-                    <div className="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500 dark:text-emerald-500/80 font-semibold tracking-wide uppercase">
-                       <Building2 size={12} />
-                       {userName || 'Sua Empresa'}
+                {/* Cabeçalho Premium */}
+                <div className="flex justify-between items-start mb-6 border-b border-gray-100 dark:border-white/5 pb-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shadow-inner overflow-hidden">
+                       <Smartphone size={28} className="text-emerald-500" />
+                    </div>
+                    <div className="flex flex-col">
+                      <h3 className="text-xl font-bold text-gray-900 dark:text-white truncate pr-2 max-w-[200px]">{inst.display_name}</h3>
+                      <div className="flex items-center gap-1.5 mt-1 text-xs text-emerald-600 dark:text-emerald-500/80 font-bold tracking-wide uppercase bg-emerald-500/10 px-2 py-0.5 rounded-md w-max">
+                         <Building2 size={12} />
+                         {userName || 'Sua Empresa'}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
@@ -447,6 +479,56 @@ export default function InstancesDashboard() {
                       <Settings size={18} />
                     </button>
                   </div>
+                </div>
+
+                {/* Especificidades e Diagnóstico */}
+                <div className="grid grid-cols-2 gap-3 mb-6 bg-gray-50/50 dark:bg-black/20 p-4 rounded-2xl border border-gray-100 dark:border-white/5">
+                   <div className="col-span-2">
+                     <span className="text-[10px] uppercase font-bold text-gray-400 mb-1 flex items-center gap-1"><Key size={12}/> API Key</span>
+                     <p className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate bg-white dark:bg-black/40 p-2 border border-gray-200 dark:border-white/5 rounded-lg select-all">
+                       {inst.api_key || 'Não gerada'}
+                     </p>
+                   </div>
+                   
+                   <div className="col-span-1 flex items-center gap-3 bg-white dark:bg-black/40 p-3 border border-gray-200 dark:border-white/5 rounded-xl">
+                      <Phone className="text-emerald-500 shrink-0" size={18} />
+                      <div className="flex flex-col">
+                        <span className="text-[10px] text-gray-400 uppercase font-bold">Celular</span>
+                        <span className="font-semibold text-gray-800 dark:text-gray-200 text-sm whitespace-nowrap">
+                           {inst.phone_number ? `+${inst.phone_number}` : 'N/A'}
+                        </span>
+                      </div>
+                   </div>
+
+                   <div className="col-span-1 flex items-center gap-3 bg-white dark:bg-black/40 p-3 border border-gray-200 dark:border-white/5 rounded-xl">
+                      <UserCircle2 className="text-emerald-500 shrink-0" size={18} />
+                      <div className="flex flex-col">
+                        <span className="text-[10px] text-gray-400 uppercase font-bold">Usuário</span>
+                        <span className="font-semibold text-gray-800 dark:text-gray-200 text-sm whitespace-nowrap">
+                           {inst.phone_number ? 'Ativado' : 'Aguardando'}
+                        </span>
+                      </div>
+                   </div>
+
+                   <div className="col-span-1 flex items-center gap-3 bg-white dark:bg-black/40 p-3 border border-gray-200 dark:border-white/5 rounded-xl">
+                      <Users className="text-blue-500 shrink-0" size={18} />
+                      <div className="flex flex-col">
+                        <span className="text-[10px] text-gray-400 uppercase font-bold">Contatos</span>
+                        <span className="font-semibold text-gray-800 dark:text-gray-200 text-sm whitespace-nowrap">
+                           {stats[inst.id]?.contacts || 0} sync
+                        </span>
+                      </div>
+                   </div>
+
+                   <div className="col-span-1 flex items-center gap-3 bg-white dark:bg-black/40 p-3 border border-gray-200 dark:border-white/5 rounded-xl">
+                      <MessageSquare className="text-violet-500 shrink-0" size={18} />
+                      <div className="flex flex-col">
+                        <span className="text-[10px] text-gray-400 uppercase font-bold">Mensagens</span>
+                        <span className="font-semibold text-gray-800 dark:text-gray-200 text-sm whitespace-nowrap">
+                           {stats[inst.id]?.messages || 0} flows
+                        </span>
+                      </div>
+                   </div>
                 </div>
 
                 {/* Instancias List Card */}
@@ -463,7 +545,7 @@ export default function InstancesDashboard() {
                        <div className="flex items-center justify-between gap-3 border-t border-gray-200/50 dark:border-white/5 pt-3">
                           <span className="text-[10px] text-emerald-600 dark:text-emerald-500 uppercase tracking-widest font-bold flex items-center gap-1"><Key size={12}/> API KEY</span>
                           <div className="flex-1 text-right font-mono text-[10px] sm:text-[11px] tracking-wide text-emerald-600 dark:text-emerald-400/80 group-hover/token:text-emerald-500 transition-colors truncate px-2">
-                             {showToken[inst.id] ? (inst.access_token || 'Chave não definida') : '••••••••••••••••••••••••••••••••'}
+                             {showToken[inst.id] ? (inst.api_key || 'Chave não definida') : '••••••••••••••••••••••••••••••••'}
                           </div>
                           <button onClick={() => setShowToken(prev => ({...prev, [inst.id]: !prev[inst.id]}))} className="text-gray-400 hover:text-emerald-500 transition-colors shrink-0">
                              {showToken[inst.id] ? <EyeOff size={16} /> : <EyeIcon size={16} />}
@@ -482,7 +564,7 @@ export default function InstancesDashboard() {
                     </div>
                     <div className="flex flex-col overflow-hidden">
                        <h4 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white truncate flex items-center gap-2">
-                          {inst.whatsapp_name || inst.name}
+                          {inst.whatsapp_name || inst.display_name}
                        </h4>
                        <p className="text-xs sm:text-sm font-medium text-gray-500 dark:text-gray-400 mt-0.5 truncate">
                           {inst.phone_number ? `+${inst.phone_number}` : 'Aguardando Pareamento Device'}
@@ -541,31 +623,31 @@ export default function InstancesDashboard() {
                 {/* Botões Bottom */}
                 <div className="mt-auto pt-6 flex flex-wrap items-center gap-3 border-t border-gray-100 dark:border-white/5">
                   {inst.status === 'offline' ? (
-                     <button onClick={() => handleConnect(inst.id)} className="flex-1 bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-3.5 px-4 rounded-[14px] transition-all flex justify-center items-center gap-2">
+                     <button onClick={() => handleConnect(inst.id, inst.api_key)} className="flex-1 bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-3.5 px-4 rounded-[14px] transition-all flex justify-center items-center gap-2">
                        Escanear QR Code
                      </button>
                   ) : inst.status === 'connecting' ? (
-                     <button onClick={() => handleConnect(inst.id)} className="flex-1 bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-3.5 px-4 rounded-[14px] transition-all flex justify-center items-center gap-2">
+                     <button onClick={() => handleConnect(inst.id, inst.api_key)} className="flex-1 bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-3.5 px-4 rounded-[14px] transition-all flex justify-center items-center gap-2">
                        <RefreshCcw size={18} className="animate-spin" /> Ver QR Code
                      </button>
                   ) : (
                      <>
-                        <button disabled className="flex-1 bg-[#00a884]/20 text-[#00a884] font-bold py-3.5 px-4 rounded-[14px] flex justify-center items-center gap-2 cursor-default border border-[#00a884]/30">
+                         <button disabled className="flex-1 bg-[#00a884]/20 text-[#00a884] font-bold py-3.5 px-4 rounded-[14px] flex justify-center items-center gap-2 cursor-default border border-[#00a884]/30">
                            Conectado
                          </button>
-                         <button onClick={() => fireEngineAction(inst.id, 'sync-contacts', 'Sincronizado!')} className="px-3 py-3.5 bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-blue-500/20 hover:border-blue-500" title="Ler Contatos Recentes">
+                         <button onClick={() => fireEngineAction(inst.id, inst.api_key, 'sync-contacts', 'Sincronizado!')} className="px-3 py-3.5 bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-blue-500/20 hover:border-blue-500" title="Ler Contatos Recentes">
                            <RefreshCcw size={18} /> Sync
                          </button>
-                         <button onClick={() => fireEngineAction(inst.id, 'presence', 'Status forçado!')} className="px-3 py-3.5 bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-emerald-500/20 hover:border-emerald-500" title="Avisar que está online para todos">
+                         <button onClick={() => fireEngineAction(inst.id, inst.api_key, 'presence', 'Status forçado!')} className="px-3 py-3.5 bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-emerald-500/20 hover:border-emerald-500" title="Avisar que está online para todos">
                            <Signal size={18} /> Forçar ON
                          </button>
-                         <button onClick={() => { if(window.confirm('Purgar Cache? As conversas de hoje serão apagadas da RAM temporária do servidor.')) fireEngineAction(inst.id, 'clear-store', 'Cache Limpo') }} className="px-3 py-3.5 bg-gray-500/10 hover:bg-gray-500 hover:text-white text-gray-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-gray-500/20 hover:border-gray-500" title="Apagar Histórico em Memória">
+                         <button onClick={() => { if(window.confirm('Purgar Cache? As conversas de hoje serão apagadas da RAM temporária do servidor.')) fireEngineAction(inst.id, inst.api_key, 'clear-store', 'Cache Limpo') }} className="px-3 py-3.5 bg-gray-500/10 hover:bg-gray-500 hover:text-white text-gray-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-gray-500/20 hover:border-gray-500" title="Apagar Histórico em Memória">
                            <Trash2 size={18} /> Limpar Mem.
                          </button>
-                         <button onClick={() => fireEngineAction(inst.id, 'reconnect', 'Reiniciando...')} className="px-3 py-3.5 bg-gray-100 dark:bg-[#202c33] hover:dark:bg-white/10 text-gray-700 dark:text-white font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-gray-200 dark:border-white/5">
+                         <button onClick={() => fireEngineAction(inst.id, inst.api_key, 'reconnect', 'Reiniciando...')} className="px-3 py-3.5 bg-gray-100 dark:bg-[#202c33] hover:dark:bg-white/10 text-gray-700 dark:text-white font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-gray-200 dark:border-white/5">
                            Reiniciar
                          </button>
-                         <button onClick={() => handleDisconnect(inst.id)} className="px-3 py-3.5 bg-orange-500/10 hover:bg-orange-500 hover:text-white text-orange-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-orange-500/20 hover:border-orange-500">
+                         <button onClick={() => handleDisconnect(inst.id, inst.api_key)} className="px-3 py-3.5 bg-orange-500/10 hover:bg-orange-500 hover:text-white text-orange-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-orange-500/20 hover:border-orange-500">
                            Desparear
                          </button>
                      </>
