@@ -68,13 +68,17 @@ const requireApiKey = async (req, res, next) => {
  *       - in: header
  *         name: apikey
  *         required: true
+ *         description: Pode ser a "GLOBAL_API_KEY".
  *         schema:
  *           type: string
+ *           example: "sk_cd31511433a155678ade719569eaa0ff"
  *       - in: header
  *         name: x-tenant-id
  *         required: true
+ *         description: O UUID do Tenant no banco de dados.
  *         schema:
  *           type: string
+ *           example: "8b1e427b-2321-4ea7-9d7e-90f7d5cbad21"
  *     requestBody:
  *       required: true
  *       content:
@@ -84,9 +88,16 @@ const requireApiKey = async (req, res, next) => {
  *             properties:
  *               instanceName:
  *                 type: string
+ *                 example: "Teste"
  *     responses:
  *       200:
  *         description: Info da Instância e ApiKey Gerada
+ *       400:
+ *         description: Parâmetros ou headers faltando
+ *       401:
+ *         description: ApiKey Inválida
+ *       500:
+ *         description: Violação de Constraints (ex. x-tenant-id não existe)
  */
 router.post('/instance/create', requireApiKey, async (req, res) => {
     try {
@@ -253,6 +264,7 @@ router.delete('/instance/:name', requireApiKey, async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
+ *           example: "sk_cd31511433a155678ade719569eaa0ff"
  *     requestBody:
  *       required: true
  *       content:
@@ -262,10 +274,25 @@ router.delete('/instance/:name', requireApiKey, async (req, res) => {
  *             properties:
  *               number:
  *                 type: string
+ *                 description: O número de telefone com DDI e DDD
+ *                 example: "5511975960999"
  *               text:
  *                 type: string
+ *                 description: A mensagem de texto a ser enviada
+ *                 example: "Olá! Esta é uma mensagem de teste enviada diretamente pelo Swagger UI da Antigravity 🚀"
  *               instance:
  *                 type: string
+ *                 description: O nome exato da instância de envio
+ *                 example: "Teste"
+ *     responses:
+ *       200:
+ *         description: Mensagem postada na fila do Socket
+ *       400:
+ *         description: Socket Offline ou Parâmetros Ausentes
+ *       401:
+ *         description: ApiKey Inválida ou Nome da Instância não encontrado
+ *       500:
+ *         description: Erro interno de processamento
  */
 router.post('/message/sendText', requireApiKey, async (req, res) => {
     try {
@@ -298,12 +325,14 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
  *   post:
  *     tags: [Message]
  *     summary: Enviar mídia por arquivo (Multipart)
+ *     description: Aceita document, audio, video ou image. Converte áudios .webm para .ogg compatível com celular e hospeda no Supabase antes de disparar.
  *     parameters:
  *       - in: header
  *         name: apikey
  *         required: true
  *         schema:
  *           type: string
+ *           example: "sk_cd31511433a155678ade719569eaa0ff"
  *     requestBody:
  *       required: true
  *       content:
@@ -313,14 +342,26 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
  *             properties:
  *               number:
  *                 type: string
+ *                 example: "5511975960999"
  *               mediatype:
  *                 type: string
  *                 description: audio, video, image, document
+ *                 example: "image"
  *               instance:
  *                 type: string
+ *                 example: "Teste"
  *               file:
  *                 type: string
  *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Mídia enviada e hospedada com sucesso. Retorna URL Supabase.
+ *       400:
+ *         description: Arquivo ou Socket faltando/offline.
+ *       401:
+ *         description: Autenticação inválida.
+ *       500:
+ *         description: Erros de armazenamento ou ffmpeg.
  */
 router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (req, res) => {
     try {
