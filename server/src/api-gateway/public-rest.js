@@ -13,12 +13,19 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 
 
 // Middleware de autenticação genérica para rotas de instância já existente
 const requireApiKey = async (req, res, next) => {
-    // Para /instance/create, não exigimos apiKey da instância, pois ela ainda não existe
-    // MAS a create exigiria apikey global. Para simplificar, na criacao pegaremos apenas x-tenant-id 
-    if (req.path === '/instance/create') return next();
-
-    const apiKey = req.headers['apikey'];
+    const apiKey = req.headers['apikey'] || req.headers['globalapikey'];
     if (!apiKey) return res.status(401).json({ error: 'ApiKey header is missing.' });
+
+    // Busca a Global Api Key
+    const { data: comp } = await supabase.from('companies').select('global_api_key').single();
+    const globalKey = comp ? comp.global_api_key : process.env.GLOBAL_API_KEY;
+
+    if (req.path === '/instance/create') {
+        if (globalKey && apiKey !== globalKey) {
+            return res.status(401).json({ error: 'Unauthorized Global ApiKey.' });
+        }
+        return next();
+    }
 
     // Nas rotas Evolution-like, a identificação é pelo {name} no caso de GET/DELETE /instance/{name}
     // E no body (instance) para POST /message/sendText
@@ -30,13 +37,17 @@ const requireApiKey = async (req, res, next) => {
     // Valida no Banco pela ApiKey e Nome
     const { data, error } = await supabase
         .from('whatsapp_instances')
-        .select('id, tenant_id, status')
+        .select('id, tenant_id, status, api_key')
         .eq('display_name', instanceName)
-        .eq('api_key', apiKey)
         .single();
 
     if (error || !data) {
-        return res.status(404).json({ error: 'Instance not found or unauthorized ApiKey.' });
+        return res.status(404).json({ error: 'Instance not found.' });
+    }
+
+    // Autoriza se for a ApiKey da Instância OU a Global Api Key
+    if (data.api_key !== apiKey && globalKey !== apiKey) {
+        return res.status(401).json({ error: 'Unauthorized ApiKey.' });
     }
 
     req.instanceData = data; // { id, tenant_id, status }
@@ -55,6 +66,11 @@ const requireApiKey = async (req, res, next) => {
  *     description: Cria uma nova instância atrelada ao tenant ou inicializa uma se usar o mesmo nome.
  *     parameters:
  *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
  *         name: x-tenant-id
  *         required: true
  *         schema:
@@ -72,7 +88,7 @@ const requireApiKey = async (req, res, next) => {
  *       200:
  *         description: Info da Instância e ApiKey Gerada
  */
-router.post('/instance/create', async (req, res) => {
+router.post('/instance/create', requireApiKey, async (req, res) => {
     try {
         const { instanceName } = req.body;
         const tenantId = req.headers['x-tenant-id'];
