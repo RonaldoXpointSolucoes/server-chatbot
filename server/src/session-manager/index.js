@@ -1,4 +1,4 @@
-import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } from '@whiskeysockets/baileys';
+import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import { useSupabaseAuthState } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
@@ -56,9 +56,6 @@ class SessionManager {
             
             console.log(`[SessionManager] Usando WA v${version.join('.')}, isLatest: ${isLatest}`);
 
-            // Crie a store em memória
-            const store = makeInMemoryStore({ logger: this.logger });
-
             // workaround for pure ESM makeWASocket if it's default exported vs destructured
             const createSocket = makeWASocket.default ? makeWASocket.default : makeWASocket;
 
@@ -71,9 +68,6 @@ class SessionManager {
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: true
             });
-
-            store.bind(sock.ev);
-            sock.store = store;
 
             sock.ev.on('creds.update', saveCreds);
 
