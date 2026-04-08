@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import EvolutionModal from '../components/EvolutionModal';
 import { DeleteModal, RenameModal, NewChatModal } from '../components/ChatModals';
@@ -63,6 +63,8 @@ export default function ChatDashboard() {
   const [contactToEdit, setContactToEdit] = useState<{id: string; name: string} | null>(null);
   const [contactToDelete, setContactToDelete] = useState<{id: string; name: string} | null>(null);
   const [isNewChatOpen, setIsNewChatOpen] = useState(false);
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [activeChatDropdown, setActiveChatDropdown] = useState(false);
   
   // Estados para Filtros
   const [searchTerm, setSearchTerm] = useState('');
@@ -352,6 +354,9 @@ export default function ChatDashboard() {
                   setActiveChat(contact.id);
                   if (connectedInstanceName) {
                     useChatStore.getState().loadHistoricalMessages(contact.id, connectedInstanceName);
+                    if (contact.avatar?.includes('ui-avatars')) {
+                      useChatStore.getState().fetchContactPicture(contact.id, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), connectedInstanceName);
+                    }
                   }
                 }}
                 className={cn(
@@ -359,10 +364,19 @@ export default function ChatDashboard() {
                   activeChatId === contact.id ? "bg-[#f0f2f5] dark:bg-[#2a3942]" : "hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]"
                 )}
               >
-                <img src={contact.avatar} alt="Avatar" className="w-12 h-12 rounded-full object-cover shadow-sm" />
+                <div className="relative shrink-0">
+                  <img src={contact.avatar} alt="Avatar" className="w-12 h-12 rounded-full object-cover shadow-sm" />
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center mb-0.5">
-                    <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate">{contact.name || contact.phone}</span>
+                    <div className="flex flex-col truncate pr-2">
+                      <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate">{contact.name || contact.phone}</span>
+                      {contact.phone && contact.name !== contact.phone && (
+                        <span className="text-[10px] text-[#54656f] dark:text-[#8696a0] font-mono tracking-tighter truncate mt-0.5">
+                          {contact.phone}
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1">
                       <span className={cn("text-[11px] font-medium min-w-fit ml-1 flex items-center gap-1", contact.unread > 0 ? "text-[#00a884]" : "text-[#54656f] dark:text-[#8696a0]")}>
                         {contact.is_pinned && <Pin size={12} className="text-[#00a884] rotate-45 fill-current opacity-80" />}
@@ -396,6 +410,20 @@ export default function ChatDashboard() {
                             >
                               <Star size={14} className={contact.is_favorite ? "text-yellow-500 fill-yellow-500" : "text-gray-400"} />
                               {contact.is_favorite ? "Remover dos favoritos" : "Favoritar"}
+                            </button>
+                            <button 
+                              onClick={async (e) => { 
+                                e.stopPropagation(); 
+                                if (connectedInstanceName) {
+                                  await useChatStore.getState().loadHistoricalMessages(contact.id, connectedInstanceName, true);
+                                }
+                                setActiveDropdown(null); 
+                              }}
+                              disabled={isSyncingHistory[contact.id]}
+                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                            >
+                              <RefreshCw size={14} className={cn(isSyncingHistory[contact.id] ? "animate-spin text-[#00a884]" : "")} />
+                              {isSyncingHistory[contact.id] ? "Sincronizando..." : "Sincronizar Conversa"}
                             </button>
                             <button 
                               onClick={(e) => { e.stopPropagation(); setContactToEdit({id: contact.id, name: contact.name}); setActiveDropdown(null); }}
@@ -455,7 +483,10 @@ export default function ChatDashboard() {
 
       {/* Main Chat Area */}
       {activeChat ? (
-        <div className={cn("flex-1 flex flex-col relative w-full h-full max-w-[100vw] overflow-hidden min-w-0 bg-[#efeae2] dark:bg-[#0b141a]", !activeChatId && "hidden sm:flex")} style={{
+        <div 
+          onClick={() => setActiveChatDropdown(false)}
+          className={cn("flex-1 flex flex-col relative w-full h-full max-w-[100vw] overflow-hidden min-w-0 bg-[#efeae2] dark:bg-[#0b141a]", !activeChatId && "hidden sm:flex")} 
+          style={{
            backgroundImage: 'url("https://w7.pngwing.com/pngs/946/407/png-transparent-whatsapp-background-theme-pattern-design.png")',
            backgroundSize: 'cover',
            backgroundBlendMode: 'overlay',
@@ -467,7 +498,14 @@ export default function ChatDashboard() {
             <div className="flex items-center gap-3">
               <img src={activeChat.avatar} alt="Avatar" className="w-10 h-10 rounded-full object-cover" />
               <div>
-                <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight">{activeChat.name || activeChat.phone}</h2>
+                <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
+                  <span className="truncate max-w-[200px] sm:max-w-md">{activeChat.name || activeChat.phone}</span>
+                  {activeChat.phone && activeChat.name !== activeChat.phone && (
+                    <span className="text-[12px] text-[#54656f] dark:text-[#8696a0] font-mono inline-block mt-0.5 border border-black/5 dark:border-white/10 px-1.5 rounded-md bg-black/5 dark:bg-white/5">
+                      {activeChat.phone}
+                    </span>
+                  )}
+                </h2>
                 <div className="flex items-center gap-1 text-xs mt-0.5">
                   {activeChat.bot_status === 'paused' ? (
                     <span className="flex items-center gap-1 text-yellow-600 bg-yellow-500/10 px-1.5 py-0.5 rounded-sm"><Bot size={10} /> Humano Assumido</span>
@@ -493,6 +531,39 @@ export default function ChatDashboard() {
                   <Power size={13} /> Devolver para IA
                 </button>
               )}
+
+              {/* Chat Actions Dropdown Premium */}
+              <div className="relative">
+                <button 
+                  className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all text-[#54656f] dark:text-[#aebac1]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveChatDropdown(!activeChatDropdown);
+                  }}
+                >
+                  <MoreVertical size={20} />
+                </button>
+                
+                {activeChatDropdown && (
+                  <div className="absolute right-0 top-12 w-52 bg-white dark:bg-[#233138] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 dark:border-[#304046] py-2 z-50 animate-in fade-in zoom-in-95 duration-200">
+                    <button 
+                      onClick={async () => {
+                        if (connectedInstanceName) {
+                          await loadHistoricalMessages(activeChat.id, connectedInstanceName, true);
+                        }
+                        setActiveChatDropdown(false);
+                      }}
+                      disabled={isSyncingHistory[activeChat.id]}
+                      className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors active:bg-gray-100"
+                    >
+                      <RefreshCw size={16} className={cn("text-[#00a884]", isSyncingHistory[activeChat.id] && "animate-spin")} />
+                      <span className="text-[14px] text-[#3b4a54] dark:text-[#d1d7db]">
+                         {isSyncingHistory[activeChat.id] ? "Sincronizando..." : "Sincronizar Histórico"}
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

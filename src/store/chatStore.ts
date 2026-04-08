@@ -49,7 +49,7 @@ interface ChatState {
   subscribeToNewMessages: () => void;
   // Historical Sync
   syncEvolutionContacts: (instanceName: string) => Promise<void>;
-  loadHistoricalMessages: (contactId: string, instanceName: string) => Promise<void>;
+  loadHistoricalMessages: (contactId: string, instanceName: string, forceSync?: boolean) => Promise<void>;
   
   // Local state updaters
   addMessageLocally: (contactId: string, msg: MessageType) => void;
@@ -61,6 +61,7 @@ interface ChatState {
   togglePinContact: (contactId: string) => Promise<void>;
   toggleFavorite: (contactId: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
+  fetchContactPicture: (contactId: string, jid: string, instanceName: string) => Promise<void>;
   // Opcional para as etiquetas
   // labels: any[];
   // fetchLabels: () => Promise<void>;
@@ -182,6 +183,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.error('[uploadAndSendMedia] Falha crítica:', err);
       // Se der erro, pelo menos mostramos no componente que a media deu erro
       // Não removemos para o dev ver onde falhou
+    }
+  },
+
+  fetchContactPicture: async (contactId, jid, instanceName) => {
+    const state = get();
+    if (!state.tenantInfo) return;
+    try {
+      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+      const apiKey = instDataDB?.api_key || '';
+      const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+      
+      const res = await fetch(`${API_URL}/api/v1/instances/${instanceName}/invoke`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tenant-id': state.tenantInfo.id, 'apikey': apiKey },
+        body: JSON.stringify({ method: 'profilePictureUrl', args: [jid, 'image'] })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok && data.result) {
+        const url = data.result;
+        await supabase.from('contacts').update({ profile_picture_url: url }).eq('id', contactId);
+        set((s) => ({
+          contacts: s.contacts.map(c => c.id === contactId ? { ...c, avatar: url } : c)
+        }));
+      }
+    } catch(err) {
+      console.error("[fetchContactPicture] Erro:", err);
     }
   },
 
@@ -520,7 +547,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     get().fetchInitialData();
   },
 
-  loadHistoricalMessages: async (contactId, instanceName) => {
+  loadHistoricalMessages: async (contactId, instanceName, forceSync = false) => {
     try {
         const tenant = get().tenantInfo;
         if (!tenant) return;
@@ -583,7 +610,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
            });
         };
 
-        if (msgs && msgs.length === 0) {
+        if ((msgs && msgs.length === 0) || forceSync) {
             // Conversa vazia no Supabase. Inicia sync-history on demand
             if (!get().isSyncingHistory[contactId]) {
                 set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: true } }));
@@ -618,7 +645,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: false } }));
                 }
             }
-        } else if (msgs) {
+        }
+        
+        // Sempre deve remapear o que tem em banco seja do forceSync atualizado ou se cair apenas no fallback
+        if (!forceSync && msgs && msgs.length > 0) {
            handleMapping(msgs);
         }
     } catch(err) {

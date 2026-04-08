@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Terminal as TerminalIcon, X, Trash2, Pause, Play, Maximize2, Minimize2, Copy, Check, Bug } from 'lucide-react';
+import { Terminal as TerminalIcon, X, Trash2, Pause, Play, Maximize2, Minimize2, Copy, Check, Bug, AlertCircle } from 'lucide-react';
 import clsx from 'clsx';
 
 interface LogEntry {
@@ -20,6 +20,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   const [isExpanded, setIsExpanded] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [showCopyOptions, setShowCopyOptions] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
   
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -63,12 +64,28 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
     return { isParsed: false, text: msg };
   };
 
-  const handleCopyLogs = () => {
-    const textToCopy = logs.map(log => `[${new Date(log.timestamp).toLocaleTimeString()}] ${log.message}`).join('\n');
+  const handleCopyLogs = (mode: 'all' | 'errors') => {
+    let filteredLogs = logs;
+    
+    if (mode === 'errors') {
+      filteredLogs = logs.filter(log => log.level === 'warn' || log.level === 'error');
+      if (filteredLogs.length === 0) {
+        alert("Olha, não existe nenhum erro ou aviso para ser copiado.");
+        return;
+      }
+    }
+
+    const textToCopy = filteredLogs.map(log => `[${new Date(log.timestamp).toLocaleTimeString()}] [${log.level.toUpperCase()}] ${log.message}`).join('\n');
     navigator.clipboard.writeText(textToCopy).then(() => {
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2000);
-    }).catch(err => console.error('Failed to copy logs', err));
+      if (mode === 'errors') {
+        alert(`Erros copiados com sucesso! Foram copiados ${filteredLogs.length} erros/avisos.`);
+      }
+    }).catch(err => {
+      console.error('Failed to copy logs', err);
+      alert('Falha ao copiar os logs!');
+    });
   };
   const logsRef = useRef(logs);
   logsRef.current = logs;
@@ -168,13 +185,22 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           >
             {isPaused ? <Play className="w-4 h-4 text-yellow-400" /> : <Pause className="w-4 h-4" />}
           </button>
-          <button 
-            onClick={handleCopyLogs}
-            className="p-1.5 hover:bg-white/10 rounded-md text-white/70 hover:text-white transition-colors"
-            title="Copiar Logs"
-          >
-            {isCopied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
-          </button>
+          <div className="relative">
+            <button 
+              onClick={() => setShowCopyOptions(!showCopyOptions)}
+              className="p-1.5 hover:bg-white/10 rounded-md text-white/70 hover:text-white transition-colors"
+              title="Copiar Logs"
+            >
+              {isCopied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+            </button>
+            {showCopyOptions && (
+              <div className="absolute right-0 top-full mt-2 w-48 bg-slate-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 z-50">
+                <button onClick={() => { setShowCopyOptions(false); handleCopyLogs('all'); }} className="w-full text-left px-4 py-2.5 text-xs text-white/90 hover:bg-white/10 transition-colors font-medium">Log Completo</button>
+                <div className="h-px bg-white/10 w-full" />
+                <button onClick={() => { setShowCopyOptions(false); handleCopyLogs('errors'); }} className="w-full text-left px-4 py-2.5 text-xs text-red-400 hover:bg-white/10 transition-colors font-medium flex items-center justify-between">Apenas Erros/Avisos <AlertCircle size={14}/></button>
+              </div>
+            )}
+          </div>
           <button 
             onClick={() => setLogs([])}
             className="p-1.5 hover:bg-white/10 rounded-md text-white/70 hover:text-white transition-colors"
