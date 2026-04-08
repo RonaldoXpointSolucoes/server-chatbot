@@ -31,7 +31,7 @@ const requireApiKey = async (req, res, next) => {
     const { data, error } = await supabase
         .from('whatsapp_instances')
         .select('id, tenant_id, status')
-        .eq('name', instanceName)
+        .eq('display_name', instanceName)
         .eq('api_key', apiKey)
         .single();
 
@@ -81,7 +81,7 @@ router.post('/instance/create', async (req, res) => {
 
         // Checar se já existe
         const { data: existing } = await supabase.from('whatsapp_instances')
-             .select('*').eq('name', instanceName).eq('tenant_id', tenantId).single();
+             .select('*').eq('display_name', instanceName).eq('tenant_id', tenantId).single();
              
         if (existing) {
              // Inicia se não estiver rodando (opcional, só p/ não dar erro de já existe)
@@ -97,7 +97,7 @@ router.post('/instance/create', async (req, res) => {
         // Cria nova
         const { data: newInstance, error } = await supabase.from('whatsapp_instances').insert({
             tenant_id: tenantId,
-            name: instanceName,
+            display_name: instanceName,
             status: 'connecting',
             api_key: apiKey
         }).select('*').single();
@@ -109,7 +109,7 @@ router.post('/instance/create', async (req, res) => {
 
         res.json({
             instance: {
-                instanceName: newInstance.name,
+                instanceName: newInstance.display_name,
                 instanceId: newInstance.id,
                 status: newInstance.status
             },
