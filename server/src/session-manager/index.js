@@ -1,4 +1,4 @@
-import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
+import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } from '@whiskeysockets/baileys';
 import { useSupabaseAuthState } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
@@ -71,6 +71,10 @@ class SessionManager {
                 keepAliveIntervalMs: 30000,
                 defaultQueryTimeoutMs: 60000
             });
+
+            const store = makeInMemoryStore({ logger: this.logger.child({ level: 'silent', stream: 'store' }) });
+            store.bind(sock.ev);
+            sock.store = store;
 
             sock.ev.on('creds.update', saveCreds);
 
