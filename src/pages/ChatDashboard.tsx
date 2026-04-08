@@ -266,7 +266,7 @@ export default function ChatDashboard() {
                Atenção: Sistema Offline
              </div>
              <p className="text-xs text-orange-700/80 dark:text-orange-300/80 leading-tight">
-                O WhatsApp desconectou. Verifique o aparelho ou refaça o login na Evolution API para enviar novas mensagens.
+                O WhatsApp desconectou ou o servidor está reiniciando. Verifique o aparelho ou abra as configurações de WhatsApp.
              </p>
              <button onClick={() => setShowEvolutionQR(true)} className="mt-1 text-xs bg-orange-100 dark:bg-orange-900/40 hover:bg-orange-200 dark:hover:bg-orange-800/40 text-orange-700 dark:text-orange-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
                 Resolver Agora
