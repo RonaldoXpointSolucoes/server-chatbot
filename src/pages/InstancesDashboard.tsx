@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Plus, Smartphone, Loader2, RefreshCcw, Signal, Archive, MessageSquare, Users, AlertCircle, EyeIcon, EyeOff, Settings, Trash2, CheckCircle2 } from 'lucide-react';
+import { Plus, Smartphone, Loader2, RefreshCcw, Signal, Archive, MessageSquare, Users, AlertCircle, EyeIcon, EyeOff, Settings, Trash2, CheckCircle2, Building2, Key, User } from 'lucide-react';
 
 interface WhatsAppInstance {
   id: string;
@@ -93,8 +93,12 @@ export default function InstancesDashboard() {
                   });
                   if (res.ok) {
                      const statusData = await res.json();
-                     if (statusData.data?.status !== 'connected') {
-                         return { ...inst, status: 'offline' }; // Sobrescreve em memória
+                     if (statusData.data?.status === 'connected' || statusData.data?.status === 'open') {
+                         return { ...inst, status: 'connected' };
+                     } else if (statusData.data?.status === 'connecting') {
+                         return { ...inst, status: 'connecting' };
+                     } else {
+                         return { ...inst, status: 'offline' };
                      }
                   } else {
                      return { ...inst, status: 'offline' }; 
@@ -429,53 +433,77 @@ export default function InstancesDashboard() {
               <div key={inst.id} className="bg-white/80 dark:bg-[#111b21] backdrop-blur-2xl p-6 rounded-[2rem] shadow-sm border border-gray-200/60 dark:border-white/5 hover:border-emerald-500/30 transition-all flex flex-col group">
                 
                 {/* Cabeçalho */}
-                <div className="flex justify-between items-center mb-6">
-                  <h3 className="text-xl font-bold text-gray-900 dark:text-white truncate pr-2">{inst.name}</h3>
+                <div className="flex justify-between items-start mb-6">
+                  <div className="flex flex-col">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white truncate pr-2">{inst.name}</h3>
+                    <div className="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500 dark:text-emerald-500/80 font-semibold tracking-wide uppercase">
+                       <Building2 size={12} />
+                       {userName || 'Sua Empresa'}
+                    </div>
+                  </div>
                   <div className="flex items-center gap-3 shrink-0">
                     {getStatusBadge(inst.status)}
-                    <button onClick={() => setShowSettings(showSettings === inst.id ? null : inst.id)} className={`p-2.5 rounded-xl transition-all ${showSettings === inst.id ? 'bg-emerald-500 text-white' : 'text-gray-400 hover:text-white bg-gray-100 dark:bg-[#202c33]'}`}>
+                    <button onClick={() => setShowSettings(showSettings === inst.id ? null : inst.id)} className={`p-2.5 rounded-xl transition-all ${showSettings === inst.id ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'text-gray-400 hover:text-emerald-500 bg-gray-100 dark:bg-[#202c33] hover:dark:bg-emerald-500/10'}`}>
                       <Settings size={18} />
                     </button>
                   </div>
                 </div>
 
                 {/* Instancias List Card */}
-                  <div className="p-4 sm:p-6 pb-4 border-b border-[#2a3942]/50 flex flex-col gap-3">
-                    {/* Exibir o UUID da Instância como info útil (já que a evolution auth caiu) */}
-                    <div className="bg-black/30 p-3 rounded-xl border border-white/5 flex items-center justify-between gap-3 group/token">
-                       <span className="text-xs text-gray-400 uppercase tracking-widest font-bold font-mono">CONNECTION ID</span>
-                       <div className="flex-1 text-right font-mono text-[10px] sm:text-xs tracking-wide text-emerald-400/80 group-hover/token:text-emerald-400 transition-colors truncate">
-                          {showToken[inst.id] ? inst.id : '••••••••-••••-••••-••••-••••••••••••'}
+                  <div className="p-4 sm:p-6 pb-4 border-b border-[#2a3942]/50 flex flex-col gap-4">
+                    {/* Credentials Block */}
+                    <div className="bg-black/5 dark:bg-black/30 p-4 rounded-2xl border border-gray-200/50 dark:border-white/5 flex flex-col gap-3 group/token backdrop-blur-sm">
+                       <div className="flex items-center justify-between gap-3">
+                          <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-widest font-bold flex items-center gap-1"><Smartphone size={12}/> INSTANCE ID</span>
+                          <div className="flex-1 text-right font-mono text-[10px] sm:text-xs tracking-wide text-gray-900 dark:text-gray-300 truncate">
+                             {inst.id}
+                          </div>
                        </div>
-                       <button onClick={() => setShowToken(prev => ({...prev, [inst.id]: !prev[inst.id]}))} className="text-gray-500 hover:text-emerald-400 transition-colors pl-2 shrink-0">
-                          {showToken[inst.id] ? <EyeOff size={16} /> : <EyeIcon size={16} />}
-                       </button>
+                       
+                       <div className="flex items-center justify-between gap-3 border-t border-gray-200/50 dark:border-white/5 pt-3">
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-500 uppercase tracking-widest font-bold flex items-center gap-1"><Key size={12}/> API KEY</span>
+                          <div className="flex-1 text-right font-mono text-[10px] sm:text-[11px] tracking-wide text-emerald-600 dark:text-emerald-400/80 group-hover/token:text-emerald-500 transition-colors truncate px-2">
+                             {showToken[inst.id] ? (inst.access_token || 'Chave não definida') : '••••••••••••••••••••••••••••••••'}
+                          </div>
+                          <button onClick={() => setShowToken(prev => ({...prev, [inst.id]: !prev[inst.id]}))} className="text-gray-400 hover:text-emerald-500 transition-colors shrink-0">
+                             {showToken[inst.id] ? <EyeOff size={16} /> : <EyeIcon size={16} />}
+                          </button>
+                       </div>
                     </div>
 
-                    <div className="flex items-center gap-4">
-                      <div className="w-16 h-16 bg-gray-100 dark:bg-[#202c33] rounded-full border border-gray-200 dark:border-white/5 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                    {/* WhatsApp Profile Banner */}
+                    <div className="flex items-center gap-4 bg-white/50 dark:bg-white/5 p-3 rounded-2xl border border-gray-100 dark:border-white/5">
+                      <div className="w-14 h-14 bg-gray-100 dark:bg-black/40 rounded-full border-2 border-emerald-500/20 flex items-center justify-center overflow-hidden shrink-0 shadow-sm ring-4 ring-emerald-500/5">
                       {inst.profile_picture_url ? (
                         <img src={inst.profile_picture_url} alt="Profile" className="w-full h-full object-cover" />
                       ) : (
-                        <Smartphone className="text-gray-400" size={28} />
+                        <User className="text-gray-400" size={24} />
                       )}
                     </div>
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-lg font-bold text-gray-900 dark:text-white truncate">{inst.whatsapp_name || inst.name}</h4>
-                        <Users size={16} className="text-gray-400 hidden sm:block" />
-                      </div>
-                      <p className="text-sm font-medium text-gray-500">{inst.phone_number ? `+${inst.phone_number}` : 'Aguardando Dispositivo'}</p>
+                    <div className="flex flex-col overflow-hidden">
+                       <h4 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white truncate flex items-center gap-2">
+                          {inst.whatsapp_name || inst.name}
+                       </h4>
+                       <p className="text-xs sm:text-sm font-medium text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                          {inst.phone_number ? `+${inst.phone_number}` : 'Aguardando Pareamento Device'}
+                       </p>
                     </div>
                   </div>
+                  
                   {/* Badges Info (Contatos, Mensagens) */}
-                  <div className="flex gap-6 pt-2 sm:pt-0 border-t sm:border-0 border-gray-200 dark:border-white/10">
-                     <div className="flex flex-col items-end">
-                       <MessageSquare size={16} className="text-gray-400 mb-1" />
+                  <div className="flex gap-4 pt-2 sm:pt-1">
+                     <div className="flex-1 flex flex-col justify-center bg-gray-50 dark:bg-black/20 rounded-xl p-3 border border-gray-100 dark:border-white/5">
+                       <div className="flex items-center gap-2 mb-1">
+                         <MessageSquare size={14} className="text-blue-500" />
+                         <span className="text-[10px] font-bold text-gray-500 uppercase">Mensagens</span>
+                       </div>
                        <span className="text-lg font-black text-gray-900 dark:text-white">{stats[inst.id]?.messages?.toLocaleString('pt-BR') || '0'}</span>
                      </div>
-                     <div className="flex flex-col items-end">
-                       <Users size={16} className="text-gray-400 mb-1" />
+                     <div className="flex-1 flex flex-col justify-center bg-gray-50 dark:bg-black/20 rounded-xl p-3 border border-gray-100 dark:border-white/5">
+                       <div className="flex items-center gap-2 mb-1">
+                         <Users size={14} className="text-indigo-500" />
+                         <span className="text-[10px] font-bold text-gray-500 uppercase">Contatos</span>
+                       </div>
                        <span className="text-lg font-black text-gray-900 dark:text-white">{stats[inst.id]?.contacts?.toLocaleString('pt-BR') || '0'}</span>
                      </div>
                   </div>
