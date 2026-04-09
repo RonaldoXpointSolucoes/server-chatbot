@@ -14,6 +14,23 @@ export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
 
+export function formatPhoneNumber(phone: string | undefined | null): string {
+  if (!phone) return '';
+  if (/[a-zA-Z]/.test(phone)) return phone;
+  
+  const cleanPhone = phone.replace(/\D/g, '');
+  if (cleanPhone.startsWith('55') && (cleanPhone.length === 12 || cleanPhone.length === 13)) {
+    const ddd = cleanPhone.substring(2, 4);
+    const num = cleanPhone.substring(4);
+    if (num.length === 9) {
+      return `(${ddd}) ${num.substring(0, 5)}-${num.substring(5)}`;
+    } else if (num.length === 8) {
+      return `(${ddd}) ${num.substring(0, 4)}-${num.substring(4)}`;
+    }
+  }
+  return phone;
+}
+
 export default function ChatDashboard() {
   const tenantName = sessionStorage.getItem('current_tenant_name');
   const { isEnabled: isDevLoggerEnabled } = useDevStore();
@@ -204,7 +221,7 @@ export default function ChatDashboard() {
         
         {/* Header Premium da Sidebar */}
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v1.0.35 | Deploy: 08/04/2026 20:38</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v1.0.36 | Deploy: 08/04/2026 21:14</span>
           
           <div className="flex items-center justify-between w-full mt-2">
             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-400 flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-[#202c33]">
@@ -370,10 +387,10 @@ export default function ChatDashboard() {
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center mb-0.5">
                     <div className="flex flex-col truncate pr-2">
-                      <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate">{contact.name || contact.phone}</span>
+                      <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate">{formatPhoneNumber(contact.name || contact.phone)}</span>
                       {contact.phone && contact.name !== contact.phone && (
                         <span className="text-[10px] text-[#54656f] dark:text-[#8696a0] font-mono tracking-tighter truncate mt-0.5">
-                          {contact.phone}
+                          {formatPhoneNumber(contact.phone)}
                         </span>
                       )}
                     </div>
@@ -499,10 +516,10 @@ export default function ChatDashboard() {
               <img src={activeChat.avatar} alt="Avatar" className="w-10 h-10 rounded-full object-cover" />
               <div>
                 <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
-                  <span className="truncate max-w-[200px] sm:max-w-md">{activeChat.name || activeChat.phone}</span>
+                  <span className="truncate max-w-[200px] sm:max-w-md">{formatPhoneNumber(activeChat.name || activeChat.phone)}</span>
                   {activeChat.phone && activeChat.name !== activeChat.phone && (
                     <span className="text-[12px] text-[#54656f] dark:text-[#8696a0] font-mono inline-block mt-0.5 border border-black/5 dark:border-white/10 px-1.5 rounded-md bg-black/5 dark:bg-white/5">
-                      {activeChat.phone}
+                      {formatPhoneNumber(activeChat.phone)}
                     </span>
                   )}
                 </h2>
