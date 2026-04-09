@@ -487,30 +487,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (tenantData.evolution_api_instance) {
            const { fetchEngineStatus, createInstance } = await import('../services/whatsappEngine');
            
-           // Buscar API Key correta do banco
-           const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', tenantData.evolution_api_instance).single();
+           // Buscar DB state
+           const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key, status').eq('id', tenantData.evolution_api_instance).single();
            const apiKey = instDataDB?.api_key || '';
-
-           try {
-             const stateRes = await fetchEngineStatus(tenantData.id, tenantData.evolution_api_instance, apiKey);
-             
-             if (stateRes?.data?.status === 'connected') {
-               set({ evolutionConnected: true, modalReason: null });
-               get().fetchInitialData();
-             } else {
-               const instData = stateRes?.data;
-   
-               if (instData && (instData.status === 'connected' || instData.status === 'connecting')) {
-                  await createInstance(tenantData.id, tenantData.evolution_api_instance, apiKey).catch(() => {});
-                  set({ evolutionConnected: true, modalReason: null });
-                  get().fetchInitialData();
-               } else {
-                  set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp foi encerrada ou expirada de forma remota. Por favor, conecte novamente relendo o QR Code.' });
-               }
-             }
-           } catch (e: any) {
-             console.error("Erro ao checar status no motor:", e);
-             set({ evolutionConnected: false, modalReason: `Oops! Falha de comunicação com o Whatsapp. Talvez o motor esteja offline. Detalhe: ${e.message}` });
+           
+           if (instDataDB?.status === 'connected') {
+             set({ evolutionConnected: true, modalReason: null });
+             get().fetchInitialData();
+           } else if (instDataDB?.status === 'connecting') {
+             set({ evolutionConnected: false, modalReason: 'O sistema está conectando ao WhatsApp...' });
+           } else {
+             set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp foi encerrada. Por favor, conecte novamente lendo o QR Code.' });
            }
         } else {
            set({ evolutionConnected: false, modalReason: 'Seja bem-vindo a sua plataforma! Crie a primeira conexão do seu número de WhatsApp comercial agora mesmo.' });

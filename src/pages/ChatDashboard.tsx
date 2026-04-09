@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import EvolutionModal from '../components/EvolutionModal';
 import { DeleteModal, RenameModal, NewChatModal } from '../components/ChatModals';
@@ -16,9 +16,12 @@ export function cn(...inputs: (string | undefined | null | false)[]) {
 
 export function formatPhoneNumber(phone: string | undefined | null): string {
   if (!phone) return '';
-  if (/[a-zA-Z]/.test(phone)) return phone;
+  // Cortar JID sulfix
+  let cleaned = phone.split('@')[0];
+  if (/[a-zA-Z]/.test(cleaned)) return cleaned;
   
-  const cleanPhone = phone.replace(/\D/g, '');
+  const cleanPhone = cleaned.replace(/\D/g, '');
+  
   if (cleanPhone.startsWith('55') && (cleanPhone.length === 12 || cleanPhone.length === 13)) {
     const ddd = cleanPhone.substring(2, 4);
     const num = cleanPhone.substring(4);
@@ -27,8 +30,16 @@ export function formatPhoneNumber(phone: string | undefined | null): string {
     } else if (num.length === 8) {
       return `(${ddd}) ${num.substring(0, 4)}-${num.substring(4)}`;
     }
+  } else if (cleanPhone.length === 10 || cleanPhone.length === 11) {
+    const ddd = cleanPhone.substring(0, 2);
+    const num = cleanPhone.substring(2);
+    if (num.length === 9) {
+      return `(${ddd}) ${num.substring(0, 5)}-${num.substring(5)}`;
+    } else if (num.length === 8) {
+      return `(${ddd}) ${num.substring(0, 4)}-${num.substring(4)}`;
+    }
   }
-  return phone;
+  return cleaned;
 }
 
 export default function ChatDashboard() {
@@ -221,7 +232,7 @@ export default function ChatDashboard() {
         
         {/* Header Premium da Sidebar */}
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v1.0.36 | Deploy: 08/04/2026 21:14</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v1.0.37 | Deploy: 08/04/2026 21:28</span>
           
           <div className="flex items-center justify-between w-full mt-2">
             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-400 flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-[#202c33]">
@@ -439,8 +450,8 @@ export default function ChatDashboard() {
                               disabled={isSyncingHistory[contact.id]}
                               className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
                             >
-                              <RefreshCw size={14} className={cn(isSyncingHistory[contact.id] ? "animate-spin text-[#00a884]" : "")} />
-                              {isSyncingHistory[contact.id] ? "Sincronizando..." : "Sincronizar Conversa"}
+                              <History size={14} className={cn(isSyncingHistory[contact.id] ? "animate-spin text-[#00a884]" : "")} />
+                              {isSyncingHistory[contact.id] ? "Buscando..." : "Buscar Histórico"}
                             </button>
                             <button 
                               onClick={(e) => { e.stopPropagation(); setContactToEdit({id: contact.id, name: contact.name}); setActiveDropdown(null); }}
@@ -573,9 +584,9 @@ export default function ChatDashboard() {
                       disabled={isSyncingHistory[activeChat.id]}
                       className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors active:bg-gray-100"
                     >
-                      <RefreshCw size={16} className={cn("text-[#00a884]", isSyncingHistory[activeChat.id] && "animate-spin")} />
+                      <History size={16} className={cn("text-[#00a884]", isSyncingHistory[activeChat.id] && "animate-spin")} />
                       <span className="text-[14px] text-[#3b4a54] dark:text-[#d1d7db]">
-                         {isSyncingHistory[activeChat.id] ? "Sincronizando..." : "Sincronizar Histórico"}
+                         {isSyncingHistory[activeChat.id] ? "Buscando..." : "Buscar Histórico"}
                       </span>
                     </button>
                   </div>
