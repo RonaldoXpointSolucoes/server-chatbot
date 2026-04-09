@@ -29,7 +29,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
     const newMode = !isDebugMode;
     setIsDebugMode(newMode);
     try {
-      const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL || 'http://localhost:9000';
+      const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
       await fetch(`${url}/api/v1/system/logs/level`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -96,7 +96,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   useEffect(() => {
     if (!isOpen) return;
 
-    const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL || 'http://localhost:9000';
+    const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
     const sse = new EventSource(`${url}/api/v1/system/logs/stream`);
     
     sse.onopen = () => {

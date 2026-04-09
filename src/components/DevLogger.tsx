@@ -20,7 +20,7 @@ export default function DevLogger() {
   const checkEngineStatus = async () => {
     try {
       setEngineStatus('checking');
-      const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL || 'http://localhost:9000';
+      const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
       const response = await fetch(`${url}/debug/healthz`);
       if (response.ok) {
         const data = await response.json();
