@@ -16,6 +16,11 @@ class EventProcessor {
         return jid === 'status@broadcast' || (jid && jid.endsWith('@newsletter'));
     }
 
+    // Auxiliar: Filtra se é um LID (Linked Device ID)
+    isLid(jid) {
+        return jid && jid.endsWith('@lid');
+    }
+
     async handleMessageUpsert(tenantId, instanceId, sock, m) {
         if (!m.messages || m.messages.length === 0) return;
 
@@ -27,8 +32,8 @@ class EventProcessor {
 
             const jid = msg.key.remoteJid;
             
-            // Ignora status e grupos por enquanto
-            if (this.isBroadcast(jid) || this.isGroup(jid)) continue;
+            // Ignora status, grupos e LIDs por enquanto
+            if (this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
 
             try {
                 const senderType = msg.key.fromMe ? 'bot' : 'client';
@@ -259,7 +264,7 @@ class EventProcessor {
         // Contacts
         for (const c of contacts) {
             const jid = c.id;
-            if (this.isBroadcast(jid) || this.isGroup(jid)) continue;
+            if (this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
             
             const phone = jid.split('@')[0];
             const pushName = c.notify || c.name || phone;
@@ -275,7 +280,7 @@ class EventProcessor {
         // Chats (Conversations meta)
         for (const chat of chats) {
             const jid = chat.id;
-            if (this.isBroadcast(jid) || this.isGroup(jid)) continue;
+            if (this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
             
             const phone = jid.split('@')[0];
             
@@ -332,7 +337,7 @@ class EventProcessor {
         // updates é um array de Partial<Chat>
         for (const update of updates) {
             const jid = update.id;
-            if (this.isBroadcast(jid) || this.isGroup(jid)) continue;
+            if (this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
 
             const phone = jid.split('@')[0];
             const { data: contact } = await supabase.from('contacts').select('id').eq('tenant_id', tenantId).eq('phone', phone).single();
