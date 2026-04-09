@@ -1,4 +1,4 @@
-import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
+import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } from '@whiskeysockets/baileys';
 import { useSupabaseAuthState } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
@@ -9,6 +9,7 @@ class SessionManager {
     constructor() {
         this.sessions = new Map();
         this.connectingState = new Map();
+        this.stores = new Map();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -59,6 +60,12 @@ class SessionManager {
             // workaround for pure ESM makeWASocket if it's default exported vs destructured
             const createSocket = makeWASocket.default ? makeWASocket.default : makeWASocket;
 
+            let store = this.stores.get(instanceId);
+            if (!store) {
+                store = makeInMemoryStore({ logger: this.logger });
+                this.stores.set(instanceId, store);
+            }
+
             const sock = createSocket({
                 version,
                 logger: this.logger,
@@ -71,6 +78,9 @@ class SessionManager {
                 keepAliveIntervalMs: 30000,
                 defaultQueryTimeoutMs: 60000
             });
+
+            store.bind(sock.ev);
+            sock.store = store;
 
             sock.ev.on('creds.update', saveCreds);
 
@@ -85,6 +95,7 @@ class SessionManager {
                     this.sessions.delete(instanceId);
 
                     if (loggedOut) {
+                        this.stores.delete(instanceId);
                         console.log(`[SessionManager] Instância ${instanceId} desconectada (Logged Out).`);
                         await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
                         await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
