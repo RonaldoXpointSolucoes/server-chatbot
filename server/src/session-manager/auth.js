@@ -3,6 +3,53 @@ import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
 
 // Cache global por instância para não estrangular a rede nas leituras
 const sessionCaches = new Map();
+const pendingWrites = new Map(); // Fila de batch para DB Sync
+
+function scheduleDbSync(instanceId, tenantId) {
+    if (pendingWrites.has(instanceId) && pendingWrites.get(instanceId).timer) {
+        clearTimeout(pendingWrites.get(instanceId).timer);
+    } else if (!pendingWrites.has(instanceId)) {
+        pendingWrites.set(instanceId, {
+           keysToUpsert: new Map(),
+           keysToDelete: new Set(),
+           timer: null
+        });
+    }
+
+    const queue = pendingWrites.get(instanceId);
+
+    // Debounce de 2 segundos para aglomerar writes e proteger a API do Supabase
+    queue.timer = setTimeout(async () => {
+        pendingWrites.delete(instanceId);
+        
+        try {
+            const dels = Array.from(queue.keysToDelete);
+            if (dels.length > 0) {
+                const { error } = await supabase.from('wa_auth_keys')
+                    .delete()
+                    .eq('instance_id', instanceId)
+                    .in('key_name', dels);
+                if(error) console.error(`[${instanceId}] Erro Batch DEL:`, error.message);
+            }
+            
+            const upserts = Array.from(queue.keysToUpsert.values());
+            if (upserts.length > 0) {
+                // Dividir em chunks para não estourar o payload max do Supabase
+                const CHUNK = 500;
+                for (let i = 0; i < upserts.length; i += CHUNK) {
+                    const { error } = await supabase.from('wa_auth_keys')
+                        .upsert(upserts.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' });
+                    if(error) console.error(`[${instanceId}] Erro Batch UPSERT (${i}):`, error.message);
+                }
+            }
+            if (upserts.length > 0 || dels.length > 0) {
+                console.log(`[SessionManager] DB Sync em lote [${instanceId}]. Upserts: ${upserts.length}, Deletes: ${dels.length}`);
+            }
+        } catch (error) {
+            console.error(`[SessionManager] Erro fatal DB Sync [${instanceId}]:`, error.message);
+        }
+    }, 2000);
+}
 
 export async function useSupabaseAuthState(tenantId, instanceId) {
     if (!sessionCaches.has(instanceId)) {
@@ -77,8 +124,11 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                     return data;
                 },
                 set: async (data) => {
-                    const keysToUpsert = [];
-                    const keysToDelete = [];
+                    let queue = pendingWrites.get(instanceId);
+                    if (!queue) {
+                        queue = { keysToUpsert: new Map(), keysToDelete: new Set(), timer: null };
+                        pendingWrites.set(instanceId, queue);
+                    }
                     
                     for (const category in data) {
                         for (const id in data[category]) {
@@ -88,37 +138,22 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                             
                             if (isNull) {
                                 memCache.delete(name);
-                                keysToDelete.push(name);
+                                queue.keysToDelete.add(name);
+                                queue.keysToUpsert.delete(name);
                             } else {
                                 memCache.set(name, val);
-                                keysToUpsert.push({
+                                queue.keysToUpsert.set(name, {
                                     instance_id: instanceId,
                                     tenant_id: tenantId,
                                     key_name: name,
                                     key_data: JSON.parse(JSON.stringify(val, BufferJSON.replacer))
                                 });
+                                queue.keysToDelete.delete(name);
                             }
                         }
                     }
 
-                    if (keysToDelete.length > 0) {
-                        const { error } = await supabase.from('wa_auth_keys')
-                            .delete()
-                            .eq('instance_id', instanceId)
-                            .in('key_name', keysToDelete);
-                        if (error) {
-                            console.error(`[${instanceId}] Erro DEL keys:`, error.message);
-                            throw new Error(error.message);
-                        }
-                    }
-                    if (keysToUpsert.length > 0) {
-                        const { error } = await supabase.from('wa_auth_keys')
-                            .upsert(keysToUpsert, { onConflict: 'instance_id, key_name' });
-                        if (error) {
-                            console.error(`[${instanceId}] Erro UPSERT keys:`, error.message);
-                            throw new Error(error.message);
-                        }
-                    }
+                    scheduleDbSync(instanceId, tenantId);
                 }
             }
         },
