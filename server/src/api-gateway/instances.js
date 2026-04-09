@@ -99,8 +99,14 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
 
         if(typeof sock[method] !== 'function') return res.status(400).json({ error: `Method ${method} not found on Baileys socket` });
 
-        const result = await sock[method](...(args || []));
-        res.json({ ok: true, result });
+        try {
+            const result = await sock[method](...(args || []));
+            res.json({ ok: true, result });
+        } catch (sockError) {
+            // Se o Baileys disparar um erro (ex: not-authorized ao buscar avatar protegido)
+            // Retornamos 200 com ok: false para não estourar 400/500 no DevLogger do frontend para erros esperados
+            return res.status(200).json({ ok: false, error: sockError.message || typeof sockError === 'string' ? sockError : 'Engine instruction failed' });
+        }
     } catch(e) {
         res.status(500).json({ error: e.message });
     }
