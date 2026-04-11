@@ -388,29 +388,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!tenant) return;
 
     try {
-       // 1. Puxa contatos (prioriza os fixados)
-       const { data: dbContacts } = await supabase.from('contacts')
-           .select('*')
-           .eq('tenant_id', tenant.id)
-           .order('is_pinned', { ascending: false })
-           .order('created_at', { ascending: false })
-           .limit(300);
-           
-       if (!dbContacts || dbContacts.length === 0) return;
-
-       const contactIds = dbContacts.map(c => c.id);
-
-       // 2. Puxa conversas desses contatos
+       // 1. Puxa as conversas recentes, garantindo a mesma ordem do WhatsApp Web
        const { data: dbConvs } = await supabase.from('conversations')
           .select('*')
           .eq('tenant_id', tenant.id)
-          .in('contact_id', contactIds);
+          .order('is_pinned', { ascending: false })
+          .order('last_message_at', { ascending: false, nullsFirst: false })
+          .limit(300);
+          
+       if (!dbConvs || dbConvs.length === 0) return;
+
+       const contactIds = dbConvs.map(cv => cv.contact_id);
+
+       // 2. Puxa os contatos dessas conversas
+       const { data: dbContacts } = await supabase.from('contacts')
+           .select('*')
+           .eq('tenant_id', tenant.id)
+           .in('id', contactIds);
 
        if (dbContacts && dbContacts.length > 0) {
+           // VALIDAÇÃO INTELIGENTE APPWEB: Filtra contatos que não tem telefone válido ou são LIDs de sistema (fantasma)
+           const validContacts = dbContacts.filter(c => {
+               const jid = c.whatsapp_jid || '';
+               const phone = c.phone || '';
+               if (jid.includes('@lid')) return false; // Bloqueia LIDs
+               if (phone.length > 15 && !phone.includes('+')) return false; // Provável ID mascarado
+               return true;
+           });
+
            set((s) => {
                const newContacts = [...s.contacts];
                
-               dbContacts.forEach(dbC => {
+               dbConvs.forEach(conv => {
+                  const dbC = validContacts.find(c => c.id === conv.contact_id);
+                  if (!dbC) return; // Ignora se perder integridade
+
                   const phoneMatch = dbC.phone || (dbC.whatsapp_jid ? dbC.whatsapp_jid.split('@')[0] : null);
                   const idx = newContacts.findIndex(c => 
                      c.id === dbC.id || 
@@ -420,13 +432,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   
                   const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(dbC.name || dbC.phone)}&background=random&color=fff`;
                   
-                  // Busca conversa associada a este contato
-                  const conv = dbConvs?.find(cv => cv.contact_id === dbC.id);
-
-                  const preview = conv?.last_message_preview || '';
-                  const unread = conv?.unread_count || 0;
-                  const isFavorite = conv?.is_favorite || false;
-                  const ts = conv?.last_message_at ? new Date(conv.last_message_at).getTime() : new Date(dbC.created_at).getTime();
+                  const preview = conv.last_message_preview || '';
+                  const unread = conv.unread_count || 0;
+                  const isFavorite = conv.is_favorite || false;
+                  // Garante a prioridade absoluta pro is_pinned da conversa (já que WA fixa conversas, não contatos globalmente)
+                  const isPinned = conv.is_pinned !== undefined ? conv.is_pinned : dbC.is_pinned;
+                  // Se não tiver last_message_at (muito raro), usa a data de criação do contato
+                  const ts = conv.last_message_at ? new Date(conv.last_message_at).getTime() : new Date(dbC.created_at).getTime();
 
                   if (idx !== -1) {
                      const existing = newContacts[idx];
@@ -438,6 +450,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         avatar: dbC.profile_picture_url || (existing.avatar?.includes('ui-avatars') ? fallbackAvatar : (existing.avatar || fallbackAvatar)),
                         unread: unread,
                         is_favorite: isFavorite,
+                        is_pinned: isPinned,
                         lastMsgTimestamp: ts,
                         messages: existing.messages || [],
                      };
@@ -458,6 +471,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         messages: preview ? [{ id: 'preview-' + conv.id, text: preview, sender: 'client', timestamp: new Date(ts) }] : [],
                         unread: unread,
                         is_favorite: isFavorite,
+                        is_pinned: isPinned,
                         lastMsgTimestamp: ts
                      });
                   }

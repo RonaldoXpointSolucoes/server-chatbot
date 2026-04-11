@@ -38,8 +38,8 @@ class EventProcessor {
 
             const jid = msg.key.remoteJid;
             
-            // Ignora status e grupos por enquanto. (Não vamos mais ignorar LIDs pois WhatsApp agora envia chats normais por LID em alguns casos).
-            if (this.isBroadcast(jid) || this.isGroup(jid)) continue;
+            // Ignora status, grupos e LIDs isolados, forçando a ignorar as ecos de múltiplos aparelhos para IDs nativos
+            if (this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
 
             try {
                 const ownerJid = sock?.user?.id;
