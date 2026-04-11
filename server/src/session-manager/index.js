@@ -1,4 +1,4 @@
-import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
+import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, Browsers } from '@whiskeysockets/baileys';
 import { useSupabaseAuthState } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
@@ -64,9 +64,9 @@ class SessionManager {
                 logger: this.logger,
                 printQRInTerminal: false,
                 auth: state,
-                browser: ['Mac OS', 'Desktop', '1.0.0'],
+                browser: Browsers.macOS('Desktop'),
                 generateHighQualityLinkPreview: true,
-                syncFullHistory: true,
+                syncFullHistory: false,
                 connectTimeoutMs: 60000,
                 keepAliveIntervalMs: 30000,
                 defaultQueryTimeoutMs: 60000

@@ -17,7 +17,14 @@ interface WhatsAppInstance {
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false
+    }
+  }
 );
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
@@ -107,7 +114,7 @@ export default function InstancesDashboard() {
                      return inst; // Se engine não responder 200, confia no Supabase
                   }
               } catch(e) {
-                 return inst; // Se o navegador falhar em atingir localhost (CORS), confia no Supabase em vez de forçar Offline
+                 return { ...inst, status: 'offline' }; // Fallback to offline to permit a reconnect attempt
               }
           }
           return inst;
@@ -252,7 +259,7 @@ export default function InstancesDashboard() {
 
     try {
       const tenantId = sessionStorage.getItem('current_tenant_id');
-      await fetch(`${ENGINE_URL}/api/v1/instances/connect`, { 
+      await fetch(`${ENGINE_URL}/api/v1/instances/${id}/connect`, { 
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json', 
@@ -309,7 +316,7 @@ export default function InstancesDashboard() {
           secondsElapsed = 0; // Renova ciclo da UI
           console.log('[UI] 30 Segundos Ociosos. Renovando QR Code do Motor via API...');
           setQrLoading(true);
-          await fetch(`${ENGINE_URL}/api/v1/instances/connect`, { 
+          await fetch(`${ENGINE_URL}/api/v1/instances/${id}/connect`, { 
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json', 
