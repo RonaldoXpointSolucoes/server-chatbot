@@ -38,8 +38,8 @@ class EventProcessor {
 
             const jid = msg.key.remoteJid;
             
-            // Ignora status, grupos e LIDs por enquanto
-            if (this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
+            // Ignora status e grupos por enquanto. (Não vamos mais ignorar LIDs pois WhatsApp agora envia chats normais por LID em alguns casos).
+            if (this.isBroadcast(jid) || this.isGroup(jid)) continue;
 
             try {
                 const senderType = msg.key.fromMe ? 'bot' : 'client';
@@ -300,6 +300,15 @@ class EventProcessor {
                          conversation_id: b.conversationId
                      });
                  }
+             }
+             
+             // Emitir trigger de recarregamento se houver mensagens de history no lote (pra interface atualizar em massa)
+             if (realInserted.length > 0 && batch.some(b => b.isHistory)) {
+                 const firstTenant = batch[0].tenantId;
+                 await realtime.publishInboxEvent(firstTenant, 'history.sync.completed', {
+                     count: realInserted.length
+                 });
+             }
                  
                  // Puxa a foto do perfil assincronamente (background level 2) sem estourar tempo
                  if(b && b.sock && b.jid && !b.jid.includes('@g.us')) {
