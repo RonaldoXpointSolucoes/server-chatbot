@@ -42,9 +42,20 @@ class EventProcessor {
             if (this.isBroadcast(jid) || this.isGroup(jid)) continue;
 
             try {
+                const ownerJid = sock?.user?.id;
+                let ownerPhone = null;
+                if (ownerJid) {
+                     ownerPhone = ownerJid.split(':')[0].split('@')[0];
+                }
+                const phone = jid.split('@')[0];
+                
+                // Evita que o proprio número da instância seja logado como um contato ou conversa
+                if (ownerPhone && phone === ownerPhone) {
+                     continue;
+                }
+
                 const senderType = msg.key.fromMe ? 'bot' : 'client';
                 const direction = msg.key.fromMe ? 'outbound' : 'inbound';
-                const phone = jid.split('@')[0];
                 const pushName = msg.pushName || phone;
                 
                 // Trata data da mensagem
@@ -333,12 +344,23 @@ class EventProcessor {
         const { chats, contacts, messages, isLatest } = payload;
         console.log(`[EventProcessor] Histórico Completo Recebido: ${chats.length} chats, ${contacts.length} contatos, ${messages.length} msgs. IsLatest: ${isLatest}`);
         
+        
+        const ownerJid = sock?.user?.id;
+        let ownerPhone = null;
+        if (ownerJid) {
+             ownerPhone = ownerJid.split(':')[0].split('@')[0];
+        }
+
         // Contacts (Fazemos um lote imediato pro Histórico base)
         const mappedContactsToHistory = {};
         for (const c of contacts) {
             const jid = c.id;
             if (this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
             const phone = jid.split('@')[0];
+            
+            // Pula o próprio número
+            if (ownerPhone && phone === ownerPhone) continue;
+
             const pushName = c.notify || c.name || phone;
             mappedContactsToHistory[`${tenantId}_${phone}`] = { tenant_id: tenantId, phone: phone, name: pushName, whatsapp_jid: jid };
         }
