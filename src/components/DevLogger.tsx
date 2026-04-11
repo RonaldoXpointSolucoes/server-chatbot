@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useDevStore } from '../store/devStore';
-import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network } from 'lucide-react';
+import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 
@@ -14,6 +14,7 @@ export default function DevLogger() {
   const [showChangelog, setShowChangelog] = useState(false);
   const [showServerLogs, setShowServerLogs] = useState(false);
   const [showEndpoints, setShowEndpoints] = useState(false);
+  const [telemetry, setTelemetry] = useState<{ cpu: number, memory: number, uptime: number } | null>(null);
   
   const engineUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -141,6 +142,32 @@ export default function DevLogger() {
     }
   }, [logs, isVisible, isEnabled]);
 
+  useEffect(() => {
+    if (!isVisible || !isEnabled) return;
+    
+    const fetchTelemetry = async () => {
+      try {
+        const response = await fetch(`${engineUrl}/debug/metrics`);
+        if (response.ok) {
+           const data = await response.json();
+           if (data.status === 'ok') {
+              setTelemetry({
+                 cpu: data.cpuPercent,
+                 memory: data.memoryMB,
+                 uptime: data.uptime
+              });
+           }
+        }
+      } catch (err) {
+         // ignora silenciosamente
+      }
+    };
+
+    fetchTelemetry();
+    const interval = setInterval(fetchTelemetry, 5000);
+    return () => clearInterval(interval);
+  }, [isVisible, isEnabled, engineUrl]);
+
   const copyLogs = () => {
     const textStr = logs.map(l => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.type.toUpperCase()}] ${l.source}: ${l.message}\n${l.details ? JSON.stringify(l.details) : ''}`).join('\n\n');
     navigator.clipboard.writeText(textStr || 'Nenhum log para copiar.');
@@ -252,7 +279,7 @@ export default function DevLogger() {
         {isVisible && serverMeta && (
           <div className="bg-gray-900/50 border-b border-gray-700/30 p-2 px-3 flex flex-col gap-2 text-xs transition-all">
             <div className="flex items-center justify-between font-mono">
-               <div className="flex items-center gap-3 opacity-80">
+               <div className="flex items-center gap-3 opacity-80 flex-wrap">
                  <div className="flex items-center gap-1.5 text-blue-300 bg-blue-900/20 px-2 py-0.5 rounded-md border border-blue-500/20">
                     <Layers size={12} />
                     <span>Engine: {serverMeta?.engineVersion || 'Desconhecido'}</span>
@@ -261,6 +288,18 @@ export default function DevLogger() {
                     <Calendar size={12} />
                     <span>Compilação: {serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString('pt-BR') : 'Indisponível'}</span>
                  </div>
+                 {telemetry && (
+                   <>
+                     <div className="flex items-center gap-1.5 text-emerald-300 bg-emerald-900/20 px-2 py-0.5 rounded-md border border-emerald-500/20" title="Uso de CPU do Backend Node.js">
+                        <Cpu size={12} className={telemetry.cpu > 50 ? 'animate-pulse text-red-400' : ''} />
+                        <span>{telemetry.cpu.toFixed(1)}%</span>
+                     </div>
+                     <div className="flex items-center gap-1.5 text-cyan-300 bg-cyan-900/20 px-2 py-0.5 rounded-md border border-cyan-500/20" title="Uso de Memória RAM do Backend Node.js">
+                        <Activity size={12} className="opacity-80" />
+                        <span>{telemetry.memory.toFixed(1)} MB</span>
+                     </div>
+                   </>
+                 )}
                </div>
                <button 
                  onClick={(e) => { e.stopPropagation(); setShowChangelog(!showChangelog); }}

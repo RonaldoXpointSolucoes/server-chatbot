@@ -45,9 +45,8 @@ export const useDevStore = create<DevStore>()(
                level: log.type,
                payload: log.details ? JSON.stringify(log.details) : null,
                company_id: tenantId || null,
-            }]).catch(err => {
-               // Avoid endless loops if supabase log fails and triggers console.error
-               if(log.source !== 'Fetch API: undefined') {
+            }]).then(({ error }) => {
+               if (error && log.source !== 'Fetch API: undefined') {
                    // Ignore to prevent loop
                }
             });

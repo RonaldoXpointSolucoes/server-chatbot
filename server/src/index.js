@@ -13,6 +13,7 @@ import sessionManager from './session-manager/index.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import pidusage from 'pidusage';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -78,6 +79,21 @@ app.get('/debug/readyz', async (req, res) => {
     const { error } = await supabase.from('tenants').select('id').limit(1);
     if (error) return res.status(503).json({ status: 'error_db', detail: error.message });
     return res.json({ status: 'ready' });
+});
+
+app.get('/debug/metrics', async (req, res) => {
+    try {
+        const stats = await pidusage(process.pid);
+        const memObj = process.memoryUsage();
+        return res.json({
+            status: 'ok',
+            cpuPercent: stats.cpu,
+            memoryMB: memObj.rss / 1024 / 1024,
+            uptime: process.uptime()
+        });
+    } catch(err) {
+        return res.status(500).json({ status: 'error', detail: err.message });
+    }
 });
 
 // Setup Swagger UI (/swagger/teste.html)

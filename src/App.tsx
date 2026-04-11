@@ -8,6 +8,7 @@ import AdminLogin from './pages/AdminLogin';
 import ClientLogin from './pages/ClientLogin';
 import BaileysFeatures from './pages/BaileysFeatures';
 import InstancesDashboard from './pages/InstancesDashboard';
+import KnowledgeBase from './pages/KnowledgeBase';
 import DevLogger from './components/DevLogger';
 import { InstallPWA } from './components/InstallPWA';
 
@@ -25,6 +26,7 @@ export default function App() {
         <Route element={<ProtectedRoute role="client" />}>
           <Route path="/chat" element={<ErrorBoundary><ChatDashboard /></ErrorBoundary>} />
           <Route path="/instances" element={<InstancesDashboard />} />
+          <Route path="/knowledge" element={<ErrorBoundary><KnowledgeBase /></ErrorBoundary>} />
         </Route>
 
         {/* Gerenciamento Master SaaS */}

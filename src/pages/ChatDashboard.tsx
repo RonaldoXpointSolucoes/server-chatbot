@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import EvolutionModal from '../components/EvolutionModal';
 import { DeleteModal, RenameModal, NewChatModal } from '../components/ChatModals';
@@ -43,6 +44,7 @@ export function formatPhoneNumber(phone: string | undefined | null): string {
 }
 
 export default function ChatDashboard() {
+  const navigate = useNavigate();
   const tenantName = sessionStorage.getItem('current_tenant_name');
   const { isEnabled: isDevLoggerEnabled } = useDevStore();
   const {  
@@ -247,6 +249,10 @@ export default function ChatDashboard() {
               
               <button className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all text-[#00a884]" onClick={() => setIsNewChatOpen(true)}>
                 <MessageSquarePlus size={20} />
+              </button>
+              
+              <button className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-emerald-500/20 transition-all text-emerald-500" title="Base de Conhecimento RAG" onClick={() => navigate('/knowledge')}>
+                <BrainCircuit size={20} />
               </button>
               
               <ThemeToggle />

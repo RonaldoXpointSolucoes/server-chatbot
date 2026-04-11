@@ -3,20 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2, Smartphone } from 'lucide-react';
 import { cn } from './ChatDashboard';
 import { Navigate } from 'react-router-dom';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../services/supabase';
 import ThemeToggle from '../components/ThemeToggle';
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY,
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false
-    }
-  }
-);
 
 type TabType = 'overview' | 'companies' | 'plans' | 'billing';
 
