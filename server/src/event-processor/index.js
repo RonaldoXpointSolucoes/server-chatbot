@@ -36,7 +36,17 @@ class EventProcessor {
                 fs.appendFileSync('event_debug.log', new Date().toISOString() + ' QUEUED RAW PAYLOAD: ' + JSON.stringify(msg) + '\n');
             } catch(e){}
 
-            const jid = msg.key.remoteJid;
+            let jid = msg.key.remoteJid;
+
+            // [LID Sync Override]
+            // Multi-device connections (WhatsApp Web/Desktop or linked phones) send outgoing 'fromMe' 
+            // messages tagged with '@lid' in remoteJid, but they include the actual target phone in remoteJidAlt.
+            // By extracting it here, we rescue the sync message and map it perfectly to the real contact.
+            if (jid && jid.includes('@lid') && msg.key.remoteJidAlt && msg.key.remoteJidAlt.includes('@s.whatsapp.net')) {
+                jid = msg.key.remoteJidAlt;
+            }
+
+            if (!jid) continue;
             
             // Ignora status, grupos e LIDs isolados, forçando a ignorar as ecos de múltiplos aparelhos para IDs nativos
             if (this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
