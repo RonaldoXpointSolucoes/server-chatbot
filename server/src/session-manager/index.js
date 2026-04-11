@@ -64,7 +64,7 @@ class SessionManager {
                 logger: this.logger,
                 printQRInTerminal: false,
                 auth: state,
-                browser: Browsers.macOS('Desktop'),
+                browser: Browsers.ubuntu('Chrome'),
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: false,
                 connectTimeoutMs: 60000,
@@ -84,11 +84,14 @@ class SessionManager {
 
                     this.sessions.delete(instanceId);
 
-                    if (loggedOut) {
-                        console.log(`[SessionManager] Instância ${instanceId} desconectada (Logged Out).`);
+                    if (loggedOut || status === 401 || status === 403 || status === 400) {
+                        console.log(`[SessionManager] Instância ${instanceId} desconectada ou erro crítico (status: ${status}). Limpando credenciais.`);
                         await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
                         await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
                         await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
+                        
+                        // Tentar reconectar limpo após 5s
+                        setTimeout(() => this.createSession(tenantId, instanceId), 5000);
                     } else {
                         console.log(`[SessionManager] Instância ${instanceId} fechou. Motivo: ${status}. Tentando reconectar em 5s...`);
                         setTimeout(() => this.createSession(tenantId, instanceId), 5000);
