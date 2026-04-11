@@ -323,9 +323,13 @@ class EventProcessor {
              }
              
              // 5. Fire socket events para realtime no painel (FrontEnd)
+             const fetchedPictures = new Set();
+
              for(const msg of realInserted) {
                  const b = batch.find(x => x.rawMsg.key.id === msg.whatsapp_message_id);
-                 if (b && !b.isHistory) {
+                 if (!b) continue;
+
+                 if (!b.isHistory) {
                      await realtime.publishInboxEvent(b.tenantId, 'message.new', {
                          message: msg,
                          contact_phone: b.phone,
@@ -334,15 +338,20 @@ class EventProcessor {
                  }
                  
                  // Puxa a foto do perfil assincronamente (background level 2) sem estourar tempo
-                 if(b && b.sock && b.jid && !b.jid.includes('@g.us')) {
-                     b.sock.profilePictureUrl(b.jid, 'image')
-                         .then(async (url) => {
-                             const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
-                             if(cid) { 
-                                 await supabase.from('contacts').update({ profile_picture_url: url }).eq('id', cid).is('profile_picture_url', null); 
-                             }
-                         })
-                         .catch(() => {});
+                 // SISTEMA ANTI-BAN/ANTI-LOOP: Garantir que não dispare múltiplas requisições (por JID) para a Meta no caso de batch insert (sync histórico de 50 msgs).
+                 if(b.sock && b.jid && !b.jid.includes('@g.us')) {
+                     const picKey = `${b.tenantId}_${b.jid}`;
+                     if (!fetchedPictures.has(picKey)) {
+                         fetchedPictures.add(picKey);
+                         b.sock.profilePictureUrl(b.jid, 'image')
+                             .then(async (url) => {
+                                 const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
+                                 if(cid) { 
+                                     await supabase.from('contacts').update({ profile_picture_url: url }).eq('id', cid).is('profile_picture_url', null); 
+                                 }
+                             })
+                             .catch(() => {});
+                     }
                  }
              }
              
