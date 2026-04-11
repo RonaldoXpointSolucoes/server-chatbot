@@ -22,8 +22,6 @@ const requireTenant = async (req, res, next) => {
 
     const instanceId = req.params.instanceId;
     if (instanceId) {
-        if (!apiKey) return res.status(401).json({ error: 'apikey header missing. Access denied.' });
-        
         const { data, error } = await supabase
             .from('whatsapp_instances')
             .select('api_key')
@@ -33,10 +31,10 @@ const requireTenant = async (req, res, next) => {
             
         if (error || !data) return res.status(404).json({ error: 'Instance not found or unauthorized' });
         
-        // Se a instância tiver uma API key registrada, verifica.
-        // Considerando a restrição estrita proativa solicitada na regra:
-        if (data.api_key && data.api_key !== apiKey) {
-            return res.status(401).json({ error: 'Invalid API Key provided for this instance' });
+        // Verifica se a instância requer API Key.
+        if (data.api_key) {
+             if (!apiKey) return res.status(401).json({ error: 'apikey header missing. Access denied.' });
+             if (data.api_key !== apiKey) return res.status(401).json({ error: 'Invalid API Key provided for this instance' });
         }
     }
 
