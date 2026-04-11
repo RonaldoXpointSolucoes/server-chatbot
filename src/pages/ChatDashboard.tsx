@@ -359,7 +359,14 @@ export default function ChatDashboard() {
           }).sort((a,b) => {
              if (a.is_pinned && !b.is_pinned) return -1;
              if (!a.is_pinned && b.is_pinned) return 1;
-             return b.lastMsgTimestamp - a.lastMsgTimestamp;
+             
+             const aLastMsg = a.messages?.[a.messages.length - 1];
+             const bLastMsg = b.messages?.[b.messages.length - 1];
+             
+             const aTime = Math.max(a.lastMsgTimestamp || 0, aLastMsg ? new Date(aLastMsg.timestamp).getTime() : 0);
+             const bTime = Math.max(b.lastMsgTimestamp || 0, bLastMsg ? new Date(bLastMsg.timestamp).getTime() : 0);
+             
+             return bTime - aTime;
           }).map((contact) => {
              const lastMsg = contact.messages?.[contact.messages.length - 1];
              const timeDisplay = lastMsg 

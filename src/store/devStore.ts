@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import { supabase } from '../services/supabase';
 
 export interface LogEntry {
   id: string;
@@ -19,20 +21,47 @@ interface DevStore {
   toggleEnabled: () => void;
 }
 
-export const useDevStore = create<DevStore>((set) => ({
-  logs: [],
-  isVisible: false,
-  isEnabled: false,
-  addLog: (log) => set((state) => {
-    const newLog: LogEntry = {
-      ...log,
-      id: crypto.randomUUID(),
-      timestamp: new Date().toISOString()
-    };
-    // keep max 100 logs
-    return { logs: [newLog, ...state.logs].slice(0, 100) };
-  }),
-  clearLogs: () => set({ logs: [] }),
-  toggleVisibility: () => set((state) => ({ isVisible: !state.isVisible })),
-  toggleEnabled: () => set((state) => ({ isEnabled: !state.isEnabled }))
-}));
+export const useDevStore = create<DevStore>()(
+  persist(
+    (set, get) => ({
+      logs: [],
+      isVisible: false,
+      isEnabled: false,
+      addLog: (log) => {
+        const newLog: LogEntry = {
+          ...log,
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString()
+        };
+        
+        const state = get();
+        if (state.isEnabled) {
+            const tenantId = sessionStorage.getItem('current_tenant_id') || localStorage.getItem('tenantId');
+            
+            // Background async save to db
+            supabase.from('system_logs').insert([{
+               type: log.source || 'Frontend',
+               message: log.message,
+               level: log.type,
+               payload: log.details ? JSON.stringify(log.details) : null,
+               company_id: tenantId || null,
+            }]).catch(err => {
+               // Avoid endless loops if supabase log fails and triggers console.error
+               if(log.source !== 'Fetch API: undefined') {
+                   // Ignore to prevent loop
+               }
+            });
+        }
+        
+        set((state) => ({ logs: [newLog, ...state.logs].slice(0, 100) }));
+      },
+      clearLogs: () => set({ logs: [] }),
+      toggleVisibility: () => set((state) => ({ isVisible: !state.isVisible })),
+      toggleEnabled: () => set((state) => ({ isEnabled: !state.isEnabled }))
+    }),
+    {
+      name: 'dev-logger-config',
+      partialize: (state) => ({ isEnabled: state.isEnabled }), 
+    }
+  )
+);

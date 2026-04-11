@@ -246,6 +246,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   upsertContactLocally: (contact) => {
+    // VALIDAÇÃO INTELIGENTE APPWEB (Realtime Barreira)
+    if (contact.whatsapp_jid && contact.whatsapp_jid.includes('@lid')) return;
+    if (contact.phone && contact.phone.length > 15 && !contact.phone.includes('+')) return;
+
     set((state) => {
       // 1. Resolvemos os dois principais identificadores unicos independentes (JID ou Telefone Formatado/Puro)
       const contactPhoneMatch = contact.phone || (contact.whatsapp_jid ? contact.whatsapp_jid.split('@')[0] : null);
