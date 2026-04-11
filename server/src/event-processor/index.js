@@ -300,14 +300,25 @@ class EventProcessor {
                     .select('*');
                     
                  if(msgErr) {
-                     console.error('[BatchProcessor] Insert Messages DB err:', msgErr);
-                     // Fallback 1 by 1 se quebrar muito
-                     if (msgErr.code !== '23505') {
-                        // try fallback without instance id if it was in the map, mas aqui nao tem.
+                     console.warn(`[BatchProcessor] Insert em lote falhou (código ${msgErr.code}). Iniciando fallback de inserção 1 a 1...`);
+                     // Fallback 1 by 1 salva as mensagens que não são duplicadas (ignora erro 23505 de cada item)
+                     for (const m of messagesToInsert) {
+                         const { data: singleInserted, error: singleErr } = await supabase.from('messages')
+                             .insert([m])
+                             .select('*');
+                             
+                         if (singleErr) {
+                             if (singleErr.code !== '23505') {
+                                 console.error(`[BatchProcessor] Erro na inserção individual falha para ID ${m.whatsapp_message_id}:`, singleErr);
+                             }
+                         } else if (singleInserted && singleInserted.length > 0) {
+                             realInserted.push(singleInserted[0]);
+                         }
                      }
+                     console.log(`[BatchProcessor] Fallback 1 a 1 concluído. ${realInserted.length} novas mensagens salvadas de ${messagesToInsert.length} totais.`);
                  } else {
                      realInserted = insertedMessages || [];
-                     console.log(`[BatchProcessor] ${realInserted.length} mensagens sincronizadas no BD com SUCESSO!`);
+                     console.log(`[BatchProcessor] ${realInserted.length} mensagens inseridas no lote com SUCESSO!`);
                  }
              }
              
