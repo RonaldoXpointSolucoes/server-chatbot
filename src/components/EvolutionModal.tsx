@@ -21,6 +21,8 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<'existing' | 'new'>('new');
   const [existingInstances, setExistingInstances] = useState<any[]>([]);
   
+  const [extName, setExtName] = useState('');
+  const [extApiKey, setExtApiKey] = useState('');
   const [customName, setCustomName] = useState<string>('');
   const [customApiKey, setCustomApiKey] = useState<string>('');
   const [activePollingId, setActivePollingId] = useState<string | null>(null);
@@ -411,6 +413,8 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                            autoFocus
                            type="text" 
                            id="ext-name"
+                           value={extName}
+                           onChange={e => setExtName(e.target.value)}
                            placeholder="Identificador da Instância"
                            className="w-full bg-white/50 dark:bg-black/40 backdrop-blur-md border border-gray-200 dark:border-white/10 rounded-2xl p-3 text-sm text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-all shadow-sm"
                          />
@@ -420,14 +424,16 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                          <input 
                            type="password" 
                            id="ext-apikey"
+                           value={extApiKey}
+                           onChange={e => setExtApiKey(e.target.value)}
                            placeholder="Sua chave secreta (API Key)"
                            className="w-full bg-white/50 dark:bg-black/40 backdrop-blur-md border border-gray-200 dark:border-white/10 rounded-2xl p-3 text-sm text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-all font-mono shadow-sm"
                          />
                       </div>
                       <button 
                         onClick={async () => {
-                            const nameVal = (document.getElementById('ext-name') as HTMLInputElement).value.trim();
-                            const apikeyVal = (document.getElementById('ext-apikey') as HTMLInputElement).value.trim();
+                            const nameVal = extName.trim();
+                            const apikeyVal = extApiKey.trim();
                             
                             if (!nameVal || !apikeyVal) {
                                 setError("Ops! O Nome/ID e a API Key são obrigatórios.");

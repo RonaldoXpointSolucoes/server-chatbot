@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import EvolutionModal from '../components/EvolutionModal';
@@ -13,6 +13,16 @@ import { twMerge } from 'tailwind-merge';
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
+}
+
+export function getContactDisplayName(name: string | undefined | null, pushName: string | undefined | null, phone: string | undefined | null): string {
+  let finalName = name || pushName;
+  if (!finalName) return phone || '';
+  const lowerName = finalName.toLowerCase();
+  if (lowerName.includes('x point') || lowerName.includes('x-point') || lowerName.includes('xpoint') || lowerName === 'empresa' || lowerName.includes('solu')) {
+    return phone || finalName;
+  }
+  return finalName;
 }
 
 export function formatPhoneNumber(phone: string | undefined | null): string {
@@ -52,6 +62,7 @@ export default function ChatDashboard() {
     activeChatId, 
     evolutionConnected, 
     connectedInstanceName,
+    appVersion,
     setActiveChat, 
     sendHumanMessage, 
     setBotStatus,
@@ -62,7 +73,7 @@ export default function ChatDashboard() {
     modalReason,
     setModalReason,
     tenantInfo,
-    updateContactName,
+    updateContactCRM,
     deleteContact,
     isSyncingHistory,
     markAllAsRead,
@@ -90,7 +101,7 @@ export default function ChatDashboard() {
 
   // Estados dos novos menus fluídos
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-  const [contactToEdit, setContactToEdit] = useState<{id: string; name: string} | null>(null);
+  const [contactToEdit, setContactToEdit] = useState<any | null>(null);
   const [contactToDelete, setContactToDelete] = useState<{id: string; name: string} | null>(null);
   const [isNewChatOpen, setIsNewChatOpen] = useState(false);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
@@ -102,11 +113,48 @@ export default function ChatDashboard() {
   
   const activeChat = contacts.find(c => c.id === activeChatId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const prevMessagesLength = useRef(0);
 
-  // Auto scroll to bottom
+  const handleScroll = () => {
+    if (!messagesContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+    // Considera "no fim" se estiver a menos de 150px do final
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 150;
+    setShowScrollButton(!isAtBottom);
+  };
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  };
+
+  // Scroll inicial e quando muda de chat
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeChat?.messages]);
+    if (activeChatId) {
+      scrollToBottom('auto'); // Vai pro fim instantâneo
+      setShowScrollButton(false);
+      prevMessagesLength.current = activeChat?.messages?.length || 0;
+      
+      // Fallback para imagens/mídias carregando
+      const timeout = setTimeout(() => scrollToBottom('smooth'), 150);
+      return () => clearTimeout(timeout);
+    }
+  }, [activeChatId]);
+
+  // Smart Auto-Scroll para novas mensagens
+  useEffect(() => {
+    const currentMessagesLength = activeChat?.messages?.length || 0;
+    if (currentMessagesLength > prevMessagesLength.current) {
+      const lastMsg = activeChat?.messages?.[currentMessagesLength - 1];
+      const isMe = lastMsg && (lastMsg.sender === 'human' || lastMsg.sender === 'bot');
+      
+      if (!showScrollButton || isMe) {
+        scrollToBottom('smooth');
+      }
+    }
+    prevMessagesLength.current = currentMessagesLength;
+  }, [activeChat?.messages, showScrollButton]);
 
 
   useEffect(() => {
@@ -192,9 +240,9 @@ export default function ChatDashboard() {
       <RenameModal 
         isOpen={!!contactToEdit} 
         onClose={() => setContactToEdit(null)} 
-        currentName={contactToEdit?.name || ''} 
-        onSave={(newName) => {
-          if(contactToEdit) updateContactName(contactToEdit.id, newName);
+        contactData={contactToEdit} 
+        onSave={(payload) => {
+          if(contactToEdit) updateContactCRM(contactToEdit.id, payload);
         }} 
       />
       
@@ -234,7 +282,9 @@ export default function ChatDashboard() {
         
         {/* Header Premium da Sidebar */}
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">v2.0.1 | Deploy: 11/04/2026 22:53</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.2 | Deploy: ..."}
+          </span>
           
           <div className="flex items-center justify-between w-full mt-2">
             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-400 flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-[#202c33]">
@@ -411,8 +461,8 @@ export default function ChatDashboard() {
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center mb-0.5">
                     <div className="flex flex-col truncate pr-2">
-                      <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate">{formatPhoneNumber(contact.name || contact.phone)}</span>
-                      {contact.phone && contact.name !== contact.phone && (
+                      <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate">{formatPhoneNumber(getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone))}</span>
+                      {contact.phone && getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone) !== formatPhoneNumber(contact.phone) && (
                         <span className="text-[10px] text-[#54656f] dark:text-[#8696a0] font-mono tracking-tighter truncate mt-0.5">
                           {formatPhoneNumber(contact.phone)}
                         </span>
@@ -467,7 +517,7 @@ export default function ChatDashboard() {
                               {isSyncingHistory[contact.id] ? "Buscando..." : "Buscar Histórico"}
                             </button>
                             <button 
-                              onClick={(e) => { e.stopPropagation(); setContactToEdit({id: contact.id, name: contact.name}); setActiveDropdown(null); }}
+                              onClick={(e) => { e.stopPropagation(); setContactToEdit(contact); setActiveDropdown(null); }}
                               className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors"
                             >
                               Editar contato
@@ -537,42 +587,25 @@ export default function ChatDashboard() {
           {/* Chat Header */}
           <div className="h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-10 shadow-sm border-l border-white/5">
             <div className="flex items-center gap-3">
+              <button className="sm:hidden p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1]" onClick={() => setActiveChat(null)}>
+                <ChevronLeft size={24} />
+              </button>
               <img src={activeChat.avatar} alt="Avatar" className="w-10 h-10 rounded-full object-cover" />
               <div>
                 <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
-                  <span className="truncate max-w-[200px] sm:max-w-md">{formatPhoneNumber(activeChat.name || activeChat.phone)}</span>
-                  {activeChat.phone && activeChat.name !== activeChat.phone && (
-                    <span className="text-[12px] text-[#54656f] dark:text-[#8696a0] font-mono inline-block mt-0.5 border border-black/5 dark:border-white/10 px-1.5 rounded-md bg-black/5 dark:bg-white/5">
+                  <span className="truncate max-w-[200px] sm:max-w-md">{formatPhoneNumber(getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone))}</span>
+                  {activeChat.phone && getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone) !== formatPhoneNumber(activeChat.phone) && (
+                    <span className="text-[12px] text-[#54656f] dark:text-[#8696a0] font-mono inline-block mt-0.5 border border-black/5 dark:border-white/10 px-1.5 rounded-md bg-black/5 dark:bg-white/5 hidden sm:inline-block">
                       {formatPhoneNumber(activeChat.phone)}
                     </span>
                   )}
                 </h2>
-                <div className="flex items-center gap-1 text-xs mt-0.5">
-                  {activeChat.bot_status === 'paused' ? (
-                    <span className="flex items-center gap-1 text-yellow-600 bg-yellow-500/10 px-1.5 py-0.5 rounded-sm"><Bot size={10} /> Humano Assumido</span>
-                  ) : (
-                    <span className="flex items-center gap-1 text-[#00a884] bg-[#00a884]/10 px-1.5 py-0.5 rounded-sm"><Bot size={10} /> IA Ativa e Monitorando</span>
-                  )}
-                </div>
               </div>
             </div>
 
             {/* Right Header Area */}
-            <div className="flex items-center gap-4">
-              <div className="text-[11px] uppercase tracking-wider text-[#54656f] dark:text-[#8696a0] font-bold flex items-center gap-1.5 pointer-events-none opacity-80 mix-blend-luminosity">
-                <Building2 size={13} className="text-[#00a884]" /> EMPRESA: {tenantName}
-              </div>
+            <div className="flex items-center gap-2 sm:gap-4">
               
-              {/* Controle da IA */}
-              {activeChat.bot_status === 'paused' && (
-                <button 
-                  onClick={() => setBotStatus(activeChat.id, 'active')}
-                  className="flex items-center gap-2 text-xs font-bold text-[#00a884] bg-[#00a884]/10 hover:bg-[#00a884]/20 px-3 py-1.5 rounded-full transition-colors border border-[#00a884]/30"
-                >
-                  <Power size={13} /> Devolver para IA
-                </button>
-              )}
-
               {/* Chat Actions Dropdown Premium */}
               <div className="relative">
                 <button 
@@ -586,7 +619,29 @@ export default function ChatDashboard() {
                 </button>
                 
                 {activeChatDropdown && (
-                  <div className="absolute right-0 top-12 w-52 bg-white dark:bg-[#233138] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 dark:border-[#304046] py-2 z-50 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute right-0 top-12 w-64 bg-white dark:bg-[#233138] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 dark:border-[#304046] py-2 z-50 animate-in fade-in zoom-in-95 duration-200">
+                    
+                    {/* Bot Controls in Menu */}
+                    <div className="border-b border-gray-100 dark:border-[#304046] mb-1 pb-1">
+                      {activeChat.bot_status === 'paused' ? (
+                        <button 
+                          onClick={() => { setBotStatus(activeChat.id, 'active'); setActiveChatDropdown(false); }}
+                          className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors"
+                        >
+                          <Power size={16} className="text-[#00a884]" />
+                          <span className="text-[14px] text-[#3b4a54] dark:text-[#d1d7db] font-medium">Devolver para IA</span>
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => { setBotStatus(activeChat.id, 'paused'); setActiveChatDropdown(false); }}
+                          className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors"
+                        >
+                          <Bot size={16} className="text-yellow-600" />
+                          <span className="text-[14px] text-[#3b4a54] dark:text-[#d1d7db] font-medium">Pausar a IA</span>
+                        </button>
+                      )}
+                    </div>
+
                     <button 
                       onClick={async () => {
                         if (connectedInstanceName) {
@@ -609,7 +664,11 @@ export default function ChatDashboard() {
           </div>
 
           {/* Chat Messages */}
-          <div className="flex-1 overflow-y-auto p-4 z-10 flex flex-col gap-2">
+          <div 
+             className="flex-1 overflow-y-auto p-4 z-10 flex flex-col gap-2"
+             ref={messagesContainerRef}
+             onScroll={handleScroll}
+          >
             {isSyncingHistory[activeChat.id] && (
                <div className="flex justify-center my-4 animate-in fade-in duration-300">
                   <span className="bg-white dark:bg-[#202c33] text-[#54656f] dark:text-[#8696a0] text-xs px-4 py-2 rounded-full flex items-center gap-2 shadow-sm border border-black/5 dark:border-white/5">
@@ -696,6 +755,21 @@ export default function ChatDashboard() {
             })}
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Botão de Rolar para Baixo Premium */}
+          {showScrollButton && (
+            <button
+               onClick={() => scrollToBottom('smooth')}
+               className="absolute right-6 bottom-[85px] z-50 w-11 h-11 bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-md rounded-full flex items-center justify-center text-[#54656f] dark:text-[#aebac1] shadow-[0_4px_12px_rgba(0,0,0,0.15)] dark:shadow-[0_4px_12px_rgba(0,0,0,0.4)] border border-white/50 dark:border-white/5 hover:bg-white dark:hover:bg-[#202c33] hover:text-[#00a884] dark:hover:text-[#00a884] transition-all hover:scale-105 active:scale-95 animate-in fade-in slide-in-from-bottom-5 duration-300"
+               title="Ir para o fim d conversa"
+               aria-label="Ir para o fim da conversa"
+            >
+               <ChevronDown size={24} />
+               {activeChat?.unread > 0 && (
+                 <span className="absolute top-0 right-0 w-3 h-3 bg-[#00a884] rounded-full border-2 border-white dark:border-[#202c33]"></span>
+               )}
+            </button>
+          )}
 
           {/* Input Area */}
           <form onSubmit={handleSendHuman} className="h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center px-4 gap-3 z-10 shadow-sm border-t border-[#d1d7db] dark:border-[#222d34]">

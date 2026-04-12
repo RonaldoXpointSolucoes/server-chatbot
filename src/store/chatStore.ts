@@ -37,6 +37,7 @@ interface ChatState {
   modalReason: string | null;
   isSubscribed: boolean;
   isSyncingHistory: Record<string, boolean>;
+  appVersion: { version: string, deploy_date: string } | null;
   setEvolutionConnection: (status: boolean, instanceName?: string | null) => void;
   setActiveChat: (id: string | null) => void;
   setBotStatus: (contactId: string, status: 'active' | 'paused') => Promise<void>;
@@ -56,7 +57,7 @@ interface ChatState {
   upsertContactLocally: (contact: ContactRow) => void;
   sendHumanMessage: (contactId: string, text: string, instanceName: string) => Promise<void>;
   uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean) => Promise<void>;
-  updateContactName: (contactId: string, newName: string) => Promise<void>;
+  updateContactCRM: (contactId: string, payload: Partial<ContactRow>) => Promise<void>;
   deleteContact: (contactId: string) => Promise<void>;
   togglePinContact: (contactId: string) => Promise<void>;
   toggleFavorite: (contactId: string) => Promise<void>;
@@ -76,7 +77,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   modalReason: null,
   isSubscribed: false, // Previne double-subscribe do react 18
   isSyncingHistory: {},
-  
+  appVersion: null,
 
   setActiveChat: (id) => set({ activeChatId: id }),
 
@@ -267,12 +268,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const isNewTemp = contact.id.includes('temp-');
         
         const finalId = (!isExistingTemp) ? existing.id : (!isNewTemp ? contact.id : existing.id);
-        const finalName = existing.name !== existing.phone && existing.name ? existing.name : contact.name; // Preserva o nome se já modificado/escolhido pelo usuário
+        const finalCustomName = existing.custom_name || contact.custom_name;
+        const fallbackName = existing.name !== existing.phone && existing.name ? existing.name : contact.name;
+        const finalName = finalCustomName || fallbackName;
 
         const updatedContact: ContactType = {
           ...existing,
           ...contact,
           id: finalId,
+          custom_name: finalCustomName,
           name: finalName,
           // Preserva o fallback avatar se a api ou realtime nao devolver algo util
           avatar: (contact as any).avatar || existing.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contactPhoneMatch || 'U')}&background=random&color=fff`,
@@ -283,9 +287,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return { contacts: newContacts };
       } else {
         // Contato novinho folha
+        const finalName = contact.custom_name || contact.name;
         const newContact: ContactType = {
           ...contact,
-          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(contact.name || contact.phone)}&background=random&color=fff`, // Avatar ui-avatars idêntico ao Chatwoot
+          name: finalName,
+          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contact.phone)}&background=random&color=fff`, // Avatar ui-avatars idêntico ao Chatwoot
           messages: [],
           unread: 0,
           // usa lastMsgTimestamp para a sidebar saber quem eh primeiro
@@ -296,14 +302,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  updateContactName: async (contactId, newName) => {
+  updateContactCRM: async (contactId, payload) => {
+    // UI Otimista: caso seja passado 'name', garantimos custom_name = name e name renderizado
     set((state) => ({
-      contacts: state.contacts.map((c) => c.id === contactId ? { ...c, name: newName } : c)
+      contacts: state.contacts.map((c) => {
+         if (c.id === contactId) {
+             const customNameUpdate = payload.name ? { custom_name: payload.name, name: payload.name } : {};
+             return { ...c, ...payload, ...customNameUpdate };
+         }
+         return c;
+      })
     }));
     try {
-      await supabase.from('contacts').update({ name: newName }).eq('id', contactId);
+      const dbPayload = { ...payload };
+      if (payload.name) {
+         dbPayload.custom_name = payload.name; // Proteção para a trigger DB e lógica interna
+      }
+      const { error } = await supabase.from('contacts').update(dbPayload).eq('id', contactId);
+      if (error) throw error;
     } catch (e) {
-      console.error('Erro ao renomear contato no DB:', e);
+      console.error('Erro ao editar contato no DB (CRM):', e);
+      throw e;
     }
   },
 
@@ -392,6 +411,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!tenant) return;
 
     try {
+       // Opcional: Buscar versão atual do app a partir do banco (tabela app_version)
+       const { data: appVersionData } = await supabase.from('app_version').select('*').order('deploy_date', { ascending: false }).limit(1).maybeSingle();
+       if (appVersionData) {
+         set({ appVersion: { version: appVersionData.version, deploy_date: appVersionData.deploy_date } });
+       }
+
        // 1. Puxa as conversas recentes, garantindo a mesma ordem do WhatsApp Web
        const { data: dbConvs } = await supabase.from('conversations')
           .select('*')
@@ -434,7 +459,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      c.phone === phoneMatch
                   );
                   
-                  const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(dbC.name || dbC.phone)}&background=random&color=fff`;
+                  let finalName = dbC.custom_name || dbC.name || dbC.push_name || phoneMatch || dbC.phone;
+                  if (finalName && typeof finalName === 'string') {
+                     const lname = finalName.toLowerCase();
+                     if (lname.includes('x point') || lname.includes('x-point') || lname === 'empresa' || lname.includes('soluções')) {
+                        finalName = phoneMatch || dbC.phone; // Falback para telefone para evitar "XS" e "X Point"
+                     }
+                  }
+                  
+                  const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName)}&background=random&color=fff`;
                   
                   const preview = conv.last_message_preview || '';
                   const unread = conv.unread_count || 0;
@@ -446,12 +479,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                   if (idx !== -1) {
                      const existing = newContacts[idx];
+                     const finalCustomName = dbC.custom_name || existing.custom_name;
+                     const finalName = finalCustomName || dbC.name || existing.name;
+                     const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || dbC.phone)}&background=random&color=fff`;
+
                      newContacts[idx] = {
                         ...existing,
                         ...dbC,
                         id: dbC.id,
-                        name: dbC.name || existing.name,
-                        avatar: dbC.profile_picture_url || (existing.avatar?.includes('ui-avatars') ? fallbackAvatar : (existing.avatar || fallbackAvatar)),
+                        custom_name: finalCustomName,
+                        name: finalName,
+                        avatar: dbC.profile_picture_url || (existing.avatar?.includes('ui-avatars') ? avatarFallback : (existing.avatar || avatarFallback)),
                         unread: unread,
                         is_favorite: isFavorite,
                         is_pinned: isPinned,
@@ -469,20 +507,48 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         }];
                      }
                   } else {
+                     const finalCustomName = dbC.custom_name;
+                     const finalName = finalCustomName || dbC.name;
+                     const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || dbC.phone)}&background=random&color=fff`;
+
                      newContacts.push({
                         ...dbC,
-                        avatar: dbC.profile_picture_url || fallbackAvatar,
+                        custom_name: finalCustomName,
+                        name: finalName,
+                        avatar: dbC.profile_picture_url || avatarFallback,
                         messages: preview ? [{ id: 'preview-' + conv.id, text: preview, sender: 'client', timestamp: new Date(ts) }] : [],
                         unread: unread,
                         is_favorite: isFavorite,
                         is_pinned: isPinned,
-                        lastMsgTimestamp: ts
+                        lastMsgTimestamp: ts,
+                        timestamp: ts
                      });
                   }
                });
 
-               return { contacts: newContacts };
+               return { contacts: newContacts.sort((a,b) => b.timestamp - a.timestamp) };
            });
+
+           // Gatilho Automático: Busca capa na instância caso falte (após popular o state)
+           const instanceName = tenant.evolution_instance_name;
+           if (instanceName) {
+               const missingDataContacts = dbContacts.filter(c => 
+                 !c.profile_picture_url
+               );
+               
+               if (missingDataContacts.length > 0) {
+                 // Processa em background para não travar a UI
+                 setTimeout(() => {
+                   const storeState = get();
+                   missingDataContacts.forEach(c => {
+                     const jid = c.whatsapp_jid || (c.phone ? `${c.phone}@s.whatsapp.net` : null);
+                     if (jid) {
+                       storeState.fetchContactPicture(c.id, jid, instanceName);
+                     }
+                   });
+                 }, 3000);
+               }
+           }
        }
     } catch(e) {
        console.error("Erro ao puxar initialDBContacts", e);
@@ -615,39 +681,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
            });
         };
 
-        if ((msgs && msgs.length === 0) || forceSync) {
-            // Conversa vazia no Supabase. Inicia sync-history on demand
-            if (!get().isSyncingHistory[contactId]) {
-                set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: true } }));
-                try {
-                    const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-                    const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
-                    await fetch(`${API_URL}/api/v1/conversations/${conv.id}/sync-history`, {
-                        method: 'POST',
-                        headers: { 
-                           'Content-Type': 'application/json',
-                           'x-tenant-id': tenant.id,
-                           'apikey': instDataDB?.api_key || ''
-                        },
-                        body: JSON.stringify({ instanceId: instanceName })
-                    });
-                    
-                    // Supabase deve ter sido populado pelo Node. Aguarda 1.0s para propagação de DB/replica
-                    await new Promise(r => setTimeout(r, 1000));
-                    
-                    const { data: fetchNewMsgs } = await supabase.from('messages')
-                       .select('*')
-                       .eq('tenant_id', tenant.id)
-                       .eq('conversation_id', conv.id)
-                       .order('timestamp', { ascending: false })
-                       .limit(100);
-                       
-                    if (fetchNewMsgs) handleMapping(fetchNewMsgs);
+        if (forceSync) {
+            if (msgs && msgs.length === 0) {
+                // Impede tentativa inútil e avisa o cliente. A API do Baileys precisa de uma mensagem âncora.
+                alert('A conversa no sistema (CRM) está completamente vazia no momento. Para iniciar uma busca profunda de histórico, o WhatsApp exige uma "mensagem âncora".\\n\\n💡 Dica: Envie agora mesmo uma mensagem (pode ser "Olá!") para estabelecer o vínculo local, e só depois clique em Buscar Histórico novamente.');
+            } else {
+                // Conversa tem base, prossegue com o sync on demand
+                if (!get().isSyncingHistory[contactId]) {
+                    set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: true } }));
+                    try {
+                        const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+                        const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+                        await fetch(`${API_URL}/api/v1/conversations/${conv.id}/sync-history`, {
+                            method: 'POST',
+                            headers: { 
+                               'Content-Type': 'application/json',
+                               'x-tenant-id': tenant.id,
+                               'apikey': instDataDB?.api_key || ''
+                            },
+                            body: JSON.stringify({ instanceId: instanceName })
+                        });
+                        
+                        // Supabase deve ter sido populado pelo Node. Aguarda 1.0s para propagação de DB/replica
+                        await new Promise(r => setTimeout(r, 1000));
+                        
+                        const { data: fetchNewMsgs } = await supabase.from('messages')
+                           .select('*')
+                           .eq('tenant_id', tenant.id)
+                           .eq('conversation_id', conv.id)
+                           .order('timestamp', { ascending: false })
+                           .limit(100);
+                           
+                        if (fetchNewMsgs) handleMapping(fetchNewMsgs);
 
-                } catch (err) {
-                    console.error("Falha ao sincronizar histórico da Baileys (on demand):", err);
-                } finally {
-                    set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: false } }));
+                    } catch (err) {
+                        console.error("Falha ao sincronizar histórico da Baileys (on demand):", err);
+                    } finally {
+                        set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: false } }));
+                    }
                 }
             }
         }
