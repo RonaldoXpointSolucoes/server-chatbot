@@ -1,10 +1,12 @@
 import express from 'express';
 import multer from 'multer';
 import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
 import { pipeline } from '@xenova/transformers';
 import { supabase } from '../supabase.js';
+
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
+
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
