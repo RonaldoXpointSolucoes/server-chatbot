@@ -1,11 +1,8 @@
 import express from 'express';
 import multer from 'multer';
-import { createRequire } from 'module';
 import { pipeline } from '@xenova/transformers';
 import { supabase } from '../supabase.js';
-
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+import { PDFParse } from 'pdf-parse';
 
 
 const router = express.Router();
@@ -54,8 +51,10 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
         // Extração de Textos PDF vs outros (TXT, CSV)
         if (mimetype === 'application/pdf') {
-            const data = await pdfParse(buffer);
+            const parser = new PDFParse({ data: buffer });
+            const data = await parser.getText();
             content = data.text;
+            await parser.destroy();
         } else {
             content = buffer.toString('utf-8');
         }
