@@ -105,7 +105,7 @@ app.use('/', publicRestRoutes);
 app.use('/api', apiGateway);
 app.use('/api/v1/system/logs', systemLogger);
 
-app.listen(PORT, async () => {
+app.listen(PORT, '0.0.0.0', async () => {
     console.log(`[Antigravity V2] Node.js Server online na porta ${PORT}`);
     
     // Registrar o deploy no banco Supabase
