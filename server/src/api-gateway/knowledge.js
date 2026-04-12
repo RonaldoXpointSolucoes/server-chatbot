@@ -1,6 +1,8 @@
 import express from 'express';
 import multer from 'multer';
-import pdfParse from 'pdf-parse';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 import { pipeline } from '@xenova/transformers';
 import { supabase } from '../supabase.js';
 
