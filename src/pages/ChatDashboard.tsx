@@ -137,7 +137,10 @@ export default function ChatDashboard() {
       prevMessagesLength.current = activeChat?.messages?.length || 0;
       
       // Fallback para imagens/mídias carregando
-      const timeout = setTimeout(() => scrollToBottom('smooth'), 150);
+      const timeout = setTimeout(() => {
+        // Usa 'auto' para evitar a animação indesejada de rolar visualmente até o fim da página ao abrir nova conversa
+        scrollToBottom('auto');
+      }, 150);
       return () => clearTimeout(timeout);
     }
   }, [activeChatId]);
