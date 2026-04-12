@@ -5,7 +5,7 @@
   "description": "WhatsApp SaaS Backend Node.js + Supabase",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node boot.js",
     "dev": "nodemon src/index.js"
   },
   "dependencies": {
