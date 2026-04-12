@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import EvolutionModal from '../components/EvolutionModal';
@@ -553,6 +553,8 @@ export default function ChatDashboard() {
                            else if (lastMsg.mediaType === 'video') icon = <Video size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
                            else if (lastMsg.mediaType === 'audio') icon = <Mic size={13} className={cn("shrink-0", lastMsg.status === 'READ' && isMe ? "text-[#53bdeb]" : "text-[#00a884]")} />;
                            else if (lastMsg.mediaType === 'document') icon = <FileText size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
+                           else if (lastMsg.mediaType === 'location') icon = <MapPin size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
+                           else if (lastMsg.mediaType === 'contact') icon = <User size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
                            
                            return (
                               <div className="flex items-center gap-1 truncate w-full">
@@ -731,16 +733,48 @@ export default function ChatDashboard() {
                          </div>
                       )}
                       
-                      {msg.mediaUrl && msg.mediaType === 'document' && (
-                         <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 hover:shadow-md transition-all duration-300 border border-gray-200 dark:border-gray-700/50 group">
+                      {msg.mediaType === 'document' && (
+                         <div className="flex items-center gap-3 bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-gray-200 dark:border-gray-700/50 group">
                             <div className="bg-[#00a884]/10 p-2 text-[#00a884] rounded-lg group-hover:scale-110 transition-transform">
                               <FileText size={20} />
                             </div>
-                            <span className="text-[14px] font-medium truncate max-w-[180px] text-gray-700 dark:text-gray-200">{msg.text || 'Documento Anexado'}</span>
-                         </a>
+                            <div className="flex flex-col flex-1 overflow-hidden">
+                               <span className="text-[14px] font-medium truncate max-w-[180px] text-gray-700 dark:text-gray-200">{msg.text || 'Documento Anexado'}</span>
+                               {!msg.mediaUrl ? (
+                                  <span className="text-[11px] text-orange-500 dark:text-orange-400 font-medium">Download falhou no servidor</span>
+                               ) : (
+                                  <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-[#00a884] hover:underline font-medium">Baixar Documento</a>
+                               )}
+                            </div>
+                         </div>
                       )}
                       
-                      {(!msg.mediaUrl || (msg.text && msg.mediaType !== 'document')) && (
+                      {msg.mediaType === 'location' && (
+                         <div className="flex flex-col gap-1 bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-gray-200 dark:border-gray-700/50 min-w-[200px]">
+                            <div className="flex items-center gap-2 text-[#00a884] mb-1">
+                               <MapPin size={18} />
+                               <span className="font-semibold text-[13px]">Localização</span>
+                            </div>
+                            <span className="text-[13px] text-gray-700 dark:text-gray-300 leading-snug">{msg.text || 'Localização enviada'}</span>
+                            <div className="mt-2 text-xs text-brand-primary font-medium flex items-center justify-center w-full bg-[#00a884]/10 p-2 rounded-lg cursor-pointer hover:bg-[#00a884]/20 transition-colors" onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${msg.text?.replace(/[^0-9.,-]/g, '')}`, '_blank')}>
+                               Abrir no Maps
+                            </div>
+                         </div>
+                      )}
+                      
+                      {msg.mediaType === 'contact' && (
+                         <div className="flex items-center gap-3 bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-gray-200 dark:border-gray-700/50 min-w-[220px]">
+                            <div className="bg-[#00a884]/10 p-3 rounded-full text-[#00a884] shrink-0">
+                               <User size={22} className="fill-current/20" />
+                            </div>
+                            <div className="flex flex-col overflow-hidden">
+                               <span className="text-[14px] font-semibold text-gray-800 dark:text-gray-100 truncate">{msg.text || 'Contato'}</span>
+                               <span className="text-[11px] text-gray-500 font-medium tracking-wide uppercase mt-0.5">Cartão VCard</span>
+                            </div>
+                         </div>
+                      )}
+                      
+                      {(!msg.mediaType || (msg.mediaType !== 'document' && msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
                          <span className="text-[14px] leading-[1.4] block pr-10 whitespace-pre-wrap break-words break-all sm:break-normal word-break shadow-none mt-1">{msg.text}</span>
                       )}
                       
