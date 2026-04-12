@@ -182,17 +182,71 @@ router.post('/match', async (req, res) => {
         const output = await transformer(query, { pooling: 'mean', normalize: true });
         const queryEmbedding = Array.from(output.data);
 
-        // 2. Chama a RPC do Postgres HNSW
-        const { data, error } = await supabase.rpc('match_knowledge_chunks', {
+        // 2. Busca Semântica (IA) com Assertividade Elevada (match_threshold 0.45)
+        const { data: semanticMatches, error: semanticError } = await supabase.rpc('match_knowledge_chunks', {
              query_embedding: queryEmbedding,
-             match_threshold: 0.20,
+             match_threshold: 0.45,
              match_count: 5,
              p_tenant_id: tenant_id
         });
 
-        if (error) throw error;
+        if (semanticError) throw semanticError;
 
-        res.json({ matches: data });
+        // 3. Busca Textual Exata (Keyword Match / Fallback WebSearch do Postgres)
+        // Isso garante que palavras como "cadastro" e "produto" tenham peso extremo se baterem exato!
+        let formattedQuery = query.trim().split(/\s+/).join(' | '); // Formata para websearch OR/AND se quiser
+        const { data: textMatches, error: textError } = await supabase
+            .from('knowledge_chunks')
+            .select('id, document_id, content, metadata')
+            .eq('tenant_id', tenant_id)
+            .textSearch('content', query, { type: 'websearch', config: 'portuguese' })
+            .limit(3);
+
+        // 4. Fusão e Deduplicação (Algoritmo de Reciprocal Rank Fusion / Bônus Simplificado)
+        const fusionMap = new Map();
+
+        // Processa Semântica
+        if (semanticMatches) {
+            semanticMatches.forEach(match => {
+                fusionMap.set(match.id, { 
+                    ...match, 
+                    method: 'Semântico (RAG)', 
+                    finalScore: match.similarity 
+                });
+            });
+        }
+
+        // Processa Textual
+        if (textMatches && !textError) {
+            textMatches.forEach(match => {
+                if (fusionMap.has(match.id)) {
+                    // Match perfeito: A semântica E a palavra-chave encontraram o mesmo texto. Bônus massivo!
+                    const existing = fusionMap.get(match.id);
+                    existing.finalScore += 0.25; 
+                    existing.method = 'Sinergia Híbrida (Vetor + Exact)';
+                } else {
+                    // Encontrado APENAS pela palavra chave exata. Assume grau forte (75%).
+                    fusionMap.set(match.id, { 
+                        ...match, 
+                        similarity: 0.75, 
+                        method: 'Exato (Lexical)', 
+                        finalScore: 0.75 
+                    });
+                }
+            });
+        }
+
+        // Ordena os Campeões Absolutos
+        const finalMatches = Array.from(fusionMap.values())
+            .sort((a, b) => b.finalScore - a.finalScore)
+            .slice(0, 4) // Retorna os 4 arquivos mais tops
+            .map(m => ({
+                 content: m.content,
+                 similarity: m.finalScore > 1 ? 1 : m.finalScore, // Trava maximo em 100%
+                 method: m.method
+            }));
+
+        res.json({ matches: finalMatches });
    } catch(e) {
         res.status(500).json({ error: e.message });
    }

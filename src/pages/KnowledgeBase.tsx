@@ -256,7 +256,12 @@ export default function KnowledgeBase() {
                            <div key={i} className="bg-gray-800/40 p-3 rounded-xl border border-gray-700/30 flex flex-col gap-2 relative overflow-hidden group">
                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-emerald-400 to-transparent"></div>
                                <div className="flex justify-between items-center pl-2">
-                                  <span className="text-[10px] uppercase font-bold text-emerald-500 tracking-wider">Grau de Acerto: {(r.similarity * 100).toFixed(1)}%</span>
+                                  <div className="flex items-center gap-2">
+                                      <span className="text-[10px] uppercase font-bold text-emerald-500 tracking-wider">Acerto: {(r.similarity * 100).toFixed(1)}%</span>
+                                      {r.method && (
+                                          <span className="text-[9px] uppercase font-bold bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded border border-gray-700">{r.method}</span>
+                                      )}
+                                  </div>
                                </div>
                                <p className="text-sm text-gray-300 pl-2 leading-relaxed italic">"...{r.content}..."</p>
                            </div>
