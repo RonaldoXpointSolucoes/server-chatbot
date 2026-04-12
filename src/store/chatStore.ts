@@ -37,6 +37,7 @@ interface ChatState {
   modalReason: string | null;
   isSubscribed: boolean;
   isSyncingHistory: Record<string, boolean>;
+  pictureFetchLocks: Record<string, number>;
   appVersion: { version: string, deploy_date: string } | null;
   setEvolutionConnection: (status: boolean, instanceName?: string | null) => void;
   setActiveChat: (id: string | null) => void;
@@ -77,6 +78,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   modalReason: null,
   isSubscribed: false, // Previne double-subscribe do react 18
   isSyncingHistory: {},
+  pictureFetchLocks: {},
   appVersion: null,
 
   setActiveChat: (id) => set({ activeChatId: id }),
@@ -189,6 +191,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   fetchContactPicture: async (contactId, jid, instanceName) => {
     const state = get();
+    const now = Date.now();
+    const lastFetch = state.pictureFetchLocks[contactId];
+    
+    // Bloqueia e impede um novo fetch se tiver ocorrido nos últimos 60 minutos (3600000ms)
+    // Isso evita o loop infinito de tentar puxar um avatar que realmente não existe ou a engine não conseguiu
+    if (lastFetch && (now - lastFetch) < 3600000) {
+       console.log(`[Anti-Spam/Loop] Fetch picture para ${jid} (${contactId}) ignorado. Último sync foi há menos de 1h.`);
+       return;
+    }
+    
+    // Atualiza o lock IMEDIATAMENTE (mesmo se falhar depois)
+    set((s) => ({ pictureFetchLocks: { ...s.pictureFetchLocks, [contactId]: now } }));
+    
     if (!state.tenantInfo) return;
     try {
       const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
