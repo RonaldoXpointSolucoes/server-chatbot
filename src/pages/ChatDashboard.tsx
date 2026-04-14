@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu } from 'lucide-react';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
-import EvolutionModal from '../components/EvolutionModal';
 import { DeleteModal, RenameModal, NewChatModal } from '../components/ChatModals';
 import { SettingsModal } from '../components/SettingsModal';
+import { AgentSettingsModal } from '../components/AgentSettingsModal';
+import { ChatOmniMenu } from '../components/ChatOmniMenu';
+import { MainSidebar } from '../components/MainSidebar';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
+import { Flag, Clock } from 'lucide-react'; // Adicionado lucide pro flag
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -70,9 +73,11 @@ export default function ChatDashboard() {
     fetchTenantConfig,
     subscribeToNewMessages,
     loadHistoricalMessages,
+    fetchTenantAgents,
     modalReason,
     setModalReason,
     tenantInfo,
+    agents,
     updateContactCRM,
     deleteContact,
     isSyncingHistory,
@@ -85,13 +90,15 @@ export default function ChatDashboard() {
   useEffect(() => {
     fetchTenantConfig().then(() => {
        fetchInitialData();
+       fetchTenantAgents();
     });
     subscribeToNewMessages();
   }, []);
   
   const [showEvolutionQR, setShowEvolutionQR] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const isModalOpen = showEvolutionQR || !!modalReason || isSettingsOpen;
+  const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
+  const isModalOpen = showEvolutionQR || !!modalReason || isSettingsOpen || isAgentSettingsOpen;
   const [inputText, setInputText] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -106,6 +113,7 @@ export default function ChatDashboard() {
   const [isNewChatOpen, setIsNewChatOpen] = useState(false);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [activeChatDropdown, setActiveChatDropdown] = useState(false);
+  const { showMainSidebar, setShowMainSidebar } = (useOutletContext() as { showMainSidebar: boolean, setShowMainSidebar: (v: boolean) => void }) || { showMainSidebar: true, setShowMainSidebar: () => {} };
   
   // Estados para Filtros
   const [searchTerm, setSearchTerm] = useState('');
@@ -232,7 +240,7 @@ export default function ChatDashboard() {
   };
 
   return (
-    <div className="flex h-[100dvh] w-full min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
+    <div className="flex w-full h-full min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
       
       {isModalOpen && <EvolutionModal onClose={() => {
           setShowEvolutionQR(false);
@@ -258,10 +266,8 @@ export default function ChatDashboard() {
         }} 
       />
 
-      <SettingsModal 
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-      />
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <AgentSettingsModal isOpen={isAgentSettingsOpen} onClose={() => setIsAgentSettingsOpen(false)} />
 
       <NewChatModal 
         isOpen={isNewChatOpen}
@@ -275,9 +281,11 @@ export default function ChatDashboard() {
         }}
       />
 
-      {/* Left Sidebar */}
+      {/* MainSidebar movido para o MainLayout global */}
+
+      {/* Middle Sidebar (Contacts List) */}
       <div className={cn(
-        "w-full sm:w-[30%] sm:min-w-[320px] sm:max-w-[400px] border-r border-[#d1d7db] dark:border-[#222d34] flex flex-col bg-white dark:bg-[#111b21] transition-all",
+        "w-full sm:w-[30%] sm:min-w-[320px] lg:w-[320px] lg:max-w-[340px] border-r border-[#d1d7db] dark:border-[#222d34] flex flex-col bg-white dark:bg-[#111b21] transition-all",
         activeChatId ? "hidden sm:flex" : "flex"
       )}
         onClick={() => setActiveDropdown(null)} // fecha qq dropdown ao clicar fora
@@ -286,12 +294,21 @@ export default function ChatDashboard() {
         {/* Header Premium da Sidebar */}
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.2 | Deploy: ..."}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.8 | Deploy: ..."}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-400 flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-[#202c33]">
-              RA
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={() => setShowMainSidebar(!showMainSidebar)}
+                className="hidden lg:flex p-2 -ml-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors"
+                title={showMainSidebar ? "Ocultar Menu Principal" : "Mostrar Menu Principal"}
+              >
+                <Menu size={20} />
+              </button>
+              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-400 flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-[#202c33]">
+                RA
+              </div>
             </div>
             
             <div className="flex gap-3 text-[#54656f] dark:text-[#aebac1] items-center">
@@ -341,7 +358,11 @@ export default function ChatDashboard() {
                         <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Swagger / API Docs</span>
                       </a>
                     )}
-                    <button onClick={() => setIsSettingsOpen(true)} className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 border-t border-gray-100 dark:border-[#304046]">
+                    <button onClick={() => { setIsAgentSettingsOpen(true); setActiveDropdown(null); }} className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 border-t border-gray-100 dark:border-[#304046]">
+                      <User size={18} className="text-emerald-500" />
+                      <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Perfil do Agente</span>
+                    </button>
+                    <button onClick={() => { setIsSettingsOpen(true); setActiveDropdown(null); }} className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3">
                       <Settings size={18} />
                       <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Configurações</span>
                     </button>
@@ -414,6 +435,16 @@ export default function ChatDashboard() {
              if (filterType === 'unread' && c.unread <= 0) return false;
              if (filterType === 'favorite' && !c.is_favorite) return false;
              if (filterType === 'labels' && !(c.conv_labels && c.conv_labels.length > 0)) return false;
+             
+             // Filtro de Adiado (Snoozed)
+             if (c.conv_status === 'snoozed' && c.snoozed_until) {
+                const untilTimestamp = new Date(c.snoozed_until).getTime();
+                if (untilTimestamp > Date.now()) {
+                   // Esconde se ainda não expirou, a menos que o usuário esteja forçando a pesquisa ativamente
+                   if (!searchTerm) return false;
+                }
+             }
+
              return true;
           }).sort((a,b) => {
              if (a.is_pinned && !b.is_pinned) return -1;
@@ -464,7 +495,18 @@ export default function ChatDashboard() {
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center mb-0.5">
                     <div className="flex flex-col truncate pr-2">
-                      <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate">{formatPhoneNumber(getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone))}</span>
+                       <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate flex items-center gap-1.5">
+                         <span className="truncate">{formatPhoneNumber(getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone))}</span>
+                         {contact.priority === 'urgent' && <Flag size={12} className="fill-rose-500 text-rose-500 shrink-0" />}
+                         {contact.priority === 'high' && <Flag size={12} className="fill-orange-500 text-orange-500 shrink-0" />}
+                         {contact.conv_status === 'snoozed' && contact.snoozed_until && new Date(contact.snoozed_until).getTime() > Date.now() && <Clock size={12} className="text-amber-500 shrink-0" />}
+                         {contact.assigned_to && (
+                           <span className="shrink-0 px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 border border-indigo-100 dark:border-indigo-500/20 text-[9px] font-bold uppercase rounded flex items-center gap-1">
+                             <User size={9} />
+                             <span className="max-w-[50px] truncate">{agents.find(a => a.id === contact.assigned_to)?.full_name?.split(' ')[0] || 'Ag'}</span>
+                           </span>
+                         )}
+                       </span>
                       {contact.phone && getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone) !== formatPhoneNumber(contact.phone) && (
                         <span className="text-[10px] text-[#54656f] dark:text-[#8696a0] font-mono tracking-tighter truncate mt-0.5">
                           {formatPhoneNumber(contact.phone)}
@@ -590,7 +632,7 @@ export default function ChatDashboard() {
         }}>
           
           {/* Chat Header */}
-          <div className="h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-10 shadow-sm border-l border-white/5">
+          <div className="relative h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5">
             <div className="flex items-center gap-3">
               <button className="sm:hidden p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1]" onClick={() => setActiveChat(null)}>
                 <ChevronLeft size={24} />
@@ -610,6 +652,8 @@ export default function ChatDashboard() {
 
             {/* Right Header Area */}
             <div className="flex items-center gap-2 sm:gap-4">
+              
+              <ChatOmniMenu contactId={activeChat.id} />
               
               {/* Chat Actions Dropdown Premium */}
               <div className="relative">
@@ -699,9 +743,9 @@ export default function ChatDashboard() {
                return (
                   <div key={msg.id} className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start")}>
                     <div className={cn(
-                      "px-3 pb-2 pt-1.5 rounded-xl shadow-sm max-w-[65%] relative group animate-in fade-in slide-in-from-bottom-2",
-                      isMe ? "bg-[#d9fdd3] dark:bg-[#005c4b] text-[#111b21] dark:text-[#e9edef] rounded-tr-none" 
-                           : "bg-white dark:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] rounded-tl-none"
+                      "px-3 pb-2 pt-1.5 rounded-2xl shadow-sm max-w-[65%] relative group animate-in fade-in slide-in-from-bottom-2 backdrop-blur-md",
+                      isMe ? "bg-[#d9fdd3]/90 dark:bg-[#005c4b]/95 text-[#111b21] dark:text-[#e9edef] rounded-tr-sm" 
+                           : "bg-white/95 dark:bg-[#202c33]/90 text-[#111b21] dark:text-[#e9edef] rounded-tl-sm border border-black/5 dark:border-white/5 border-l-4 border-l-[#00a884]"
                     )}>
                       {msg.sender === 'bot' && (
                         <div className="flex items-center gap-1 mb-1 text-[10px] text-[#005c4b] dark:text-[#1d9782] opacity-80 font-bold uppercase tracking-wider">
@@ -709,9 +753,31 @@ export default function ChatDashboard() {
                         </div>
                       )}
                       {msg.sender === 'human' && (
-                        <div className="flex items-center gap-1 mb-1 text-[10px] text-[#00a884]/70 font-bold uppercase tracking-wider">
-                           👤 Atendente Real
+                        <div className="flex items-center gap-1 mb-1 text-[10px] text-[#005c4b] dark:text-[#1d9782] opacity-80 font-bold uppercase tracking-wider">
+                           <User size={10} /> Você (Atendente)
                         </div>
+                      )}
+                      {!isMe && (
+                        <div className="flex items-center gap-1.5 mb-1 text-[11px] text-[#00a884] font-bold tracking-tight">
+                           <User size={11} className="opacity-80" /> 
+                           <span className="truncate">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
+                        </div>
+                      )}
+
+                      {/* Quoted Message Render */}
+                      {msg.quoted && (
+                         <div className="bg-black/5 dark:bg-black/20 border-l-4 border-[#00a884] rounded-lg p-2 mb-2 w-full flex flex-col gap-0.5 relative overflow-hidden group/quote">
+                           <div className="absolute inset-0 bg-white/40 dark:bg-white/5 opacity-0 group-hover/quote:opacity-100 transition-opacity pointer-events-none"></div>
+                           <span className="text-[11px] font-bold text-[#00a884] opacity-90 truncate">
+                             {msg.quoted.sender && activeChat.phone && msg.quoted.sender.includes(activeChat.phone.replace(/\D/g, '')) 
+                               ? getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)
+                               : 'Você'
+                             }
+                           </span>
+                           <span className="text-[13px] text-[#54656f] dark:text-[#aebac1] leading-snug line-clamp-3">
+                             {msg.quoted.text}
+                           </span>
+                         </div>
                       )}
                       
                       {/* Media Render Premium Elements */}
@@ -763,13 +829,22 @@ export default function ChatDashboard() {
                       )}
                       
                       {msg.mediaType === 'contact' && (
-                         <div className="flex items-center gap-3 bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-gray-200 dark:border-gray-700/50 min-w-[220px]">
-                            <div className="bg-[#00a884]/10 p-3 rounded-full text-[#00a884] shrink-0">
-                               <User size={22} className="fill-current/20" />
+                         <div className="flex flex-col bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-1 rounded-xl mb-1 border border-gray-200 dark:border-gray-700/50 min-w-[220px]">
+                            <div className="flex items-center gap-3 p-2">
+                               <div className="bg-[#00a884]/10 p-3 rounded-full text-[#00a884] shrink-0">
+                                  <User size={22} className="fill-current/20" />
+                               </div>
+                               <div className="flex flex-col overflow-hidden">
+                                  <span className="text-[14px] font-semibold text-gray-800 dark:text-gray-100 truncate">{msg.text || 'Contato'}</span>
+                                  <span className="text-[11px] text-gray-500 font-medium tracking-wide uppercase mt-0.5">Cartão VCard</span>
+                               </div>
                             </div>
-                            <div className="flex flex-col overflow-hidden">
-                               <span className="text-[14px] font-semibold text-gray-800 dark:text-gray-100 truncate">{msg.text || 'Contato'}</span>
-                               <span className="text-[11px] text-gray-500 font-medium tracking-wide uppercase mt-0.5">Cartão VCard</span>
+                            <div className="border-t border-gray-100 dark:border-gray-700/50 mt-1 p-2">
+                               <button 
+                                  onClick={() => alert(`Funcionalidade de enviar mensagem para este contato vCard será implementada no próximo ciclo (Nome: ${msg.text})`)}
+                                  className="w-full text-xs text-brand-primary font-medium flex items-center justify-center bg-[#00a884]/10 p-2 rounded-lg cursor-pointer hover:bg-[#00a884]/20 transition-colors">
+                                  Abrir / Enviar Mensagem
+                               </button>
                             </div>
                          </div>
                       )}

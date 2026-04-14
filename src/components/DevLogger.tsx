@@ -65,18 +65,21 @@ export default function DevLogger() {
 
       addLog({
         type: 'error',
-        message: args[0]?.message || (typeof args[0] === 'string' ? args[0] : 'Erro Capturado'),
-        source: 'Console',
+        message: args[0]?.message || (typeof args[0] === 'string' ? args[0] : 'Erro App Frontend (React/Code)'),
+        source: 'Console (Frontend)',
         details: serializedArgs
       });
       originalConsoleError.apply(console, args);
     };
 
     console.warn = (...args: any[]) => {
+      // Evitar spam de warning de input controlado do react
+      if (typeof args[0] === 'string' && args[0].includes('A component is changing an uncontrolled input')) return;
+      
       addLog({
         type: 'warn',
-        message: args[0]?.message || (typeof args[0] === 'string' ? args[0] : 'Alerta Capturado'),
-        source: 'Console',
+        message: args[0]?.message || (typeof args[0] === 'string' ? args[0] : 'Alerta Frontend (React/Code)'),
+        source: 'Console (Frontend)',
         details: args
       });
       originalConsoleWarn.apply(console, args);
@@ -88,41 +91,48 @@ export default function DevLogger() {
       try {
         const response = await originalFetch(...args);
         
-        // Log bad responses, exclude supabase realtime pings and basic assets ideally
-        const url = (args[0] as any)?.url || args[0];
-        if (typeof url === 'string') {
-          if (!response.ok && !url.includes('supabase.co') && !url.includes('/debug/healthz')) {
+        // Excluir rotas que tem ping constante ou info normal (Telemetry e WS)
+        const urlObj = (args[0] as any)?.url || args[0];
+        const url = typeof urlObj === 'string' ? urlObj : '';
+        const method = (args[1] as RequestInit)?.method || 'GET';
+        
+        if (url) {
+          if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/realtime/')) {
+             let detailsStr = '';
+             try {
+               detailsStr = await response.clone().text();
+             } catch {
+               detailsStr = 'no body';
+             }
+             
+             let sourcePrefix = 'Fetch (External)';
+             if (url.includes('supabase.co')) sourcePrefix = 'Fetch (Supabase REST)';
+             else if (url.includes('whatsapp.net')) sourcePrefix = 'Fetch (WhatsApp Media)';
+             else if (url.includes(import.meta.env.VITE_WHATSAPP_ENGINE_URL || 'localhost:9000')) sourcePrefix = 'Fetch (Node Server)';
+
              addLog({
                type: 'error',
-               message: `HTTP Error ${response.status}`,
-               source: `Fetch: ${url}`,
-               details: await response.clone().text().catch(() => 'no body')
+               message: `HTTP Error ${response.status} em ${method}`,
+               source: sourcePrefix,
+               details: { url, payload: (args[1] as RequestInit)?.body, response: detailsStr }
              });
           }
         }
         return response;
       } catch (err: any) {
-        const url = (args[0] as any)?.url || args[0];
+        const urlObj = (args[0] as any)?.url || args[0];
+        const method = (args[1] as RequestInit)?.method || 'GET';
+        const urlStr = typeof urlObj === 'string' ? urlObj : 'unknown';
         
-        let urlStr = 'unknown';
-        if (typeof url === 'string') {
-           urlStr = url;
-        } else if (url && url.toString) {
-           urlStr = url.toString();
-        }
-
-        if (urlStr.includes('/debug/healthz')) {
-           throw err; // swallow throws from pinger hook to avoid spam
-        }
-
         addLog({
           type: 'error',
           message: err.message || 'Network Fetch Failed',
-          source: `Fetch API: ${urlStr}`,
+          source: `Fetch Critical (${method})`,
           details: {
             name: err.name,
             message: err.message,
-            url: urlStr
+            url: urlStr,
+            payload: (args[1] as RequestInit)?.body
           }
         });
         throw err;

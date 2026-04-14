@@ -19,14 +19,12 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
     document_type: 'cpf',
     document_number: '',
     cep: '',
-    neighborhood: '',
-    city: '',
-    state: '',
+    address_neighborhood: '',
+    address_city: '',
+    address_state: '',
     notes: '',
     email: '',
-    instagram: '',
-    address: '',
-    company_role: ''
+    address_street: ''
   });
   
   const [isSearchingDoc, setIsSearchingDoc] = useState(false);
@@ -42,13 +40,11 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
         document_number: contactData.document_number || '',
         email: contactData.email || '',
         cep: contactData.cep || '',
-        neighborhood: contactData.address_neighborhood || '',
-        city: contactData.address_city || '',
-        state: contactData.address_state || '',
+        address_neighborhood: contactData.address_neighborhood || '',
+        address_city: contactData.address_city || '',
+        address_state: contactData.address_state || '',
         notes: contactData.notes || '',
-        instagram: contactData.instagram || '',
-        address: contactData.address_street || '',
-        company_role: contactData.company_role || ''
+        address_street: contactData.address_street || ''
       });
     }
   }, [contactData, isOpen]);
@@ -72,10 +68,10 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
         ...prev,
         name: data.razao_social || data.nome_fantasia || prev.name,
         cep: data.cep ? data.cep.replace(/\D/g, '') : prev.cep,
-        address: data.logradouro || prev.address,
-        neighborhood: data.bairro || prev.neighborhood,
-        city: data.municipio || prev.city,
-        state: data.uf || prev.state,
+        address_street: data.logradouro || prev.address_street,
+        address_neighborhood: data.bairro || prev.address_neighborhood,
+        address_city: data.municipio || prev.address_city,
+        address_state: data.uf || prev.address_state,
       }));
     } catch (e) {
       alert("Falha ao buscar CNPJ na base.");
@@ -95,10 +91,10 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
       if (!data.erro) {
         setFormData(prev => ({
            ...prev,
-           address: data.logradouro || prev.address,
-           neighborhood: data.bairro || prev.neighborhood,
-           city: data.localidade || prev.city,
-           state: data.uf || prev.state,
+           address_street: data.logradouro || prev.address_street,
+           address_neighborhood: data.bairro || prev.address_neighborhood,
+           address_city: data.localidade || prev.address_city,
+           address_state: data.uf || prev.address_state,
         }));
       }
     } catch (e) {
@@ -124,7 +120,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-200">
       <div 
         className="bg-[#f0f2f5] dark:bg-[#111b21] border border-white/20 dark:border-white/5 rounded-3xl w-[95%] max-w-2xl shadow-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200 overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -239,8 +235,8 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                     <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Rua / Logradouro</label>
                     <input 
                       type="text" 
-                      value={formData.address}
-                      onChange={e => setFormData({...formData, address: e.target.value})}
+                      value={formData.address_street}
+                      onChange={e => setFormData({...formData, address_street: e.target.value})}
                       className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
                     />
                   </div>
@@ -251,8 +247,8 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                      <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Bairro</label>
                      <input 
                        type="text" 
-                       value={formData.neighborhood}
-                       onChange={e => setFormData({...formData, neighborhood: e.target.value})}
+                       value={formData.address_neighborhood}
+                       onChange={e => setFormData({...formData, address_neighborhood: e.target.value})}
                        className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
                      />
                   </div>
@@ -261,14 +257,14 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                      <div className="flex gap-2">
                        <input 
                          type="text" 
-                         value={formData.city}
-                         onChange={e => setFormData({...formData, city: e.target.value})}
+                         value={formData.address_city}
+                         onChange={e => setFormData({...formData, address_city: e.target.value})}
                          className="w-2/3 px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
                        />
                        <input 
                          type="text" 
-                         value={formData.state}
-                         onChange={e => setFormData({...formData, state: e.target.value})}
+                         value={formData.address_state}
+                         onChange={e => setFormData({...formData, address_state: e.target.value})}
                          placeholder="UF"
                          className="w-1/3 px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all text-center uppercase"
                          maxLength={2}

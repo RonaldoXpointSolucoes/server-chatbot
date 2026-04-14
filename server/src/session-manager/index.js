@@ -68,8 +68,10 @@ class SessionManager {
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: false,
                 connectTimeoutMs: 60000,
-                keepAliveIntervalMs: 30000,
-                defaultQueryTimeoutMs: 60000
+                keepAliveIntervalMs: 25000,
+                defaultQueryTimeoutMs: 120000,
+                retryRequestDelayMs: 5000,
+                maxMsgRetryCount: 5
             });
 
             sock.ev.on('creds.update', saveCreds);

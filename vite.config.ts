@@ -7,12 +7,15 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       injectRegister: 'auto',
       includeAssets: ['vite.svg', 'pwa-192x192.svg', 'pwa-512x512.svg'],
       devOptions: {
         enabled: true,
         type: 'module',
+        navigateFallback: 'index.html',
       },
       manifest: {
         name: 'ChatBoot CRM',

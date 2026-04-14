@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",
+    "@xyflow/react": "^12.10.2",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "dotenv": "^17.4.0",
@@ -21,6 +22,7 @@
     "react-qr-code": "^2.0.18",
     "react-router-dom": "^7.14.0",
     "tailwind-merge": "^3.5.0",
+    "uuid": "^13.0.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

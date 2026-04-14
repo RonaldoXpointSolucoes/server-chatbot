@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrainCircuit, UploadCloud, FileText, File, Trash2, CheckCircle2, AlertCircle, Loader2, Search, Zap, Info, Server } from 'lucide-react';
+import { BrainCircuit, UploadCloud, FileText, File, Trash2, CheckCircle2, AlertCircle, Loader2, Search, Zap, Info, Server, ArrowLeft } from 'lucide-react';
 import { supabase } from '../services/supabase';
+import { useNavigate } from 'react-router-dom';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -14,6 +15,7 @@ interface KnowledgeDoc {
 }
 
 export default function KnowledgeBase() {
+  const navigate = useNavigate();
   const [documents, setDocuments] = useState<KnowledgeDoc[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -147,6 +149,15 @@ export default function KnowledgeBase() {
       
       <div className="max-w-5xl mx-auto relative z-10 flex flex-col gap-8">
         
+        {/* Back Button */}
+        <button 
+          onClick={() => navigate(-1)} 
+          className="flex items-center gap-2 text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-5 py-2.5 rounded-full transition-all border border-emerald-500/20 w-fit shadow-lg shadow-emerald-500/5 group backdrop-blur-md"
+        >
+          <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
+          <span className="font-bold text-sm tracking-wide">Voltar</span>
+        </button>
+
         {/* Header Premium */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>

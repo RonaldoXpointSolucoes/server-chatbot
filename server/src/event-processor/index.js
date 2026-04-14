@@ -3,6 +3,7 @@ import realtime from '../realtime-publisher/index.js';
 import qrcode from 'qrcode';
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import fs from 'fs';
+import FlowEngine from '../flow-runtime/index.js';
 
 class EventProcessor {
     constructor() {
@@ -335,6 +336,18 @@ class EventProcessor {
                          contact_phone: b.phone,
                          conversation_id: b.conversationId
                      });
+
+                     // Despacha para o Runtime do Flow Builder (apenas inbound de clientes)
+                     if (msg.direction === 'inbound') {
+                         FlowEngine.processIncomingMessage({
+                             tenantId: b.tenantId,
+                             instanceId: b.instanceId,
+                             jid: b.jid,
+                             textMessage: b.textMessage,
+                             rawPayload: b.rawMsg,
+                             sock: b.sock
+                         }).catch(e => console.error("[BatchProcessor] Erro no FlowEngine:", e));
+                     }
                  }
                  
                  // Puxa a foto do perfil assincronamente (background level 2) sem estourar tempo

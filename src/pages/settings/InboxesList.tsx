@@ -1,0 +1,130 @@
+import React, { useEffect, useState } from 'react';
+import { supabase } from '../../services/supabase';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, Settings2, Trash2, Smartphone, Inbox, MessageSquare } from 'lucide-react';
+import { useChatStore } from '../../store/chatStore';
+
+interface WhatsAppInstance {
+  id: string;
+  display_name: string;
+  status: string;
+  created_at: string;
+}
+
+export default function InboxesList() {
+  const [instances, setInstances] = useState<WhatsAppInstance[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const tenantId = useChatStore(state => state.tenantInfo?.id);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!tenantId) return;
+    
+    const fetchInstances = async () => {
+      try {
+        const { data, error } = await supabase.from('whatsapp_instances')
+          .select('id, display_name, status, created_at')
+          .eq('tenant_id', tenantId)
+          .order('created_at', { ascending: false });
+          
+        if (error) throw error;
+        if (data) setInstances(data);
+      } catch (err) {
+        console.error('Erro ao buscar caixas:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchInstances();
+
+    const channel = supabase.channel(`public:whatsapp_instances:tenant_id=${tenantId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, () => {
+         fetchInstances();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [tenantId]);
+
+  const filteredInstances = instances.filter(i => i.display_name.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="w-full h-full bg-[#111b21] flex flex-col items-center py-10 px-6 sm:px-12 animate-in fade-in duration-500 overflow-y-auto">
+       <div className="w-full max-w-5xl flex flex-col gap-8">
+          
+          <div className="flex flex-col gap-3">
+             <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
+               <Inbox className="text-emerald-500" size={32} /> Caixas de Entrada
+             </h1>
+             <p className="text-gray-400 text-base max-w-3xl leading-relaxed">
+               Um canal é o modo de comunicação que seu cliente escolhe para interagir com você. Uma caixa de entrada é onde você gerencia interações para um canal específico. Adicione um canal de WhatsApp Baileys para centralizar conversas da sua empresa.
+             </p>
+             <a href="#" className="flex items-center gap-1 text-emerald-500 hover:text-emerald-400 font-semibold text-sm w-max transition-colors mt-1">
+               Saiba mais sobre as caixas de entrada <span className="text-lg">›</span>
+             </a>
+          </div>
+
+          <div className="flex justify-between items-center bg-[#182229]/80 backdrop-blur-xl p-4 sm:px-6 rounded-[2rem] border border-white/5 shadow-xl mt-4">
+             <div className="flex items-center bg-[#202c33] px-4 py-2.5 rounded-2xl w-full max-w-xs border border-white/5">
+                <Search size={18} className="text-gray-400 mr-2 shrink-0" />
+                <input 
+                  type="text" 
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Pesquisar caixas de entrada..."
+                  className="bg-transparent border-none text-white text-sm outline-none w-full placeholder-gray-500"
+                />
+             </div>
+
+             <div className="flex items-center border border-white/5 bg-[#202c33] rounded-[1.5rem] p-1 shadow-inner overflow-hidden shrink-0">
+               <div className="px-4 text-sm font-semibold text-gray-500 whitespace-nowrap">
+                  {instances.length} caixas de entrada
+               </div>
+               <div className="w-px h-6 bg-white/10 mx-1"></div>
+               <button onClick={() => navigate('/instances')} className="bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-2 px-5 rounded-[1.1rem] transition-all flex items-center gap-2 shadow-[0_5px_15px_-5px_rgba(16,185,129,0.5)]">
+                 <Plus size={18} /> Adicionar Caixa
+               </button>
+             </div>
+          </div>
+
+          <div className="flex flex-col rounded-[2rem] bg-[#182229]/50 border border-white/5 overflow-hidden backdrop-blur-md shadow-2xl">
+             {loading ? (
+                <div className="p-12 flex justify-center"><div className="w-8 h-8 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin"/></div>
+             ) : filteredInstances.length > 0 ? (
+                filteredInstances.map((inst, idx) => (
+                  <div key={inst.id} className={`flex items-center justify-between p-6 hover:bg-white/5 transition-colors ${idx !== filteredInstances.length - 1 ? 'border-b border-white/5' : ''}`}>
+                     <div className="flex items-center gap-5">
+                        <div className="w-14 h-14 bg-[#202c33] dark:bg-[#202c33] border border-white/10 rounded-2xl flex items-center justify-center shadow-inner">
+                           <MessageSquare size={28} className="text-gray-300" />
+                        </div>
+                        <div className="flex flex-col">
+                           <span className="text-lg font-bold text-white">{inst.display_name}</span>
+                           <span className="text-sm font-medium text-gray-400 mt-1">WhatsApp - Baileys</span>
+                        </div>
+                     </div>
+                     <div className="flex items-center gap-3">
+                        <button onClick={() => navigate(`/settings/inboxes/${inst.id}`)} className="p-3 bg-[#202c33] hover:bg-emerald-500 hover:text-white text-gray-400 rounded-xl transition-all border border-white/5 hover:border-emerald-500 hover:shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                           <Settings2 size={18} />
+                        </button>
+                        <button className="p-3 bg-[#202c33] hover:bg-red-500 hover:text-white text-gray-400 rounded-xl transition-all border border-white/5 hover:border-red-500">
+                           <Trash2 size={18} />
+                        </button>
+                     </div>
+                  </div>
+                ))
+             ) : (
+                <div className="p-16 flex flex-col items-center justify-center text-center">
+                   <Inbox size={48} className="text-gray-600 mb-4" />
+                   <h3 className="text-xl font-bold text-gray-300 mb-1">Nenhuma caixa encontrada</h3>
+                   <p className="text-gray-500">Tente buscar por um nome diferente ou adicione uma nova.</p>
+                </div>
+             )}
+          </div>
+       </div>
+    </div>
+  );
+}

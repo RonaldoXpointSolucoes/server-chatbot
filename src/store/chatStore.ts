@@ -10,6 +10,11 @@ export type MessageType = {
   mediaType?: 'image' | 'video' | 'audio' | 'document';
   status?: string; // PENDING, SENT, DELIVERY_ACK, READ
   timestamp: Date;
+  quoted?: {
+      id: string;
+      sender: string;
+      text: string;
+  };
 };
 
 export type ContactType = ContactRow & {
@@ -19,8 +24,22 @@ export type ContactType = ContactRow & {
   lastMsgTimestamp: number; // novo campo para ordernar realista
   is_pinned?: boolean;
   is_favorite?: boolean;
+  conv_status?: string;
+  snoozed_until?: string | null;
+  priority?: string | null;
+  assigned_to?: string | null;
   conv_labels?: any[];
 };
+
+export interface AgentType {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  role: string;
+  full_name?: string | null;
+  signature?: string | null;
+  email?: string | null;
+}
 
 export interface TenantInfo {
   id: string;
@@ -34,6 +53,7 @@ interface ChatState {
   evolutionConnected: boolean;
   connectedInstanceName: string | null;
   tenantInfo: TenantInfo | null;
+  agents: AgentType[];
   modalReason: string | null;
   isSubscribed: boolean;
   isSyncingHistory: Record<string, boolean>;
@@ -64,34 +84,109 @@ interface ChatState {
   toggleFavorite: (contactId: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
   fetchContactPicture: (contactId: string, jid: string, instanceName: string) => Promise<void>;
-  // Opcional para as etiquetas
-  // labels: any[];
-  // fetchLabels: () => Promise<void>;
+  fetchContactPicture: (contactId: string, jid: string, instanceName: string) => Promise<void>;
+  
+  // Omnichannel Actions
+  fetchTenantAgents: () => Promise<void>;
+  createAgent: (payload: { full_name: string; email: string; role: string; password?: string }) => Promise<void>;
+  updateAgent: (id: string, payload: { full_name: string; email: string; role: string; password?: string }) => Promise<void>;
+  deleteAgent: (id: string) => Promise<void>;
+  updateConversationField: (contactId: string, payload: Record<string, any>) => Promise<void>;
+  updateAgentProfile: (fullName: string, signature: string) => Promise<void>;
+}
+
+function parseAdvancedMsgMetadata(m: any) {
+  let derivedType = m.message_type;
+  let derivedText = m.text_content;
+  let derivedQuoted: any = undefined;
+
+  try {
+      const payloadMessage = m.raw_payload?.message;
+      if (payloadMessage) {
+          let contextInfo = null;
+          if (payloadMessage.extendedTextMessage?.contextInfo) {
+              contextInfo = payloadMessage.extendedTextMessage.contextInfo;
+          } else if (payloadMessage.imageMessage?.contextInfo) {
+              contextInfo = payloadMessage.imageMessage.contextInfo;
+          } else if (payloadMessage.videoMessage?.contextInfo) {
+              contextInfo = payloadMessage.videoMessage.contextInfo;
+          } else if (payloadMessage.documentMessage?.contextInfo) {
+              contextInfo = payloadMessage.documentMessage.contextInfo;
+          } else if (payloadMessage.audioMessage?.contextInfo) {
+              contextInfo = payloadMessage.audioMessage.contextInfo;
+          } else if (payloadMessage.contactMessage?.contextInfo) {
+              contextInfo = payloadMessage.contactMessage.contextInfo;
+          }
+
+          if (contextInfo && contextInfo.quotedMessage) {
+              const qm = contextInfo.quotedMessage;
+              let qText = '📎 Mídia';
+              if (qm.conversation) qText = qm.conversation;
+              else if (qm.extendedTextMessage?.text) qText = qm.extendedTextMessage.text;
+              else if (qm.imageMessage) qText = qm.imageMessage.caption || '📸 Imagem';
+              else if (qm.videoMessage) qText = qm.videoMessage.caption || '🎥 Vídeo';
+              else if (qm.audioMessage) qText = '🎵 Áudio';
+              else if (qm.documentMessage) qText = '📁 Documento';
+
+              derivedQuoted = {
+                  id: contextInfo.stanzaId,
+                  sender: contextInfo.participant,
+                  text: qText
+              };
+          }
+
+          if (payloadMessage.locationMessage || payloadMessage.liveLocationMessage) {
+              derivedType = 'location';
+              const loc = payloadMessage.locationMessage || payloadMessage.liveLocationMessage;
+              derivedText = `${loc.degreesLatitude},${loc.degreesLongitude}`;
+          } else if (payloadMessage.contactMessage) {
+              derivedType = 'contact';
+              derivedText = payloadMessage.contactMessage.displayName || payloadMessage.contactMessage.vcard?.match(/FN:(.+)/)?.[1] || 'Contato';
+          } else if (payloadMessage.contactsArrayMessage) {
+              derivedType = 'contact';
+              derivedText = payloadMessage.contactsArrayMessage.displayName || 'Vários Contatos';
+          }
+      }
+  } catch(e) {}
+
+  return { mediaType: derivedType, text: derivedText, quoted: derivedQuoted };
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
   contacts: [],
   activeChatId: null,
   evolutionConnected: false,
-  connectedInstanceName: null, // Será gerido unicamente via tenantInfo agora e não mais em localStorage para segurança SaaS
+  connectedInstanceName: null,
   tenantInfo: null,
+  agents: [],
   modalReason: null,
-  isSubscribed: false, // Previne double-subscribe do react 18
+  isSubscribed: false,
   isSyncingHistory: {},
   pictureFetchLocks: {},
   appVersion: null,
 
   setActiveChat: (id) => set({ activeChatId: id }),
 
-  // Envia via Evolution API e nao cadastra nativo, pois webhook vai assumir
   sendHumanMessage: async (contactId, text, instanceName) => {
     const state = get();
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact) return;
     
+    // Injeção Mágica de Assinatura (Signature)
+    let finalMessageText = text;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+         const agent = state.agents.find(a => a.user_id === user.id);
+         if (agent && agent.signature && agent.signature.trim().length > 0) {
+            finalMessageText = `${text}\n\n_${agent.signature}_`;
+         }
+      }
+    } catch (e) {}
+
     // Atualiza otimista UI
     const pseudoId = 'optimistic-' + Math.random().toString();
-    state.addMessageLocally(contactId, { id: pseudoId, text, sender: 'human', timestamp: new Date() });
+    state.addMessageLocally(contactId, { id: pseudoId, text: finalMessageText, sender: 'human', timestamp: new Date() });
 
     try {
       const { sendTextMessage } = await import('../services/whatsappEngine');
@@ -101,7 +196,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
       const apiKey = instDataDB?.api_key || '';
 
-      await sendTextMessage(state.tenantInfo.id, instanceName, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), text, apiKey);
+      await sendTextMessage(state.tenantInfo.id, instanceName, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), finalMessageText, apiKey);
       
     } catch(err: any) {
       console.error(err);
@@ -241,8 +336,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       contacts: state.contacts.map((c) => {
         if (c.id === contactId) {
+          // Acorda (Wake Up) se for mensagem de cliente e estiver em Snooze
+          let updatedStatus = c.conv_status;
+          let updatedSnooze = c.snoozed_until;
+          if (msg.sender === 'client' && c.conv_status === 'snoozed') {
+              updatedStatus = 'open';
+              updatedSnooze = undefined; // trigger null cleanup
+              // Atualiza o DB assincronamente em background sem bloquear
+              setTimeout(() => {
+                 get().updateConversationField(contactId, { status: 'open', snoozed_until: null });
+              }, 100);
+          }
+
           // Previne duplicados por ID do DB ou whatsapp_id
-          if (c.messages.some(m => m.id === msg.id || (msg.whatsapp_id && m.whatsapp_id === msg.whatsapp_id))) return c;
+          if (c.messages.some(m => m.id === msg.id || (msg.whatsapp_id && m.whatsapp_id === msg.whatsapp_id))) {
+             if (updatedStatus !== c.conv_status) return { ...c, conv_status: updatedStatus, snoozed_until: updatedSnooze };
+             return c;
+          }
           
           // Tratamento de UI otimista: varre se ja tem uma mensagem igualzinha de 'human'
           if (msg.sender === 'human') {
@@ -250,11 +360,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (optIndex !== -1) {
               const updatedMsgs = [...c.messages];
               updatedMsgs[optIndex] = msg; // substitui pelo registro do Realtime com UUID real
-              return { ...c, messages: updatedMsgs };
+              return { ...c, messages: updatedMsgs, conv_status: updatedStatus, snoozed_until: updatedSnooze };
             }
           }
           
-          return { ...c, messages: [...c.messages, msg] };
+          return { ...c, messages: [...c.messages, msg], conv_status: updatedStatus, snoozed_until: updatedSnooze };
         }
         return c;
       })
@@ -510,6 +620,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         is_pinned: isPinned,
                         lastMsgTimestamp: ts,
                         messages: existing.messages || [],
+                        conv_status: conv.status,
+                        snoozed_until: conv.snoozed_until,
+                        priority: conv.priority,
+                        assigned_to: conv.assigned_to
                      };
                      
                      // Injeta um preview fake se messages tiver vazio e tem preview no banco 
@@ -536,7 +650,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         is_favorite: isFavorite,
                         is_pinned: isPinned,
                         lastMsgTimestamp: ts,
-                        timestamp: ts
+                        timestamp: ts,
+                        conv_status: conv.status,
+                        snoozed_until: conv.snoozed_until,
+                        priority: conv.priority,
+                        assigned_to: conv.assigned_to
                      });
                   }
                });
@@ -681,16 +799,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
               const idx = updated.findIndex(c => c.id === contactId);
               if (idx !== -1) {
                   updated[idx].unread = 0;
-                  updated[idx].messages = orderedMsgs.map(m => ({
-                      id: m.id,
-                      whatsapp_id: m.whatsapp_message_id,
-                      text: m.text_content,
-                      sender: m.sender_type,
-                      mediaUrl: m.media_url,
-                      mediaType: m.message_type,
-                      status: m.status,
-                      timestamp: new Date(m.timestamp)
-                  }));
+                  updated[idx].messages = orderedMsgs.map(m => {
+                      const advanced = parseAdvancedMsgMetadata(m);
+                      return {
+                          id: m.id,
+                          whatsapp_id: m.whatsapp_message_id,
+                          text: advanced.text || m.text_content,
+                          sender: m.sender_type,
+                          mediaUrl: m.media_url,
+                          mediaType: advanced.mediaType,
+                          status: m.status,
+                          timestamp: new Date(m.timestamp),
+                          quoted: advanced.quoted
+                      };
+                  });
               }
               return { contacts: updated };
            });
@@ -747,6 +869,123 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  fetchTenantAgents: async () => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    try {
+      const { data: agentsData, error } = await supabase.from('tenant_users').select('*').eq('tenant_id', tenant.id).order('created_at', { ascending: true });
+      if (error) throw error;
+      set({ agents: agentsData || [] });
+    } catch (e) {
+      console.error('Erro ao buscar agentes:', e);
+    }
+  },
+
+  createAgent: async (payload) => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    try {
+      // Gera um UUID local para o user_id provisório
+      const tempUserId = crypto.randomUUID();
+      const { error } = await supabase.from('tenant_users').insert([{
+        tenant_id: tenant.id,
+        user_id: tempUserId,
+        role: payload.role,
+        full_name: payload.full_name,
+        email: payload.email,
+        password: payload.password
+      }]);
+      if (error) throw error;
+      await get().fetchTenantAgents();
+    } catch (e) {
+      console.error('Erro ao criar agente:', e);
+      throw e;
+    }
+  },
+
+  updateAgent: async (id, payload) => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    try {
+      const { error } = await supabase.from('tenant_users').update({
+        role: payload.role,
+        full_name: payload.full_name,
+        email: payload.email,
+        password: payload.password
+      }).eq('id', id).eq('tenant_id', tenant.id);
+      
+      if (error) throw error;
+      await get().fetchTenantAgents();
+    } catch (e) {
+      console.error('Erro ao atualizar agente:', e);
+      throw e;
+    }
+  },
+
+  deleteAgent: async (id) => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    try {
+      const { error } = await supabase.from('tenant_users').delete()
+        .eq('id', id).eq('tenant_id', tenant.id);
+      
+      if (error) throw error;
+      await get().fetchTenantAgents();
+    } catch (e) {
+      console.error('Erro ao deletar agente:', e);
+      throw e;
+    }
+  },
+
+  updateAgentProfile: async (fullName, signature) => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    try {
+      const userRes = await supabase.auth.getUser();
+      if (!userRes.data.user) return;
+      
+      const { error } = await supabase.from('tenant_users').update({ full_name: fullName, signature: signature })
+        .eq('tenant_id', tenant.id).eq('user_id', userRes.data.user.id);
+      
+      if (error) throw error;
+      await get().fetchTenantAgents(); // Sincroniza localmente
+    } catch (e) {
+      console.error('Erro ao atualizar perfil do agente:', e);
+      throw e;
+    }
+  },
+
+  updateConversationField: async (contactId, payload) => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    
+    // UI Otimista
+    set((state) => ({
+       contacts: state.contacts.map((c) => {
+         if (c.id === contactId) {
+            const stateUpdates: any = {};
+            if ('status' in payload) stateUpdates.conv_status = payload.status;
+            if ('snoozed_until' in payload) stateUpdates.snoozed_until = payload.snoozed_until;
+            if ('priority' in payload) stateUpdates.priority = payload.priority;
+            if ('assigned_to' in payload) stateUpdates.assigned_to = payload.assigned_to;
+            return { ...c, ...stateUpdates };
+         }
+         return c;
+       })
+    }));
+
+    try {
+      const { data: conv } = await supabase.from('conversations').select('id').eq('contact_id', contactId).eq('tenant_id', tenant.id).order('last_message_at', { ascending: false }).limit(1).single();
+      if (!conv) return;
+
+      const { error } = await supabase.from('conversations').update(payload).eq('id', conv.id);
+      if (error) throw error;
+    } catch (e) {
+      console.error('Erro ao atualizar campo da conversa:', e);
+      // Aqui no mundo real adicionariamos reversão otimista
+    }
+  },
+
   subscribeToNewMessages: () => {
     const state = get() as any;
     if (state.isSubscribed) return; // React 18 protection
@@ -790,15 +1029,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         const cid = targetContactLocally ? targetContactLocally.id : cData.id;
 
+        const advanced = parseAdvancedMsgMetadata(m);
+
         get().addMessageLocally(cid, {
           id: m.id,
           whatsapp_id: m.whatsapp_message_id,
-          text: m.text_content,
+          text: advanced.text || m.text_content,
           sender: m.sender_type || 'client',
           mediaUrl: m.media_url,
-          mediaType: m.message_type,
+          mediaType: advanced.mediaType,
           status: m.status,
-          timestamp: new Date(m.timestamp)
+          timestamp: new Date(m.timestamp),
+          quoted: advanced.quoted
         });
 
         // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele
