@@ -49,7 +49,19 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
         if (sessionManager.sessions.has(instanceId)) {
             console.log(`[API] /connect chamado, mas a sessão ${instanceId} já estava em memória. Forçando fechamento prévio.`);
             await sessionManager.closeSession(instanceId);
+            if (sessionManager.connectingState.has(instanceId)) {
+                 sessionManager.connectingState.delete(instanceId);
+            }
         }
+        
+        // Ensure absolutely fresh credentials to force new QR Code generation
+        console.log(`[API] Limpando credenciais antigas do DB e RAM para a instância ${instanceId} forçar novo QR Code...`);
+        const { sessionCaches } = await import('../session-manager/auth.js');
+        if (sessionCaches && sessionCaches.has(instanceId)) {
+            sessionCaches.delete(instanceId);
+        }
+        await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
+        await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
 
         await supabase.from('whatsapp_instances')
             .update({ status: 'connecting', last_error: null })

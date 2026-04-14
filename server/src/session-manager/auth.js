@@ -1,9 +1,8 @@
 import { supabase } from '../supabase.js';
 import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
 
-// Cache global por instância para não estrangular a rede nas leituras
-const sessionCaches = new Map();
-const pendingWrites = new Map(); // Fila de batch para DB Sync
+export const sessionCaches = new Map();
+export const pendingWrites = new Map(); // Fila de batch para DB Sync
 
 function scheduleDbSync(instanceId, tenantId) {
     if (pendingWrites.has(instanceId) && pendingWrites.get(instanceId).timer) {
