@@ -46,6 +46,11 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
         const { instanceId } = req.params;
         const tenantId = req.tenantId;
 
+        if (sessionManager.sessions.has(instanceId)) {
+            console.log(`[API] /connect chamado, mas a sessão ${instanceId} já estava em memória. Forçando fechamento prévio.`);
+            await sessionManager.closeSession(instanceId);
+        }
+
         await supabase.from('whatsapp_instances')
             .update({ status: 'connecting', last_error: null })
             .eq('id', instanceId)
