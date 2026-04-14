@@ -194,24 +194,35 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 	// Handles mex newsletter notifications
 	const handleMexNewsletterNotification = async (node: BinaryNode) => {
+		// As vezes a tag principal interna não é <mex> e sim <update> com op_name (ex: LinkedProfiles)
 		const mexNode = getBinaryNodeChild(node, 'mex')
-		if (!mexNode?.content) {
+		const updateNode = getBinaryNodeChild(node, 'update')
+
+		if (updateNode && updateNode.attrs?.op_name?.includes('LinkedProfiles')) {
+			// This is a LinkedProfiles update (often from LIDs). Safe to ignore for now so it won't clutter logs.
+			logger.debug({ node }, 'Ignored LinkedProfiles mex notification')
+			return
+		}
+
+		const targetNode = mexNode || updateNode
+
+		if (!targetNode?.content) {
 			logger.warn({ node }, 'Invalid mex newsletter notification')
 			return
 		}
 
 		let data: any
 		try {
-			data = JSON.parse(mexNode.content.toString())
+			data = JSON.parse(targetNode.content.toString())
 		} catch (error) {
 			logger.error({ err: error, node }, 'Failed to parse mex newsletter notification')
 			return
 		}
 
-		const operation = data?.operation
-		const updates = data?.updates
+		const operation = data?.operation || targetNode.attrs?.op_name
+		const updates = data?.updates || [data] //Fallback for single payload without wrapper
 
-		if (!updates || !operation) {
+		if (!operation) {
 			logger.warn({ data }, 'Invalid mex newsletter notification content')
 			return
 		}

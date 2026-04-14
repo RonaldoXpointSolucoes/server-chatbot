@@ -1053,7 +1053,11 @@ export const makeChatsSocket = (config: SocketConfig) => {
 	 * help ensure parity with WA Web
 	 * */
 	const executeInitQueries = async () => {
-		await Promise.all([fetchProps(), fetchBlocklist(), fetchPrivacySettings()])
+		await Promise.all([
+			fetchProps().catch(err => logger.warn({ err }, 'failed to fetch props')),
+			fetchBlocklist().catch(err => logger.warn({ err }, 'failed to fetch blocklist')),
+			fetchPrivacySettings().catch(err => logger.warn({ err }, 'failed to fetch privacy settings'))
+		])
 	}
 
 	const upsertMessage = ev.createBufferedFunction(async (msg: WAMessage, type: MessageUpsertType) => {
@@ -1198,7 +1202,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 			return
 		}
 
-		logger.info('History sync is enabled, awaiting notification with a 20s timeout.')
+		logger.info('History sync is enabled, awaiting notification with a 60s timeout.')
 
 		if (awaitingSyncTimeout) {
 			clearTimeout(awaitingSyncTimeout)
@@ -1207,11 +1211,11 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		awaitingSyncTimeout = setTimeout(() => {
 			if (syncState === SyncState.AwaitingInitialSync) {
 				// TODO: investigate
-				logger.warn('Timeout in AwaitingInitialSync, forcing state to Online and flushing buffer')
+				logger.warn('Timeout after 60s in AwaitingInitialSync, forcing state to Online and flushing buffer')
 				syncState = SyncState.Online
 				ev.flush()
 			}
-		}, 20_000)
+		}, 60_000)
 	})
 
 	ev.on('lid-mapping.update', async ({ lid, pn }) => {
