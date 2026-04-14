@@ -13,6 +13,7 @@ import { format, isToday, isYesterday } from 'date-fns';
 import { Flag, Clock } from 'lucide-react'; // Adicionado lucide pro flag
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import EvolutionModal from '../components/EvolutionModal';
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
