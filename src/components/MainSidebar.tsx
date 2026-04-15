@@ -41,7 +41,7 @@ export function MainSidebar() {
     conversations: true,
     teams: true,
     channels: true,
-    labels: true,
+    labels: false,
     settings: false
   });
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);

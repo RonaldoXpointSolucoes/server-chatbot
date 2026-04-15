@@ -14,6 +14,7 @@ import { Flag, Clock } from 'lucide-react'; // Adicionado lucide pro flag
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import EvolutionModal from '../components/EvolutionModal';
+import { supabase } from '../services/supabase';
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -120,7 +121,15 @@ export default function ChatDashboard() {
   // Estados para Filtros
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'unread' | 'favorite' | 'labels'>('all');
+  const [filterContextMenu, setFilterContextMenu] = useState<{ type: string, x: number, y: number } | null>(null);
+  const [instanceNamesMap, setInstanceNamesMap] = useState<Record<string, string>>({});
   
+  useEffect(() => {
+    const closeCb = () => setFilterContextMenu(null);
+    window.addEventListener('click', closeCb);
+    return () => window.removeEventListener('click', closeCb);
+  }, []);
+
   const activeChat = contacts.find(c => c.id === activeChatId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -176,6 +185,14 @@ export default function ChatDashboard() {
       await fetchInitialData();
     })();
     subscribeToNewMessages();
+
+    supabase.from('whatsapp_instances').select('id, display_name').then(({data}) => {
+      if (data) {
+        const map: Record<string, string> = {};
+        data.forEach(d => { map[d.id] = d.display_name; });
+        setInstanceNamesMap(map);
+      }
+    });
   }, []);
 
   // Carrega mensagens do Evolution ao clicar num chat novo
@@ -410,20 +427,92 @@ export default function ChatDashboard() {
           </div>
           
           {/* Pills Filters (Glassmorphism inspired) */}
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-             <button onClick={() => setFilterType('all')} className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'all' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide relative select-none">
+             <button 
+                onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'all', x: e.clientX, y: e.clientY }); }}
+                onClick={() => setFilterType('all')} 
+                className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'all' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
                Tudo
              </button>
-             <button onClick={() => setFilterType('unread')} className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'unread' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+             <button 
+                onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'unread', x: e.clientX, y: e.clientY }); }}
+                onClick={() => setFilterType('unread')} 
+                className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'unread' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
                Não Lidas
              </button>
-             <button onClick={() => setFilterType('favorite')} className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'favorite' ? "bg-yellow-500/10 text-yellow-600 ring-1 ring-yellow-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+             <button 
+                onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'favorite', x: e.clientX, y: e.clientY }); }}
+                onClick={() => setFilterType('favorite')} 
+                className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'favorite' ? "bg-yellow-500/10 text-yellow-600 ring-1 ring-yellow-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
                <Star size={14} className={filterType === 'favorite' ? "fill-yellow-600" : ""} /> Favoritas
              </button>
-             <button onClick={() => setFilterType('labels')} className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'labels' ? "bg-blue-500/10 text-blue-600 ring-1 ring-blue-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+             <button 
+                onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'labels', x: e.clientX, y: e.clientY }); }}
+                onClick={() => setFilterType('labels')} 
+                className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'labels' ? "bg-blue-500/10 text-blue-600 ring-1 ring-blue-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
                <Tag size={14} /> Etiquetas
              </button>
           </div>
+
+          {/* Context Menu flutuante do Filtro */}
+          {filterContextMenu && (
+            <div 
+               className="fixed z-[9999] bg-white dark:bg-[#233138] border border-black/5 dark:border-white/5 rounded-xl shadow-2xl py-1.5 flex flex-col min-w-[220px] animate-in fade-in zoom-in-95 duration-100"
+               style={{ top: filterContextMenu.y, left: filterContextMenu.x }}
+               onClick={e => e.stopPropagation()}
+            >
+              {filterContextMenu.type === 'unread' && (
+                <button 
+                  onClick={async () => {
+                     const m = useChatStore.getState().markAllAsRead;
+                     if (m) await m();
+                     setFilterContextMenu(null);
+                  }}
+                  className="w-full text-left px-4 py-3 border-b border-black/5 dark:border-white/5 text-sm font-medium text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-3"
+                >
+                  <CheckCheck size={16} className="text-[#00a884]" /> Marcar todas como lidas
+                </button>
+              )}
+              {filterContextMenu.type === 'favorite' && (
+                <button 
+                  onClick={async () => {
+                     const favs = contacts.filter(c => c.is_favorite);
+                     if (favs.length) {
+                        try {
+                           // Otimista
+                           useChatStore.setState((s) => ({
+                             contacts: s.contacts.map(c => ({...c, is_favorite: false}))
+                           }));
+                           const tenant = useChatStore.getState().tenantInfo;
+                           if (tenant) {
+                              await supabase.from('conversations').update({ is_favorite: false }).eq('tenant_id', tenant.id).eq('is_favorite', true);
+                           }
+                        } catch(e) {}
+                     }
+                     setFilterContextMenu(null);
+                  }}
+                  className="w-full text-left px-4 py-3 border-b border-black/5 dark:border-white/5 text-sm font-medium text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-3"
+                >
+                  <Star size={16} className="text-gray-400" /> Desfazer todas as favoritas
+                </button>
+              )}
+              {filterContextMenu.type === 'all' && (
+                <button 
+                  onClick={async () => {
+                     const m = useChatStore.getState().markAllAsRead;
+                     if (m) await m();
+                     setFilterContextMenu(null);
+                  }}
+                  className="w-full text-left px-4 py-3 border-b border-black/5 dark:border-white/5 text-sm font-medium text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-3"
+                >
+                  <CheckCheck size={16} className="text-[#00a884]" /> Limpar crachás não lidos
+                </button>
+              )}
+              {filterContextMenu.type === 'labels' && (
+                 <div className="px-4 py-3 text-xs text-center text-gray-500 dark:text-gray-400">Sem ações globais para etiquetas ativas.</div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Chat List Realtime */}
@@ -535,9 +624,10 @@ export default function ChatDashboard() {
                            </span>
                          )}
                        </span>
-                      {contact.phone && getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone) !== formatPhoneNumber(contact.phone) && (
-                        <span className="text-[10px] text-[#54656f] dark:text-[#8696a0] font-mono tracking-tighter truncate mt-0.5">
-                          {formatPhoneNumber(contact.phone)}
+                      {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (
+                        <span className="text-[10px] px-1.5 py-[2px] rounded-md bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 text-slate-600 dark:text-[#aebac1] font-medium truncate mt-1 w-fit max-w-[140px] flex items-center gap-1 shadow-sm">
+                          <Smartphone size={10} className="shrink-0 opacity-80" />
+                          <span className="truncate">{contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName}</span>
                         </span>
                       )}
                     </div>

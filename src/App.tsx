@@ -11,6 +11,7 @@ import KnowledgeBase from './pages/KnowledgeBase';
 import InboxesList from './pages/settings/InboxesList';
 import InboxSettings from './pages/settings/InboxSettings';
 import AgentsList from './pages/settings/AgentsList';
+import LabelsSettings from './pages/settings/LabelsSettings';
 import DevLogger from './components/DevLogger';
 import { InstallPWA } from './components/InstallPWA';
 import { usePushNotifications } from './hooks/usePushNotifications';
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="/settings/inboxes" element={<InboxesList />} />
             <Route path="/settings/inboxes/:id" element={<InboxSettings />} />
             <Route path="/settings/agents" element={<AgentsList />} />
+            <Route path="/settings/labels" element={<LabelsSettings />} />
           </Route>
           
           {/* Settings do Modulo Flow (Typebot UI) */}

@@ -565,17 +565,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
           .eq('tenant_id', tenant.id)
           .order('is_pinned', { ascending: false })
           .order('last_message_at', { ascending: false, nullsFirst: false })
-          .limit(300);
+          .limit(800);
           
        if (!dbConvs || dbConvs.length === 0) return;
 
        const contactIds = dbConvs.map(cv => cv.contact_id);
 
-       // 2. Puxa os contatos dessas conversas
-       const { data: dbContacts } = await supabase.from('contacts')
-           .select('*')
-           .eq('tenant_id', tenant.id)
-           .in('id', contactIds);
+       // 2. Puxa os contatos em Lotes (Chunks) para evitar erro HTTP 400 URI Too Long na API Supabase
+       const chunkSize = 150;
+       let dbContacts: any[] = [];
+       for (let i = 0; i < contactIds.length; i += chunkSize) {
+           const chunk = contactIds.slice(i, i + chunkSize);
+           const { data: chunkData, error } = await supabase.from('contacts')
+               .select('*')
+               .eq('tenant_id', tenant.id)
+               .in('id', chunk);
+               
+           if (chunkData) {
+               dbContacts = dbContacts.concat(chunkData);
+           }
+           if (error) {
+              console.warn('Erro ao buscar dbContacts chunk', error);
+           }
+       }
 
        if (dbContacts && dbContacts.length > 0) {
            // VALIDAÇÃO INTELIGENTE APPWEB: Filtra contatos que não tem telefone válido ou são LIDs de sistema (fantasma)
