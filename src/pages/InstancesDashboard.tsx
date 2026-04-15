@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Smartphone, CheckCircle, Loader2, AlertCircle, RefreshCw, Key, Shield, MessageSquare, Terminal, Eye, Link, Unlink, Activity, ShieldAlert, Cpu, Network, FileDown, Lock, Server, Users, StopCircle, RefreshCcw, LogOut, Download, Clock, Zap, Building2, HelpCircle, Archive, Trash2, Edit3, Save, X, PlusCircle, Maximize2, MoreVertical, Copy, ArrowRight, Settings, CheckCircle2, ChevronRight, Phone, UserCircle2, Signal, Plus, EyeOff, EyeIcon, User } from 'lucide-react';
+import { Smartphone, CheckCircle, Loader2, AlertCircle, RefreshCw, Key, Shield, MessageSquare, Terminal, Eye, Link, Unlink, Activity, ShieldAlert, Cpu, Network, FileDown, Lock, Server, Users, StopCircle, QrCode, RefreshCcw, LogOut, Download, Clock, Zap, Building2, HelpCircle, Archive, Trash2, Edit3, Save, X, PlusCircle, Maximize2, MoreVertical, Copy, ArrowRight, Settings, CheckCircle2, ChevronRight, Phone, UserCircle2, Signal, Plus, EyeOff, EyeIcon, User } from 'lucide-react';
 
 interface WhatsAppInstance {
   id: string;
@@ -16,6 +16,7 @@ interface WhatsAppInstance {
 }
 
 import { supabase } from '../services/supabase';
+import { createInstance } from '../services/whatsappEngine';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -151,14 +152,22 @@ export default function InstancesDashboard() {
       const defaultSettings = { reject_calls: false, ignore_groups: false, always_online: true, sync_history: false, read_messages: false };
       
       const tenantId = sessionStorage.getItem('current_tenant_id');
+      const newEngineId = crypto.randomUUID(); 
+      const finalApiKey = 'sk_' + Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
+
       const { error } = await supabase.from('whatsapp_instances').insert([{
+        id: newEngineId,
         display_name: nameStr,
         status: 'offline',
         settings: defaultSettings,
-        tenant_id: tenantId
+        tenant_id: tenantId,
+        api_key: finalApiKey
       }]);
       
       if (error) throw error;
+      
+      await createInstance(tenantId!, newEngineId, finalApiKey);
+      
       setIsCreating(false);
       setNewInstanceName('');
       fetchInstances();
@@ -346,7 +355,7 @@ export default function InstancesDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#0b141a] p-8 transition-colors">
+    <div className="h-full w-full overflow-y-auto overflow-x-hidden bg-[#f3f4f6] dark:bg-[#0b141a] p-4 sm:p-8 transition-colors custom-scrollbar">
       <div className="max-w-7xl mx-auto space-y-8">
         
         <div className="flex justify-between items-center bg-[#111b21] p-6 sm:p-8 border-b border-[#2a3942] rounded-t-[20px]">
@@ -357,7 +366,7 @@ export default function InstancesDashboard() {
             </h1>
             <p className="text-gray-400 mt-2">Olá <span className="text-white font-semibold">{userName || 'Usuário'}</span>, gerencie o pareamento de suas instâncias do engine.</p>
           </div>
-          <button onClick={() => setIsCreating(true)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-3 rounded-2xl flex items-center gap-2 font-bold transition-all shadow-[0_10px_20px_-10px_rgba(16,185,129,0.5)] active:scale-95">
+          <button onClick={() => setIsCreating(true)} className="bg-emerald-500 hover:bg-emerald-400 text-white px-5 py-3 rounded-[1.2rem] flex items-center gap-2 font-bold transition-all shadow-[0_5px_15px_-5px_rgba(16,185,129,0.5)] active:scale-95">
             <Plus size={20} />
             Nova Instância
           </button>
@@ -417,30 +426,7 @@ export default function InstancesDashboard() {
             </div>
         )}
 
-        {/* Modal QR Code */}
-        {showQrModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-2xl animate-in fade-in duration-200">
-             <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-3xl border border-white/50 dark:border-white/10 rounded-3xl shadow-2xl p-8 max-w-sm w-full flex flex-col items-center animate-in zoom-in-95 relative">
-               <button onClick={() => setShowQrModal(null)} className="absolute top-4 right-4 bg-black/5 dark:bg-white/10 p-2 rounded-full text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-white transition-all"><AlertCircle size={20}/></button>
-               <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2 text-center">Pareamento Web</h2>
-               <p className="text-sm text-gray-500 dark:text-gray-400 text-center mb-6">Abra o seu WhatsApp e acesse "Aparelhos Conectados" para ler o código QR.</p>
-               
-               <div className="w-64 h-64 bg-white rounded-3xl shadow-inner border border-gray-100 dark:border-gray-800 flex items-center justify-center relative overflow-hidden">
-                  {qrLoading ? (
-                    <div className="flex flex-col items-center gap-3">
-                      <Loader2 className="animate-spin text-emerald-500" size={32} />
-                      <span className="text-xs font-semibold text-gray-400">Gerando Token...</span>
-                    </div>
-                  ) : qrCode ? (
-                    <img src={qrCode} alt="QR Code" className="w-full h-full object-cover animate-in fade-in zoom-in duration-500" />
-                  ) : (
-                    <span className="text-sm font-semibold text-red-400">QR Code falhou.</span>
-                  )}
-               </div>
-               <p className="text-xs text-center text-emerald-600 dark:text-emerald-400 font-semibold mt-6 bg-emerald-500/10 px-4 py-2 rounded-full">Aguardando conexão segura</p>
-             </div>
-          </div>
-        )}
+
 
         {/* Grid Principal */}
         {loading && instances.length === 0 ? (
@@ -452,9 +438,9 @@ export default function InstancesDashboard() {
             <p className="text-gray-500">Crie sua primeira instância para conectar um número.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 pb-32">
             {instances.map(inst => (
-              <div key={inst.id} className="bg-white/80 dark:bg-[#111b21] backdrop-blur-2xl p-6 rounded-[2rem] shadow-sm border border-gray-200/60 dark:border-white/5 hover:border-emerald-500/30 transition-all flex flex-col group">
+              <div key={inst.id} className="bg-white/80 dark:bg-[#111b21]/90 backdrop-blur-3xl p-6 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-200/60 dark:border-white/5 hover:border-emerald-500/30 transition-all flex flex-col group">
                 
                 {/* Cabeçalho Premium */}
                 <div className="flex justify-between items-start mb-6 border-b border-gray-100 dark:border-white/5 pb-4">
@@ -617,38 +603,64 @@ export default function InstancesDashboard() {
                    </div>
                 )}
 
-                {/* Botões Bottom */}
-                <div className="mt-auto pt-6 flex flex-wrap items-center gap-3 border-t border-gray-100 dark:border-white/5">
-                  {inst.status === 'offline' ? (
-                     <button onClick={() => handleConnect(inst.id, inst.api_key)} className="flex-1 bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-3.5 px-4 rounded-[14px] transition-all flex justify-center items-center gap-2">
-                       Escanear QR Code
-                     </button>
-                  ) : inst.status === 'connecting' ? (
-                     <button onClick={() => handleConnect(inst.id, inst.api_key)} className="flex-1 bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-3.5 px-4 rounded-[14px] transition-all flex justify-center items-center gap-2">
-                       <RefreshCcw size={18} className="animate-spin" /> Ver QR Code
-                     </button>
-                  ) : (
-                     <>
-                         <button disabled className="flex-1 bg-[#00a884]/20 text-[#00a884] font-bold py-3.5 px-4 rounded-[14px] flex justify-center items-center gap-2 cursor-default border border-[#00a884]/30">
-                           Conectado
-                         </button>
-                         <button onClick={() => fireEngineAction(inst.id, inst.api_key, 'sync-contacts', 'Sincronizado!')} className="px-3 py-3.5 bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-blue-500/20 hover:border-blue-500" title="Ler Contatos Recentes">
-                           <RefreshCcw size={18} /> Sync
-                         </button>
-                         <button onClick={() => fireEngineAction(inst.id, inst.api_key, 'presence', 'Status forçado!')} className="px-3 py-3.5 bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-emerald-500/20 hover:border-emerald-500" title="Avisar que está online para todos">
-                           <Signal size={18} /> Forçar ON
-                         </button>
-                         <button onClick={() => { if(window.confirm('Purgar Cache? As conversas de hoje serão apagadas da RAM temporária do servidor.')) fireEngineAction(inst.id, inst.api_key, 'clear-store', 'Cache Limpo') }} className="px-3 py-3.5 bg-gray-500/10 hover:bg-gray-500 hover:text-white text-gray-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-gray-500/20 hover:border-gray-500" title="Apagar Histórico em Memória">
-                           <Trash2 size={18} /> Limpar Mem.
-                         </button>
-                         <button onClick={() => fireEngineAction(inst.id, inst.api_key, 'reconnect', 'Reiniciando...')} className="px-3 py-3.5 bg-gray-100 dark:bg-[#202c33] hover:dark:bg-white/10 text-gray-700 dark:text-white font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-gray-200 dark:border-white/5">
-                           Reiniciar
-                         </button>
-                         <button onClick={() => handleDisconnect(inst.id, inst.api_key)} className="px-3 py-3.5 bg-orange-500/10 hover:bg-orange-500 hover:text-white text-orange-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-orange-500/20 hover:border-orange-500">
-                           Desparear
-                         </button>
-                     </>
-                  )}
+                 {/* Área de Pareamento Inline (Substitui Modal) */}
+                 {showQrModal === inst.id && (
+                    <div className="mt-6 w-full flex flex-col items-center justify-center p-6 bg-gray-50/50 dark:bg-black/30 border border-gray-200/50 dark:border-white/5 rounded-3xl animate-in fade-in zoom-in-95">
+                       <h4 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2 mb-2">
+                         <QrCode className="text-emerald-500" /> Pareamento Web
+                       </h4>
+                       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 text-center max-w-sm">Abra "Aparelhos Conectados" no seu WhatsApp e aponte a câmera para o QR.</p>
+                       <div className="w-56 h-56 bg-white rounded-2xl shadow-inner border border-gray-200 dark:border-gray-800 flex items-center justify-center overflow-hidden mb-4 relative">
+                          {qrLoading ? (
+                            <div className="flex flex-col items-center gap-2">
+                              <Loader2 className="animate-spin text-emerald-500" size={28} />
+                              <span className="text-[10px] font-bold text-gray-400">GERANDO...</span>
+                            </div>
+                          ) : qrCode ? (
+                            <img src={qrCode} alt="QR Code Inline" className="w-full h-full object-cover animate-in fade-in" />
+                          ) : (
+                            <span className="text-xs font-semibold text-red-400">QR Code falhou.</span>
+                          )}
+                       </div>
+                       <button onClick={() => setShowQrModal(null)} className="w-full py-3 bg-gray-200 dark:bg-white/10 hover:bg-gray-300 hover:dark:bg-white/20 text-gray-700 dark:text-white rounded-[14px] font-bold transition-all text-sm">
+                         Cancelar
+                       </button>
+                    </div>
+                 )}
+
+                {/* Botões Bottom (Não exibir se estiver mostrando o QR inline) */}
+                {showQrModal !== inst.id && (
+                  <div className="mt-auto pt-6 flex flex-wrap items-center gap-3 border-t border-gray-100 dark:border-white/5">
+                    {inst.status === 'offline' ? (
+                       <button onClick={() => handleConnect(inst.id, inst.api_key)} className="flex-1 bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-3.5 px-4 rounded-[14px] transition-all flex justify-center items-center gap-2">
+                         Escanear QR Code Aqui
+                       </button>
+                    ) : inst.status === 'connecting' ? (
+                       <button onClick={() => handleConnect(inst.id, inst.api_key)} className="flex-1 bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-3.5 px-4 rounded-[14px] transition-all flex justify-center items-center gap-2">
+                         <RefreshCcw size={18} className="animate-spin" /> Ver QR Code Aqui
+                       </button>
+                    ) : (
+                       <>
+                           <button disabled className="flex-1 bg-[#00a884]/20 text-[#00a884] font-bold py-3.5 px-4 rounded-[14px] flex justify-center items-center gap-2 cursor-default border border-[#00a884]/30">
+                             Conectado
+                           </button>
+                           <button onClick={() => fireEngineAction(inst.id, inst.api_key, 'sync-contacts', 'Sincronizado!')} className="px-3 py-3.5 bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-blue-500/20 hover:border-blue-500" title="Ler Contatos Recentes">
+                             <RefreshCcw size={18} /> Sync
+                           </button>
+                           <button onClick={() => fireEngineAction(inst.id, inst.api_key, 'presence', 'Status forçado!')} className="px-3 py-3.5 bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-emerald-500/20 hover:border-emerald-500" title="Avisar que está online para todos">
+                             <Signal size={18} /> Forçar ON
+                           </button>
+                           <button onClick={() => { if(window.confirm('Purgar Cache? As conversas de hoje serão apagadas da RAM temporária do servidor.')) fireEngineAction(inst.id, inst.api_key, 'clear-store', 'Cache Limpo') }} className="px-3 py-3.5 bg-gray-500/10 hover:bg-gray-500 hover:text-white text-gray-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-gray-500/20 hover:border-gray-500" title="Apagar Histórico em Memória">
+                             <Trash2 size={18} /> Limpar Mem.
+                           </button>
+                           <button onClick={() => fireEngineAction(inst.id, inst.api_key, 'reconnect', 'Reiniciando...')} className="px-3 py-3.5 bg-gray-100 dark:bg-[#202c33] hover:dark:bg-white/10 text-gray-700 dark:text-white font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-gray-200 dark:border-white/5">
+                             Reiniciar
+                           </button>
+                           <button onClick={() => handleDisconnect(inst.id, inst.api_key)} className="px-3 py-3.5 bg-orange-500/10 hover:bg-orange-500 hover:text-white text-orange-500 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-orange-500/20 hover:border-orange-500">
+                             Desparear
+                           </button>
+                       </>
+                    )}
                   {/* Botão Usar Esta Instância */}
                   {activeInstanceId === inst.id ? (
                       <button disabled className="px-5 py-3.5 bg-blue-500/20 text-blue-500 font-bold rounded-[14px] flex justify-center items-center gap-2 cursor-default border border-blue-500/30">
@@ -664,7 +676,7 @@ export default function InstancesDashboard() {
                      <Trash2 size={20} />
                   </button>
                 </div>
-
+                )}
               </div>
             ))}
           </div>

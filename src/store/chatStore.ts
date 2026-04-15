@@ -29,6 +29,7 @@ export type ContactType = ContactRow & {
   priority?: string | null;
   assigned_to?: string | null;
   conv_labels?: any[];
+  instance_id?: string | null;
 };
 
 export interface AgentType {
@@ -58,7 +59,15 @@ interface ChatState {
   isSubscribed: boolean;
   isSyncingHistory: Record<string, boolean>;
   pictureFetchLocks: Record<string, number>;
-  appVersion: { version: string, deploy_date: string } | null;
+  activeChannelFilter: string | null;
+  activeChannelName: string | null; // Adicionado para suportar old e nova engines comparations
+  isQRModalOpen: boolean;
+  qrModalTargetInstance: string | null;
+  
+  openQRModal: (instanceId?: string | null) => void;
+  closeQRModal: () => void;
+  
+  setActiveChannelFilter: (channelId: string | null, channelName?: string) => void;
   setEvolutionConnection: (status: boolean, instanceName?: string | null) => void;
   setActiveChat: (id: string | null) => void;
   setBotStatus: (contactId: string, status: 'active' | 'paused') => Promise<void>;
@@ -164,7 +173,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isSyncingHistory: {},
   pictureFetchLocks: {},
   appVersion: null,
+  activeChannelFilter: null,
+  isQRModalOpen: false,
+  qrModalTargetInstance: null,
 
+  openQRModal: (instanceId) => set({ isQRModalOpen: true, qrModalTargetInstance: instanceId || null }),
+  closeQRModal: () => set({ isQRModalOpen: false, qrModalTargetInstance: null }),
+
+  setActiveChannelFilter: (id, name) => set({ activeChannelFilter: id, activeChannelName: name || null, activeChatId: null }),
   setActiveChat: (id) => set({ activeChatId: id }),
 
   sendHumanMessage: async (contactId, text, instanceName) => {
@@ -419,6 +435,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contact.phone)}&background=random&color=fff`, // Avatar ui-avatars idêntico ao Chatwoot
           messages: [],
           unread: 0,
+          instance_id: contact.instance_id || null,
           // usa lastMsgTimestamp para a sidebar saber quem eh primeiro
           lastMsgTimestamp: new Date(contact.created_at || Date.now()).getTime()
         };
@@ -623,7 +640,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         conv_status: conv.status,
                         snoozed_until: conv.snoozed_until,
                         priority: conv.priority,
-                        assigned_to: conv.assigned_to
+                        assigned_to: conv.assigned_to,
+                        instance_id: dbC.instance_id || null
                      };
                      
                      // Injeta um preview fake se messages tiver vazio e tem preview no banco 
@@ -654,7 +672,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         conv_status: conv.status,
                         snoozed_until: conv.snoozed_until,
                         priority: conv.priority,
-                        assigned_to: conv.assigned_to
+                        assigned_to: conv.assigned_to,
+                        instance_id: dbC.instance_id || null
                      });
                   }
                });

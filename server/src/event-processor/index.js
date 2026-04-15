@@ -134,7 +134,8 @@ class EventProcessor {
                  tenant_id: c.tenant_id,
                  phone: c.phone,
                  name: c.name,
-                 whatsapp_jid: c.whatsapp_jid
+                 whatsapp_jid: c.whatsapp_jid,
+                 instance_id: c.instance_id
              }));
              
              const { data: upsertedContacts, error: contactErr } = await supabase.from('contacts')
@@ -208,6 +209,7 @@ class EventProcessor {
                  } else {
                      toInsertConvs.push({
                          tenant_id: data.tenant_id,
+                         instance_id: data.instance_id,
                          contact_id: data.contact_id,
                          status: 'bot',
                          unread_count: data.unread_count,
@@ -405,7 +407,7 @@ class EventProcessor {
             if (ownerPhone && phone === ownerPhone) continue;
 
             const pushName = c.notify || c.name || phone;
-            mappedContactsToHistory[`${tenantId}_${phone}`] = { tenant_id: tenantId, phone: phone, name: pushName, whatsapp_jid: jid };
+            mappedContactsToHistory[`${tenantId}_${phone}`] = { tenant_id: tenantId, phone: phone, name: pushName, whatsapp_jid: jid, instance_id: instanceId };
         }
         const histContacts = Object.values(mappedContactsToHistory);
         if(histContacts.length > 0) {
@@ -416,12 +418,51 @@ class EventProcessor {
              }
         }
 
-        // Histórico em Massa de Mensagens: Apenas injetamos no método normal
-        // E como o Flush é dinâmico (bufferiza a cada 2 seg até 1000 itens),
-        // ele vai mastigar o array gigante aos poucos, sem quebrar ou dar timeout!
+        // Histórico em Massa de Mensagens: Distribuir em Timers
         if (messages && messages.length > 0) {
-            const chronologicMessages = [...messages].reverse(); 
-            await this.handleMessageUpsert(tenantId, instanceId, sock, { messages: chronologicMessages, type: 'append' });
+            // Regra Anti-Ban e Anti-Loop: Limitar a 50 Contatos, 50 mensagens por contato, fatiados a cada 10 min
+            const chatMap = new Map();
+            for (const m of messages) {
+                const jid = m.key.remoteJid;
+                // Excluir grupos e broadcasts e ids vazios
+                if (!jid || jid.includes('@g.us') || jid.includes('broadcast')) continue;
+                
+                if (!chatMap.has(jid)) chatMap.set(jid, []);
+                // Limite de 50 mensagens de histórico por conversa
+                if (chatMap.get(jid).length < 50) {
+                     chatMap.get(jid).push(m);
+                }
+            }
+            
+            const validJids = Array.from(chatMap.keys());
+            // Teto Global: 50 Contatos 
+            const top50 = validJids.slice(0, 50);
+            
+            const batches = [];
+            for (let i = 0; i < top50.length; i += 5) {
+                batches.push(top50.slice(i, i + 5)); // Lotes de 5 contatos
+            }
+            
+            console.log(`[EventProcessor] Sincronização Fragmentada de Histórico. Batches: ${batches.length} (5 contatos a cada 10m, cap de 50 contatos)`);
+
+            batches.forEach((batch, index) => {
+                 const msgsToProcess = [];
+                 batch.forEach(jid => msgsToProcess.push(...chatMap.get(jid)));
+                 
+                 const chronologicMessages = msgsToProcess.reverse();
+                 
+                 // Lote 0 (Ponto de contato inicial) roda quase imediato. O restante avança em 10 Min (600,000 milissegundos)
+                 const delayMs = index === 0 ? 5000 : index * 600000;
+                 
+                 setTimeout(async () => {
+                      if (!sock || sock.ws?.readyState !== 1) {
+                          console.log(`[EventProcessor] Abortando Lote ${index+1}/${batches.length} do History Sync. Sock fechado.`);
+                          return;
+                      }
+                      await this.handleMessageUpsert(tenantId, instanceId, sock, { messages: chronologicMessages, type: 'append' });
+                      console.log(`[EventProcessor] Sync Histórico do Lote ${index+1}/${batches.length} finalizado e enviado p/ UPSERT. (Registros no Lote: ${chronologicMessages.length})`);
+                 }, delayMs);
+            });
         }
         
         console.log(`[EventProcessor] Sync histórico absorvido e em processamento background.`);

@@ -15,8 +15,12 @@ export default function InboxesList() {
   const [instances, setInstances] = useState<WhatsAppInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const tenantId = useChatStore(state => state.tenantInfo?.id);
+  const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
+  const tenantId = sessionStorage.getItem('current_tenant_id') || tenantIdFromStore;
   const navigate = useNavigate();
+
+  const [isCreating, setIsCreating] = useState(false);
+  const [newInstanceName, setNewInstanceName] = useState('');
 
   useEffect(() => {
     if (!tenantId) return;
@@ -49,6 +53,37 @@ export default function InboxesList() {
       supabase.removeChannel(channel);
     };
   }, [tenantId]);
+
+  const handleCreateInstance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const nameStr = newInstanceName.trim();
+    if (!nameStr) {
+       alert("Nome é obrigatório.");
+       return;
+    }
+    
+    setLoading(true);
+    try {
+      const defaultSettings = { reject_calls: false, ignore_groups: false, always_online: true, sync_history: false, read_messages: false };
+      
+      const currentTenantId = sessionStorage.getItem('current_tenant_id') || tenantId;
+      const { error } = await supabase.from('whatsapp_instances').insert([{
+        display_name: nameStr,
+        status: 'offline',
+        settings: defaultSettings,
+        tenant_id: currentTenantId
+      }]);
+      
+      if (error) throw error;
+      setIsCreating(false);
+      setNewInstanceName('');
+    } catch (err) {
+      alert('Falha ao criar caixa de entrada!');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredInstances = instances.filter(i => i.display_name.toLowerCase().includes(search.toLowerCase()));
 
@@ -85,7 +120,7 @@ export default function InboxesList() {
                   {instances.length} caixas de entrada
                </div>
                <div className="w-px h-6 bg-white/10 mx-1"></div>
-               <button onClick={() => navigate('/instances')} className="bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-2 px-5 rounded-[1.1rem] transition-all flex items-center gap-2 shadow-[0_5px_15px_-5px_rgba(16,185,129,0.5)]">
+               <button onClick={() => setIsCreating(true)} className="bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-2 px-5 rounded-[1.1rem] transition-all flex items-center gap-2 shadow-[0_5px_15px_-5px_rgba(16,185,129,0.5)]">
                  <Plus size={18} /> Adicionar Caixa
                </button>
              </div>
@@ -125,6 +160,36 @@ export default function InboxesList() {
              )}
           </div>
        </div>
+
+       {isCreating && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-200">
+             <div className="bg-[#111b21] border border-white/10 rounded-3xl shadow-2xl p-8 max-w-sm w-full animate-in zoom-in-95">
+               <h2 className="text-2xl font-bold text-white mb-6">Criar Caixa de Entrada</h2>
+               <form onSubmit={handleCreateInstance}>
+                 <div className="space-y-4">
+                    <div>
+                     <label className="block text-sm font-medium text-gray-300 mb-2">Nome da Caixa (Ex: Comercial 1)</label>
+                     <input 
+                        required 
+                        autoFocus 
+                        value={newInstanceName} 
+                        onChange={e => setNewInstanceName(e.target.value)} 
+                        type="text" 
+                        placeholder="Ex: Suporte Financeiro" 
+                        className="w-full bg-[#182229] border border-white/10 rounded-2xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all placeholder-gray-500 shadow-inner"
+                     />
+                   </div>
+                   <div className="flex gap-3 mt-6">
+                     <button type="button" onClick={() => setIsCreating(false)} className="flex-1 bg-[#202c33] hover:bg-[#2a3942] text-gray-300 font-semibold py-3 rounded-2xl transition-all border border-transparent hover:border-white/5">Cancelar</button>
+                     <button type="submit" disabled={loading} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-3 rounded-2xl transition-all shadow-[0_5px_15px_-5px_rgba(16,185,129,0.4)] disabled:opacity-50 disabled:cursor-not-allowed">
+                        {loading ? 'Criando...' : 'Criar Caixa'}
+                     </button>
+                   </div>
+                 </div>
+               </form>
+             </div>
+          </div>
+       )}
     </div>
   );
 }

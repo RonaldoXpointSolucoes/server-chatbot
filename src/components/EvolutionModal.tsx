@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
-import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link, PlusCircle, LogOut, RefreshCcw, UserCircle2, Trash2 } from 'lucide-react';
+import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link, PlusCircle, LogOut, RefreshCcw, UserCircle2, Trash2, QrCode } from 'lucide-react';
 import { createInstance, fetchEngineStatus, logoutEngine, reconnectEngine, clearEngineStore, syncEngineContacts, forceEnginePresence } from '../services/whatsappEngine';
 import { supabase } from '../services/supabase';
 
@@ -11,7 +11,7 @@ function uuidv4() {
   });
 }
 
-export default function EvolutionModal({ onClose }: { onClose: () => void }) {
+export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: { isOpen?: boolean, onClose: () => void, targetInstanceName?: string | null }) {
   const { evolutionConnected, setEvolutionConnection, modalReason } = useChatStore();
   const [loading, setLoading] = useState(false);
   const [qrBase64, setQrBase64] = useState<string | null>(null);
@@ -218,13 +218,25 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
     }
   }, [evolutionConnected]);
 
+  if (isOpen === false) return null;
+
+  const targetInstObj = targetInstanceName 
+    ? existingInstances.find(i => i.id === targetInstanceName)
+    : null;
+    
+  const isTargetConnected = targetInstObj 
+    ? targetInstObj.status === 'connected' || targetInstObj.connection_status === 'connected'
+    : evolutionConnected;
+
+  const displayNameToUse = targetInstObj ? targetInstObj.display_name : (engineUser?.name || 'Motor Ativado');
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-300">
       <div className="bg-white/70 dark:bg-[#111b21]/70 backdrop-blur-2xl rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col items-center p-8 border border-white/50 dark:border-white/10 relative transition-all">
         <button onClick={onClose} className="absolute top-5 right-5 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors bg-white/50 dark:bg-black/20 rounded-full w-8 h-8 flex items-center justify-center">X</button>
         
         <h2 className="text-2xl font-black tracking-tight text-gray-800 dark:text-white mb-1 flex items-center gap-2">
-          <Smartphone className="text-emerald-500"/> App Connect
+          <Smartphone className="text-emerald-500"/> {targetInstObj ? targetInstObj.display_name : 'App Connect'}
         </h2>
 
         {modalReason ? (
@@ -244,12 +256,12 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {evolutionConnected ? (
+        {isTargetConnected ? (
           <div className="flex flex-col w-full animate-in zoom-in slide-in-from-bottom-4 duration-500 delay-150">
             <div className="flex flex-col items-center bg-emerald-500/10 p-6 rounded-3xl border border-emerald-500/20 mb-2 relative overflow-hidden backdrop-blur-md">
               <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
               
-              {engineUser ? (
+              {engineUser && !targetInstObj ? (
                  <div className="w-20 h-20 rounded-full bg-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.3)] border-2 border-emerald-500/50 flex items-center justify-center mb-4 overflow-hidden">
                     <UserCircle2 size={40} className="text-emerald-500 drop-shadow-md" />
                  </div>
@@ -260,7 +272,7 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
               )}
               
               <h3 className="font-bold text-lg text-emerald-700 dark:text-emerald-400">
-                {engineUser?.name || 'Motor Ativado'}
+                {displayNameToUse}
               </h3>
               
               {engineUser?.id && (
@@ -279,11 +291,12 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                  <button 
                    onClick={async () => {
                       const cId = sessionStorage.getItem('current_tenant_id');
-                      if (!confirm("Tem certeza que deseja deslogar seu aparelho da engine?")) return;
+                     if (!confirm(`Tem certeza que deseja deslogar seu aparelho da engine ${targetInstObj?.display_name || ''}?`)) return;
                       if (!cId) return;
                       setLoading(true);
-                      const currInst = existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
-                      await logoutEngine(cId, useChatStore.getState().connectedInstanceName!, currInst?.api_key || '');
+                      const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                      const currInst = existingInstances.find(i => i.id === tInstanceId);
+                      await logoutEngine(cId, tInstanceId!, currInst?.api_key || '');
                       setEvolutionConnection(false, null);
                       setLoading(false);
                       setQrBase64(null);
@@ -386,9 +399,26 @@ export default function EvolutionModal({ onClose }: { onClose: () => void }) {
                    Cancelar
                  </button>
               </div>
+            ) : targetInstObj ? (
+              <div className="flex flex-col w-full animate-in fade-in zoom-in-95 duration-300 items-center py-6 px-4">
+                <div className="w-20 h-20 bg-emerald-500/10 rounded-full border-2 border-emerald-500/30 flex items-center justify-center mb-6 shadow-inner">
+                  <QrCode size={36} className="text-emerald-500 drop-shadow-md" />
+                </div>
+                <h3 className="text-xl w-full font-bold text-gray-800 dark:text-white mb-2 text-center truncate px-2">{targetInstObj.display_name}</h3>
+                <p className="text-sm font-medium text-gray-500 dark:text-gray-400 text-center mb-8 px-2 leading-relaxed">
+                  Esta conexão está offline no motor principal. Clique abaixo para gerar o <strong className="text-emerald-500 font-bold tracking-wide">QR Code</strong> e ativá-la.
+                </p>
+                <button 
+                  onClick={() => handleConnectExisting(targetInstObj)}
+                  className="w-full bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-4 rounded-2xl transition-all shadow-[0_10px_20px_-10px_rgba(0,168,132,0.5)] active:scale-95 flex items-center justify-center gap-2"
+                >
+                  <RefreshCcw size={20} />
+                  Gerar QR Code 
+                </button>
+              </div>
             ) : (
               <div className="flex flex-col w-full animate-in fade-in zoom-in-95 duration-300 items-center">
-                
+
                 {/* Tabs */}
                 <div className="flex w-full bg-black/10 dark:bg-white/5 rounded-2xl p-1 mb-6">
                    <button 

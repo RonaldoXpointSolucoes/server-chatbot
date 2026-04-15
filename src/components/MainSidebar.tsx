@@ -28,7 +28,8 @@ import {
   Code2,
   Repeat,
   CalendarDays,
-  Puzzle
+  Puzzle,
+  Smartphone
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
@@ -51,6 +52,8 @@ export function MainSidebar() {
 
   const agentName = useChatStore(state => state.tenantInfo?.users?.find(u => u.user_id === state.currentUser?.id)?.full_name || 'Agente');
   const agentInitial = agentName ? agentName.substring(0, 1).toUpperCase() : 'A';
+  const activeChannelFilter = useChatStore(state => state.activeChannelFilter);
+  const setActiveChannelFilter = useChatStore(state => state.setActiveChannelFilter);
   const connectedInstanceName = useChatStore(state => state.connectedInstanceName);
 
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
@@ -165,7 +168,7 @@ export function MainSidebar() {
           <NavItem icon={<Inbox size={16} />} title="Caixa de Entrada" badge="99+" />
           
           <CollapsibleSection title="Conversas" icon={<MessageCircle size={16} />} isOpen={expandedSections.conversations} onToggle={() => toggleSection('conversations')}>
-            <NavItem title="Todas as conversas" isActive />
+            <NavItem title="Todas as conversas" isActive={!activeChannelFilter} onClick={() => setActiveChannelFilter(null, null)} />
             <NavItem title="Menções" />
             <NavItem title="Não atendidas" />
           </CollapsibleSection>
@@ -177,13 +180,23 @@ export function MainSidebar() {
           <CollapsibleSection title="Canais" icon={<Layers size={16} />} isOpen={expandedSections.channels} onToggle={() => toggleSection('channels')}>
             {instances.length > 0 ? (
                instances.map(inst => (
-                  <NavItem 
-                    key={inst.id} 
-                    icon={<Brands.WhatsApp size={14} />} 
-                    title={inst.display_name || 'Sem nome'} 
-                    isSub 
-                    isActive={connectedInstanceName === inst.id}
-                  />
+                  <div key={inst.id} className="relative group/channel">
+                    <NavItem 
+                      icon={<Brands.WhatsApp size={14} />} 
+                      title={inst.display_name || 'Sem nome'} 
+                      isSub 
+                      isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
+                      onClick={() => setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name)}
+                    />
+                    <button 
+                       className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-black/10 dark:hover:bg-white/10 opacity-0 group-hover/channel:opacity-100 transition-all z-10"
+                       onClick={(e) => { e.stopPropagation(); useChatStore.getState().openQRModal(inst.id); }}
+                       title={inst.status === 'connected' ? 'Instância Conectada' : 'Visualizar QRC / Conectar'}
+                    >
+                       <Smartphone size={14} className={cn("transition-colors", inst.status === 'connected' ? 'text-[#00a884]' : 'text-slate-400')} />
+                       {inst.status !== 'connected' && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
+                    </button>
+                  </div>
                ))
             ) : (
                <NavItem title="Nenhum canal ativo" isSub />

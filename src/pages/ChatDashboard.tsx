@@ -84,7 +84,9 @@ export default function ChatDashboard() {
     isSyncingHistory,
     markAllAsRead,
     togglePinContact,
-    toggleFavorite
+    toggleFavorite,
+    activeChannelFilter,
+    activeChannelName
   } = useChatStore();
 
   // Execucao Incial Reativa
@@ -96,10 +98,9 @@ export default function ChatDashboard() {
     subscribeToNewMessages();
   }, []);
   
-  const [showEvolutionQR, setShowEvolutionQR] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
-  const isModalOpen = showEvolutionQR || !!modalReason || isSettingsOpen || isAgentSettingsOpen;
+  const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen;
   const [inputText, setInputText] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -179,35 +180,41 @@ export default function ChatDashboard() {
 
   // Carrega mensagens do Evolution ao clicar num chat novo
   useEffect(() => {
-     if (activeChatId && connectedInstanceName && evolutionConnected) {
-       loadHistoricalMessages(activeChatId, connectedInstanceName);
+     if (activeChatId && activeChat && evolutionConnected) {
+       const properTargetInstance = activeChat.instance_id || connectedInstanceName;
+       if (properTargetInstance) {
+          loadHistoricalMessages(activeChatId, properTargetInstance);
+       }
      }
-  }, [activeChatId, connectedInstanceName, evolutionConnected, loadHistoricalMessages]);
+  }, [activeChatId, activeChat?.instance_id, connectedInstanceName, evolutionConnected, loadHistoricalMessages]);
 
   const handleSendHuman = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || !activeChatId || !connectedInstanceName) return;
+    const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+    if (!inputText.trim() || !activeChatId || !properTargetInstance) return;
     
     // ATENÇÃO: Numa versão final multi-tenant o instanceName deve vir do Login.
-    sendHumanMessage(activeChatId, inputText, connectedInstanceName as string);
+    sendHumanMessage(activeChatId, inputText, properTargetInstance as string);
     setInputText('');
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !activeChatId || !connectedInstanceName) return;
+    const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+    if (!file || !activeChatId || !properTargetInstance) return;
     
     let mediaType: 'image' | 'video' | 'audio' | 'document' = 'document';
     if (file.type.startsWith('image/')) mediaType = 'image';
     else if (file.type.startsWith('video/')) mediaType = 'video';
     else if (file.type.startsWith('audio/')) mediaType = 'audio';
 
-    await useChatStore.getState().uploadAndSendMedia(activeChatId, file, mediaType, connectedInstanceName);
+    await useChatStore.getState().uploadAndSendMedia(activeChatId, file, mediaType, properTargetInstance as string);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleMicClick = async () => {
-    if (!activeChatId || !connectedInstanceName) return;
+    const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+    if (!activeChatId || !properTargetInstance) return;
 
     if (isRecording) {
        // Stop recording
@@ -229,7 +236,7 @@ export default function ChatDashboard() {
             const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
             const fileName = `audio_record_${Date.now()}.webm`;
             const file = new File([audioBlob], fileName, { type: 'audio/webm' });
-            await useChatStore.getState().uploadAndSendMedia(activeChatId, file, 'audio', connectedInstanceName, true);
+            await useChatStore.getState().uploadAndSendMedia(activeChatId, file, 'audio', properTargetInstance as string, true);
          };
 
          mediaRecorder.start();
@@ -243,10 +250,13 @@ export default function ChatDashboard() {
   return (
     <div className="flex w-full h-full min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
       
-      {isModalOpen && <EvolutionModal onClose={() => {
-          setShowEvolutionQR(false);
-          setModalReason(null);
-      }} />}
+      {useChatStore(s => s.isQRModalOpen) && <EvolutionModal 
+          targetInstanceName={useChatStore.getState().qrModalTargetInstance}
+          onClose={() => {
+            useChatStore.getState().closeQRModal();
+            setModalReason(null);
+          }} 
+      />}
 
       {/* Nossos Novos Modais Premium */}
       <RenameModal 
@@ -313,11 +323,6 @@ export default function ChatDashboard() {
             </div>
             
             <div className="flex gap-3 text-[#54656f] dark:text-[#aebac1] items-center">
-              <button onClick={() => setShowEvolutionQR(true)} className="group relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all" title={tenantInfo?.evolution_api_instance ? "Conectado" : "Conectar WhatsApp"}>
-                <Smartphone size={20} className={cn("cursor-pointer transition-colors", evolutionConnected ? "text-[#00a884]" : "text-red-500 hover:text-red-600")} />
-                {!evolutionConnected && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
-              </button>
-              
               <button className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all text-[#00a884]" onClick={() => setIsNewChatOpen(true)}>
                 <MessageSquarePlus size={20} />
               </button>
@@ -385,7 +390,7 @@ export default function ChatDashboard() {
              <p className="text-xs text-orange-700/80 dark:text-orange-300/80 leading-tight">
                 O WhatsApp desconectou ou o servidor está reiniciando. Verifique o aparelho ou abra as configurações de WhatsApp.
              </p>
-             <button onClick={() => setShowEvolutionQR(true)} className="mt-1 text-xs bg-orange-100 dark:bg-orange-900/40 hover:bg-orange-200 dark:hover:bg-orange-800/40 text-orange-700 dark:text-orange-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
+             <button onClick={() => useChatStore.getState().openQRModal()} className="mt-1 text-xs bg-orange-100 dark:bg-orange-900/40 hover:bg-orange-200 dark:hover:bg-orange-800/40 text-orange-700 dark:text-orange-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
                 Resolver Agora
              </button>
           </div>
@@ -428,6 +433,27 @@ export default function ChatDashboard() {
           )}
 
           {contacts.filter(c => {
+             // Debug para entender o bug do filtro quando Comercial X-Point é clicado!
+             if (activeChannelFilter) {
+                 const dbInstId = c.instance_id;
+                 const effectiveId = connectedInstanceName;
+                 console.log("DEBUG CHANNEL FILTER:", {
+                     contactName: c.contact_name,
+                     dbInstId,
+                     effectiveId,
+                     activeFilter: activeChannelFilter,
+                     activeName: activeChannelName
+                 });
+
+                 if (!dbInstId) {
+                     // Fallback conversas antigas órfãs. Vão para a instância padrão (connectedInstanceName)
+                     if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
+                 } else {
+                     // Conversas nativas. Compara com ID gerado UUID ou Legacy Name
+                     if (dbInstId !== activeChannelFilter && dbInstId !== activeChannelName) return false;
+                 }
+             }
+
              // Busca em texto
              if (searchTerm && !c.name?.toLowerCase().includes(searchTerm.toLowerCase()) && !c.whatsapp_jid?.includes(searchTerm)) {
                return false;
@@ -478,10 +504,11 @@ export default function ChatDashboard() {
                 key={contact.id}
                 onClick={() => {
                   setActiveChat(contact.id);
-                  if (connectedInstanceName) {
-                    useChatStore.getState().loadHistoricalMessages(contact.id, connectedInstanceName);
+                  const properTargetInstance = contact.instance_id || connectedInstanceName;
+                  if (properTargetInstance) {
+                    useChatStore.getState().loadHistoricalMessages(contact.id, properTargetInstance);
                     if (contact.avatar?.includes('ui-avatars')) {
-                      useChatStore.getState().fetchContactPicture(contact.id, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), connectedInstanceName);
+                      useChatStore.getState().fetchContactPicture(contact.id, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), properTargetInstance);
                     }
                   }
                 }}
@@ -551,8 +578,9 @@ export default function ChatDashboard() {
                             <button 
                               onClick={async (e) => { 
                                 e.stopPropagation(); 
-                                if (connectedInstanceName) {
-                                  await useChatStore.getState().loadHistoricalMessages(contact.id, connectedInstanceName, true);
+                                const properTargetInstance = contact.instance_id || connectedInstanceName;
+                                if (properTargetInstance) {
+                                  await useChatStore.getState().loadHistoricalMessages(contact.id, properTargetInstance, true);
                                 }
                                 setActiveDropdown(null); 
                               }}
@@ -694,8 +722,9 @@ export default function ChatDashboard() {
 
                     <button 
                       onClick={async () => {
-                        if (connectedInstanceName) {
-                          await loadHistoricalMessages(activeChat.id, connectedInstanceName, true);
+                        const properTargetInstance = activeChat.instance_id || connectedInstanceName;
+                        if (properTargetInstance) {
+                          await loadHistoricalMessages(activeChat.id, properTargetInstance, true);
                         }
                         setActiveChatDropdown(false);
                       }}
