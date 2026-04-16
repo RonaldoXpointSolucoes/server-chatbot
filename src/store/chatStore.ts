@@ -370,12 +370,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
              return c;
           }
           
-          // Tratamento de UI otimista: varre se ja tem uma mensagem igualzinha de 'human'
-          if (msg.sender === 'human') {
-            const optIndex = c.messages.findIndex(m => String(m.id).startsWith('optimistic-') && m.text === msg.text);
+          // Tratamento de UI otimista: varre se ja tem uma mensagem igualzinha pendente
+          if (msg.sender === 'human' || msg.sender === 'bot') {
+            const optIndex = c.messages.findIndex(m => {
+                if (!String(m.id).startsWith('optimistic-')) return false;
+                if (m.mediaType && msg.mediaType && m.mediaType === msg.mediaType) return true;
+                return m.text === msg.text;
+            });
             if (optIndex !== -1) {
               const updatedMsgs = [...c.messages];
-              updatedMsgs[optIndex] = msg; // substitui pelo registro do Realtime com UUID real
+              updatedMsgs[optIndex] = { ...msg, sender: 'human' }; // substitui pelo registro do Realtime com UUID real mantendo verde na UI
               return { ...c, messages: updatedMsgs, conv_status: updatedStatus, snoozed_until: updatedSnooze };
             }
           }
@@ -825,12 +829,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
                
         const handleMapping = (messagesArray: any[]) => {
            const orderedMsgs = messagesArray.reverse();
+           
+           // Deduplicate messages on initial load to resolve any historical/db corruptions
+           const uniqueMsgs: any[] = [];
+           const seenWaIds = new Set();
+           for (const m of orderedMsgs) {
+               if (m.whatsapp_message_id) {
+                   if (seenWaIds.has(m.whatsapp_message_id)) continue;
+                   seenWaIds.add(m.whatsapp_message_id);
+               }
+               uniqueMsgs.push(m);
+           }
+
            set((s) => {
               const updated = [...s.contacts];
               const idx = updated.findIndex(c => c.id === contactId);
               if (idx !== -1) {
                   updated[idx].unread = 0;
-                  updated[idx].messages = orderedMsgs.map(m => {
+                  updated[idx].messages = uniqueMsgs.map(m => {
                       const advanced = parseAdvancedMsgMetadata(m);
                       return {
                           id: m.id,
@@ -1037,7 +1053,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const m = payload.new as any;
         console.log('[Realtime] Message INSERT:', m);
 
-        if (m.sender_type === 'bot' || m.sender_type === 'system') return; // Ignore echoes that don't need realtime sync
+        if (m.sender_type === 'system') return; // Ignore echoes that don't need realtime sync
 
         let targetContactId = m.conversation_id ? null : m.contact_id;
         

@@ -105,6 +105,7 @@ export default function ChatDashboard() {
   const [inputText, setInputText] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -224,6 +225,9 @@ export default function ChatDashboard() {
     // ATENÇÃO: Numa versão final multi-tenant o instanceName deve vir do Login.
     sendHumanMessage(activeChatId, inputText, properTargetInstance as string);
     setInputText('');
+    if (textareaRef.current) {
+       textareaRef.current.style.height = 'auto';
+    }
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -333,7 +337,7 @@ export default function ChatDashboard() {
         {/* Header Premium da Sidebar */}
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.10 | Deploy: ..."}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.11 | Deploy: ..."}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1032,13 +1036,32 @@ export default function ChatDashboard() {
               accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
             />
 
-            <div className="flex flex-1 items-center bg-white dark:bg-[#2a3942] rounded-xl px-4 py-2 border border-transparent focus-within:border-[#00a884]/50 transition-colors shadow-sm">
-              <input 
-                type="text"
+            <div className="flex flex-1 items-end bg-white dark:bg-[#2a3942] rounded-xl px-4 py-2 border border-transparent focus-within:border-[#00a884]/50 transition-colors shadow-sm">
+              <textarea 
+                ref={textareaRef}
                 value={inputText}
                 onChange={e => setInputText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (inputText.trim()) {
+                      handleSendHuman(e as any);
+                    }
+                  }
+                }}
+                rows={1}
                 placeholder="Responda como humano e a IA será pausada automaticamente..."
-                className="bg-transparent border-none outline-none w-full text-sm text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1]"
+                className="bg-transparent border-none outline-none w-full text-sm text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none pb-0.5 overflow-hidden max-h-[120px] scrollbar-thin"
+                style={{
+                   // A simple inline trick to handle height locally without an extra useEffect
+                   height: "auto",
+                   minHeight: "20px"
+                }}
+                onInput={(e) => {
+                   const target = e.target as HTMLTextAreaElement;
+                   target.style.height = 'auto';
+                   target.style.height = `${target.scrollHeight}px`;
+                }}
               />
             </div>
             

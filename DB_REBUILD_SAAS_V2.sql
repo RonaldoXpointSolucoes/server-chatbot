@@ -116,7 +116,8 @@ create table messages (
   raw_payload jsonb,
   whatsapp_message_id text, -- stanza id
   sender_type text default 'client', -- 'client', 'bot', 'human', 'system'
-  timestamp timestamp with time zone default timezone('utc'::text, now())
+  timestamp timestamp with time zone default timezone('utc'::text, now()),
+  unique(tenant_id, whatsapp_message_id)
 );
 
 -- 9.10 handoff_sessions
