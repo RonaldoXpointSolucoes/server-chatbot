@@ -1162,6 +1162,12 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	}
 
 	const handleMessage = async (node: BinaryNode) => {
+		if (node.attrs.from === 'status@broadcast') {
+			logger.debug({ key: node.attrs.key }, 'ignored status broadcast message')
+			await sendMessageAck(node)
+			return
+		}
+
 		if (shouldIgnoreJid(node.attrs.from!) && node.attrs.from !== S_WHATSAPP_NET) {
 			logger.debug({ key: node.attrs.key }, 'ignored message')
 			await sendMessageAck(node, NACK_REASONS.UnhandledError)

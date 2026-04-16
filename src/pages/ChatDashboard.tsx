@@ -167,12 +167,23 @@ export default function ChatDashboard() {
   // Smart Auto-Scroll para novas mensagens
   useEffect(() => {
     const currentMessagesLength = activeChat?.messages?.length || 0;
-    if (currentMessagesLength > prevMessagesLength.current) {
+    const diff = currentMessagesLength - prevMessagesLength.current;
+    
+    if (diff > 0) {
       const lastMsg = activeChat?.messages?.[currentMessagesLength - 1];
       const isMe = lastMsg && (lastMsg.sender === 'human' || lastMsg.sender === 'bot');
       
       if (!showScrollButton || isMe) {
-        scrollToBottom('smooth');
+        // Usa rolagem instantânea ('auto') se vierem múltiplas mensagens de uma vez (ex: carregamento do histórico)
+        // Usa 'smooth' apenas para novas mensagens recebidas 1 a 1
+        const behavior = diff > 1 ? 'auto' : 'smooth';
+        scrollToBottom(behavior);
+        
+        // Fallbacks para garantir que caia na última linha mesmo que as imagens demorem a renderizar
+        if (diff > 1) {
+           setTimeout(() => scrollToBottom('auto'), 150);
+           setTimeout(() => scrollToBottom('auto'), 500);
+        }
       }
     }
     prevMessagesLength.current = currentMessagesLength;
@@ -322,7 +333,7 @@ export default function ChatDashboard() {
         {/* Header Premium da Sidebar */}
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.8 | Deploy: ..."}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.10 | Deploy: ..."}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">

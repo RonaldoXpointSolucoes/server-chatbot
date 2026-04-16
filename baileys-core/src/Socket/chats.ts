@@ -1054,7 +1054,13 @@ export const makeChatsSocket = (config: SocketConfig) => {
 	 * */
 	const executeInitQueries = async () => {
 		await Promise.all([
-			fetchProps().catch(err => logger.warn({ err }, 'failed to fetch props')),
+			fetchProps().catch(err => {
+				if (err && err.data === 400) {
+					logger.debug('fetch props returned 400 (expected on some accounts), ignoring')
+				} else {
+					logger.warn({ err }, 'failed to fetch props')
+				}
+			}),
 			fetchBlocklist().catch(err => logger.warn({ err }, 'failed to fetch blocklist')),
 			fetchPrivacySettings().catch(err => logger.warn({ err }, 'failed to fetch privacy settings'))
 		])
