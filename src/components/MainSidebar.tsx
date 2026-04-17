@@ -218,7 +218,7 @@ export function MainSidebar() {
         <div className="px-2 space-y-0.5 pb-4">
           <NavItem icon={<MessageCircle size={16} />} title="Chat Interno" />
           <NavItem icon={<LayoutDashboard size={16} />} title="Kanban" />
-          <NavItem icon={<Contact size={16} />} title="Contatos" />
+          <NavItem icon={<Contact size={16} />} title="Contatos" onClick={() => navigate('/contacts')} />
           <NavItem icon={<BarChart3 size={16} />} title="Relatórios" />
           <NavItem icon={<Megaphone size={16} />} title="Campanhas" />
           <NavItem icon={<BookOpen size={16} />} title="Central de Ajuda" />

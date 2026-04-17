@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2 } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { DeleteModal, RenameModal, NewChatModal } from '../components/ChatModals';
@@ -7,6 +7,7 @@ import { SettingsModal } from '../components/SettingsModal';
 import { AgentSettingsModal } from '../components/AgentSettingsModal';
 import { ChatOmniMenu } from '../components/ChatOmniMenu';
 import { MainSidebar } from '../components/MainSidebar';
+import { GeminiEditorModal } from '../components/GeminiEditorModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
@@ -15,6 +16,7 @@ import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import EvolutionModal from '../components/EvolutionModal';
 import { supabase } from '../services/supabase';
+import { geminiService } from '../services/geminiService';
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -104,6 +106,15 @@ export default function ChatDashboard() {
   const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen;
   const [inputText, setInputText] = useState('');
 
+  // Lógica de rascunhos por chat
+  const draftsRef = useRef<Record<string, string>>({});
+  const prevActiveChatId = useRef<string | null>(null);
+  const currentInputText = useRef(inputText);
+  
+  useEffect(() => {
+    currentInputText.current = inputText;
+  }, [inputText]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -119,6 +130,22 @@ export default function ChatDashboard() {
   const [activeChatDropdown, setActiveChatDropdown] = useState(false);
   const { showMainSidebar, setShowMainSidebar } = (useOutletContext() as { showMainSidebar: boolean, setShowMainSidebar: (v: boolean) => void }) || { showMainSidebar: true, setShowMainSidebar: () => {} };
   
+  // Gemini AI States
+  const [isGeminiPopoverOpen, setIsGeminiPopoverOpen] = useState(false);
+  const [isGeminiProcessing, setIsGeminiProcessing] = useState(false);
+  const [geminiSuggestion, setGeminiSuggestion] = useState<string | null>(null);
+  const [geminiModalState, setGeminiModalState] = useState<{
+    isOpen: boolean;
+    originalText: string;
+    suggestedText: string;
+    intent: 'grammar' | 'sales' | 'enchant' | 'support' | null;
+  }>({
+    isOpen: false,
+    originalText: '',
+    suggestedText: '',
+    intent: null
+  });
+
   // Estados para Filtros
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'unread' | 'favorite' | 'labels'>('all');
@@ -162,6 +189,21 @@ export default function ChatDashboard() {
         scrollToBottom('auto');
       }, 150);
       return () => clearTimeout(timeout);
+    }
+  }, [activeChatId]);
+
+  // Restaura e salva rascunhos ao trocar de chat
+  useEffect(() => {
+    if (prevActiveChatId.current !== activeChatId) {
+      if (prevActiveChatId.current) {
+        draftsRef.current[prevActiveChatId.current] = currentInputText.current;
+      }
+      if (activeChatId) {
+        setInputText(draftsRef.current[activeChatId] || '');
+      } else {
+        setInputText('');
+      }
+      prevActiveChatId.current = activeChatId || null;
     }
   }, [activeChatId]);
 
@@ -225,6 +267,8 @@ export default function ChatDashboard() {
     // ATENÇÃO: Numa versão final multi-tenant o instanceName deve vir do Login.
     sendHumanMessage(activeChatId, inputText, properTargetInstance as string);
     setInputText('');
+    if (activeChatId) draftsRef.current[activeChatId] = '';
+    
     if (textareaRef.current) {
        textareaRef.current.style.height = 'auto';
     }
@@ -279,6 +323,34 @@ export default function ChatDashboard() {
     }
   };
 
+  const handleGeminiAction = async (type: 'grammar' | 'sales' | 'enchant' | 'support') => {
+    if (!inputText.trim() || !activeChat) return;
+
+    setIsGeminiProcessing(true);
+    try {
+      const history = activeChat.messages
+        ? activeChat.messages.map(m => ({ 
+            role: m.sender === 'bot' ? 'IA' : m.sender === 'human' ? 'Atendente' : 'Cliente', 
+            text: m.text || '' 
+          }))
+        : [];
+      
+      const suggestion = await geminiService.enhanceMessage(inputText, type, history);
+      
+      setGeminiModalState({
+        isOpen: true,
+        originalText: inputText,
+        suggestedText: suggestion,
+        intent: type
+      });
+    } catch (error: any) {
+      alert(error.message || 'Erro ao comunicar com a IA (Verifique a API Key).');
+    } finally {
+      setIsGeminiProcessing(false);
+      setIsGeminiPopoverOpen(false);
+    }
+  };
+
   return (
     <div className="flex w-full h-full min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
       
@@ -324,6 +396,24 @@ export default function ChatDashboard() {
         }}
       />
 
+      <GeminiEditorModal 
+        isOpen={geminiModalState.isOpen}
+        onClose={() => setGeminiModalState(prev => ({ ...prev, isOpen: false }))}
+        originalText={geminiModalState.originalText}
+        suggestedText={geminiModalState.suggestedText}
+        intent={geminiModalState.intent}
+        onSend={(finalText) => {
+           const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+           if (activeChatId && properTargetInstance) {
+             sendHumanMessage(activeChatId, finalText, properTargetInstance as string);
+             setInputText('');
+             if (textareaRef.current) {
+                textareaRef.current.style.height = 'auto';
+             }
+           }
+        }}
+      />
+
       {/* MainSidebar movido para o MainLayout global */}
 
       {/* Middle Sidebar (Contacts List) */}
@@ -337,7 +427,7 @@ export default function ChatDashboard() {
         {/* Header Premium da Sidebar */}
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.11 | Deploy: ..."}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.14 | Deploy: ..."}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1036,10 +1126,12 @@ export default function ChatDashboard() {
               accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
             />
 
-            <div className="flex flex-1 items-end bg-white dark:bg-[#2a3942] rounded-xl px-4 py-2 border border-transparent focus-within:border-[#00a884]/50 transition-colors shadow-sm">
+            <div className="flex flex-1 items-end bg-white dark:bg-[#2a3942] rounded-xl px-4 py-2 border border-transparent focus-within:border-[#00a884]/50 transition-colors shadow-sm relative">
               <textarea 
                 ref={textareaRef}
                 value={inputText}
+                spellCheck={true}
+                lang="pt-BR"
                 onChange={e => setInputText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
@@ -1063,6 +1155,46 @@ export default function ChatDashboard() {
                    target.style.height = `${target.scrollHeight}px`;
                 }}
               />
+              <button 
+                type="button" 
+                onClick={() => setIsGeminiPopoverOpen(!isGeminiPopoverOpen)}
+                className="ml-2 mb-0.5 p-1.5 text-[#00a884] hover:bg-[#00a884]/10 rounded-full transition-colors flex-shrink-0"
+                title="Assistente IA"
+              >
+                <Sparkles size={20} />
+              </button>
+
+              {/* Popover UI Gemini */}
+              {isGeminiPopoverOpen && (
+                <div className="absolute bottom-full right-0 mb-3 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/5 dark:border-white/5 rounded-2xl shadow-xl w-72 p-2 animate-in fade-in zoom-in duration-200 z-50">
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-black/5 dark:border-white/5 mb-2">
+                    <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-[#00a884] to-teal-500 flex items-center justify-center text-white shadow-sm">
+                      <Wand2 size={12} />
+                    </div>
+                    <span className="text-xs font-semibold text-[#111b21] dark:text-[#aebac1]">Magia da IA</span>
+                    <button onClick={() => setIsGeminiPopoverOpen(false)} className="ml-auto text-[#54656f] hover:text-red-500 p-1"><X size={14}/></button>
+                  </div>
+                  
+                  {isGeminiProcessing ? (
+                    <div className="flex flex-col items-center justify-center py-6 gap-3">
+                        <RefreshCw size={24} className="text-[#00a884] animate-spin" />
+                        <span className="text-xs text-[#54656f] dark:text-[#aebac1] animate-pulse">A IA está processando...</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      <button onClick={() => handleGeminiAction('sales')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                        <ShoppingBag size={16} className="text-emerald-500 group-hover:scale-110 transition-transform" /> Focar em Vendas
+                      </button>
+                      <button onClick={() => handleGeminiAction('enchant')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                        <HeartHandshake size={16} className="text-pink-500 group-hover:scale-110 transition-transform" /> Encantar Cliente
+                      </button>
+                      <button onClick={() => handleGeminiAction('support')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                        <LifeBuoy size={16} className="text-orange-500 group-hover:scale-110 transition-transform" /> Melhorar Suporte/Dúvida
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             
             {inputText.trim() ? (

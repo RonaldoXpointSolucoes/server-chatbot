@@ -24,7 +24,9 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
     address_state: '',
     notes: '',
     email: '',
-    address_street: ''
+    address_street: '',
+    phone: '',
+    bot_status: 'active'
   });
   
   const [isSearchingDoc, setIsSearchingDoc] = useState(false);
@@ -44,7 +46,9 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
         address_city: contactData.address_city || '',
         address_state: contactData.address_state || '',
         notes: contactData.notes || '',
-        address_street: contactData.address_street || ''
+        address_street: contactData.address_street || '',
+        phone: contactData.phone || '',
+        bot_status: contactData.bot_status || 'active'
       });
     }
   }, [contactData, isOpen]);
@@ -178,6 +182,33 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                          className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
                        />
                     </div>
+                  </div>
+               </div>
+
+               <div className="flex flex-col sm:flex-row gap-4">
+                  <div className="w-full sm:w-1/2">
+                     <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Celular (ID)</label>
+                     <div className="relative">
+                       <Phone size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                       <input 
+                         type="text" 
+                         value={formData.phone}
+                         onChange={e => setFormData({...formData, phone: e.target.value})}
+                         className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
+                         placeholder="5511999999999"
+                       />
+                     </div>
+                  </div>
+                  <div className="w-full sm:w-1/2">
+                     <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Status do Robô</label>
+                     <select 
+                       value={formData.bot_status}
+                       onChange={e => setFormData({...formData, bot_status: e.target.value})}
+                       className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                     >
+                        <option value="active">🟢 Ativo</option>
+                        <option value="paused">🔴 Pausado</option>
+                     </select>
                   </div>
                </div>
 

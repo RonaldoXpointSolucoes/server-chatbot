@@ -67,6 +67,8 @@ class SessionManager {
                 browser: Browsers.ubuntu('Chrome'),
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: false,
+                markOnlineOnConnect: true,
+                shouldSyncHistoryMessage: () => false, // Impede que o socket trave no buffer esperando evento de sync timeout (60s)
                 connectTimeoutMs: 60000,
                 keepAliveIntervalMs: 25000,
                 defaultQueryTimeoutMs: 120000,
