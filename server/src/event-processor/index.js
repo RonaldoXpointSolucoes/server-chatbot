@@ -130,13 +130,39 @@ class EventProcessor {
              
              // BULK UPSERT CONTACTS
              const contactsArray = Array.from(contactsMap.values());
-             const safeContactsArray = contactsArray.map(c => ({
-                 tenant_id: c.tenant_id,
-                 phone: c.phone,
-                 name: c.name,
-                 whatsapp_jid: c.whatsapp_jid,
-                 instance_id: c.instance_id
-             }));
+             
+             // Proteger contra overwrite de nomes e custom_names
+             const phonesToSeek = contactsArray.map(c => c.phone);
+             const tenantIdTarget = contactsArray[0]?.tenant_id;
+             
+             let existingMap = new Map();
+             if (tenantIdTarget && phonesToSeek.length > 0) {
+                 const { data: existingDbContacts } = await supabase.from('contacts')
+                     .select('phone, name, custom_name')
+                     .eq('tenant_id', tenantIdTarget)
+                     .in('phone', phonesToSeek);
+                     
+                 if (existingDbContacts) {
+                     for (const e of existingDbContacts) {
+                         existingMap.set(e.phone, e);
+                     }
+                 }
+             }
+
+             const safeContactsArray = contactsArray.map(c => {
+                 const ex = existingMap.get(c.phone);
+                 // Respeita o custom_name ou o nome antigo se válido frente ao fallback bruto
+                 const hasValidOldName = ex && ex.name && ex.name !== ex.phone && ex.name !== c.phone;
+                 const finalName = ex?.custom_name ? ex.custom_name : (hasValidOldName ? ex.name : c.name);
+                 
+                 return {
+                     tenant_id: c.tenant_id,
+                     phone: c.phone,
+                     name: finalName,
+                     whatsapp_jid: c.whatsapp_jid,
+                     instance_id: c.instance_id
+                 };
+             });
              
              const { data: upsertedContacts, error: contactErr } = await supabase.from('contacts')
                  .upsert(safeContactsArray, { onConflict: 'tenant_id, phone' })

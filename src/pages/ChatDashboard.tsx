@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2 } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { DeleteModal, RenameModal, NewChatModal } from '../components/ChatModals';
@@ -60,6 +60,31 @@ export function formatPhoneNumber(phone: string | undefined | null): string {
   return cleaned;
 }
 
+export function renderMessageText(text: string) {
+  if (!text) return null;
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+
+  return parts.map((part, i) => {
+    if (part.match(urlRegex)) {
+      return (
+        <a 
+          key={i} 
+          href={part} 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="text-[#00a884] dark:text-[#53bdeb] hover:underline font-semibold inline-flex items-center gap-0.5 align-middle mx-1 group"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="truncate block" style={{ maxWidth: 'min(100%, 250px)' }}>{part.replace(/^https?:\/\//, '')}</span>
+          <ExternalLink size={12} className="inline opacity-80 shrink-0 group-hover:scale-110 transition-transform" />
+        </a>
+      );
+    }
+    return <React.Fragment key={i}>{part}</React.Fragment>;
+  });
+}
+
 export default function ChatDashboard() {
   const navigate = useNavigate();
   const tenantName = sessionStorage.getItem('current_tenant_name');
@@ -105,6 +130,7 @@ export default function ChatDashboard() {
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
   const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen;
   const [inputText, setInputText] = useState('');
+  const [replyMessage, setReplyMessage] = useState<{ id: string, text: string, sender: string } | null>(null);
 
   // Lógica de rascunhos por chat
   const draftsRef = useRef<Record<string, string>>({});
@@ -264,9 +290,16 @@ export default function ChatDashboard() {
     const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
     if (!inputText.trim() || !activeChatId || !properTargetInstance) return;
     
+    let finalMessageText = inputText;
+    if (replyMessage) {
+        const shortQuote = replyMessage.text.length > 80 ? replyMessage.text.substring(0, 80) + '...' : replyMessage.text;
+        finalMessageText = `> *Mensagem Citada:* "${shortQuote}"\n\n${inputText}`;
+    }
+
     // ATENÇÃO: Numa versão final multi-tenant o instanceName deve vir do Login.
-    sendHumanMessage(activeChatId, inputText, properTargetInstance as string);
+    sendHumanMessage(activeChatId, finalMessageText, properTargetInstance as string);
     setInputText('');
+    setReplyMessage(null);
     if (activeChatId) draftsRef.current[activeChatId] = '';
     
     if (textareaRef.current) {
@@ -973,7 +1006,22 @@ export default function ChatDashboard() {
                       isMe ? "bg-[#d9fdd3]/90 dark:bg-[#005c4b]/95 text-[#111b21] dark:text-[#e9edef] rounded-tr-sm" 
                            : "bg-white/95 dark:bg-[#202c33]/90 text-[#111b21] dark:text-[#e9edef] rounded-tl-sm border border-black/5 dark:border-white/5 border-l-4 border-l-[#00a884]"
                     )}>
-                      {msg.sender === 'bot' && (
+                       {/* Menu de Três Pontinhos para Responder */}
+                       <div 
+                         className={cn(
+                           "opacity-0 group-hover:opacity-100 absolute top-2 flex items-center justify-center w-7 h-7 cursor-pointer text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] dark:hover:text-[#00a884] bg-white/80 dark:bg-black/40 hover:bg-white dark:hover:bg-black/60 shadow-sm border border-black/5 dark:border-white/5 backdrop-blur-sm rounded-full transition-all duration-200 z-10",
+                           isMe ? "-left-10" : "-right-10"
+                         )}
+                         onClick={() => {
+                           setReplyMessage({ id: msg.id, text: msg.text || 'Mídia enviada', sender: msg.sender });
+                           textareaRef.current?.focus();
+                         }}
+                         title="Responder"
+                       >
+                         <MoreVertical size={16} />
+                       </div>
+
+                       {msg.sender === 'bot' && (
                         <div className="flex items-center gap-1 mb-1 text-[10px] text-[#005c4b] dark:text-[#1d9782] opacity-80 font-bold uppercase tracking-wider">
                           <Bot size={10} /> IA ChatBoot
                         </div>
@@ -981,12 +1029,6 @@ export default function ChatDashboard() {
                       {msg.sender === 'human' && (
                         <div className="flex items-center gap-1 mb-1 text-[10px] text-[#005c4b] dark:text-[#1d9782] opacity-80 font-bold uppercase tracking-wider">
                            <User size={10} /> Você (Atendente)
-                        </div>
-                      )}
-                      {!isMe && (
-                        <div className="flex items-center gap-1.5 mb-1 text-[11px] text-[#00a884] font-bold tracking-tight">
-                           <User size={11} className="opacity-80" /> 
-                           <span className="truncate">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
                         </div>
                       )}
 
@@ -1076,11 +1118,11 @@ export default function ChatDashboard() {
                       )}
                       
                       {(!msg.mediaType || (msg.mediaType !== 'document' && msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
-                         <span className="text-[14px] leading-[1.4] block pr-10 whitespace-pre-wrap break-words break-all sm:break-normal word-break shadow-none mt-1">{msg.text}</span>
+                         <span className="text-[14px] leading-[1.4] block pr-10 whitespace-pre-wrap break-words break-all sm:break-normal word-break shadow-none mt-1">{renderMessageText(msg.text)}</span>
                       )}
                       
-                      <div className="absolute right-2 bottom-1 flex items-center gap-1 text-[9px] text-[#54656f] dark:text-gray-400">
-                        {format(msg.timestamp, 'HH:mm')}
+                      <div className="absolute right-2 bottom-1 flex items-center gap-1 text-[9px] text-[#54656f] dark:text-gray-400 bg-white/40 dark:bg-[#202c33]/40 px-1.5 py-0.5 rounded-full backdrop-blur-sm">
+                        {format(msg.timestamp, "HH:mm'h' dd/MM/yy")}
                         {isMe && (
                            msg.status === 'READ' ? <CheckCheck size={12} className="text-[#53bdeb] ml-0.5" /> : 
                            msg.status === 'DELIVERY_ACK' || msg.status === 'SERVER_ACK' ? <CheckCheck size={12} className="text-gray-400 ml-0.5" /> :
@@ -1110,10 +1152,28 @@ export default function ChatDashboard() {
           )}
 
           {/* Input Area */}
-          <form onSubmit={handleSendHuman} className="h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center px-4 gap-3 z-10 shadow-sm border-t border-[#d1d7db] dark:border-[#222d34]">
+          <div className="flex flex-col z-10 w-full bg-[#f0f2f5] dark:bg-[#202c33] shadow-sm border-t border-[#d1d7db] dark:border-[#222d34]">
+            {/* Reply Preview Box */}
+            {replyMessage && (
+              <div className="flex items-start bg-black/5 dark:bg-black/20 p-3 relative animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-t-xl mx-2 mt-2 group/replybox border border-black/5 dark:border-white/5">
+                <div className="w-1.5 h-full absolute left-0 top-0 bottom-0 bg-[#00a884] rounded-l-xl"></div>
+                <div className="flex flex-col flex-1 pl-3 pr-8">
+                  <span className="text-[12px] font-bold text-[#00a884] mb-0.5">{replyMessage.sender === 'human' || replyMessage.sender === 'me' ? 'Você' : getContactDisplayName(activeChat?.custom_name || activeChat?.name, activeChat?.push_name, activeChat?.phone)}</span>
+                  <span className="text-[13px] text-[#54656f] dark:text-[#aebac1] line-clamp-2 leading-relaxed">{replyMessage.text}</span>
+                </div>
+                <button 
+                  type="button" 
+                  onClick={() => setReplyMessage(null)} 
+                  className="absolute right-3 top-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors bg-white/50 dark:bg-black/20 p-1.5 rounded-full shadow-sm hover:scale-105"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
             
-            <button 
-              type="button"
+            <form onSubmit={handleSendHuman} className="min-h-16 flex items-end px-4 py-3 gap-3">
+              <button 
+                type="button"
               onClick={() => fileInputRef.current?.click()}
               className="p-2 text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
             >
@@ -1227,6 +1287,7 @@ export default function ChatDashboard() {
               </button>
             )}
           </form>
+          </div>
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#222d34] border-l border-white/5 relative z-10">
