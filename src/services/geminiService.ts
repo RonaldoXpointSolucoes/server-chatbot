@@ -14,7 +14,7 @@ class GeminiService {
     return apiKey.length > 5;
   }
 
-  async enhanceMessage(draft: string, intent: 'grammar' | 'sales' | 'enchant' | 'support', contextHistory: {role: string, text: string}[]): Promise<string> {
+  async enhanceMessage(draft: string, intent: 'grammar' | 'sales' | 'enchant' | 'support' | 'analyze', contextHistory: {role: string, text: string}[]): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
     }
@@ -36,14 +36,26 @@ class GeminiService {
       case 'support':
         promptObj = `Aja como um analista de suporte técnico excelente. Reescreva o texto do Atendente para ser claríssimo e amigável. Para dúvidas de suporte, PODE E DEVE MANTER OS DETALHES e ser bem ESPECÍFICO nas explicações, não economize no passo a passo se for para ajudar o cliente. Histórico:\n${historyText}\n\nTexto do Atendente:\n${draft}`;
         break;
+      case 'analyze':
+        promptObj = `Aja como um supervisor experiente de atendimento e vendas. Analise o histórico da conversa abaixo e forneça um feedback detalhado com insights importantes sobre o sentimento do cliente, o que ele está precisando e sugestões de próximos passos ou como conduzir. Histórico:\n${historyText}\n\nLembre-se que isto é um relatório para o ATENDENTE. Não é uma mensagem para ser enviada, mas um resumo de análise interna.`;
+        break;
     }
 
-    const prompt = `${promptObj}
-
+    let formatRules = `
 ATENÇÃO E REGRAS DE FORMATO:
 1. Separe BEM o texto em parágrafos curtos pulando uma linha em branco entre eles (isso ajuda a não ficar maçante de ler no celular).
 2. Utilize alguns EMOJIS sutis que combinam com o assunto para deixar a mensagem mais leve e bonita.
 3. Retorne APENAS a mensagem pronta para envio, sem aspas, sem marcadores de markdown, sem responder ou adicionar conversinha antes da resposta real.`;
+
+    if (intent === 'analyze') {
+       formatRules = `
+ATENÇÃO E REGRAS DE FORMATO:
+1. Separe BEM os pontos em tópicos curtos e objetivos.
+2. Seja direto ao ponto. Use estilo de relatório interno, sem saudações e enrolações.
+3. Use emojis para destacar pontos vitais.`;
+    }
+
+    const prompt = `${promptObj}\n${formatRules}`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;

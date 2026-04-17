@@ -7,7 +7,7 @@ interface GeminiEditorModalProps {
   onClose: () => void;
   originalText: string;
   suggestedText: string;
-  intent: 'grammar' | 'sales' | 'enchant' | 'support' | null;
+  intent: 'grammar' | 'sales' | 'enchant' | 'support' | 'analyze' | null;
   onSend: (finalText: string) => void;
 }
 
@@ -35,6 +35,7 @@ export function GeminiEditorModal({ isOpen, onClose, originalText, suggestedText
       case 'sales': return "Foco em Vendas";
       case 'enchant': return "Encantar o Cliente";
       case 'support': return "Melhoria de Suporte";
+      case 'analyze': return "Análise da Conversa e Feedback";
       default: return "Magia da IA";
     }
   };
@@ -45,6 +46,7 @@ export function GeminiEditorModal({ isOpen, onClose, originalText, suggestedText
       case 'sales': return "from-emerald-500 to-teal-500";
       case 'enchant': return "from-pink-500 to-rose-500";
       case 'support': return "from-orange-500 to-amber-500";
+      case 'analyze': return "from-purple-500 to-fuchsia-500";
       default: return "from-[#00a884] to-teal-500";
     }
   };
@@ -123,25 +125,29 @@ export function GeminiEditorModal({ isOpen, onClose, originalText, suggestedText
               onClick={onClose}
               className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-medium text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
             >
-              Cancelar
+              {intent === 'analyze' ? 'Fechar Feedback' : 'Cancelar'}
             </button>
+            {intent !== 'analyze' && (
+              <button 
+                onClick={() => {
+                  onSend(originalText);
+                  onClose();
+                }}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-medium text-[#111b21] dark:text-white bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
+              >
+                Enviar Original
+              </button>
+            )}
             <button 
               onClick={() => {
-                onSend(originalText);
-                onClose();
-              }}
-              className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-medium text-[#111b21] dark:text-white bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
-            >
-              Enviar Original
-            </button>
-            <button 
-              onClick={() => {
-                onSend(editedText);
+                if (intent !== 'analyze') {
+                  onSend(editedText);
+                }
                 onClose();
               }}
               className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-white bg-gradient-to-r from-[#00a884] to-teal-500 hover:from-teal-500 hover:to-emerald-500 shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95"
             >
-               <Send size={18} className="translate-x-0.5" /> Enviar Otimizada
+               {intent === 'analyze' ? <><CheckCircle2 size={18} /> Entendido</> : <><Send size={18} className="translate-x-0.5" /> Enviar Otimizada</>}
             </button>
           </div>
 

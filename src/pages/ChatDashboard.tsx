@@ -138,7 +138,7 @@ export default function ChatDashboard() {
     isOpen: boolean;
     originalText: string;
     suggestedText: string;
-    intent: 'grammar' | 'sales' | 'enchant' | 'support' | null;
+    intent: 'grammar' | 'sales' | 'enchant' | 'support' | 'analyze' | null;
   }>({
     isOpen: false,
     originalText: '',
@@ -323,8 +323,9 @@ export default function ChatDashboard() {
     }
   };
 
-  const handleGeminiAction = async (type: 'grammar' | 'sales' | 'enchant' | 'support') => {
-    if (!inputText.trim() || !activeChat) return;
+  const handleGeminiAction = async (type: 'grammar' | 'sales' | 'enchant' | 'support' | 'analyze') => {
+    if (!activeChat) return;
+    if (type !== 'analyze' && !inputText.trim()) return;
 
     setIsGeminiProcessing(true);
     try {
@@ -335,11 +336,11 @@ export default function ChatDashboard() {
           }))
         : [];
       
-      const suggestion = await geminiService.enhanceMessage(inputText, type, history);
+      const suggestion = await geminiService.enhanceMessage(type === 'analyze' ? '' : inputText, type, history);
       
       setGeminiModalState({
         isOpen: true,
-        originalText: inputText,
+        originalText: type === 'analyze' ? 'Análise interna da conversa atual. Esta mensagem não será enviada.' : inputText,
         suggestedText: suggestion,
         intent: type
       });
@@ -1182,6 +1183,9 @@ export default function ChatDashboard() {
                     </div>
                   ) : (
                     <div className="flex flex-col gap-1">
+                      <button onClick={() => handleGeminiAction('grammar')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                        <CheckCircle2 size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Corrigir Gramática & Ortografia
+                      </button>
                       <button onClick={() => handleGeminiAction('sales')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
                         <ShoppingBag size={16} className="text-emerald-500 group-hover:scale-110 transition-transform" /> Focar em Vendas
                       </button>
@@ -1190,6 +1194,12 @@ export default function ChatDashboard() {
                       </button>
                       <button onClick={() => handleGeminiAction('support')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
                         <LifeBuoy size={16} className="text-orange-500 group-hover:scale-110 transition-transform" /> Melhorar Suporte/Dúvida
+                      </button>
+                      
+                      <div className="my-1 border-t border-black/5 dark:border-white/5"></div>
+                      
+                      <button onClick={() => handleGeminiAction('analyze')} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors text-[#111b21] dark:text-[#e9edef] group">
+                        <BrainCircuit size={16} className="text-purple-500 group-hover:scale-110 transition-transform" /> Analisar Conversa / Dar Feedback
                       </button>
                     </div>
                   )}
