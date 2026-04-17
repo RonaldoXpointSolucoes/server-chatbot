@@ -15,6 +15,8 @@ export type MessageType = {
       sender: string;
       text: string;
   };
+  buttons?: Array<{ id: string; text: string; url?: string; type: string }>; // Novo campo!
+  transcription?: string; // Transcrição de áudio via Gemini
 };
 
 export type ContactType = ContactRow & {
@@ -86,7 +88,7 @@ interface ChatState {
   addMessageLocally: (contactId: string, msg: MessageType) => void;
   upsertContactLocally: (contact: ContactRow) => void;
   sendHumanMessage: (contactId: string, text: string, instanceName: string) => Promise<void>;
-  uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean) => Promise<void>;
+  uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean, caption?: string) => Promise<void>;
   updateContactCRM: (contactId: string, payload: Partial<ContactRow>) => Promise<void>;
   deleteContact: (contactId: string) => Promise<void>;
   togglePinContact: (contactId: string) => Promise<void>;
@@ -102,6 +104,9 @@ interface ChatState {
   deleteAgent: (id: string) => Promise<void>;
   updateConversationField: (contactId: string, payload: Record<string, any>) => Promise<void>;
   updateAgentProfile: (fullName: string, signature: string) => Promise<void>;
+  
+  // Gemini Actions
+  requestTranscription: (messageId: string, mediaUrl: string) => Promise<void>;
 }
 
 function parseAdvancedMsgMetadata(m: any) {
@@ -158,7 +163,94 @@ function parseAdvancedMsgMetadata(m: any) {
       }
   } catch(e) {}
 
-  return { mediaType: derivedType, text: derivedText, quoted: derivedQuoted };
+  let buttons: any[] = [];
+  
+  try {
+      const payloadMessage = m.raw_payload?.message;
+      if (payloadMessage) {
+          let targetMsg = payloadMessage;
+          if (targetMsg?.viewOnceMessageV2?.message) targetMsg = targetMsg.viewOnceMessageV2.message;
+          else if (targetMsg?.viewOnceMessage?.message) targetMsg = targetMsg.viewOnceMessage.message;
+          else if (targetMsg?.documentWithCaptionMessage?.message) targetMsg = targetMsg.documentWithCaptionMessage.message;
+
+          if (targetMsg?.templateMessage?.interactiveMessageTemplate) {
+              const imt = targetMsg.templateMessage.interactiveMessageTemplate;
+              let full = [];
+              if (imt.header?.title) full.push(`*${imt.header.title.trim()}*`);
+              if (imt.body?.text) full.push(imt.body.text.trim());
+              if (imt.footer?.text) full.push(`_${imt.footer.text.trim()}_`);
+              if (full.length > 0) derivedText = full.join('\n\n');
+              derivedType = 'interactive';
+              
+              if (imt.nativeFlowMessage?.buttons) {
+                 buttons = imt.nativeFlowMessage.buttons.map((b: any, i: number) => {
+                     let dt = b.name;
+                     let url;
+                     try { if (b.buttonParamsJson) { const pj = JSON.parse(b.buttonParamsJson); dt = pj.display_text || dt; url = pj.url; } } catch(e){}
+                     return { id: `btn_${i}`, text: dt, url, type: 'action' };
+                 });
+              }
+          } else if (targetMsg?.interactiveMessage) {
+              const im = targetMsg.interactiveMessage;
+              let full = [];
+              if (im.header?.title) full.push(`*${im.header.title.trim()}*`);
+              else if (im.header?.subtitle) full.push(`*${im.header.subtitle.trim()}*`);
+              if (im.body?.text) full.push(im.body.text.trim());
+              if (im.footer?.text) full.push(`_${im.footer.text.trim()}_`);
+              if (full.length > 0) derivedText = full.join('\n\n');
+              derivedType = 'interactive';
+              
+              if (im.nativeFlowMessage?.buttons) {
+                 buttons = im.nativeFlowMessage.buttons.map((b: any, i: number) => {
+                     let dt = b.name;
+                     let url;
+                     try { if (b.buttonParamsJson) { const pj = JSON.parse(b.buttonParamsJson); dt = pj.display_text || dt; url = pj.url; } } catch(e){}
+                     return { id: `btn_${i}`, text: dt, url, type: 'action' };
+                 });
+              }
+          } else if (targetMsg?.templateMessage?.hydratedTemplate) {
+             const ht = targetMsg.templateMessage.hydratedTemplate;
+             let full = [];
+             if (ht.hydratedTitleText) full.push(`*${ht.hydratedTitleText.trim()}*`);
+             if (ht.hydratedContentText) full.push(ht.hydratedContentText.trim());
+             if (ht.hydratedFooterText) full.push(`_${ht.hydratedFooterText.trim()}_`);
+             if (full.length > 0) derivedText = full.join('\n\n');
+             derivedType = 'template';
+             
+             if (ht.hydratedButtons) {
+                 buttons = ht.hydratedButtons.map((b: any, i: number) => {
+                     const btn = b.quickReplyButton || b.urlButton || b.callButton;
+                     return { id: `btn_${i}`, text: btn?.displayText || btn?.text || 'Botão', url: btn?.url, type: 'action' };
+                 });
+             }
+          } else if (targetMsg?.buttonsMessage) {
+             const bm = targetMsg.buttonsMessage;
+             let full = [];
+             if (bm.contentText) full.push(bm.contentText.trim());
+             if (bm.footerText) full.push(`_${bm.footerText.trim()}_`);
+             if (full.length > 0) derivedText = full.join('\n\n');
+             derivedType = 'buttons';
+             
+             if (bm.buttons) {
+                 buttons = bm.buttons.map((b: any, i: number) => ({
+                     id: b.buttonId || `btn_${i}`, text: b.buttonText?.displayText || 'Botão', type: 'action'
+                 }));
+             }
+          } else if (targetMsg?.listMessage) {
+             const lm = targetMsg.listMessage;
+             let full = [];
+             if (lm.title) full.push(`*${lm.title.trim()}*`);
+             if (lm.description) full.push(lm.description.trim());
+             if (lm.footerText) full.push(`_${lm.footerText.trim()}_`);
+             if (full.length > 0) derivedText = full.join('\n\n');
+             derivedType = 'list';
+             
+             buttons = [{ id: 'list_btn', text: lm.buttonText || 'Ver Opções', type: 'action' }];
+          }
+      }
+  } catch(e){}
+
+  return { mediaType: derivedType, text: derivedText, quoted: derivedQuoted, buttons: buttons.length > 0 ? buttons : undefined };
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -176,6 +268,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeChannelFilter: null,
   isQRModalOpen: false,
   qrModalTargetInstance: null,
+
+  requestTranscription: async (messageId: string, mediaUrl: string) => {
+    try {
+      const { geminiService } = await import('../services/geminiService');
+      const text = await geminiService.transcribeAudio(mediaUrl);
+
+      // Save to Supabase
+      const { error } = await supabase.from('messages')
+        .update({ transcription: text })
+        .eq('id', messageId);
+
+      if (error) {
+        console.error('Erro ao salvar transcrição:', error);
+      } else {
+        // Update local state
+        set(state => ({
+          contacts: state.contacts.map(c => ({
+            ...c,
+            messages: c.messages.map(m => m.id === messageId ? { ...m, transcription: text } : m)
+          }))
+        }));
+      }
+    } catch(e) {
+      console.error('Erro na transcrição de áudio:', e);
+      throw e;
+    }
+  },
 
   openQRModal: (instanceId) => set({ isQRModalOpen: true, qrModalTargetInstance: instanceId || null }),
   closeQRModal: () => set({ isQRModalOpen: false, qrModalTargetInstance: null }),
@@ -237,7 +356,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  uploadAndSendMedia: async (contactId, file, mediaType, instanceName, isPtt) => {
+  uploadAndSendMedia: async (contactId, file, mediaType, instanceName, isPtt, caption) => {
     const state = get();
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
@@ -247,7 +366,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const tempUrl = URL.createObjectURL(file);
     state.addMessageLocally(contactId, { 
       id: pseudoId, 
-      text: file.name, 
+      text: caption?.trim() ? caption.trim() : file.name, 
       sender: 'human', 
       mediaType: mediaType,
       mediaUrl: tempUrl,
@@ -261,7 +380,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
       formData.append('jid', jid);
       formData.append('messageType', mediaType);
-      if (file.name) formData.append('caption', file.name);
+      
+      const finalCaption = caption?.trim() ? caption.trim() : (file.name || '');
+      if (finalCaption) formData.append('caption', finalCaption);
+      
       if (isPtt) formData.append('ptt', 'true');
 
       // Chamada HTTP pro Node (único dono do upload Supabase e Baileys)
@@ -857,7 +979,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                           mediaType: advanced.mediaType,
                           status: m.status,
                           timestamp: new Date(m.timestamp),
-                          quoted: advanced.quoted
+                          quoted: advanced.quoted,
+                          buttons: advanced.buttons,
+                          transcription: m.transcription
                       };
                   });
               }
@@ -1087,7 +1211,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           mediaType: advanced.mediaType,
           status: m.status,
           timestamp: new Date(m.timestamp),
-          quoted: advanced.quoted
+          quoted: advanced.quoted,
+          buttons: advanced.buttons,
+          transcription: m.transcription
         });
 
         // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele

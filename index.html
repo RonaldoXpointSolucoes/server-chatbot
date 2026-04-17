@@ -4,17 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="google" content="notranslate" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#f0f2f5" />
     <link rel="apple-touch-icon" href="/pwa-192x192.svg" />
     <title>SaaS WhatsApp Master</title>
     <script>
       // Anti-flicker for dark mode
+      const applyThemeColor = (isDark) => {
+         let metaTheme = document.querySelector('meta[name="theme-color"]');
+         if (!metaTheme) {
+            metaTheme = document.createElement('meta');
+            metaTheme.name = 'theme-color';
+            document.head.appendChild(metaTheme);
+         }
+         metaTheme.setAttribute('content', isDark ? '#111b21' : '#f0f2f5');
+      };
+
       if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
         document.documentElement.classList.add('dark');
         localStorage.setItem('theme', 'dark');
+        applyThemeColor(true);
       } else {
         document.documentElement.classList.remove('dark');
+        applyThemeColor(false);
       }
     </script>
   </head>

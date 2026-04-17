@@ -61,6 +61,64 @@ ATENÇÃO E REGRAS DE FORMATO:
     const response = await result.response;
     return response.text().trim();
   }
+  async transcribeAudio(mediaUrl: string): Promise<string> {
+    if (!this.isConfigured()) {
+      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+    }
+
+    try {
+      // 1. Fetch o áudio e converte pra base64 (isso só funciona se não tiver CORS block)
+      const req = await fetch(mediaUrl);
+      if (!req.ok) throw new Error("Falha ao baixar o áudio da URL fornecida.");
+      
+      const blob = await req.blob();
+      const base64DataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror =() => reject(new Error("Falha ao ler o áudio"));
+        reader.readAsDataURL(blob);
+      });
+      const base64Audio = base64DataUrl.split(',')[1];
+      
+      // Vamos tentar deduzir o mimetype (ex vindo do whatsapp geralmente é ogg/oga, ou mpeg se for MP3)
+      let mimeType = req.headers.get("content-type") || "audio/ogg";
+      if(mimeType.includes("application/octet-stream")) mimeType = "audio/ogg"; // fallback comum
+
+      const payload = {
+        contents: [
+          {
+            parts: [
+              { text: "Transcreva exatamente o que está sendo dito neste áudio. Se não houver voz ou ninguém falar, responda com: '[Áudio sem fala detectável]'. Retorne APENAS o texto da transcrição, sem introduções ou explicações adicionais." },
+              {
+                inlineData: {
+                  mimeType,
+                  data: base64Audio
+                }
+              }
+            ]
+          }
+        ]
+      };
+
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+      if(data.error) {
+         throw new Error(data.error.message);
+      }
+
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      return text ? text.trim() : "[Nenhuma transcrição retornada]";
+    } catch (err) {
+      console.error("Erro em transcribeAudio:", err);
+      throw err;
+    }
+  }
 }
 
 export const geminiService = new GeminiService();

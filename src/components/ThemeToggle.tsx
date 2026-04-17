@@ -7,8 +7,10 @@ export default function ThemeToggle() {
   useEffect(() => {
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#111b21');
     } else {
       document.documentElement.classList.remove('dark');
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#f0f2f5');
     }
     localStorage.setItem('theme', theme);
   }, [theme]);

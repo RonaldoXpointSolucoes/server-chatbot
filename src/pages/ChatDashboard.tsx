@@ -25,10 +25,6 @@ export function cn(...inputs: (string | undefined | null | false)[]) {
 export function getContactDisplayName(name: string | undefined | null, pushName: string | undefined | null, phone: string | undefined | null): string {
   let finalName = name || pushName;
   if (!finalName) return phone || '';
-  const lowerName = finalName.toLowerCase();
-  if (lowerName.includes('x point') || lowerName.includes('x-point') || lowerName.includes('xpoint') || lowerName === 'empresa' || lowerName.includes('solu')) {
-    return phone || finalName;
-  }
   return finalName;
 }
 
@@ -131,6 +127,10 @@ export default function ChatDashboard() {
   const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen;
   const [inputText, setInputText] = useState('');
   const [replyMessage, setReplyMessage] = useState<{ id: string, text: string, sender: string } | null>(null);
+  const [pastedImage, setPastedImage] = useState<File | null>(null);
+  const [pastedImagePreview, setPastedImagePreview] = useState<string | null>(null);
+  const [pastedImageCaption, setPastedImageCaption] = useState('');
+  const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
 
   // Lógica de rascunhos por chat
   const draftsRef = useRef<Record<string, string>>({});
@@ -159,6 +159,7 @@ export default function ChatDashboard() {
   // Gemini AI States
   const [isGeminiPopoverOpen, setIsGeminiPopoverOpen] = useState(false);
   const [isGeminiProcessing, setIsGeminiProcessing] = useState(false);
+  const [transcribingIds, setTranscribingIds] = useState<Record<string, boolean>>({});
   const [geminiSuggestion, setGeminiSuggestion] = useState<string | null>(null);
   const [geminiModalState, setGeminiModalState] = useState<{
     isOpen: boolean;
@@ -175,6 +176,7 @@ export default function ChatDashboard() {
   // Estados para Filtros
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'unread' | 'favorite' | 'labels'>('all');
+  const [showFilters, setShowFilters] = useState(false);
   const [filterContextMenu, setFilterContextMenu] = useState<{ type: string, x: number, y: number } | null>(null);
   const [instanceNamesMap, setInstanceNamesMap] = useState<Record<string, string>>({});
   
@@ -385,8 +387,20 @@ export default function ChatDashboard() {
     }
   };
 
+  const handleTranscribeAudio = async (msgId: string, mediaUrl: string) => {
+    if (!mediaUrl || transcribingIds[msgId] || !activeChatId) return;
+    setTranscribingIds(s => ({ ...s, [msgId]: true }));
+    try {
+      await useChatStore.getState().requestTranscription(activeChatId, msgId, mediaUrl);
+    } catch (e: any) {
+      alert(e.message || "Erro ao transcrever áudio.");
+    } finally {
+      setTranscribingIds(s => ({ ...s, [msgId]: false }));
+    }
+  };
+
   return (
-    <div className="flex w-full h-full min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
+    <div className="flex w-full h-[100dvh] min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
       
       {useChatStore(s => s.isQRModalOpen) && <EvolutionModal 
           targetInstanceName={useChatStore.getState().qrModalTargetInstance}
@@ -414,6 +428,73 @@ export default function ChatDashboard() {
           if(contactToDelete) deleteContact(contactToDelete.id);
         }} 
       />
+
+      {/* Modal de Preview de Imagem Colada */}
+      {pastedImagePreview && (
+        <div className="fixed inset-0 z-[9999] bg-black/80 flex flex-col items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#111b21] rounded-[24px] w-full max-w-md overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 mt-4">
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
+              <h3 className="font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2"><ImageIcon size={18}/> Enviar Imagem</h3>
+              <button 
+                onClick={() => {
+                  setPastedImage(null);
+                  setPastedImagePreview(null);
+                }} 
+                className="p-2 text-gray-500 hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="bg-gray-100/50 dark:bg-black/40 flex-1 flex items-center justify-center p-4 min-h-[300px] relative">
+              <img src={pastedImagePreview} alt="Preview" className="max-h-[300px] object-contain rounded-xl shadow-sm" />
+            </div>
+            <div className="p-4 flex gap-2 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-[#111b21]">
+              <input 
+                type="text" 
+                placeholder="Adicionar legenda (opcional)..." 
+                value={pastedImageCaption}
+                onChange={(e) => setPastedImageCaption(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById('btn-send-paste')?.click();
+                  }
+                }}
+                className="flex-1 bg-[#f0f2f5] dark:bg-[#202c33] border-none rounded-2xl px-4 py-2 text-sm text-[#111b21] dark:text-[#d1d7db] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] focus:outline-none focus:ring-1 focus:ring-[#00a884]/50"
+              />
+              <button 
+                id="btn-send-paste"
+                onClick={() => {
+                  if (pastedImage && activeChatId) {
+                    const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+                    
+                    const imageToSend = pastedImage;
+                    const captionToSend = pastedImageCaption;
+                    
+                    // Fechar imediatamente para percepção instantânea
+                    setPastedImage(null);
+                    setPastedImagePreview(null);
+                    setPastedImageCaption('');
+                    
+                    // Fazer o envio async por trás dos panos com o novo suporte a caption
+                    useChatStore.getState().uploadAndSendMedia(
+                      activeChatId, 
+                      imageToSend, 
+                      'image', 
+                      properTargetInstance as string,
+                      false,
+                      captionToSend
+                    ).catch(console.error);
+                  }
+                }}
+                className="bg-[#00a884] hover:bg-[#008f6f] text-white p-3 rounded-xl transition-colors shadow-md flex items-center justify-center"
+              >
+                <Send size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <AgentSettingsModal isOpen={isAgentSettingsOpen} onClose={() => setIsAgentSettingsOpen(false)} />
@@ -460,15 +541,15 @@ export default function ChatDashboard() {
         
         {/* Header Premium da Sidebar */}
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.14 | Deploy: ..."}
+          <span className="hidden md:block absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.20 | Deploy: 17/04/2026, 15:26"}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => setShowMainSidebar(!showMainSidebar)}
-                className="hidden lg:flex p-2 -ml-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors"
+                className="flex p-2 -ml-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors"
                 title={showMainSidebar ? "Ocultar Menu Principal" : "Mostrar Menu Principal"}
               >
                 <Menu size={20} />
@@ -554,44 +635,54 @@ export default function ChatDashboard() {
 
         {/* Search e Filtros */}
         <div className="flex flex-col border-b border-[#f2f2f2] dark:border-[#222d34] px-3 py-2 gap-3 bg-white dark:bg-[#111b21]">
-          <div className="flex w-full bg-[#f0f2f5] dark:bg-[#202c33] px-3 py-2 rounded-xl items-center gap-2 group transition-all ring-1 ring-transparent focus-within:ring-[#00a884]/50 shadow-inner">
-            <Search size={18} className="text-[#54656f] dark:text-[#aebac1] group-focus-within:text-[#00a884] transition-colors" />
-            <input 
-              type="text" 
-              placeholder="Pesquisar chat ou contato" 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-transparent border-none outline-none text-sm w-full dark:text-[#d1d7db] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1]"
-            />
+          <div className="flex items-center gap-2 w-full">
+            <div className="flex w-full bg-[#f0f2f5] dark:bg-[#202c33] px-3 py-2 rounded-xl items-center gap-2 group transition-all ring-1 ring-transparent focus-within:ring-[#00a884]/50 shadow-inner">
+              <Search size={18} className="text-[#54656f] dark:text-[#aebac1] group-focus-within:text-[#00a884] transition-colors" />
+              <input 
+                type="text" 
+                placeholder="Pesquisar chat ou contato" 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="bg-transparent border-none outline-none text-sm w-full dark:text-[#d1d7db] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1]"
+              />
+            </div>
+            <button 
+              onClick={() => setShowFilters(!showFilters)}
+              className={cn("p-2 rounded-full transition-colors flex-shrink-0", showFilters || filterType !== 'all' ? "text-[#00a884] bg-[#00a884]/10" : "text-[#54656f] dark:text-[#aebac1] hover:bg-gray-100 dark:hover:bg-[#202c33]")}
+              title="Filtros">
+              <Filter size={18} />
+            </button>
           </div>
           
           {/* Pills Filters (Glassmorphism inspired) */}
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide relative select-none">
-             <button 
-                onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'all', x: e.clientX, y: e.clientY }); }}
-                onClick={() => setFilterType('all')} 
-                className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'all' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-               Tudo
-             </button>
-             <button 
-                onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'unread', x: e.clientX, y: e.clientY }); }}
-                onClick={() => setFilterType('unread')} 
-                className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'unread' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-               Não Lidas
-             </button>
-             <button 
-                onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'favorite', x: e.clientX, y: e.clientY }); }}
-                onClick={() => setFilterType('favorite')} 
-                className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'favorite' ? "bg-yellow-500/10 text-yellow-600 ring-1 ring-yellow-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-               <Star size={14} className={filterType === 'favorite' ? "fill-yellow-600" : ""} /> Favoritas
-             </button>
-             <button 
-                onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'labels', x: e.clientX, y: e.clientY }); }}
-                onClick={() => setFilterType('labels')} 
-                className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'labels' ? "bg-blue-500/10 text-blue-600 ring-1 ring-blue-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-               <Tag size={14} /> Etiquetas
-             </button>
-          </div>
+          {showFilters && (
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide relative select-none animate-in fade-in slide-in-from-top-2 duration-200">
+               <button 
+                  onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'all', x: e.clientX, y: e.clientY }); }}
+                  onClick={() => setFilterType('all')} 
+                  className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'all' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                 Tudo
+               </button>
+               <button 
+                  onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'unread', x: e.clientX, y: e.clientY }); }}
+                  onClick={() => setFilterType('unread')} 
+                  className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'unread' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                 Não Lidas
+               </button>
+               <button 
+                  onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'favorite', x: e.clientX, y: e.clientY }); }}
+                  onClick={() => setFilterType('favorite')} 
+                  className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'favorite' ? "bg-yellow-500/10 text-yellow-600 ring-1 ring-yellow-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                 <Star size={14} className={filterType === 'favorite' ? "fill-yellow-600" : ""} /> Favoritas
+               </button>
+               <button 
+                  onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'labels', x: e.clientX, y: e.clientY }); }}
+                  onClick={() => setFilterType('labels')} 
+                  className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'labels' ? "bg-blue-500/10 text-blue-600 ring-1 ring-blue-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                 <Tag size={14} /> Etiquetas
+               </button>
+            </div>
+          )}
 
           {/* Context Menu flutuante do Filtro */}
           {filterContextMenu && (
@@ -890,7 +981,7 @@ export default function ChatDashboard() {
         }}>
           
           {/* Chat Header */}
-          <div className="relative h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5">
+          <div className="relative h-16 shrink-0 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5">
             <div className="flex items-center gap-3">
               <button className="sm:hidden p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1]" onClick={() => setActiveChat(null)}>
                 <ChevronLeft size={24} />
@@ -1002,23 +1093,20 @@ export default function ChatDashboard() {
                return (
                   <div key={msg.id} className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start")}>
                     <div className={cn(
-                      "px-3 pb-2 pt-1.5 rounded-2xl shadow-sm max-w-[65%] relative group animate-in fade-in slide-in-from-bottom-2 backdrop-blur-md",
+                      "px-3 pb-2 pt-1.5 min-w-[120px] rounded-2xl shadow-sm max-w-[85%] md:max-w-[65%] relative group animate-in fade-in slide-in-from-bottom-2 backdrop-blur-md",
                       isMe ? "bg-[#d9fdd3]/90 dark:bg-[#005c4b]/95 text-[#111b21] dark:text-[#e9edef] rounded-tr-sm" 
                            : "bg-white/95 dark:bg-[#202c33]/90 text-[#111b21] dark:text-[#e9edef] rounded-tl-sm border border-black/5 dark:border-white/5 border-l-4 border-l-[#00a884]"
                     )}>
                        {/* Menu de Três Pontinhos para Responder */}
                        <div 
-                         className={cn(
-                           "opacity-0 group-hover:opacity-100 absolute top-2 flex items-center justify-center w-7 h-7 cursor-pointer text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] dark:hover:text-[#00a884] bg-white/80 dark:bg-black/40 hover:bg-white dark:hover:bg-black/60 shadow-sm border border-black/5 dark:border-white/5 backdrop-blur-sm rounded-full transition-all duration-200 z-10",
-                           isMe ? "-left-10" : "-right-10"
-                         )}
+                         className="absolute top-1.5 right-1 flex items-center justify-center w-7 h-7 cursor-pointer text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] dark:hover:text-[#00a884] bg-transparent hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-all duration-200 z-10"
                          onClick={() => {
                            setReplyMessage({ id: msg.id, text: msg.text || 'Mídia enviada', sender: msg.sender });
                            textareaRef.current?.focus();
                          }}
                          title="Responder"
                        >
-                         <MoreVertical size={16} />
+                         <MoreVertical size={16} className="opacity-40 hover:opacity-100" />
                        </div>
 
                        {msg.sender === 'bot' && (
@@ -1050,8 +1138,17 @@ export default function ChatDashboard() {
                       
                       {/* Media Render Premium Elements */}
                       {msg.mediaUrl && msg.mediaType === 'image' && (
-                         <div className="relative group overflow-hidden rounded-xl border border-black/5 dark:border-white/5 mb-1 bg-black/5 dark:bg-black/20">
-                           <img src={msg.mediaUrl} alt="Imagem" className="max-w-full h-auto max-h-[350px] object-cover hover:scale-[1.02] transition-transform duration-300" />
+                         <div 
+                           className="relative group overflow-hidden rounded-xl border border-black/5 dark:border-white/5 mb-1 bg-black/5 dark:bg-black/20 cursor-pointer"
+                           onClick={(e) => { e.stopPropagation(); setFullscreenImage(msg.mediaUrl || null); }}
+                           onContextMenu={(e) => { e.preventDefault(); setFullscreenImage(msg.mediaUrl || null); }}
+                         >
+                           <img src={msg.mediaUrl} alt="Imagem" className="max-w-full h-auto max-h-[350px] object-cover hover:scale-[1.02] transition-transform duration-300 pointer-events-none" />
+                           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                             <div className="bg-black/50 text-white p-2 rounded-full backdrop-blur-md">
+                               <ImageIcon size={20} />
+                             </div>
+                           </div>
                          </div>
                       )}
                       
@@ -1062,8 +1159,29 @@ export default function ChatDashboard() {
                       )}
                       
                       {msg.mediaUrl && msg.mediaType === 'audio' && (
-                         <div className="flex items-center gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-[#1d272b] dark:to-[#172124] p-1.5 rounded-3xl mb-1 border border-emerald-100/50 dark:border-emerald-900/30">
-                            <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] sm:max-w-[260px] h-10 custom-audio" />
+                         <div className="flex flex-col gap-1 mb-1">
+                           <div className={`flex items-center gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-[#1d272b] dark:to-[#172124] p-1.5 rounded-3xl border border-emerald-100/50 dark:border-emerald-900/30 ${msg.transcription ? 'rounded-b-md' : ''}`}>
+                              <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] sm:max-w-[260px] h-10 custom-audio flex-1" />
+                              {!msg.transcription && (
+                                <button 
+                                  onClick={() => handleTranscribeAudio(msg.id, msg.mediaUrl!)}
+                                  disabled={transcribingIds[msg.id]}
+                                  className="mr-2 p-1.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all border border-indigo-100 dark:border-indigo-800 disabled:opacity-50 group/btn"
+                                  title="Transcrever Áudio com IA"
+                                >
+                                  {transcribingIds[msg.id] ? <RefreshCw size={15} className="animate-spin" /> : <Sparkles size={15} className="group-hover/btn:scale-110 transition-transform" />}
+                                </button>
+                              )}
+                           </div>
+                           {/* Transcription Block */}
+                           {msg.transcription && (
+                             <div className="flex animate-in fade-in slide-in-from-top-1 bg-white/60 dark:bg-black/20 backdrop-blur-md rounded-xl rounded-t-md p-3 text-sm text-gray-800 dark:text-gray-200 border border-black/5 dark:border-white/5 relative items-start gap-3 shadow-sm">
+                               <Sparkles size={16} className="text-indigo-500 mt-0.5 shrink-0" />
+                               <div className="flex-1 whitespace-pre-wrap leading-relaxed italic">
+                                 {msg.transcription}
+                               </div>
+                             </div>
+                           )}
                          </div>
                       )}
                       
@@ -1118,7 +1236,31 @@ export default function ChatDashboard() {
                       )}
                       
                       {(!msg.mediaType || (msg.mediaType !== 'document' && msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
-                         <span className="text-[14px] leading-[1.4] block pr-10 whitespace-pre-wrap break-words break-all sm:break-normal word-break shadow-none mt-1">{renderMessageText(msg.text)}</span>
+                         <span className="text-[14px] leading-[1.4] block whitespace-pre-wrap break-words sm:break-normal word-break shadow-none mt-1">
+                            {renderMessageText(msg.text)}
+                            {!msg.buttons && <span className="inline-block w-[110px] h-3 ml-2 shrink-0"></span>}
+                         </span>
+                      )}
+
+                      {/* Render Interactive Buttons */}
+                      {msg.buttons && msg.buttons.length > 0 && (
+                         <div className="flex flex-col gap-1.5 mt-2 w-full pt-1 pb-4">
+                            {msg.buttons.map((btn: any) => (
+                               <button 
+                                  key={btn.id}
+                                  className="w-full relative px-3 py-2 bg-gradient-to-r from-[#00a884]/5 to-[#00a884]/10 hover:from-[#00a884]/10 hover:to-[#00a884]/20 border border-[#00a884]/30 rounded-xl text-[#00a884] font-medium text-sm text-center shadow-sm hover:shadow-md transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                  onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (btn.url) window.open(btn.url, '_blank');
+                                      else alert(`O cliente visualiza e clica neste botão: "${btn.text}" no celular dele.`);
+                                  }}
+                                  title="Este botão foi exibido para o cliente"
+                               >
+                                  {btn.url ? <span className="p-0.5 bg-[#00a884]/20 rounded-md"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></span> : <span className="p-0.5 bg-[#00a884]/20 rounded-md"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg></span>}
+                                  <span className="truncate">{btn.text}</span>
+                               </button>
+                            ))}
+                         </div>
                       )}
                       
                       <div className="absolute right-2 bottom-1 flex items-center gap-1 text-[9px] text-[#54656f] dark:text-gray-400 bg-white/40 dark:bg-[#202c33]/40 px-1.5 py-0.5 rounded-full backdrop-blur-sm">
@@ -1152,7 +1294,7 @@ export default function ChatDashboard() {
           )}
 
           {/* Input Area */}
-          <div className="flex flex-col z-10 w-full bg-[#f0f2f5] dark:bg-[#202c33] shadow-sm border-t border-[#d1d7db] dark:border-[#222d34]">
+          <div className="flex flex-col shrink-0 z-10 w-full bg-[#f0f2f5] dark:bg-[#202c33] shadow-sm border-t border-[#d1d7db] dark:border-[#222d34]">
             {/* Reply Preview Box */}
             {replyMessage && (
               <div className="flex items-start bg-black/5 dark:bg-black/20 p-3 relative animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-t-xl mx-2 mt-2 group/replybox border border-black/5 dark:border-white/5">
@@ -1199,6 +1341,22 @@ export default function ChatDashboard() {
                     e.preventDefault();
                     if (inputText.trim()) {
                       handleSendHuman(e as any);
+                    }
+                  }
+                }}
+                onPaste={(e) => {
+                  const items = e.clipboardData?.items;
+                  if (!items) return;
+                  for (let i = 0; i < items.length; i++) {
+                    if (items[i].type.indexOf('image') !== -1) {
+                      e.preventDefault();
+                      const file = items[i].getAsFile();
+                      if (file) {
+                        setPastedImage(file);
+                        setPastedImagePreview(URL.createObjectURL(file));
+                        setPastedImageCaption('');
+                      }
+                      break;
                     }
                   }
                 }}
@@ -1294,6 +1452,29 @@ export default function ChatDashboard() {
           <Bot size={80} className="text-gray-300 dark:text-[#2a3942] mb-6" />
           <h1 className="text-3xl font-light text-[#54656f] dark:text-[#8696a0]">SaaS Multi-Agente Híbrido</h1>
           <div className="text-sm text-[#54656f] dark:text-[#8696a0] mt-2 flex items-center gap-2"><div className="w-2 h-2 bg-[#00a884] rounded-full animate-pulse"></div> Conectado com banco de dados</div>
+        </div>
+      )}
+
+      {/* Modal de Tela Cheia para Imagens */}
+      {fullscreenImage && (
+        <div 
+          className="fixed inset-0 z-[99999] bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setFullscreenImage(null)}
+          onContextMenu={(e) => { e.preventDefault(); setFullscreenImage(null); }}
+        >
+          <button 
+            onClick={() => setFullscreenImage(null)}
+            className="absolute top-6 right-6 text-white p-2 bg-black/50 hover:bg-white/20 rounded-full transition-colors z-50 shadow-lg"
+          >
+            <X size={24} />
+          </button>
+          <img 
+            src={fullscreenImage} 
+            alt="Imagem em Tela Cheia" 
+            className="max-w-full max-h-[90vh] object-contain select-none animate-in zoom-in-95 duration-300 shadow-2xl rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.stopPropagation()}
+          />
         </div>
       )}
 
