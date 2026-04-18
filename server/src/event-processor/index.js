@@ -265,8 +265,37 @@ class EventProcessor {
              for(const e of existingConvs) finalConvIdMap.set(`${e.tenant_id}_${e.contact_id}`, e.id);
              for(const e of insertedConvs) finalConvIdMap.set(`${e.tenant_id}_${e.contact_id}`, e.id);
              
+             // 2.5 Resolve Duplicatas de Mensagens ANTES do processo pesado de mídias e inserções
+             const allMessageIds = batch.map(b => b.rawMsg.key.id).filter(Boolean);
+             const existingIdsSet = new Set();
+             if (allMessageIds.length > 0) {
+                 // Busca IDs já existentes para evitar código 23505 (Unique Violation)
+                 for(let i = 0; i < allMessageIds.length; i += 500) {
+                     const chunk = allMessageIds.slice(i, i + 500);
+                     const { data: existingMessages } = await supabase.from('messages')
+                         .select('whatsapp_message_id')
+                         .in('whatsapp_message_id', chunk);
+                     if (existingMessages) {
+                         for (const m of existingMessages) existingIdsSet.add(m.whatsapp_message_id);
+                     }
+                 }
+             }
+
+             const uniqueBatchMap = new Map();
+             for (const b of batch) {
+                 if (!existingIdsSet.has(b.rawMsg.key.id)) {
+                     uniqueBatchMap.set(b.rawMsg.key.id, b);
+                 }
+             }
+             const activeBatch = Array.from(uniqueBatchMap.values());
+
+             if (activeBatch.length === 0) {
+                 console.log(`[BatchProcessor] Lote concluído sem novas requisições (todas as ${batch.length} mensagens já existiam).`);
+                 return;
+             }
+
              // 3. Processa Mídias em Paralelo Segura (evitando Memory leaks)
-             await Promise.all(batch.map(async b => {
+             await Promise.all(activeBatch.map(async b => {
                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
                  b.conversationId = finalConvIdMap.get(`${b.tenantId}_${cid}`);
                  
@@ -306,7 +335,7 @@ class EventProcessor {
              }));
              
              // 4. INSERE TODAS AS MENSAGENS NUM CHUTE SÓ (BULK INSERT)
-             const messagesToInsert = batch.map(b => ({
+             const messagesToInsert = activeBatch.map(b => ({
                  tenant_id: b.tenantId,
                  conversation_id: b.conversationId,
                  direction: b.direction,
@@ -355,7 +384,7 @@ class EventProcessor {
              const fetchedPictures = new Set();
 
              for(const msg of realInserted) {
-                 const b = batch.find(x => x.rawMsg.key.id === msg.whatsapp_message_id);
+                 const b = activeBatch.find(x => x.rawMsg.key.id === msg.whatsapp_message_id);
                  if (!b) continue;
 
                  if (!b.isHistory) {
