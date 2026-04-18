@@ -146,10 +146,10 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
         const timestamp = Date.now();
         console.log(`[send-media] Received request! messageType: ${messageType}, file: ${file.originalname}, mime: ${file.mimetype}, size: ${file.buffer.length}`);
         
-        if (messageType === 'audio' && (file.mimetype.includes('webm') || file.originalname.endsWith('.webm'))) {
+        if (messageType === 'audio') {
             try {
-                console.log(`[send-media] Starting ffmpeg conversion to ogg...`);
-                const tempInput = path.join(os.tmpdir(), `in_${timestamp}.webm`);
+                console.log(`[send-media] Starting ffmpeg conversion to WhatsApp OGG Opus...`);
+                const tempInput = path.join(os.tmpdir(), `in_${timestamp}.tmp`);
                 const tempOutput = path.join(os.tmpdir(), `out_${timestamp}.ogg`);
                 
                 fs.writeFileSync(tempInput, file.buffer);
@@ -157,6 +157,8 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                 await new Promise((resolve, reject) => {
                     ffmpeg(tempInput)
                         .audioCodec('libopus')
+                        .audioChannels(1)
+                        .audioFrequency(16000)
                         .format('ogg')
                         .on('end', () => {
                             console.log(`[send-media] Conversion finished!`);
@@ -175,14 +177,16 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                 // Sobrescreve as propriedades do arquivo com a versão convertida
                 file.buffer = convertedBuffer;
                 file.mimetype = 'audio/ogg; codecs=opus';
-                file.originalname = file.originalname.replace('.webm', '.ogg');
+                
+                // Atualiza a extensão pra ogg se não for
+                file.originalname = file.originalname.replace(/\.[^/.]+$/, "") + ".ogg";
                 
                 // Clean up temp files
                 try { fs.unlinkSync(tempInput); } catch (e) {}
                 try { fs.unlinkSync(tempOutput); } catch (e) {}
                 
             } catch (err) {
-                console.error('Error converting WebM to OGG:', err);
+                console.error('Error converting Audio to OGG Opus:', err);
                 return res.status(500).json({ error: 'Failed to convert audio file format' });
             }
         }
