@@ -137,14 +137,14 @@ export default function InboxesList() {
                 <div className="p-12 flex justify-center"><div className="w-8 h-8 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin"/></div>
              ) : filteredInstances.length > 0 ? (
                 filteredInstances.map((inst, idx) => (
-                  <div key={inst.id} className={`flex items-center justify-between p-6 hover:bg-white/5 transition-colors ${idx !== filteredInstances.length - 1 ? 'border-b border-white/5' : ''}`}>
+                  <div key={inst.id} onClick={() => navigate(`/settings/inboxes/${inst.id}`)} className={`flex items-center justify-between p-6 hover:bg-white/10 transition-colors cursor-pointer ${idx !== filteredInstances.length - 1 ? 'border-b border-white/5' : ''}`}>
                      <div className="flex items-center gap-5">
-                        <div className="w-14 h-14 bg-[#202c33] dark:bg-[#202c33] border border-white/10 rounded-2xl flex items-center justify-center shadow-inner">
-                           <MessageSquare size={28} className="text-gray-300" />
+                        <div className="w-14 h-14 bg-[#202c33] dark:bg-[#202c33] border border-emerald-500/30 rounded-2xl flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.15)] group-hover:scale-105 transition-transform duration-300">
+                           <MessageSquare size={28} className="text-emerald-500" />
                         </div>
                         <div className="flex flex-col">
                            <span className="text-lg font-bold text-white">{inst.display_name}</span>
-                           <span className="text-sm font-medium text-gray-400 mt-1">WhatsApp - Baileys</span>
+                           <span className="text-sm font-medium text-emerald-500/80 mt-1 flex items-center gap-1"><Smartphone size={14}/> WhatsApp Baileys • {inst.status === 'connected' ? 'Conectado' : inst.status === 'connecting' ? 'Gerando QR Code' : 'Offline'}</span>
                         </div>
                      </div>
                      <div className="flex items-center gap-3">

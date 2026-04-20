@@ -92,7 +92,10 @@ class EventProcessor {
 
                 const senderType = msg.key.fromMe ? 'bot' : 'client';
                 const direction = msg.key.fromMe ? 'outbound' : 'inbound';
-                const pushName = msg.pushName || phone;
+                
+                // Se for outbound (fromMe), o msg.pushName é o nome do PRÓPRIO aparelho (ex: Burguer Plus).
+                // Não devemos atribuir ao nome do cliente (jid).
+                const pushName = msg.key.fromMe ? phone : (msg.pushName || phone);
                 
                 // Trata data da mensagem
                 const timestampSecs = msg.messageTimestamp;

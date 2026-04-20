@@ -1219,9 +1219,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   subscribeToNewMessages: () => {
     const state = get() as any;
     if (state.isSubscribed) return; // React 18 protection
-    const tenantId = state.tenantInfo?.id;
+    let tenantId = state.tenantInfo?.id;
     if (!tenantId) {
-        console.error('[Realtime] Cannot subscribe without tenantInfo.id');
+        tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+    }
+    if (!tenantId) {
+        console.error('[Realtime] Cannot subscribe without tenantId. Ensure user is logged in.');
         return;
     }
     set({ isSubscribed: true } as any);

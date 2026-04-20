@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
-import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X } from 'lucide-react';
+import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X, QrCode, RefreshCcw, LogOut } from 'lucide-react';
 
 interface InstanceData {
   id: string;
@@ -12,6 +12,8 @@ interface InstanceData {
   settings: Record<string, any>;
   tenant_id: string;
 }
+
+const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
 export default function InboxSettings() {
   const { id } = useParams<{ id: string }>();
@@ -24,8 +26,15 @@ export default function InboxSettings() {
   const [instance, setInstance] = useState<InstanceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [engineStatus, setEngineStatus] = useState<string>('offline');
   
-  const [activeTab, setActiveTab] = useState('settings');
+  const [activeTab, setActiveTab] = useState('config'); // Changed default to 'config' to focus on connection
+
+  // QR Code States
+  const [showQr, setShowQr] = useState(false);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [successConnectId, setSuccessConnectId] = useState<string | null>(null);
 
   // Form states (Configurações)
   const [displayName, setDisplayName] = useState('');
@@ -105,6 +114,92 @@ export default function InboxSettings() {
     setAssignedAgents(prev => 
       prev.includes(userId) ? prev.filter(u => u !== userId) : [...prev, userId]
     );
+  };
+
+  const handleDisconnect = async () => {
+    if (!instance || !tenantId) return;
+    try {
+      setEngineStatus('offline');
+      await fetch(`${ENGINE_URL}/api/v1/instances/${instance.id}/disconnect`, {
+        method: 'POST',
+        headers: { 'x-tenant-id': tenantId }
+      });
+      setInstance({ ...instance, status: 'offline' });
+    } catch (e) {
+      console.error('Disconnect error:', e);
+    }
+  };
+
+  const pollQrCode = (instId: string) => {
+    let attempts = 0;
+    const maxAttempts = 30; // 60 segundos
+    
+    const interval = setInterval(async () => {
+      attempts++;
+      if (attempts > maxAttempts || !tenantId) {
+        clearInterval(interval);
+        setQrLoading(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${ENGINE_URL}/api/v1/instances/${instId}/status`, {
+          headers: { 'x-tenant-id': tenantId }
+        });
+        const respJson = await res.json();
+        const data = respJson.data;
+
+        if (data && data.status === 'connected') {
+          clearInterval(interval);
+          setQrLoading(false);
+          setSuccessConnectId(instId);
+          setEngineStatus('connected');
+          setInstance(prev => prev ? { ...prev, status: 'connected' } : prev);
+          
+          setTimeout(() => {
+            setSuccessConnectId(null);
+            setShowQr(false);
+          }, 2000);
+        } else if (data && data.status === 'offline') {
+          setQrLoading(false);
+          clearInterval(interval);
+          setEngineStatus('offline');
+          setInstance(prev => prev ? { ...prev, status: 'offline' } : prev);
+        } else if (data && data.whatsapp_instance_runtime && data.whatsapp_instance_runtime.qr_code) {
+          setQrCode(data.whatsapp_instance_runtime.qr_code);
+          setQrLoading(false);
+        }
+      } catch (err) {
+        console.error("Polling error:", err);
+      }
+    }, 2000);
+
+    return interval;
+  };
+
+  const handleConnect = async () => {
+    if (!instance || !tenantId) return;
+    try {
+      setShowQr(true);
+      setQrLoading(true);
+      setQrCode(null);
+      setEngineStatus('connecting');
+
+      const res = await fetch(`${ENGINE_URL}/api/v1/instances/${instance.id}/connect`, {
+        method: 'POST',
+        headers: { 'x-tenant-id': tenantId }
+      });
+      
+      if (!res.ok) throw new Error('Falha ao conectar');
+      
+      // Começa a monitorar
+      pollQrCode(instance.id);
+
+    } catch (err) {
+      setQrLoading(false);
+      setShowQr(false);
+      setEngineStatus('error');
+    }
   };
 
   if (loading) {
@@ -261,16 +356,56 @@ export default function InboxSettings() {
                      <div className="flex items-start gap-8 border-b border-white/5 pb-8">
                        <div className="w-1/3 flex flex-col gap-2">
                          <h3 className="text-sm font-bold text-blue-500">Gerenciar Conexão do Provedor</h3>
-                         <p className="text-xs text-gray-400 leading-relaxed">Conecte o seu dispositivo e gerencie a conexão do provedor.</p>
+                         <p className="text-xs text-gray-400 leading-relaxed">Conecte o seu dispositivo escaneando o QR Code abaixo.</p>
                        </div>
                        <div className="w-2/3 flex flex-col gap-4">
-                         <div className="flex items-center gap-2 text-sm text-gray-300 font-medium">
-                            <MessageSquare size={16} /> {instance.display_name} <strong className="text-white ml-1">{instance.phone_number ? `+${instance.phone_number}` : ''}</strong>  
-                            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 ml-2 animate-pulse"></div>
+                         <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-sm text-gray-300 font-medium">
+                               <MessageSquare size={16} /> {instance.display_name} <strong className="text-white ml-1">{instance.phone_number ? `+${instance.phone_number}` : ''}</strong>  
+                               <div className={`w-2.5 h-2.5 rounded-full ml-2 ${engineStatus === 'connected' || instance.status === 'connected' ? 'bg-emerald-500 animate-pulse' : engineStatus === 'connecting' || instance.status === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-red-500'}`}></div>
+                            </div>
+
+                            {/* BOTOES DE AÇÃO */}
+                            {engineStatus === 'connected' || instance.status === 'connected' ? (
+                                <button onClick={handleDisconnect} className="bg-red-500/10 hover:bg-red-500/20 text-red-500 text-sm font-bold py-2.5 px-6 rounded-xl transition-all border border-red-500/20 hover:border-red-500 flex items-center gap-2 w-max">
+                                    <LogOut size={16} /> Desconectar
+                                </button>
+                            ) : (
+                                <button onClick={handleConnect} disabled={showQr && qrLoading} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold py-2.5 px-6 rounded-xl transition-all shadow-[0_5px_15px_-5px_rgba(37,99,235,0.5)] flex items-center gap-2 w-max disabled:opacity-50">
+                                    <QrCode size={16} /> {showQr && qrLoading ? 'Aguarde...' : 'Escanear QR Code'}
+                                </button>
+                            )}
                          </div>
-                         <button onClick={() => navigate('/instances')} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold py-2.5 px-6 rounded-xl transition-all shadow-[0_5px_15px_-5px_rgba(37,99,235,0.5)] w-max">
-                           Gerenciar conexão
-                         </button>
+
+                         {/* CONTAINER QR CODE */}
+                         {showQr && (
+                             <div className="mt-4 p-8 bg-[#182229] border border-white/10 rounded-2xl flex flex-col items-center justify-center animate-in zoom-in-95 duration-300">
+                                {successConnectId === instance.id ? (
+                                    <div className="flex flex-col items-center justify-center animate-in zoom-in duration-300">
+                                        <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center mb-4 border border-emerald-500/50 shadow-[0_0_30px_rgba(16,185,129,0.3)]">
+                                            <svg className="w-10 h-10 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                                        </div>
+                                        <span className="text-xl font-bold text-emerald-500">Conectado com Sucesso!</span>
+                                    </div>
+                                ) : qrCode ? (
+                                    <div className="flex flex-col items-center">
+                                       <div className="bg-white p-4 rounded-2xl shadow-[0_0_30px_rgba(255,255,255,0.1)] relative group">
+                                           <img src={qrCode} alt="WhatsApp QR Code" className="w-[280px] h-[280px]" />
+                                       </div>
+                                       <p className="text-gray-400 text-sm mt-6 text-center max-w-sm">Aponte a câmera do seu celular para o código acima para conectar o WhatsApp.</p>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center py-10">
+                                       <div className="relative">
+                                           <div className="w-16 h-16 border-4 border-blue-500/30 rounded-full"></div>
+                                           <div className="w-16 h-16 border-4 border-blue-500 rounded-full border-t-transparent animate-spin absolute top-0 left-0"></div>
+                                       </div>
+                                       <span className="text-blue-500 font-bold mt-6 text-lg tracking-wide">Gerando QR Code...</span>
+                                       <p className="text-gray-500 text-sm mt-2">Iniciando sessão no servidor Baileys</p>
+                                    </div>
+                                )}
+                             </div>
+                         )}
                        </div>
                      </div>
 
