@@ -12,8 +12,28 @@ class EventProcessor {
         
         // Loop de processamento em lote a cada 2 segundos.
         setInterval(() => this.flushQueue(), 2000);
+        
+        this.tenantConfigs = new Map();
     }
     
+    async getTenantConfig(tenantId) {
+        const cached = this.tenantConfigs.get(tenantId);
+        // Cache por 60 segundos
+        if (cached && (Date.now() - cached.timestamp < 60000)) {
+            return cached.config;
+        }
+
+        try {
+            const { data } = await supabase.from('companies').select('ignore_groups').eq('tenant_id', tenantId).single();
+            // Default é true (ignorar grupos) para retrocompatibilidade
+            const config = { ignore_groups: data && data.ignore_groups !== null ? data.ignore_groups : true };
+            this.tenantConfigs.set(tenantId, { config, timestamp: Date.now() });
+            return config;
+        } catch (e) {
+            return { ignore_groups: true }; 
+        }
+    }
+
     // Auxiliar: Filtra se é um grupo
     isGroup(jid) {
         return jid && jid.endsWith('@g.us');
@@ -49,8 +69,13 @@ class EventProcessor {
 
             if (!jid) continue;
             
-            // Ignora status, grupos e LIDs isolados, forçando a ignorar as ecos de múltiplos aparelhos para IDs nativos
-            if (this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
+            const config = await this.getTenantConfig(tenantId);
+            
+            // Ignora status e LIDs isolados, forçando a ignorar as ecos de múltiplos aparelhos para IDs nativos
+            if (this.isBroadcast(jid) || this.isLid(jid)) continue;
+            
+            // Ignora grupos dependendo da opção da empresa
+            if (config.ignore_groups && this.isGroup(jid)) continue;
 
             try {
                 const ownerJid = sock?.user?.id;

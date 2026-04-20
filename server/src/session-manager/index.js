@@ -68,7 +68,12 @@ class SessionManager {
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: false,
                 markOnlineOnConnect: true,
-                shouldSyncHistoryMessage: () => false, // Impede que o socket trave no buffer esperando evento de sync timeout (60s)
+                shouldSyncHistoryMessage: (msg) => {
+                    // Impede baixar histórico gigante (FULL / RECENT),
+                    // mas PERMITE sync de contatos e metadados como @lid para evitar falhas de sessão!
+                    // syncType enum: INITIAL_BOOTSTRAP = 0, FULL = 2, RECENT = 3
+                    return msg.syncType !== 2 && msg.syncType !== 3; 
+                },
                 connectTimeoutMs: 60000,
                 keepAliveIntervalMs: 25000,
                 defaultQueryTimeoutMs: 120000,
