@@ -59,6 +59,14 @@ class SessionManager {
             // workaround for pure ESM makeWASocket if it's default exported vs destructured
             const createSocket = makeWASocket.default ? makeWASocket.default : makeWASocket;
 
+            const msgRetryCounterCache = {
+                store: new Map(),
+                get(k) { return this.store.get(k); },
+                set(k, v) { this.store.set(k, v); },
+                del(k) { this.store.delete(k); },
+                flushAll() { this.store.clear(); }
+            };
+
             const sock = createSocket({
                 version,
                 logger: this.logger,
@@ -78,7 +86,11 @@ class SessionManager {
                 keepAliveIntervalMs: 25000,
                 defaultQueryTimeoutMs: 120000,
                 retryRequestDelayMs: 5000,
-                maxMsgRetryCount: 5
+                maxMsgRetryCount: 5,
+                msgRetryCounterCache,
+                getMessage: async (key) => {
+                    return { conversation: 'MENSAGEM_RECUPEERADA_COM_FALHA' };
+                }
             });
 
             sock.ev.on('creds.update', saveCreds);
