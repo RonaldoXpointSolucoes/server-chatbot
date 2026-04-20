@@ -32,6 +32,7 @@ export type ContactType = ContactRow & {
   assigned_to?: string | null;
   conv_labels?: any[];
   instance_id?: string | null;
+  is_blocked?: boolean;
 };
 
 export interface AgentType {
@@ -93,8 +94,8 @@ interface ChatState {
   deleteContact: (contactId: string) => Promise<void>;
   togglePinContact: (contactId: string) => Promise<void>;
   toggleFavorite: (contactId: string) => Promise<void>;
+  toggleBlockContact: (contactId: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
-  fetchContactPicture: (contactId: string, jid: string, instanceName: string) => Promise<void>;
   fetchContactPicture: (contactId: string, jid: string, instanceName: string) => Promise<void>;
   
   // Omnichannel Actions
@@ -654,6 +655,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
             contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_favorite: !newStatus } : c)
          }));
       }
+    }
+  },
+
+  toggleBlockContact: async (contactId) => {
+    const contact = get().contacts.find(c => c.id === contactId);
+    if (!contact) return;
+    const newBlockedState = !contact.is_blocked;
+
+    // Atualização otimista local
+    set((state) => ({
+      contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_blocked: newBlockedState } : c)
+    }));
+
+    try {
+      const { error } = await supabase.from('contacts').update({ is_blocked: newBlockedState }).eq('id', contactId);
+      if (error) throw error;
+    } catch (e) {
+      console.error('Erro ao bloquear contato:', e);
+      // Reverter atualização otimista
+      set((state) => ({
+        contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_blocked: !newBlockedState } : c)
+      }));
     }
   },
 

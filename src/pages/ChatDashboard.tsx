@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2 } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
-import { DeleteModal, RenameModal, NewChatModal } from '../components/ChatModals';
+import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal } from '../components/ChatModals';
 import { SettingsModal } from '../components/SettingsModal';
 import { AgentSettingsModal } from '../components/AgentSettingsModal';
 import { ChatOmniMenu } from '../components/ChatOmniMenu';
@@ -151,6 +151,8 @@ export default function ChatDashboard() {
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [contactToEdit, setContactToEdit] = useState<any | null>(null);
   const [contactToDelete, setContactToDelete] = useState<{id: string; name: string} | null>(null);
+  const [contactToBlock, setContactToBlock] = useState<{id: string; name: string; isBlocked: boolean} | null>(null);
+  const [contactForLabels, setContactForLabels] = useState<any | null>(null);
   const [isNewChatOpen, setIsNewChatOpen] = useState(false);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [activeChatDropdown, setActiveChatDropdown] = useState(false);
@@ -499,6 +501,21 @@ export default function ChatDashboard() {
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <AgentSettingsModal isOpen={isAgentSettingsOpen} onClose={() => setIsAgentSettingsOpen(false)} />
 
+      <BlockModal 
+        isOpen={!!contactToBlock}
+        onClose={() => setContactToBlock(null)}
+        contactId={contactToBlock?.id || ''}
+        contactName={contactToBlock?.name || contactToBlock?.jid?.split('@')[0] || ''}
+        isCurrentlyBlocked={contactToBlock?.is_blocked || false}
+      />
+
+      <ContactLabelsModal
+        isOpen={!!contactForLabels}
+        onClose={() => setContactForLabels(null)}
+        contactId={contactForLabels?.id || ''}
+        contactName={contactForLabels?.name || contactForLabels?.phone || ''}
+      />
+
       <NewChatModal 
         isOpen={isNewChatOpen}
         onClose={() => setIsNewChatOpen(false)}
@@ -587,9 +604,9 @@ export default function ChatDashboard() {
                       <Star size={18} className="text-yellow-500" />
                       <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Favoritas</span>
                     </button>
-                    <button className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3">
+                    <button onClick={() => { navigate('/settings/labels'); setActiveDropdown(null); }} className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3">
                       <Tag size={18} className="text-blue-500" />
-                      <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Etiquetas</span>
+                      <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Editar Etiquetas</span>
                     </button>
                     <button onClick={() => { markAllAsRead(); setActiveDropdown(null); }} className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3">
                       <CheckCheck size={18} className="text-[#00a884]" />
@@ -880,7 +897,7 @@ export default function ChatDashboard() {
                         </button>
                         
                         {activeDropdown === contact.id && (
-                          <div className="absolute right-0 top-6 w-44 bg-white dark:bg-[#233138] border border-black/5 dark:border-white/5 rounded-xl shadow-xl py-2 z-[99] animate-in fade-in zoom-in-95 duration-100">
+                          <div className="absolute right-0 top-6 w-52 bg-white dark:bg-[#233138] border border-black/5 dark:border-white/5 rounded-xl shadow-xl py-2 z-[99] animate-in fade-in zoom-in-95 duration-100">
                             <button 
                               onClick={(e) => { e.stopPropagation(); togglePinContact(contact.id); setActiveDropdown(null); }}
                               className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
@@ -910,17 +927,48 @@ export default function ChatDashboard() {
                               <History size={14} className={cn(isSyncingHistory[contact.id] ? "animate-spin text-[#00a884]" : "")} />
                               {isSyncingHistory[contact.id] ? "Buscando..." : "Buscar Histórico"}
                             </button>
+                            
+                            {/* Novos botões inseridos */}
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setContactForLabels(contact); setActiveDropdown(null); }}
+                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                            >
+                              <Tag size={14} className="text-blue-500" />
+                              Atribuir etiqueta
+                            </button>
                             <button 
                               onClick={(e) => { e.stopPropagation(); setContactToEdit(contact); setActiveDropdown(null); }}
-                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors"
+                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
                             >
+                              <User size={14} className="text-gray-500" />
                               Editar contato
+                            </button>
+
+                            <div className="h-px w-full bg-gray-100 dark:bg-white/10 my-1" />
+
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setContactToBlock({id: contact.id, name: contact.name || contact.phone, isBlocked: !!contact.is_blocked}); setActiveDropdown(null); }}
+                              className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex items-center gap-2"
+                            >
+                              <ShieldAlert size={14} />
+                              {contact.is_blocked ? "Desbloquear contato" : "Bloquear contato"}
                             </button>
                             <button 
                               onClick={(e) => { e.stopPropagation(); setContactToDelete({id: contact.id, name: contact.name || contact.phone}); setActiveDropdown(null); }}
-                              className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                              className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex items-center gap-2"
                             >
+                              <Trash2 size={14} />
                               Apagar conversa
+                            </button>
+
+                            <div className="h-px w-full bg-gray-100 dark:bg-white/10 my-1" />
+
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setActiveDropdown(null); }}
+                              className="w-full text-left px-4 py-2 text-sm text-gray-500 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors flex items-center gap-2"
+                            >
+                              <X size={14} />
+                              Fechar menu
                             </button>
                           </div>
                         )}

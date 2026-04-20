@@ -29,7 +29,9 @@ import {
   Repeat,
   CalendarDays,
   Puzzle,
-  Smartphone
+  Smartphone,
+  Edit2,
+  Plus
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
@@ -204,12 +206,48 @@ export function MainSidebar() {
           </CollapsibleSection>
 
           <CollapsibleSection title="Etiquetas" icon={<Tag size={16} />} isOpen={expandedSections.labels} onToggle={() => toggleSection('labels')}>
-            <NavItem icon={<LabelDot color="bg-red-500" />} title="agente-off" isSub />
-            <NavItem icon={<LabelDot color="bg-red-600" />} title="bloqueado" isSub />
-            <NavItem icon={<LabelDot color="bg-[#111111]" />} title="em-treinamento" isSub />
-            <NavItem icon={<LabelDot color="bg-blue-600" />} title="financeiro" isSub />
-            <NavItem icon={<LabelDot color="bg-slate-600" />} title="gestor" isSub />
-            <NavItem icon={<LabelDot color="bg-green-600" />} title="plano-básico" isSub />
+            {[
+               { title: "agente-off", color: "bg-red-500" },
+               { title: "bloqueado", color: "bg-red-600" },
+               { title: "em-treinamento", color: "bg-[#111111]" },
+               { title: "financeiro", color: "bg-blue-600" },
+               { title: "gestor", color: "bg-slate-600" },
+               { title: "plano-básico", color: "bg-green-600" }
+            ].map(label => (
+                <NavItem 
+                  key={label.title}
+                  icon={<LabelDot color={label.color} />} 
+                  title={label.title} 
+                  isSub 
+                  actionNode={
+                     <button 
+                       onClick={(e) => { e.stopPropagation(); navigate('/settings/labels'); }}
+                       className="p-1.5 hover:bg-white/10 dark:hover:bg-white/10 rounded-md text-[#8696a0] hover:text-[#00a884] transition-colors"
+                       title="Editar Etiqueta"
+                     >
+                       <Edit2 size={13} />
+                     </button>
+                  }
+                />
+            ))}
+            
+            <div className="mt-1 pt-1.5 mx-3 border-t border-[#2a3942]/60 flex gap-1">
+               <button 
+                  onClick={() => navigate('/settings/labels')}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-[#202c33] hover:bg-[#2a3942] rounded-md text-[11px] text-[#8696a0] hover:text-white transition-colors"
+                  title="Gerenciar Etiquetas"
+               >
+                 <Settings size={12} />
+                 <span>Gerenciar</span>
+               </button>
+               <button 
+                  onClick={() => navigate('/settings/labels')}
+                  className="flex items-center justify-center py-1.5 px-3 bg-[#00a884]/10 hover:bg-[#00a884]/20 border border-[#00a884]/20 hover:border-[#00a884]/40 rounded-md text-[#00a884] transition-colors"
+                  title="Adicionar Nova Etiqueta"
+               >
+                 <Plus size={12} />
+               </button>
+            </div>
           </CollapsibleSection>
         </div>
 
@@ -294,6 +332,7 @@ function NavItem({
   badge, 
   isActive = false, 
   isSub = false, 
+  actionNode,
   onClick 
 }: { 
   icon?: React.ReactNode, 
@@ -301,6 +340,7 @@ function NavItem({
   badge?: string, 
   isActive?: boolean, 
   isSub?: boolean,
+  actionNode?: React.ReactNode,
   onClick?: () => void
 }) {
   return (
@@ -312,21 +352,29 @@ function NavItem({
         isSub ? "pl-5" : ""
       )}
     >
-      <div className="flex items-center min-w-0 gap-3">
+      <div className="flex items-center min-w-0 gap-3 flex-1">
         {icon && <span className={cn("shrink-0", isActive ? "text-[#e9edef]" : "text-[#8696a0] group-hover:text-[#d1d7db]")}>{icon}</span>}
         <span className={cn(
-          "truncate tracking-tight", 
+          "truncate tracking-tight flex-1", 
           isActive ? "text-[#e9edef] font-medium" : "text-[#aebac1] group-hover:text-[#d1d7db]",
           isSub && !icon ? "text-[13px]" : "text-[14px]"
         )}>
           {title}
         </span>
       </div>
-      {badge && (
-        <span className="shrink-0 bg-[#2a3942] text-[#d1d7db] text-[10px] px-1.5 py-0.5 rounded-full font-mono">
-          {badge}
-        </span>
-      )}
+      
+      <div className="flex items-center gap-1.5 shrink-0 ml-2">
+         {actionNode && (
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+               {actionNode}
+            </div>
+         )}
+         {badge && (
+           <span className="bg-[#2a3942] text-[#d1d7db] text-[10px] px-1.5 py-0.5 rounded-full font-mono">
+             {badge}
+           </span>
+         )}
+      </div>
       
       {/* Indicador de ativo (famoso trancinho no canto no chatwoot original) */}
       {isActive && !isSub && (

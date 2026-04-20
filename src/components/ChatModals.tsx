@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check } from 'lucide-react';
 
 interface BaseModalProps {
   isOpen: boolean;
@@ -457,3 +457,178 @@ export function NewChatModal({ isOpen, onClose, contacts, onStartChat }: NewChat
     </div>
   );
 }
+
+export interface BlockModalProps extends BaseModalProps {
+  contactName: string;
+  isBlocked: boolean;
+  onConfirm: () => void;
+}
+
+export function BlockModal({ isOpen, onClose, contactName, isBlocked, onConfirm }: BlockModalProps) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
+      <div 
+        className="bg-white dark:bg-[#202c33] border border-white/20 dark:border-white/5 rounded-3xl p-6 w-[90%] max-w-sm shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-200"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className={`absolute top-0 left-0 w-full h-1 ${isBlocked ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+        <div className="flex items-center gap-3 mb-4 mt-2">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${isBlocked ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-500' : 'bg-red-100 dark:bg-red-500/20 text-red-500'}`}>
+            {isBlocked ? <CheckCircle2 size={24} /> : <AlertCircle size={24} />}
+          </div>
+          <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef]">
+            {isBlocked ? "Desbloquear Contato?" : "Bloquear Contato?"}
+          </h2>
+        </div>
+        
+        <p className="text-sm text-[#54656f] dark:text-[#8696a0] mb-6 leading-relaxed">
+          {isBlocked ? (
+            <>Tem certeza que deseja desbloquear <strong className="text-[#111b21] dark:text-[#e9edef]">{contactName}</strong>? Você voltará a receber mensagens desta pessoa.</>
+          ) : (
+            <>Tem certeza que deseja bloquear <strong className="text-[#111b21] dark:text-[#e9edef]">{contactName}</strong>? Você deixará de receber mensagens desta pessoa.</>
+          )}
+        </p>
+        
+        <div className="flex flex-col-reverse sm:flex-row justify-end gap-3">
+          <button 
+            type="button" 
+            onClick={onClose}
+            className="px-5 py-2.5 rounded-full text-sm font-semibold text-[#54656f] dark:text-[#aebac1] hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() => {
+              onConfirm();
+              onClose();
+            }}
+            disabled={isProcessing}
+            className={`flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white shadow-md transition-all active:scale-95 ${isBlocked ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"}`}
+          >
+            {isBlocked ? <CheckCircle2 size={16} /> : <ShieldAlert size={16} />} 
+            {isBlocked ? "Sim, Desbloquear" : "Sim, Bloquear"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ContactLabelsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  contactId: string;
+  contactName: string;
+}
+
+export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: ContactLabelsModalProps) {
+  const [labels, setLabels] = useState<any[]>([]);
+  const [activeLabels, setActiveLabels] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      // Carregar etiquetas globais e as ativas do contato
+      setIsLoading(true);
+      // Fallback premium MOCK se não tiver no supabase ainda
+      const MOCK_LABELS = [
+        { id: '1', name: 'agente-off', color: 'bg-rose-500' },
+        { id: '2', name: 'bloqueado', color: 'bg-rose-600' },
+        { id: '3', name: 'em-treinamento', color: 'bg-[#182229]' },
+        { id: '4', name: 'financeiro', color: 'bg-indigo-500' },
+        { id: '5', name: 'gestor', color: 'bg-slate-600' },
+        { id: '6', name: 'plano-básico', color: 'bg-emerald-500' },
+      ];
+      setLabels(MOCK_LABELS);
+      // Simular carregamento das ativas mockada
+      setActiveLabels(['4']); 
+      setIsLoading(false);
+    }
+  }, [isOpen, contactId]);
+
+  const toggleLabel = (labelId: string) => {
+    setActiveLabels(prev => 
+      prev.includes(labelId) ? prev.filter(id => id !== labelId) : [...prev, labelId]
+    );
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    // Aqui iria a lógica para salvar no Supabase (inserir e deletar da tabela conversation_labels)
+    setTimeout(() => {
+      setIsSaving(false);
+      onClose();
+    }, 600);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose} />
+      
+      <div className="relative w-full max-w-sm bg-white dark:bg-[#182229] border border-black/5 dark:border-[#2a3942] rounded-3xl shadow-2xl p-6 animate-in zoom-in-95 slide-in-from-bottom-10 duration-300">
+        <div className="flex items-center justify-between gap-3 mb-5">
+          <div className="p-2.5 rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-500">
+            <Tag size={20} />
+          </div>
+          <button onClick={onClose} className="p-2 text-gray-400 hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+        
+        <h2 className="text-xl font-bold text-[#111b21] dark:text-white tracking-tight leading-tight">Atribuir Etiquetas</h2>
+        <p className="text-sm text-[#54656f] dark:text-[#8696a0] mt-1 mb-6">
+          Selecione as etiquetas para <strong className="text-[#111b21] dark:text-[#e9edef]">{contactName}</strong>
+        </p>
+
+        <div className="flex flex-col gap-2 max-h-60 overflow-y-auto styled-scrollbar pr-2 mb-6">
+          {isLoading ? (
+            <div className="flex justify-center py-6"><Loader2 size={24} className="text-[#00a884] animate-spin" /></div>
+          ) : (
+            labels.map(label => {
+              const isActive = activeLabels.includes(label.id);
+              return (
+                <label key={label.id} className="flex items-center gap-3 p-3 rounded-2xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors border border-transparent hover:border-black/5 dark:hover:border-white/5">
+                   <div className="relative flex items-center justify-center w-5 h-5 rounded border border-[#54656f] dark:border-[#8696a0] bg-transparent overflow-hidden">
+                     <input 
+                       type="checkbox" 
+                       checked={isActive} 
+                       onChange={() => toggleLabel(label.id)}
+                       className="opacity-0 absolute inset-0 cursor-pointer"
+                     />
+                     {isActive && <div className="absolute inset-0 bg-[#00a884] flex items-center justify-center"><Check size={12} className="text-white" /></div>}
+                   </div>
+                   <div className={`w-3 h-3 rounded-full shadow-inner ${label.color}`} />
+                   <span className="text-sm font-medium text-[#3b4a54] dark:text-[#d1d7db] leading-none">{label.name}</span>
+                </label>
+              );
+            })
+          )}
+        </div>
+
+        <div className="flex items-center justify-between mt-2 pt-4 border-t border-black/5 dark:border-white/5">
+          <a href="/settings/labels" className="text-sm font-medium text-blue-500 hover:text-blue-600 transition-colors flex items-center gap-1.5">
+             <Edit2 size={14} /> Editar
+          </a>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-5 py-2 rounded-full text-sm font-medium text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+              Cancelar
+            </button>
+            <button 
+              onClick={handleSave}
+              disabled={isSaving}
+              className="flex items-center justify-center min-w-[90px] px-5 py-2 rounded-full text-sm font-semibold bg-[#00a884] hover:bg-emerald-600 text-white shadow-[0_4px_14px_0_rgba(0,168,132,0.39)] transition-all disabled:opacity-50"
+            >
+              {isSaving ? <Loader2 size={16} className="animate-spin" /> : "Salvar"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
