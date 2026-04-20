@@ -102,7 +102,7 @@ const NODE_TYPES = [
 function FlowBuilderContent() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const tenant_id = sessionStorage.getItem('current_tenant_id');
+    const tenant_id = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
     const { screenToFlowPosition, fitView } = useReactFlow();
     const reactFlowWrapper = useRef<HTMLDivElement>(null);
 

@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 
 export default function FlowManager() {
   const navigate = useNavigate();
-  const tenant_id = sessionStorage.getItem('current_tenant_id');
+  const tenant_id = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
   const [flows, setFlows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);

@@ -24,7 +24,7 @@ export default function KnowledgeBase() {
   const [isTesting, setIsTesting] = useState(false);
   const [testResults, setTestResults] = useState<any[] | null>(null);
 
-  const tenantId = sessionStorage.getItem('current_tenant_id') || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+  const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
 
   useEffect(() => {
     fetchDocuments();

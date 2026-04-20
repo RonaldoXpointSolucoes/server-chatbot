@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2 } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
-import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal } from '../components/ChatModals';
+import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal } from '../components/ChatModals';
 import { SettingsModal } from '../components/SettingsModal';
 import { AgentSettingsModal } from '../components/AgentSettingsModal';
 import { ChatOmniMenu } from '../components/ChatOmniMenu';
@@ -14,7 +14,6 @@ import { format, isToday, isYesterday } from 'date-fns';
 import { Flag, Clock } from 'lucide-react'; // Adicionado lucide pro flag
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import EvolutionModal from '../components/EvolutionModal';
 import { supabase } from '../services/supabase';
 import { geminiService } from '../services/geminiService';
 
@@ -83,7 +82,7 @@ export function renderMessageText(text: string) {
 
 export default function ChatDashboard() {
   const navigate = useNavigate();
-  const tenantName = sessionStorage.getItem('current_tenant_name');
+  const tenantName = (localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name'));
   const { isEnabled: isDevLoggerEnabled } = useDevStore();
   const {  
     contacts, 
@@ -93,6 +92,7 @@ export default function ChatDashboard() {
     appVersion,
     setActiveChat, 
     sendHumanMessage, 
+    forwardMessage,
     setBotStatus,
     fetchInitialData,
     fetchTenantConfig,
@@ -114,13 +114,7 @@ export default function ChatDashboard() {
   } = useChatStore();
 
   // Execucao Incial Reativa
-  useEffect(() => {
-    fetchTenantConfig().then(() => {
-       fetchInitialData();
-       fetchTenantAgents();
-    });
-    subscribeToNewMessages();
-  }, []);
+  // Efect removido (duplicado com o useEffect consolidado mais abaixo)
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
@@ -156,6 +150,8 @@ export default function ChatDashboard() {
   const [isNewChatOpen, setIsNewChatOpen] = useState(false);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [activeChatDropdown, setActiveChatDropdown] = useState(false);
+  const [activeMsgDropdown, setActiveMsgDropdown] = useState<string | null>(null);
+  const [messageToForward, setMessageToForward] = useState<any | null>(null);
   const { showMainSidebar, setShowMainSidebar } = (useOutletContext() as { showMainSidebar: boolean, setShowMainSidebar: (v: boolean) => void }) || { showMainSidebar: true, setShowMainSidebar: () => {} };
   
   // Gemini AI States
@@ -181,9 +177,25 @@ export default function ChatDashboard() {
   const [showFilters, setShowFilters] = useState(false);
   const [filterContextMenu, setFilterContextMenu] = useState<{ type: string, x: number, y: number } | null>(null);
   const [instanceNamesMap, setInstanceNamesMap] = useState<Record<string, string>>({});
+
+  // Estados de Paginação Local Virtual
+  const [contactPageLimit, setContactPageLimit] = useState(20);
+  const contactListRef = useRef<HTMLDivElement>(null);
+
+  const handleContactScroll = () => {
+    if (!contactListRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = contactListRef.current;
+    if (scrollHeight - scrollTop - clientHeight < 150) {
+      setContactPageLimit(prev => prev + 20);
+    }
+  };
+
   
   useEffect(() => {
-    const closeCb = () => setFilterContextMenu(null);
+    const closeCb = () => {
+       setFilterContextMenu(null);
+       setActiveMsgDropdown(null);
+    };
     window.addEventListener('click', closeCb);
     return () => window.removeEventListener('click', closeCb);
   }, []);
@@ -267,8 +279,11 @@ export default function ChatDashboard() {
     (async () => {
       await fetchTenantConfig();
       await fetchInitialData();
+      await fetchTenantAgents();
+      
+      // Chama subscriber *depois* do tenant carregado
+      subscribeToNewMessages();
     })();
-    subscribeToNewMessages();
 
     supabase.from('whatsapp_instances').select('id, display_name').then(({data}) => {
       if (data) {
@@ -393,7 +408,7 @@ export default function ChatDashboard() {
     if (!mediaUrl || transcribingIds[msgId] || !activeChatId) return;
     setTranscribingIds(s => ({ ...s, [msgId]: true }));
     try {
-      await useChatStore.getState().requestTranscription(activeChatId, msgId, mediaUrl);
+      await useChatStore.getState().requestTranscription(msgId, mediaUrl);
     } catch (e: any) {
       alert(e.message || "Erro ao transcrever áudio.");
     } finally {
@@ -404,14 +419,6 @@ export default function ChatDashboard() {
   return (
     <div className="flex w-full h-[100dvh] min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
       
-      {useChatStore(s => s.isQRModalOpen) && <EvolutionModal 
-          targetInstanceName={useChatStore.getState().qrModalTargetInstance}
-          onClose={() => {
-            useChatStore.getState().closeQRModal();
-            setModalReason(null);
-          }} 
-      />}
-
       {/* Nossos Novos Modais Premium */}
       <RenameModal 
         isOpen={!!contactToEdit} 
@@ -429,6 +436,14 @@ export default function ChatDashboard() {
         onConfirm={() => {
           if(contactToDelete) deleteContact(contactToDelete.id);
         }} 
+      />
+
+      <ForwardMessageModal 
+        isOpen={!!messageToForward}
+        onClose={() => setMessageToForward(null)}
+        contacts={contacts}
+        onForward={(contactId) => forwardMessage(contactId, messageToForward, activeChat?.instance_id || connectedInstanceName || '')}
+        messagePreview={messageToForward?.text ? messageToForward.text.substring(0, 40) + '...' : (messageToForward?.mediaType ? `Mídia: ${messageToForward.mediaType}` : undefined)}
       />
 
       {/* Modal de Preview de Imagem Colada */}
@@ -764,7 +779,7 @@ export default function ChatDashboard() {
         </div>
 
         {/* Chat List Realtime */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto" ref={contactListRef} onScroll={handleContactScroll}>
           {contacts.length === 0 && (
              <p className="text-xs text-center p-6 text-gray-400">Nenhuma conversa encontrada ou aguardando conexão web-socket...</p>
           )}
@@ -821,7 +836,7 @@ export default function ChatDashboard() {
              const bTime = Math.max(b.lastMsgTimestamp || 0, bLastMsg ? new Date(bLastMsg.timestamp).getTime() : 0);
              
              return bTime - aTime;
-          }).map((contact) => {
+          }).slice(0, contactPageLimit).map((contact) => {
              const lastMsg = contact.messages?.[contact.messages.length - 1];
              const timeDisplay = lastMsg 
                ? (isToday(lastMsg.timestamp) ? format(lastMsg.timestamp, 'HH:mm') 
@@ -870,6 +885,15 @@ export default function ChatDashboard() {
                              <User size={9} />
                              <span className="max-w-[50px] truncate">{agents.find(a => a.id === contact.assigned_to)?.full_name?.split(' ')[0] || 'Ag'}</span>
                            </span>
+                         )}
+                         {contact.conv_labels && contact.conv_labels.length > 0 && (
+                           <div className="flex items-center gap-1 shrink-0 ml-1">
+                             {contact.conv_labels.map((l: any, i: number) => (
+                               <span key={i} className="px-1.5 py-0.5 text-[9px] font-bold text-white rounded-full flex items-center max-w-[60px] truncate shadow-sm border border-black/10" style={{ backgroundColor: l.color || '#3b82f6' }} title={l.name}>
+                                 {l.name}
+                               </span>
+                             ))}
+                           </div>
                          )}
                        </span>
                       {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (
@@ -1144,18 +1168,42 @@ export default function ChatDashboard() {
                     <div className={cn(
                       "px-3 pb-2 pt-1.5 min-w-[120px] rounded-2xl shadow-sm max-w-[85%] md:max-w-[65%] relative group animate-in fade-in slide-in-from-bottom-2 backdrop-blur-md",
                       isMe ? "bg-[#d9fdd3]/90 dark:bg-[#005c4b]/95 text-[#111b21] dark:text-[#e9edef] rounded-tr-sm" 
-                           : "bg-white/95 dark:bg-[#202c33]/90 text-[#111b21] dark:text-[#e9edef] rounded-tl-sm border border-black/5 dark:border-white/5 border-l-4 border-l-[#00a884]"
+                           : "bg-white/95 dark:bg-[#202c33]/90 text-[#111b21] dark:text-[#e9edef] rounded-tl-sm border border-black/5 dark:border-white/5 border-l-4 border-l-[#00a884]",
+                      activeMsgDropdown === msg.id ? "z-[50] relative" : "z-10 relative"
                     )}>
-                       {/* Menu de Três Pontinhos para Responder */}
+                       {/* Menu de Três Pontinhos para Responder/Encaminhar */}
                        <div 
                          className="absolute top-1.5 right-1 flex items-center justify-center w-7 h-7 cursor-pointer text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] dark:hover:text-[#00a884] bg-transparent hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-all duration-200 z-10"
-                         onClick={() => {
-                           setReplyMessage({ id: msg.id, text: msg.text || 'Mídia enviada', sender: msg.sender });
-                           textareaRef.current?.focus();
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           setActiveMsgDropdown(activeMsgDropdown === msg.id ? null : msg.id);
                          }}
-                         title="Responder"
                        >
                          <MoreVertical size={16} className="opacity-40 hover:opacity-100" />
+                         
+                         {activeMsgDropdown === msg.id && (
+                            <div className="absolute right-0 top-8 w-40 bg-white/90 dark:bg-[#233138]/95 backdrop-blur-xl border border-black/5 dark:border-[#304046] rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.15)] py-2 z-[999] animate-in fade-in zoom-in-95 duration-100" onClick={e => e.stopPropagation()}>
+                              <button 
+                                onClick={() => {
+                                  setReplyMessage({ id: msg.id, text: msg.text || 'Mídia enviada', sender: msg.sender });
+                                  textareaRef.current?.focus();
+                                  setActiveMsgDropdown(null);
+                                }}
+                                className="w-full text-left px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors text-[14px] text-[#3b4a54] dark:text-[#d1d7db]"
+                              >
+                                Responder
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  setMessageToForward(msg);
+                                  setActiveMsgDropdown(null);
+                                }}
+                                className="w-full text-left px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors text-[14px] text-[#3b4a54] dark:text-[#d1d7db]"
+                              >
+                                Encaminhar
+                              </button>
+                            </div>
+                         )}
                        </div>
 
                        {msg.sender === 'bot' && (

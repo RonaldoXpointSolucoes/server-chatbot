@@ -16,7 +16,7 @@ export default function InboxesList() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
-  const tenantId = sessionStorage.getItem('current_tenant_id') || tenantIdFromStore;
+  const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || tenantIdFromStore;
   const navigate = useNavigate();
 
   const [isCreating, setIsCreating] = useState(false);
@@ -43,7 +43,13 @@ export default function InboxesList() {
     
     fetchInstances();
 
-    const channel = supabase.channel(`public:whatsapp_instances:tenant_id=${tenantId}`)
+    const channelName = `public:whatsapp_instances:tenant_id=${tenantId}`;
+    const existingChannel = supabase.getChannels().find(c => c.topic === `realtime:${channelName}`);
+    if (existingChannel) {
+      supabase.removeChannel(existingChannel);
+    }
+
+    const channel = supabase.channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, () => {
          fetchInstances();
       })
@@ -66,7 +72,7 @@ export default function InboxesList() {
     try {
       const defaultSettings = { reject_calls: false, ignore_groups: false, always_online: true, sync_history: false, read_messages: false };
       
-      const currentTenantId = sessionStorage.getItem('current_tenant_id') || tenantId;
+      const currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || tenantId;
       const { error } = await supabase.from('whatsapp_instances').insert([{
         display_name: nameStr,
         status: 'offline',

@@ -36,7 +36,7 @@ export const useDevStore = create<DevStore>()(
         
         const state = get();
         if (state.isEnabled) {
-            const tenantId = sessionStorage.getItem('current_tenant_id') || localStorage.getItem('tenantId');
+            const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId');
             
             // Background async save to db
             supabase.from('system_logs').insert([{

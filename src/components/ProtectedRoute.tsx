@@ -7,8 +7,8 @@ interface ProtectedRouteProps {
 export default function ProtectedRoute({ role }: ProtectedRouteProps) {
   // Verificação de autenticação Client SaaS
   if (role === 'client') {
-    const tenantId = sessionStorage.getItem('current_tenant_id');
-    const tenantName = sessionStorage.getItem('current_tenant_name');
+    const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    const tenantName = localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name');
     
     // Se não estiver logado, redireciona para a tela inicial de Login corporativo
     if (!tenantId || !tenantName || tenantId === 'undefined') {

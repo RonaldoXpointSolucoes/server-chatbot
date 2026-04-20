@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { supabase } from '../services/supabase';
@@ -9,7 +9,16 @@ export default function ClientLogin() {
   const [password, setPassword] = useState('Xx@gh03360102');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [keepLogged, setKeepLogged] = useState(false);
   const navigate = useNavigate();
+
+  // Redireciona automaticamente se já estiver logado
+  useEffect(() => {
+    const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    if (tenantId && tenantId !== 'undefined') {
+      navigate('/chat', { replace: true });
+    }
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +34,9 @@ export default function ClientLogin() {
         .select('id, name, status, evolution_api_instance')
         .eq('email', email.trim().toLowerCase())
         .eq('password', password)
-        .single();
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
 
       if (error || !data) {
         setErrorMsg('E-mail ou senha inválidos.');
@@ -39,8 +50,13 @@ export default function ClientLogin() {
         return;
       }
 
-      sessionStorage.setItem('current_tenant_id', data.id);
-      sessionStorage.setItem('current_tenant_name', data.name);
+      if (keepLogged) {
+        localStorage.setItem('current_tenant_id', data.id);
+        localStorage.setItem('current_tenant_name', data.name);
+      } else {
+        sessionStorage.setItem('current_tenant_id', data.id);
+        sessionStorage.setItem('current_tenant_name', data.name);
+      }
       navigate('/chat');
     } catch (err) {
       setErrorMsg('Erro de conexão com o banco de dados.');
@@ -85,6 +101,19 @@ export default function ClientLogin() {
               placeholder="••••••••"
               required
             />
+          </div>
+
+          <div className="flex items-center gap-2 mt-2">
+            <input 
+              type="checkbox" 
+              id="keepLogged" 
+              checked={keepLogged}
+              onChange={(e) => setKeepLogged(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 bg-[#f0f2f5] dark:bg-[#111b21] dark:border-[#2a3942] cursor-pointer"
+            />
+            <label htmlFor="keepLogged" className="text-sm font-medium text-[#54656f] dark:text-[#8696a0] select-none cursor-pointer">
+              Manter-me conectado
+            </label>
           </div>
 
           <button 

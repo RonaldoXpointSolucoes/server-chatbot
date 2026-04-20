@@ -89,6 +89,7 @@ interface ChatState {
   addMessageLocally: (contactId: string, msg: MessageType) => void;
   upsertContactLocally: (contact: ContactRow) => void;
   sendHumanMessage: (contactId: string, text: string, instanceName: string) => Promise<void>;
+  forwardMessage: (contactId: string, message: MessageType, instanceName: string) => Promise<void>;
   uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean, caption?: string) => Promise<void>;
   updateContactCRM: (contactId: string, payload: Partial<ContactRow>) => Promise<void>;
   deleteContact: (contactId: string) => Promise<void>;
@@ -420,6 +421,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.error('[uploadAndSendMedia] Falha crítica:', err);
       // Se der erro, pelo menos mostramos no componente que a media deu erro
       // Não removemos para o dev ver onde falhou
+    }
+  },
+
+  forwardMessage: async (contactId, message, instanceName) => {
+    const state = get();
+    // Se a mensagem original tiver texto ou caption e não tiver media, envia como text
+    if (!message.mediaUrl) {
+       await state.sendHumanMessage(contactId, message.text || "Mensagem encaminhada vazia", instanceName);
+       return;
+    }
+    
+    // Se tiver media, precisamos baixar para subir localmente
+    try {
+      const response = await fetch(message.mediaUrl);
+      if (!response.ok) throw new Error("Erro ao obter a mídia para encaminhamento.");
+      const blob = await response.blob();
+      
+      let initialType = blob.type;
+      let ext = initialType.split('/')[1] || 'bin';
+      
+      // Mapeia extensões
+      if (ext.startsWith('ogg')) ext = 'ogg';
+      else if (ext.startsWith('jpeg')) ext = 'jpg';
+      else if (ext.startsWith('png')) ext = 'png';
+      else if (initialType.includes('pdf')) ext = 'pdf';
+      else if (ext.startsWith('mp4')) ext = 'mp4';
+
+      const file = new File([blob], `encaminhado_${Date.now()}.${ext}`, { type: initialType });
+      
+      const basicType = message.mediaType || (initialType.includes('image') ? 'image' : initialType.includes('video') ? 'video' : initialType.includes('audio') ? 'audio' : 'document');
+      
+      await state.uploadAndSendMedia(contactId, file, basicType as any, instanceName, false, message.text);
+    } catch(err) {
+      console.error("[forwardMessage] Erro ao extrair/encaminhar media:", err);
+      alert('Houve uma falha ao preparar a mídia para o envio. Se possível, faça o download e envio manual.');
     }
   },
 
@@ -870,7 +906,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   fetchTenantConfig: async () => {
     try {
-      const currentTenantId = sessionStorage.getItem('current_tenant_id');
+      const currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       if (!currentTenantId) return;
 
       const { data: tenantData } = await supabase.from('companies').select('*').eq('id', currentTenantId).single();
@@ -1183,9 +1219,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   subscribeToNewMessages: () => {
     const state = get() as any;
     if (state.isSubscribed) return; // React 18 protection
+    const tenantId = state.tenantInfo?.id;
+    if (!tenantId) {
+        console.error('[Realtime] Cannot subscribe without tenantInfo.id');
+        return;
+    }
     set({ isSubscribed: true } as any);
 
-    const channelName = 'realtime_chat';
+    const channelName = `realtime_chat_${tenantId}`;
     // HMR fallback: Remove o canal caso já exista no cache do Supabase Client para evitar "cannot add callback after subscribe"
     const existingChannel = supabase.getChannels().find(c => c.topic === `realtime:${channelName}`);
     if (existingChannel) {
@@ -1196,7 +1237,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     
     // Escuta novas mensagens
     channel
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
         const m = payload.new as any;
         console.log('[Realtime] Message INSERT:', m);
 
@@ -1254,7 +1295,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
            return { contacts: u };
         });
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, async (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
         const m = payload.new as any;
         console.log('[Realtime] Message UPDATE:', m);
         set((s) => {
@@ -1272,12 +1313,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
            return { contacts: updatedContacts };
         });
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
         if(payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
            get().upsertContactLocally(payload.new as ContactRow);
         }
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'whatsapp_instances' }, async (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
          const t = get().tenantInfo;
          if (!t || !t.evolution_api_instance) return;
          const inst = payload.new as any;

@@ -632,3 +632,136 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
   );
 }
 
+// -- Encaminhar Mensagem Modal
+export interface ForwardMessageModalProps extends BaseModalProps {
+  contacts: any[];
+  onForward: (contactId: string) => void;
+  messagePreview?: string;
+}
+
+export function ForwardMessageModal({ isOpen, onClose, contacts, onForward, messagePreview }: ForwardMessageModalProps) {
+  const [search, setSearch] = useState('');
+  const [isSending, setIsSending] = useState(false);
+
+  if (!isOpen) return null;
+
+  // Filtro de busca
+  const parsedSearch = search.toLowerCase().trim();
+  const filtered = contacts.filter(c => 
+    (c.custom_name || c.name || c.push_name || c.phone || '').toLowerCase().includes(parsedSearch)
+  );
+
+  // Considerar que 'contacts' já vem ordenado pelos mais recentes pelo useChatStore
+  const top10 = parsedSearch ? [] : filtered.slice(0, 10);
+  const listToShow = parsedSearch ? filtered : filtered.slice(10);
+
+  const handleForward = async (id: string) => {
+    setIsSending(true);
+    try {
+      await onForward(id);
+      onClose();
+    } catch (e) {
+      console.error(e);
+      alert('Erro ao encaminhar mensagem.');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const renderContact = (c: any) => (
+    <div 
+      key={c.id} 
+      onClick={() => !isSending && handleForward(c.id)}
+      className={`group flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all border border-transparent ${isSending ? 'opacity-50' : 'hover:bg-[#f0f2f5] dark:hover:bg-white/5'}`}
+    >
+      <img src={c.avatar || 'https://ui-avatars.com/api/?background=random&name='+(c.name || c.phone)} alt={c.name} className="w-12 h-12 rounded-full object-cover shadow-sm bg-gray-200 dark:bg-gray-800" />
+      <div className="flex flex-col flex-1 min-w-0">
+        <span className="font-semibold text-[#111b21] dark:text-[#e9edef] truncate">{c.custom_name || c.name || c.push_name || c.phone}</span>
+        {c.phone && <span className="text-xs text-gray-500 dark:text-[#8696a0] truncate">{c.phone}</span>}
+      </div>
+      <button disabled={isSending} className="p-2 text-[#00a884] opacity-0 group-hover:opacity-100 transition-opacity">
+         <CheckCircle2 size={20} />
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
+      <div 
+        onClick={e => e.stopPropagation()}
+        className="bg-white dark:bg-[#111b21] border border-black/5 dark:border-white/5 rounded-[32px] shadow-2xl w-full max-w-md flex flex-col max-h-[85vh] animate-in zoom-in-95 slide-in-from-bottom-10 duration-300 overflow-hidden"
+      >
+        {/* Header */}
+        <div className="p-5 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between border-b border-black/5 dark:border-white/5 shrink-0">
+          <div className="flex flex-col">
+             <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef] flex items-center gap-2">
+                Encaminhar Mensagem
+             </h2>
+             {messagePreview && (
+                <span className="text-sm text-[#54656f] dark:text-[#8696a0] truncate max-w-[280px]">
+                  {messagePreview}
+                </span>
+             )}
+          </div>
+          <button onClick={onClose} disabled={isSending} className="p-2.5 text-[#54656f] dark:text-[#8696a0] hover:text-[#111b21] dark:hover:text-[#e9edef] bg-black/5 dark:bg-white/5 rounded-full transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="px-5 py-4 bg-white dark:bg-[#111b21] shrink-0 border-b border-black/5 dark:border-white/5">
+          <div className="relative">
+            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input 
+              type="text" 
+              placeholder="Pesquisar contatos..." 
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+              className="w-full pl-11 pr-4 py-3 bg-[#f0f2f5] dark:bg-[#202c33] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-2xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all text-sm"
+            />
+          </div>
+        </div>
+
+        {/* Lists */}
+        <div className="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
+          {top10.length > 0 && (
+            <div className="mb-4">
+              <h3 className="px-2 py-2.5 text-xs font-bold uppercase tracking-wider text-[#00a884]">Recentes</h3>
+              <div className="flex flex-col gap-1">
+                {top10.map(renderContact)}
+              </div>
+            </div>
+          )}
+          
+          <div className="pb-4">
+            {parsedSearch && <h3 className="px-2 py-2.5 text-xs font-bold uppercase tracking-wider text-[#00a884]">Resultados</h3>}
+            {!parsedSearch && listToShow.length > 0 && <h3 className="px-2 py-2.5 text-xs font-bold uppercase tracking-wider text-[#54656f] dark:text-[#8696a0]">Outros Contatos</h3>}
+            <div className="flex flex-col gap-1">
+              {listToShow.map(renderContact)}
+            </div>
+          </div>
+
+          {filtered.length === 0 && (
+             <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="w-16 h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-center rounded-full mb-4">
+                  <Search size={28} className="text-[#54656f] dark:text-[#8696a0]" />
+                </div>
+                <span className="text-[#111b21] dark:text-[#e9edef] font-semibold text-lg">Nenhum contato</span>
+                <span className="text-sm text-[#54656f] dark:text-[#8696a0] mt-1">Busque por nome ou número</span>
+             </div>
+          )}
+        </div>
+        
+        {isSending && (
+          <div className="absolute inset-0 bg-white/60 dark:bg-black/60 backdrop-blur-sm flex items-center justify-center z-10 transition-opacity">
+            <div className="bg-white dark:bg-[#202c33] p-5 rounded-2xl shadow-xl flex items-center gap-4">
+               <Loader2 size={24} className="text-[#00a884] animate-spin" />
+               <span className="text-[#111b21] dark:text-[#e9edef] font-semibold">Encaminhando...</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

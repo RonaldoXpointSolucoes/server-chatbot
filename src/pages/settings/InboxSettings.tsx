@@ -16,7 +16,8 @@ interface InstanceData {
 export default function InboxSettings() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const tenantId = useChatStore(state => state.tenantInfo?.id);
+  const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
+  const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || tenantIdFromStore;
   const users = useChatStore(state => state.tenantInfo?.users);
   const companyUsers = users || [];
   

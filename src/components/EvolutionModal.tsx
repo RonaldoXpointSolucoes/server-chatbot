@@ -34,7 +34,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
 
   const fetchExistingInstances = async () => {
     try {
-      const tenantId = sessionStorage.getItem('current_tenant_id');
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       if (!tenantId) return;
       const { data } = await supabase.from('whatsapp_instances')
           .select('*')
@@ -61,7 +61,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
           return;
       }
       
-      const cId = sessionStorage.getItem('current_tenant_id');
+      const cId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       if (!cId) throw new Error("Tenant não identificado");
 
       setActivePollingId(inst.id);
@@ -73,7 +73,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
   };
 
   const handleDeleteInstance = async (id: string) => {
-    const cId = sessionStorage.getItem('current_tenant_id');
+    const cId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
     if (!cId) return;
     setLoading(true);
     setError(null);
@@ -119,7 +119,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
 
     try {
         const newEngineId = uuidv4();
-        const cId = sessionStorage.getItem('current_tenant_id');
+        const cId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
         if (!cId) throw new Error("Tenant não identificado");
         
         const { error: dbErr } = await supabase.from('whatsapp_instances').insert({
@@ -150,7 +150,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
   useEffect(() => {
     if (!activePollingId) return;
     
-    const tenantId = sessionStorage.getItem('current_tenant_id');
+    const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
     const channelName = `tenant:${tenantId}:instance:${activePollingId}`;
     
     console.log(`[Realtime] Inscrito no canal: ${channelName}`);
@@ -202,7 +202,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
   useEffect(() => {
     // If modal opens and we are marked as connected, let's load user from v2 status
     if (evolutionConnected && useChatStore.getState().connectedInstanceName) {
-       const cId = sessionStorage.getItem('current_tenant_id');
+       const cId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
        const currInst = existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
        if(cId && currInst && currInst.api_key) {
           fetchEngineStatus(cId, useChatStore.getState().connectedInstanceName!, currInst.api_key)
@@ -290,7 +290,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
               <div className="grid grid-cols-2 gap-2 w-full mt-6">
                  <button 
                    onClick={async () => {
-                      const cId = sessionStorage.getItem('current_tenant_id');
+                      const cId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
                      if (!confirm(`Tem certeza que deseja deslogar seu aparelho da engine ${targetInstObj?.display_name || ''}?`)) return;
                       if (!cId) return;
                       setLoading(true);
@@ -310,7 +310,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
                  
                  <button 
                    onClick={async () => {
-                      const cId = sessionStorage.getItem('current_tenant_id');
+                      const cId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
                       if (!cId) return;
                       setLoading(true);
                       const currInst = existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
@@ -328,7 +328,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
 
                  <button 
                    onClick={async () => {
-                      const cId = sessionStorage.getItem('current_tenant_id');
+                      const cId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
                       if (!cId) return;
                       setLoading(true);
                       const currInst = existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
@@ -344,7 +344,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
 
                  <button 
                    onClick={async () => {
-                      const cId = sessionStorage.getItem('current_tenant_id');
+                      const cId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
                       if (!cId) return;
                       setLoading(true);
                       const currInst = existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
@@ -360,7 +360,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
                  
                  <button 
                    onClick={async () => {
-                      const cId = sessionStorage.getItem('current_tenant_id');
+                      const cId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
                       if (!confirm("Isso apagará o cache de mensagens em RAM. Deseja prosseguir?")) return;
                       if (!cId) return;
                       setLoading(true);
@@ -475,7 +475,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
                             setQrBase64(null);
                             
                             try {
-                                const tenantId = sessionStorage.getItem('current_tenant_id');
+                                const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
                                 if (!tenantId) throw new Error("Tenant não identificado");
                                 
                                 const { data: list, error: err } = await supabase.from('whatsapp_instances')

@@ -20,6 +20,10 @@ serve(async (req) => {
       return new Response("No valid record or tenant_id", { status: 400 });
     }
 
+    if (record.sender_type === 'bot' || record.sender_type === 'human') {
+      return new Response(JSON.stringify({ success: true, message: "No push for outgoing messages" }), { status: 200 });
+    }
+
     // Use service role to bypass RLS and fetch all user subscriptions for this tenant
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";

@@ -82,6 +82,15 @@ ATENÇÃO E REGRAS DE FORMATO:
       
       // Vamos tentar deduzir o mimetype (ex vindo do whatsapp geralmente é ogg/oga, ou mpeg se for MP3)
       let mimeType = req.headers.get("content-type") || "audio/ogg";
+      
+      // DEBUB: if it's HTML, we shouldn't send it to Gemini! It means the URL is an error page or a Vercel 404.
+      if (mimeType.includes("text/html")) {
+        console.error("GeminiService Error: audio URL returned HTML string. URL:", mediaUrl);
+        const textBody = await blob.text();
+        console.error("HTML Body snippet:", textBody.substring(0, 500));
+        throw new Error(`A URL do áudio é inválida ou não está acessível (retornou página web). URL: ${mediaUrl}`);
+      }
+
       if(mimeType.includes("application/octet-stream")) mimeType = "audio/ogg"; // fallback comum
 
       const payload = {

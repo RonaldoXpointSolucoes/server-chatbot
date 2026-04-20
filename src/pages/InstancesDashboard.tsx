@@ -59,7 +59,7 @@ export default function InstancesDashboard() {
 
   const fetchActiveInstance = async () => {
     try {
-      const tenantId = sessionStorage.getItem('current_tenant_id');
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       const { data } = await supabase.from('companies').select('evolution_api_instance, name').eq('id', tenantId).single();
       if (data) {
         setActiveInstanceId(data.evolution_api_instance);
@@ -70,7 +70,7 @@ export default function InstancesDashboard() {
 
   const fetchInstances = async () => {
     try {
-      const tenantId = sessionStorage.getItem('current_tenant_id');
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       const { data, error } = await supabase
         .from('whatsapp_instances')
         .select('*')
@@ -151,7 +151,7 @@ export default function InstancesDashboard() {
     try {
       const defaultSettings = { reject_calls: false, ignore_groups: false, always_online: true, sync_history: false, read_messages: false };
       
-      const tenantId = sessionStorage.getItem('current_tenant_id');
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       const newEngineId = crypto.randomUUID(); 
       const finalApiKey = 'sk_' + Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
 
@@ -187,7 +187,7 @@ export default function InstancesDashboard() {
     if (!deletingInstance) return;
     try {
       setLoading(true);
-      const tenantId = sessionStorage.getItem('current_tenant_id');
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       await fetch(`${ENGINE_URL}/api/v1/instances/${deletingInstance.id}`, { 
           method: 'DELETE',
           headers: { 
@@ -211,7 +211,7 @@ export default function InstancesDashboard() {
   
   const handleSetAsActive = async (id: string) => {
     try {
-      const tenantId = sessionStorage.getItem('current_tenant_id');
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       await supabase.from('companies').update({ evolution_api_instance: id }).eq('id', tenantId);
       setActiveInstanceId(id);
       alert('Instância definida como principal com sucesso!');
@@ -224,7 +224,7 @@ export default function InstancesDashboard() {
   const handleDisconnect = async (id: string, apiKey?: string) => {
     if (!window.confirm('Isto fará logoff do WhatsApp atual mas manterá a instância. Deseja Continuar?')) return;
     // O delete sem apagar do banco. O /delete agora apaga tudo se feito via painel se não mudarmos
-    const tenantId = sessionStorage.getItem('current_tenant_id');
+    const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
     await fetch(`${ENGINE_URL}/api/v1/instances/${id}/disconnect`, { 
         method: 'POST',
         headers: { 
@@ -236,7 +236,7 @@ export default function InstancesDashboard() {
 
   const fireEngineAction = async (id: string, apiKey: string | undefined, action: string, successMsg: string) => {
     try {
-       const tenantId = sessionStorage.getItem('current_tenant_id');
+       const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
        const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/${action}`, { 
            method: 'POST',
            headers: { 
@@ -257,7 +257,7 @@ export default function InstancesDashboard() {
     setQrLoading(true);
 
     try {
-      const tenantId = sessionStorage.getItem('current_tenant_id');
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       await fetch(`${ENGINE_URL}/api/v1/instances/${id}/connect`, { 
         method: 'POST',
         headers: { 
@@ -280,7 +280,7 @@ export default function InstancesDashboard() {
     const interval = setInterval(async () => {
       try {
         secondsElapsed += 2;
-        const tenantId = sessionStorage.getItem('current_tenant_id');
+        const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
         const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/status`, {
             headers: { 
               'x-tenant-id': tenantId!,

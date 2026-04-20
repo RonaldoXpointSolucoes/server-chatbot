@@ -21,7 +21,7 @@ function urlBase64ToUint8Array(base64String: string) {
 }
 
 export function usePushNotifications() {
-  const tenantId = sessionStorage.getItem('current_tenant_id');
+  const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
 
   useEffect(() => {
     if (!tenantId || !('serviceWorker' in navigator) || !('PushManager' in window)) {

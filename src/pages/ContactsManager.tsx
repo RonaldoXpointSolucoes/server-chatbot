@@ -12,7 +12,7 @@ import { RenameModal } from '../components/ChatModals';
 export default function ContactsManager() {
   const navigate = useNavigate();
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
-  const tenantId = tenantIdFromStore || sessionStorage.getItem('current_tenant_id');
+  const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
 
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [loading, setLoading] = useState(true);

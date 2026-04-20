@@ -31,7 +31,8 @@ import {
   Puzzle,
   Smartphone,
   Edit2,
-  Plus
+  Plus,
+  CheckCircle2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
@@ -57,9 +58,14 @@ export function MainSidebar() {
   const activeChannelFilter = useChatStore(state => state.activeChannelFilter);
   const setActiveChannelFilter = useChatStore(state => state.setActiveChannelFilter);
   const connectedInstanceName = useChatStore(state => state.connectedInstanceName);
+  
+  const [userCompanies, setUserCompanies] = useState<any[]>([]);
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  const [currentCompanyContext, setCurrentCompanyContext] = useState<any>(null);
 
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
-  const tenantId = tenantIdFromStore || sessionStorage.getItem('current_tenant_id');
+  const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
   const [instances, setInstances] = useState<any[]>([]);
 
   useEffect(() => {
@@ -81,7 +87,37 @@ export function MainSidebar() {
         console.error('Erro ao buscar canais:', e);
       }
     };
+
+    const fetchCompanies = async () => {
+      try {
+        const { data: currentCompany, error: currentError } = await supabase
+          .from('companies')
+          .select('*')
+          .eq('id', tenantId)
+          .single();
+          
+        if (currentError || !currentCompany) return;
+        
+        setCurrentCompanyContext(currentCompany);
+
+        if (currentCompany.email) {
+            const { data: companies, error: companiesError } = await supabase
+              .from('companies')
+              .select('id, name, status, plan_id')
+              .eq('email', currentCompany.email)
+              .order('created_at', { ascending: false });
+
+            if (!companiesError && companies) {
+               setUserCompanies(companies);
+            }
+        }
+      } catch (err) {
+        console.error('Erro ao buscar empresas multi-tenant:', err);
+      }
+    };
+
     fetchInstances();
+    fetchCompanies();
 
     const channel = supabase.channel(`public:whatsapp_instances:tenant_id=${tenantId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, () => {
@@ -93,6 +129,46 @@ export function MainSidebar() {
       supabase.removeChannel(channel);
     };
   }, [tenantId]);
+
+  const handleSwitchWorkspace = (company: any) => {
+    if (company.id === tenantId) return;
+    
+    if (localStorage.getItem('current_tenant_id')) {
+        localStorage.setItem('current_tenant_id', company.id);
+        localStorage.setItem('current_tenant_name', company.name);
+    } else {
+        sessionStorage.setItem('current_tenant_id', company.id);
+        sessionStorage.setItem('current_tenant_name', company.name);
+    }
+    
+    window.location.reload();
+  };
+
+  const handleCreateWorkspace = async () => {
+    if (!newWorkspaceName.trim() || !currentCompanyContext) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('companies')
+        .insert({
+          name: newWorkspaceName.trim(),
+          email: currentCompanyContext.email,
+          password: currentCompanyContext.password,
+          status: 'active',
+          plan_id: currentCompanyContext.plan_id
+        })
+        .select()
+        .single();
+        
+      if (!error && data) {
+         handleSwitchWorkspace(data);
+      } else {
+         console.error('Error creating workspace:', error);
+      }
+    } catch(err) {
+      console.error(err);
+    }
+  };
 
   return (
     <div className="w-[260px] h-full bg-[#182229] dark:bg-[#111b21] flex flex-col text-[#d1d7db] font-sans text-sm border-r border-[#2a3942] z-20 shrink-0 shadow-lg relative overflow-hidden transition-all duration-300">
@@ -106,7 +182,9 @@ export function MainSidebar() {
           <div className="w-2 h-2 bg-white rounded-sm"></div>
         </div>
         <div className="flex-1 min-w-0 ml-3">
-          <h2 className="font-semibold text-[#e9edef] truncate text-[15px] tracking-tight group-hover:text-white transition-colors">X-Point Soluções</h2>
+          <h2 className="font-semibold text-[#e9edef] truncate text-[15px] tracking-tight group-hover:text-white transition-colors">
+            {currentCompanyContext?.name || 'Carregando...'}
+          </h2>
         </div>
         <div className="bg-[#2a3942] group-hover:bg-[#3b4a54] p-1 rounded transition-colors">
            <ChevronDown size={14} className="text-[#8696a0] group-hover:text-white transition-colors" />
@@ -115,36 +193,79 @@ export function MainSidebar() {
         {/* Workspace Dropdown Panel */}
         {showWorkspaceMenu && (
           <div className="absolute top-[68px] left-2 w-[340px] bg-[#1e1e24] border border-[#2a2a2f] rounded-xl shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-             <div className="p-3 border-b border-[#2a2a2f] flex justify-between items-center bg-[#24242b]">
-                <div className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-                   <Settings size={14} /> Configurações & Membros
-                </div>
-                <div className="flex items-center gap-2 bg-[#18181b] border border-[#2a2a2f] rounded flex-1 ml-4 px-2 py-1">
-                   <span className="text-xs text-slate-300 truncate max-w-[120px]">X-Point Soluções</span>
-                   <span className="text-[9px] font-bold uppercase tracking-widest text-[#d4af37] bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20 ml-auto">Unlimited</span>
-                </div>
-             </div>
              
              <div className="max-h-[300px] overflow-y-auto styled-scrollbar py-2">
-                {[
-                  'Restaurante do Ceará (pizzaria lovers)',
-                  'Sushi America',
-                  'Casas Frigideira',
-                  'Restaurante Oliveiras',
-                  'Al Forno',
-                  'Frigideirinha Gourmet',
-                  'Bom lanches',
-                  'Tarantela',
-                  'X-Point Soluções\'s workspace'
-                ].map((ws, i) => (
-                  <div key={i} className="flex items-center justify-between px-4 py-2 hover:bg-[#2a2a2f]/50 cursor-pointer transition-colors">
+                {userCompanies.map((ws) => (
+                  <div 
+                    key={ws.id} 
+                    onClick={() => handleSwitchWorkspace(ws)}
+                    className={cn(
+                      "flex items-center justify-between px-4 py-2 hover:bg-[#2a2a2f]/50 cursor-pointer transition-colors",
+                      ws.id === tenantId ? "bg-indigo-500/10 border-l-2 border-indigo-500" : ""
+                    )}
+                  >
                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <Inbox size={14} className="text-slate-400 shrink-0" />
-                        <span className="text-sm text-slate-300 truncate">{ws}</span>
+                        <div className="w-5 h-5 rounded bg-gradient-to-tr from-indigo-500/20 to-purple-500/20 flex items-center justify-center shrink-0 border border-indigo-500/30">
+                          <span className="text-[10px] font-bold text-indigo-400">{ws.name.substring(0, 1).toUpperCase()}</span>
+                        </div>
+                        <span className={cn("text-sm truncate", ws.id === tenantId ? "text-white font-medium" : "text-slate-300")}>{ws.name}</span>
                      </div>
-                     <span className="text-[9px] font-bold uppercase tracking-widest text-[#d4af37] border border-[#d4af37]/30 bg-[#d4af37]/5 px-1.5 py-0.5 rounded ml-2 shrink-0">Unlimited</span>
+                     {ws.id === tenantId && (
+                       <CheckCircle2 size={14} className="text-indigo-400 shrink-0 ml-2" />
+                     )}
                   </div>
                 ))}
+             </div>
+
+             {/* Add New Workspace Action */}
+             <div className="p-3 bg-[#18181b] border-t border-[#2a2a2f]" onClick={e => e.stopPropagation()}>
+               {isCreatingWorkspace ? (
+                  <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                     <input 
+                       autoFocus
+                       type="text"
+                       value={newWorkspaceName}
+                       onChange={(e) => setNewWorkspaceName(e.target.value)}
+                       placeholder="Nome da Nova Empresa..."
+                       className="w-full bg-[#202027] border border-[#2a2a2f] rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors"
+                       onKeyDown={(e) => {
+                         if (e.key === 'Enter') handleCreateWorkspace()
+                         if (e.key === 'Escape') setIsCreatingWorkspace(false)
+                       }}
+                     />
+                     <div className="flex gap-2">
+                       <button 
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           handleCreateWorkspace();
+                         }}
+                         disabled={!newWorkspaceName.trim()}
+                         className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium py-2 rounded-md transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                       >
+                         Criar
+                       </button>
+                       <button 
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           setIsCreatingWorkspace(false);
+                         }}
+                         className="flex-1 bg-[#2a2a2f] hover:bg-[#323238] text-slate-300 text-xs font-medium py-2 rounded-md transition-colors"
+                       >
+                         Cancelar
+                       </button>
+                     </div>
+                  </div>
+               ) : (
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsCreatingWorkspace(true);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-[#2a2a2f] hover:border-indigo-500/50 hover:bg-indigo-500/5 text-slate-400 hover:text-indigo-400 transition-all text-sm font-medium"
+                  >
+                    <Plus size={16} /> Criar nova empresa
+                  </button>
+               )}
              </div>
           </div>
         )}
@@ -188,7 +309,14 @@ export function MainSidebar() {
                       title={inst.display_name || 'Sem nome'} 
                       isSub 
                       isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
-                      onClick={() => setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name)}
+                      onClick={() => {
+                        if (inst.status !== 'connected') {
+                          useChatStore.getState().openQRModal(inst.id);
+                        } else {
+                          setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name);
+                          navigate('/chat');
+                        }
+                      }}
                     />
                     <button 
                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-black/10 dark:hover:bg-white/10 opacity-0 group-hover/channel:opacity-100 transition-all z-10"
