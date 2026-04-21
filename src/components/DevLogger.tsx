@@ -97,7 +97,9 @@ export default function DevLogger() {
         const method = (args[1] as RequestInit)?.method || 'GET';
         
         if (url) {
-          if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/realtime/')) {
+          const isExpectedOfflineError = url.includes('/invoke') && response.status === 400;
+          
+          if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/realtime/') && !isExpectedOfflineError) {
              let detailsStr = '';
              try {
                detailsStr = await response.clone().text();
@@ -124,17 +126,21 @@ export default function DevLogger() {
         const method = (args[1] as RequestInit)?.method || 'GET';
         const urlStr = typeof urlObj === 'string' ? urlObj : 'unknown';
         
-        addLog({
-          type: 'error',
-          message: err.message || 'Network Fetch Failed',
-          source: `Fetch Critical (${method})`,
-          details: {
-            name: err.name,
-            message: err.message,
-            url: urlStr,
-            payload: (args[1] as RequestInit)?.body
-          }
-        });
+        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/realtime/');
+        
+        if (!isSpammyUrl) {
+          addLog({
+            type: 'error',
+            message: err.message || 'Network Fetch Failed',
+            source: `Fetch Critical (${method})`,
+            details: {
+              name: err.name,
+              message: err.message,
+              url: urlStr,
+              payload: (args[1] as RequestInit)?.body
+            }
+          });
+        }
         throw err;
       }
     };

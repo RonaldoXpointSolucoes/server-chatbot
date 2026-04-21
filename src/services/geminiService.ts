@@ -61,6 +61,62 @@ ATENÇÃO E REGRAS DE FORMATO:
     const response = await result.response;
     return response.text().trim();
   }
+
+  async chatWithArchitect(history: {role: 'user'|'model', text: string}[]): Promise<string> {
+    if (!this.isConfigured()) {
+      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+    }
+    const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+    // Build standard multi-turn format for Gemini
+    const contents = history.map(msg => ({
+      role: msg.role,
+      parts: [{ text: msg.text }]
+    }));
+
+    // Start Chat
+    const chat = model.startChat({
+      history: contents,
+      systemInstruction: {
+        role: "system",
+        parts: [{ text: `Você é um Arquiteto de I.A Expert Master, especializado em criar os melhores "System Prompts" do mercado para robôs de atendimento de WhatsApp, focando fortemente em Restaurantes, Lanchonetes, Delivery de comida, Clínicas e Oficinas.
+Seu objetivo é extrair do cliente as informações chave (como nome do negócio, tom de voz desejado, cardápio principal ou serviços, tempo de resposta, regras especiais) de forma BEM natural e interativa.
+
+Regras de Interação:
+1. Faça Apenas 1 ou 2 perguntas de cada vez. Não assuste o cliente com muitas perguntas longas de uma vez.
+2. Ajude o cliente sugerindo ideias (ex: "Legal que é uma pizzaria, você prefere que o robô já mande o link do cardápio logo de primeira ou espere o cliente pedir?").
+3. Mantenha um tom muito empático, inspirador e com foco em VENDAS e ATENDIMENTO EXCELENTE (Customer Success). Use emojis.
+4. Quando você julgar que já tem informações suficientes (ex: nome do negócio, o que vendem e principal regra), gere o "Prompt de Sistema Final".
+
+QUANDO FOR CONCLUIR E GERAR O BOT:
+Retorne no final da sua mensagem obrigatoriamente um bloco de código markdown começando com \`\`\`bot-config e terminando com \`\`\`. 
+Dentro dele, passe um JSON com a configuração perfeita e maravilhosa do bot.
+
+REGRAS CRÍTICAS DO JSON:
+- O JSON deve ser perfeitamente válido.
+- NUNCA use quebras de linha reais (Enter) dentro dos valores string (como no systemPrompt). Use SEMPRE "\\n" literal na string para que o JSON.parse não quebre.
+- As strings devem estar sempre entre aspas duplas escapando aspas internas caso existam.
+
+Exemplo do JSON final esperado dentro do bloco:
+\`\`\`bot-config
+{
+  "name": "Nome sugerido",
+  "description": "Pequena descrição de 1 linha",
+  "systemPrompt": "Aqui entra o textão de System Prompt.\\nTodo o comportamento, regras e exemplos pro llm.\\n\\nQuanto mais rico, melhor.",
+  "model": "gemini-1.5-pro",
+  "temperature": 0.5
+}
+\`\`\`
+Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, apenas converse e ajude o usuário com respostas curtas.` }]
+      }
+    });
+
+    const result = await chat.sendMessage([
+      "Agir como Arquiteto Expert. Me responda e analise o meu contexto anterior e a minha última mensagem, seguindo o seu System Prompt."
+    ]);
+    
+    return result.response.text();
+  }
   async transcribeAudio(mediaUrl: string): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');

@@ -255,6 +255,16 @@ function parseAdvancedMsgMetadata(m: any) {
   return { mediaType: derivedType, text: derivedText, quoted: derivedQuoted, buttons: buttons.length > 0 ? buttons : undefined };
 }
 
+function sanitizeContactName(targetName: string | null | undefined, fallbackPhone: string | null | undefined, tenantName: string | null | undefined): string | null {
+  if (!targetName) return fallbackPhone || null;
+  const lname = targetName.toLowerCase();
+  const tname = tenantName ? tenantName.toLowerCase().trim() : '';
+  if ((tname && lname === tname) || (tname && lname.includes(tname)) || lname.includes('x point') || lname.includes('x-point') || lname === 'empresa' || lname.includes('soluções')) {
+      return fallbackPhone || targetName; 
+  }
+  return targetName;
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   contacts: [],
   activeChatId: null,
@@ -470,6 +480,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
        console.log(`[Anti-Spam/Loop] Fetch picture para ${jid} (${contactId}) ignorado. Último sync foi há menos de 1h.`);
        return;
     }
+
+    if (!state.evolutionConnected) {
+       return; // Previne requisições 400 previsiveis caso o socket esteja offline
+    }
     
     // Atualiza o lock IMEDIATAMENTE (mesmo se falhar depois)
     set((s) => ({ pictureFetchLocks: { ...s.pictureFetchLocks, [contactId]: now } }));
@@ -574,7 +588,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const finalId = (!isExistingTemp) ? existing.id : (!isNewTemp ? contact.id : existing.id);
         const finalCustomName = existing.custom_name || contact.custom_name;
         const fallbackName = existing.name !== existing.phone && existing.name ? existing.name : contact.name;
-        const finalName = finalCustomName || fallbackName;
+        
+        const tname = get().tenantInfo?.name || '';
+        let finalName = finalCustomName || fallbackName;
+        finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
 
         const updatedContact: ContactType = {
           ...existing,
@@ -591,7 +608,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return { contacts: newContacts };
       } else {
         // Contato novinho folha
-        const finalName = contact.custom_name || contact.name;
+        const tname = get().tenantInfo?.name || '';
+        let finalName = contact.custom_name || contact.name;
+        finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
+        
         const newContact: ContactType = {
           ...contact,
           name: finalName,
@@ -619,10 +639,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       })
     }));
     try {
-      const dbPayload = { ...payload };
+      const dbPayload = { ...payload } as any;
       if (payload.name) {
          dbPayload.custom_name = payload.name; // Proteção para a trigger DB e lógica interna
       }
+      
+      // Omit values that do not exist strictly in the Supabase Schema to prevent PGRST204 errors
+      delete dbPayload.bot_status;
+
       const { error } = await supabase.from('contacts').update(dbPayload).eq('id', contactId);
       if (error) throw error;
     } catch (e) {
@@ -798,13 +822,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      c.phone === phoneMatch
                   );
                   
+                  const tname = tenant?.name || '';
                   let finalName = dbC.custom_name || dbC.name || dbC.push_name || phoneMatch || dbC.phone;
-                  if (finalName && typeof finalName === 'string') {
-                     const lname = finalName.toLowerCase();
-                     if (lname.includes('x point') || lname.includes('x-point') || lname === 'empresa' || lname.includes('soluções')) {
-                        finalName = phoneMatch || dbC.phone; // Falback para telefone para evitar "XS" e "X Point"
-                     }
-                  }
+                  finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
                   
                   const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName)}&background=random&color=fff`;
                   
@@ -819,7 +839,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   if (idx !== -1) {
                      const existing = newContacts[idx];
                      const finalCustomName = dbC.custom_name || existing.custom_name;
-                     const finalName = finalCustomName || dbC.name || existing.name;
+                     const tname = tenant?.name || '';
+                     let finalName = finalCustomName || dbC.name || existing.name;
+                     finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
+                     
                      const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || dbC.phone)}&background=random&color=fff`;
 
                      newContacts[idx] = {
@@ -1330,13 +1353,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
          if (inst.id === t.evolution_api_instance) {
             console.log('[Realtime] Instance Status Changed:', inst.status);
             if (inst.status === 'connected') {
+               if ((window as any)._disconnectTimer) {
+                  clearInterval((window as any)._disconnectTimer);
+                  (window as any)._disconnectTimer = null;
+               }
+               (window as any)._failCheckCount = 0;
+               
                if (!get().evolutionConnected) {
                   set({ evolutionConnected: true, modalReason: null });
                   get().fetchInitialData();
                }
             } else if (inst.status === 'offline' || inst.status === 'connecting') {
                if (get().evolutionConnected) {
-                  set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp caiu ou o servidor reiniciou. Tentando reconectar...' });
+                  if (!(window as any)._disconnectTimer) {
+                     (window as any)._failCheckCount = 0;
+                     (window as any)._disconnectTimer = setInterval(async () => {
+                        (window as any)._failCheckCount++;
+                        
+                        // Faz uma verificação de segurança no banco
+                        const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', inst.id).single();
+                        
+                        if (data && data.status === 'connected') {
+                           clearInterval((window as any)._disconnectTimer);
+                           (window as any)._disconnectTimer = null;
+                           (window as any)._failCheckCount = 0;
+                        } else if ((window as any)._failCheckCount >= 2) {
+                           clearInterval((window as any)._disconnectTimer);
+                           (window as any)._disconnectTimer = null;
+                           (window as any)._failCheckCount = 0;
+                           set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp caiu ou o servidor reiniciou. Tentando reconectar...' });
+                        }
+                     }, 10000);
+                  }
                }
             }
          }

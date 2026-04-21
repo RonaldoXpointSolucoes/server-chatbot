@@ -57,6 +57,27 @@ export function formatPhoneNumber(phone: string | undefined | null): string {
 
 export function renderMessageText(text: string) {
   if (!text) return null;
+  
+  // Detecção de mensagem citada na string (padrão de envio)
+  const quoteMatch = text.match(/^> \*Mensagem Citada:\* "(.*?)"\n\n([\s\S]*)$/);
+  
+  if (quoteMatch) {
+    const quotedText = quoteMatch[1];
+    const actualMessage = quoteMatch[2];
+    
+    return (
+      <div className="flex flex-col gap-1.5 w-full">
+        <div className="relative pl-3 pr-2 py-2 mb-0.5 bg-black/5 dark:bg-black/20 border-l-4 border-emerald-500 rounded-lg text-[0.85rem] text-[#54656f] dark:text-[#8696a0] whitespace-normal overflow-hidden max-w-full">
+           <div className="font-bold text-emerald-600 dark:text-emerald-400 text-xs mb-1 opacity-90 drop-shadow-sm flex items-center gap-1">Mensagem Citada</div>
+           <div className="line-clamp-3 italic opacity-90">{quotedText}</div>
+        </div>
+        <div>
+           {renderMessageText(actualMessage)}
+        </div>
+      </div>
+    );
+  }
+
   const urlRegex = /(https?:\/\/[^\s]+)/g;
   const parts = text.split(urlRegex);
 
@@ -76,7 +97,27 @@ export function renderMessageText(text: string) {
         </a>
       );
     }
-    return <React.Fragment key={i}>{part}</React.Fragment>;
+    
+    // Tratamento para quebras de linha e formatação WhatsApp (apenas negrito básico para strings limpas)
+    const lines = part.split('\n');
+    return (
+      <React.Fragment key={i}>
+        {lines.map((line, j) => {
+            const boldParts = line.split(/(\*[^*\n]+\*)/g);
+            return (
+              <React.Fragment key={j}>
+                 {boldParts.map((bp, k) => {
+                    if (bp.startsWith('*') && bp.endsWith('*') && bp.length > 2) {
+                      return <strong key={k} className="font-bold tracking-tight text-inherit">{bp.substring(1, bp.length - 1)}</strong>;
+                    }
+                    return bp;
+                 })}
+                 {j < lines.length - 1 && <br />}
+              </React.Fragment>
+            );
+        })}
+      </React.Fragment>
+    );
   });
 }
 
