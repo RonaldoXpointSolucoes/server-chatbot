@@ -17,7 +17,9 @@ export type MessageType = {
   };
   buttons?: Array<{ id: string; text: string; url?: string; type: string }>; // Novo campo!
   transcription?: string; // Transcrição de áudio via Gemini
+  isIgnored?: boolean; // Flag para mensagens ignoradas por automações
 };
+
 
 export type ContactType = ContactRow & {
   avatar: string;
@@ -66,6 +68,8 @@ interface ChatState {
   activeChannelName: string | null; // Adicionado para suportar old e nova engines comparations
   isQRModalOpen: boolean;
   qrModalTargetInstance: string | null;
+  automations: any[];
+  tenantLabels: any[];
   
   openQRModal: (instanceId?: string | null) => void;
   closeQRModal: () => void;
@@ -108,7 +112,14 @@ interface ChatState {
   updateAgentProfile: (fullName: string, signature: string) => Promise<void>;
   
   // Gemini Actions
-  requestTranscription: (messageId: string, mediaUrl: string) => Promise<void>;
+  // Automations
+  automations: any[];
+  fetchAutomations: () => Promise<void>;
+  
+  // Labels
+  fetchTenantLabels: () => Promise<void>;
+  assignLabelToConversation: (contactId: string, labelId: string) => Promise<void>;
+  removeLabelFromConversation: (contactId: string, labelId: string) => Promise<void>;
 }
 
 function parseAdvancedMsgMetadata(m: any) {
@@ -280,6 +291,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeChannelFilter: null,
   isQRModalOpen: false,
   qrModalTargetInstance: null,
+  automations: [],
+  tenantLabels: [],
+  
+  fetchAutomations: async () => {
+    try {
+      const state = get();
+      if (!state.tenantInfo) return;
+      
+      const { data, error } = await supabase
+        .from('tenant_automations')
+        .select('*')
+        .eq('tenant_id', state.tenantInfo.id)
+        .eq('is_active', true);
+        
+      if (error) {
+        console.error('Error fetching automations:', error);
+        return;
+      }
+      
+      set({ automations: data || [] });
+    } catch (err) {
+      console.error('Failed to fetch automations:', err);
+    }
+  },
 
   requestTranscription: async (messageId: string, mediaUrl: string) => {
     try {
@@ -757,20 +792,77 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  fetchTenantLabels: async () => {
+     const tenant = get().tenantInfo;
+     if (!tenant) return;
+     try {
+         const { data, error } = await supabase.from('tenant_labels').select('*').eq('tenant_id', tenant.id);
+         if (!error && data) {
+             set({ tenantLabels: data });
+         }
+     } catch (e) {
+         console.error('Erro ao buscar labels do tenant', e);
+     }
+   },
+   
+   assignLabelToConversation: async (contactId: string, labelId: string) => {
+      const state = get();
+      const tenant = state.tenantInfo;
+      if (!tenant) return;
+      const conv = state.contacts.find(c => c.id === contactId);
+      if (!conv) return;
+
+      const { data: convRecord } = await supabase.from('conversations').select('id').eq('contact_id', contactId).eq('tenant_id', tenant.id).single();
+      if (!convRecord) return;
+
+      const { error } = await supabase.from('conversation_labels').insert({
+         conversation_id: convRecord.id,
+         label_id: labelId
+      });
+
+      if (!error) {
+         await state.fetchInitialData(); // Reload para atualizar as labels
+      }
+   },
+
+   removeLabelFromConversation: async (contactId: string, labelId: string) => {
+      const state = get();
+      const tenant = state.tenantInfo;
+      if (!tenant) return;
+
+      const { data: convRecord } = await supabase.from('conversations').select('id').eq('contact_id', contactId).eq('tenant_id', tenant.id).single();
+      if (!convRecord) return;
+
+      const { error } = await supabase.from('conversation_labels').delete()
+         .match({ conversation_id: convRecord.id, label_id: labelId });
+
+      if (!error) {
+         await state.fetchInitialData();
+      }
+   },
+
   fetchInitialData: async () => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
 
     try {
+       // Buscar Automacoes
+       await get().fetchAutomations();
+       // Buscar Labels
+       await get().fetchTenantLabels();
+
        // Opcional: Buscar versão atual do app a partir do banco (tabela app_version)
        const { data: appVersionData } = await supabase.from('app_version').select('*').order('deploy_date', { ascending: false }).limit(1).maybeSingle();
        if (appVersionData) {
          set({ appVersion: { version: appVersionData.version, deploy_date: appVersionData.deploy_date } });
        }
 
+       // Fetch labels
+       await get().fetchTenantLabels();
+
        // 1. Puxa as conversas recentes, garantindo a mesma ordem do WhatsApp Web
        const { data: dbConvs } = await supabase.from('conversations')
-          .select('*')
+          .select('*, conversation_labels(labels(*))')
           .eq('tenant_id', tenant.id)
           .order('is_pinned', { ascending: false })
           .order('last_message_at', { ascending: false, nullsFirst: false })
@@ -861,6 +953,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         snoozed_until: conv.snoozed_until,
                         priority: conv.priority,
                         assigned_to: conv.assigned_to,
+                        conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.labels) : [],
                         instance_id: dbC.instance_id || null
                      };
                      
@@ -1292,6 +1385,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         const advanced = parseAdvancedMsgMetadata(m);
 
+        // Verifica automações
+        const isIgnored = get().automations.some((auto: any) => {
+           if ((auto.action_type === 'ignore' || auto.action_type === 'ignore_message') && auto.is_active && m.text_content) {
+               // Handle variables like (X) replacing it with regex wildcard .*
+               const patternText = auto.condition_text || auto.keyword || '';
+               if (!patternText) return false;
+               // Escapa caracteres especiais de regex, mas deixa o (X) ser substituído depois
+               const escapedPattern = patternText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+               // Substitui o (X) escapado por um wildcard real
+               const finalPattern = escapedPattern.replace(/\\\(X\\\)/ig, '.*');
+               const regex = new RegExp(finalPattern, 'i');
+               return regex.test(m.text_content);
+           }
+           return false;
+        });
+
         get().addMessageLocally(cid, {
           id: m.id,
           whatsapp_id: m.whatsapp_message_id,
@@ -1303,7 +1412,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           timestamp: new Date(m.timestamp),
           quoted: advanced.quoted,
           buttons: advanced.buttons,
-          transcription: m.transcription
+          transcription: m.transcription,
+          isIgnored: isIgnored
         });
 
         // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele
@@ -1312,10 +1422,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
            const i = u.findIndex(c => c.id === cid);
            if (i !== -1) {
               const updatedContact = { ...u[i] };
-              updatedContact.lastMsgTimestamp = new Date(m.timestamp).getTime();
-              if (s.activeChatId !== cid) {
-                  updatedContact.unread = (updatedContact.unread || 0) + 1;
+              
+              if (!isIgnored) {
+                 updatedContact.lastMsgTimestamp = new Date(m.timestamp).getTime();
+                 if (s.activeChatId !== cid) {
+                     updatedContact.unread = (updatedContact.unread || 0) + 1;
+                 }
               }
+              
               u[i] = updatedContact;
            }
            return { contacts: u };

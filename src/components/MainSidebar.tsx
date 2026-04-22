@@ -291,7 +291,10 @@ export function MainSidebar() {
           <NavItem icon={<Inbox size={16} />} title="Caixa de Entrada" badge="99+" />
           
           <CollapsibleSection title="Conversas" icon={<MessageCircle size={16} />} isOpen={expandedSections.conversations} onToggle={() => toggleSection('conversations')}>
-            <NavItem title="Todas as conversas" isActive={!activeChannelFilter} onClick={() => setActiveChannelFilter(null, null)} />
+            <NavItem title="Todas as conversas" isActive={!activeChannelFilter} onClick={() => {
+              setActiveChannelFilter(null, null);
+              useChatStore.getState().fetchInitialData();
+            }} />
             <NavItem title="Menções" />
             <NavItem title="Não atendidas" />
           </CollapsibleSection>

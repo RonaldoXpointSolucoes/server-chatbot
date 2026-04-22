@@ -15,6 +15,7 @@ import AgentsList from './pages/settings/AgentsList';
 import LabelsSettings from './pages/settings/LabelsSettings';
 import BotsList from './pages/settings/BotsList';
 import PromptBuilder from './pages/settings/PromptBuilder';
+import AutomationSettings from './pages/settings/AutomationSettings';
 import DevLogger from './components/DevLogger';
 import { InstallPWA } from './components/InstallPWA';
 import { usePushNotifications } from './hooks/usePushNotifications';
@@ -59,6 +60,7 @@ export default function App() {
             <Route path="/settings/labels" element={<LabelsSettings />} />
             <Route path="/settings/bots" element={<BotsList />} />
             <Route path="/settings/prompt-builder" element={<PromptBuilder />} />
+            <Route path="/settings/automation" element={<AutomationSettings />} />
           </Route>
           
           {/* Settings do Modulo Flow (Typebot UI) */}

@@ -616,7 +616,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.22 | Deploy: 20/04/2026, 23:09"}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.24 | Deploy: 21/04/2026, 21:30"}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -870,8 +870,19 @@ export default function ChatDashboard() {
              if (a.is_pinned && !b.is_pinned) return -1;
              if (!a.is_pinned && b.is_pinned) return 1;
              
-             const aLastMsg = a.messages?.[a.messages.length - 1];
-             const bLastMsg = b.messages?.[b.messages.length - 1];
+             let aLastMsg;
+             if (a.messages) {
+               for (let i = a.messages.length - 1; i >= 0; i--) {
+                 if (!a.messages[i].isIgnored) { aLastMsg = a.messages[i]; break; }
+               }
+             }
+
+             let bLastMsg;
+             if (b.messages) {
+               for (let i = b.messages.length - 1; i >= 0; i--) {
+                 if (!b.messages[i].isIgnored) { bLastMsg = b.messages[i]; break; }
+               }
+             }
              
              const aTime = Math.max(a.lastMsgTimestamp || 0, aLastMsg ? new Date(aLastMsg.timestamp).getTime() : 0);
              const bTime = Math.max(b.lastMsgTimestamp || 0, bLastMsg ? new Date(bLastMsg.timestamp).getTime() : 0);

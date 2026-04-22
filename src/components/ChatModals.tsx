@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check } from 'lucide-react';
+import { useChatStore } from '../store/chatStore';
 
 interface BaseModalProps {
   isOpen: boolean;
@@ -516,7 +517,7 @@ export function BlockModal({ isOpen, onClose, contactName, isBlocked, onConfirm 
   );
 }
 
-interface ContactLabelsModalProps {
+export interface ContactLabelsModalProps {
   isOpen: boolean;
   onClose: () => void;
   contactId: string;
@@ -524,30 +525,18 @@ interface ContactLabelsModalProps {
 }
 
 export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: ContactLabelsModalProps) {
-  const [labels, setLabels] = useState<any[]>([]);
+  const { tenantLabels, contacts, assignLabelToConversation, removeLabelFromConversation } = useChatStore();
+  const contact = contacts.find(c => c.id === contactId);
+  const contactLabels = contact?.conv_labels || [];
+
   const [activeLabels, setActiveLabels] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      // Carregar etiquetas globais e as ativas do contato
-      setIsLoading(true);
-      // Fallback premium MOCK se não tiver no supabase ainda
-      const MOCK_LABELS = [
-        { id: '1', name: 'agente-off', color: 'bg-rose-500' },
-        { id: '2', name: 'bloqueado', color: 'bg-rose-600' },
-        { id: '3', name: 'em-treinamento', color: 'bg-[#182229]' },
-        { id: '4', name: 'financeiro', color: 'bg-indigo-500' },
-        { id: '5', name: 'gestor', color: 'bg-slate-600' },
-        { id: '6', name: 'plano-básico', color: 'bg-emerald-500' },
-      ];
-      setLabels(MOCK_LABELS);
-      // Simular carregamento das ativas mockada
-      setActiveLabels(['4']); 
-      setIsLoading(false);
+      setActiveLabels(contactLabels.map((l: any) => l.id));
     }
-  }, [isOpen, contactId]);
+  }, [isOpen, contactId, contactLabels]);
 
   const toggleLabel = (labelId: string) => {
     setActiveLabels(prev => 
@@ -557,11 +546,23 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
 
   const handleSave = async () => {
     setIsSaving(true);
-    // Aqui iria a lógica para salvar no Supabase (inserir e deletar da tabela conversation_labels)
-    setTimeout(() => {
+    try {
+      const originalLabels = contactLabels.map((l: any) => l.id);
+      const toAdd = activeLabels.filter(id => !originalLabels.includes(id));
+      const toRemove = originalLabels.filter(id => !activeLabels.includes(id));
+
+      for (const id of toAdd) {
+        await assignLabelToConversation(contactId, id);
+      }
+      for (const id of toRemove) {
+        await removeLabelFromConversation(contactId, id);
+      }
+    } catch(e) {
+      console.error(e);
+    } finally {
       setIsSaving(false);
       onClose();
-    }, 600);
+    }
   };
 
   if (!isOpen) return null;
@@ -586,10 +587,7 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
         </p>
 
         <div className="flex flex-col gap-2 max-h-60 overflow-y-auto styled-scrollbar pr-2 mb-6">
-          {isLoading ? (
-            <div className="flex justify-center py-6"><Loader2 size={24} className="text-[#00a884] animate-spin" /></div>
-          ) : (
-            labels.map(label => {
+            {tenantLabels.map(label => {
               const isActive = activeLabels.includes(label.id);
               return (
                 <label key={label.id} className="flex items-center gap-3 p-3 rounded-2xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors border border-transparent hover:border-black/5 dark:hover:border-white/5">
@@ -602,12 +600,13 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
                      />
                      {isActive && <div className="absolute inset-0 bg-[#00a884] flex items-center justify-center"><Check size={12} className="text-white" /></div>}
                    </div>
-                   <div className={`w-3 h-3 rounded-full shadow-inner ${label.color}`} />
-                   <span className="text-sm font-medium text-[#3b4a54] dark:text-[#d1d7db] leading-none">{label.name}</span>
+                   <div className="flex-1 flex items-center gap-2">
+                     <span className="w-2.5 h-2.5 rounded-full shadow-inner" style={{ backgroundColor: label.color }}></span>
+                     <span className="text-sm font-medium text-[#3b4a54] dark:text-[#d1d7db] leading-none">{label.name}</span>
+                   </div>
                 </label>
               );
-            })
-          )}
+            })}
         </div>
 
         <div className="flex items-center justify-between mt-2 pt-4 border-t border-black/5 dark:border-white/5">
