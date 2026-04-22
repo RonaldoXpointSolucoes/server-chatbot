@@ -395,11 +395,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
       
       if (err.message === 'Failed to fetch') {
-         alert('Falha crítica de comunicação com o Motor Baileys Local na Porta 9000. Verifique se o terminal do servidor node está rodando (node index.js).');
-      } else if (err.message === 'Connection Closed') {
+         alert('Falha crítica de comunicação com o Motor Baileys. Verifique se o backend está rodando e online.');
+      } else if (err.message.includes('Connection Closed')) {
          alert('Conexão instável com o WhatsApp (Connection Closed). O motor Baileys está tentando reconectar em segundo plano. Aguarde 5 segundos e tente novamente.');
       } else {
-         alert('Erro ao enviar mensagem: ' + err.message);
+         alert(`Não foi possível enviar a mensagem: ${err.message}`);
       }
     }
   },

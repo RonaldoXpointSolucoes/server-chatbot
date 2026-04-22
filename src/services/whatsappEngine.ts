@@ -27,7 +27,17 @@ export const sendNativeMessage = async (tenantId: string, instanceId: string, nu
     },
     body: JSON.stringify({ method: 'sendMessage', args: [number, { text }] })
   });
-  if (!res.ok) throw new Error("Falha ao injetar mensagem nativa");
+  
+  if (!res.ok) {
+     let errorDetail = 'Falha desconhecida';
+     try {
+       const errJson = await res.json();
+       errorDetail = errJson.error || JSON.stringify(errJson);
+     } catch (e) {
+       errorDetail = await res.text();
+     }
+     throw new Error(`Falha ao injetar mensagem nativa: ${res.status} - ${errorDetail}`);
+  }
   return res.json();
 };
 

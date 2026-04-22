@@ -88,6 +88,21 @@ export default function ClientLogin() {
         return;
       }
 
+      // Limpa dados antigos para evitar conflitos entre local e session storage
+      localStorage.removeItem('current_tenant_id');
+      localStorage.removeItem('current_tenant_name');
+      localStorage.removeItem('current_user_name');
+      localStorage.removeItem('current_user_role');
+      localStorage.removeItem('allowed_instances');
+      localStorage.removeItem('allowed_companies');
+      
+      sessionStorage.removeItem('current_tenant_id');
+      sessionStorage.removeItem('current_tenant_name');
+      sessionStorage.removeItem('current_user_name');
+      sessionStorage.removeItem('current_user_role');
+      sessionStorage.removeItem('allowed_instances');
+      sessionStorage.removeItem('allowed_companies');
+
       const storage = keepLogged ? localStorage : sessionStorage;
       storage.setItem('current_tenant_id', tenantData.id);
       storage.setItem('current_tenant_name', tenantData.name);
@@ -97,12 +112,9 @@ export default function ClientLogin() {
       if (userRole === 'agent' || userRole === 'Agente') {
           storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
           storage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
-      } else {
-          storage.removeItem('allowed_instances');
-          storage.removeItem('allowed_companies');
       }
 
-      navigate('/chat');
+      window.location.href = '/chat';
     } catch (err) {
       console.error(err);
       setErrorMsg('Erro de conexão com o banco de dados.');
