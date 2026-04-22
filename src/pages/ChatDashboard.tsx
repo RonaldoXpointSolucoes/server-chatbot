@@ -622,7 +622,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.27 | Deploy: 22/04/2026, 17:59"}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.28 | Deploy: 22/04/2026, 18:05"}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">

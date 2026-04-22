@@ -1488,7 +1488,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               
               if (!isIgnored) {
                  updatedContact.lastMsgTimestamp = new Date(m.timestamp).getTime();
-                 if (s.activeChatId !== cid) {
+                 const isClient = (m.sender_type === 'client' || !m.sender_type);
+                 if (s.activeChatId !== cid && isClient) {
                      updatedContact.unread = (updatedContact.unread || 0) + 1;
                  }
               }
