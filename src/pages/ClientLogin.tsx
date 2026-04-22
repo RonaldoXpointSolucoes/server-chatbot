@@ -28,37 +28,83 @@ export default function ClientLogin() {
     setErrorMsg('');
 
     try {
-      // Procura a empresa pelo nome (case-insensitive) via ilike
-      const { data, error } = await supabase
+      let tenantData = null;
+      let userRole = 'admin';
+      let allowedInstances = null;
+      let allowedCompanies = null;
+      let userName = '';
+
+      // Tenta login como Empresa (Admin)
+      const { data: companyData, error: companyError } = await supabase
         .from('companies')
-        .select('id, name, status, evolution_api_instance')
+        .select('id, name, status')
         .eq('email', email.trim().toLowerCase())
         .eq('password', password)
         .order('created_at', { ascending: true })
         .limit(1)
         .maybeSingle();
 
-      if (error || !data) {
+      if (companyData) {
+        tenantData = companyData;
+        userName = companyData.name;
+        userRole = 'admin';
+      } else {
+        // Tenta login como Agente / Membro do time
+        const { data: agentData, error: agentError } = await supabase
+          .from('tenant_users')
+          .select('id, tenant_id, role, full_name, allowed_instances, allowed_companies')
+          .eq('email', email.trim().toLowerCase())
+          .eq('password', password)
+          .limit(1)
+          .maybeSingle();
+
+        if (agentData) {
+           // Busca os dados da empresa matriz desse agente
+           const { data: parentCompany } = await supabase
+             .from('companies')
+             .select('id, name, status')
+             .eq('id', agentData.tenant_id)
+             .single();
+             
+           if (parentCompany) {
+             tenantData = parentCompany;
+             userName = agentData.full_name;
+             userRole = agentData.role;
+             allowedInstances = agentData.allowed_instances || [];
+             allowedCompanies = agentData.allowed_companies || [];
+           }
+        }
+      }
+
+      if (!tenantData) {
         setErrorMsg('E-mail ou senha inválidos.');
         setIsLoading(false);
         return;
       }
 
-      if (data.status === 'suspended') {
+      if (tenantData.status === 'suspended') {
         setErrorMsg('Acesso bloqueado. Contate o administrador.');
         setIsLoading(false);
         return;
       }
 
-      if (keepLogged) {
-        localStorage.setItem('current_tenant_id', data.id);
-        localStorage.setItem('current_tenant_name', data.name);
+      const storage = keepLogged ? localStorage : sessionStorage;
+      storage.setItem('current_tenant_id', tenantData.id);
+      storage.setItem('current_tenant_name', tenantData.name);
+      storage.setItem('current_user_name', userName);
+      storage.setItem('current_user_role', userRole);
+      
+      if (userRole === 'agent' || userRole === 'Agente') {
+          storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
+          storage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
       } else {
-        sessionStorage.setItem('current_tenant_id', data.id);
-        sessionStorage.setItem('current_tenant_name', data.name);
+          storage.removeItem('allowed_instances');
+          storage.removeItem('allowed_companies');
       }
+
       navigate('/chat');
     } catch (err) {
+      console.error(err);
       setErrorMsg('Erro de conexão com o banco de dados.');
     } finally {
       setIsLoading(false);

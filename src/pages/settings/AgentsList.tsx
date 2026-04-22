@@ -4,7 +4,7 @@ import { useChatStore } from '../../store/chatStore';
 import { AgentModal } from '../../components/modals/AgentModal';
 
 export default function AgentsList() {
-  const { agents, fetchTenantAgents, deleteAgent } = useChatStore();
+  const { agents, fetchTenantAgents, deleteAgent, tenantInfo } = useChatStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [agentToEdit, setAgentToEdit] = useState<any>(null);
@@ -14,8 +14,10 @@ export default function AgentsList() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    fetchTenantAgents();
-  }, [fetchTenantAgents]);
+    if (tenantInfo?.id) {
+      fetchTenantAgents();
+    }
+  }, [fetchTenantAgents, tenantInfo?.id]);
 
   const filteredAgents = agents?.filter((agent) => {
     const term = searchTerm.toLowerCase();

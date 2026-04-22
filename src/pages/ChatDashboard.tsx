@@ -218,6 +218,7 @@ export default function ChatDashboard() {
   const [showFilters, setShowFilters] = useState(false);
   const [filterContextMenu, setFilterContextMenu] = useState<{ type: string, x: number, y: number } | null>(null);
   const [instanceNamesMap, setInstanceNamesMap] = useState<Record<string, string>>({});
+  const [instanceColorsMap, setInstanceColorsMap] = useState<Record<string, string>>({});
 
   // Estados de Paginação Local Virtual
   const [contactPageLimit, setContactPageLimit] = useState(20);
@@ -326,11 +327,16 @@ export default function ChatDashboard() {
       subscribeToNewMessages();
     })();
 
-    supabase.from('whatsapp_instances').select('id, display_name').then(({data}) => {
+    supabase.from('whatsapp_instances').select('id, display_name, color').then(({data}) => {
       if (data) {
-        const map: Record<string, string> = {};
-        data.forEach(d => { map[d.id] = d.display_name; });
-        setInstanceNamesMap(map);
+        const nameMap: Record<string, string> = {};
+        const colorMap: Record<string, string> = {};
+        data.forEach(d => { 
+           nameMap[d.id] = d.display_name; 
+           if(d.color) colorMap[d.id] = d.color;
+        });
+        setInstanceNamesMap(nameMap);
+        setInstanceColorsMap(colorMap);
       }
     });
   }, []);
@@ -616,7 +622,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.24 | Deploy: 21/04/2026, 21:30"}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.26 | Deploy: 22/04/2026, 13:54"}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -873,14 +879,14 @@ export default function ChatDashboard() {
              let aLastMsg;
              if (a.messages) {
                for (let i = a.messages.length - 1; i >= 0; i--) {
-                 if (!a.messages[i].isIgnored) { aLastMsg = a.messages[i]; break; }
+                 if (!a.messages[i].isIgnoredSilent) { aLastMsg = a.messages[i]; break; }
                }
              }
 
              let bLastMsg;
              if (b.messages) {
                for (let i = b.messages.length - 1; i >= 0; i--) {
-                 if (!b.messages[i].isIgnored) { bLastMsg = b.messages[i]; break; }
+                 if (!b.messages[i].isIgnoredSilent) { bLastMsg = b.messages[i]; break; }
                }
              }
              
@@ -922,7 +928,15 @@ export default function ChatDashboard() {
                 )}
               >
                 <div className="relative shrink-0">
-                  <img src={contact.avatar} alt="Avatar" className="w-12 h-12 rounded-full object-cover shadow-sm" />
+                  <img 
+                      src={contact.avatar} 
+                      alt="Avatar" 
+                      className="w-12 h-12 rounded-full object-cover shadow-sm hover:scale-105 transition-transform duration-200 cursor-pointer ring-2 ring-transparent hover:ring-[#00a884]/30" 
+                      onClick={(e) => { e.stopPropagation(); setFullscreenImage(contact.avatar); }}
+                      onError={(e) => {
+                        e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone))}&background=random&color=fff`;
+                      }}
+                    />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center mb-0.5">
@@ -948,12 +962,25 @@ export default function ChatDashboard() {
                            </div>
                          )}
                        </span>
-                      {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (
-                        <span className="text-[10px] px-1.5 py-[2px] rounded-md bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 text-slate-600 dark:text-[#aebac1] font-medium truncate mt-1 w-fit max-w-[140px] flex items-center gap-1 shadow-sm">
-                          <Smartphone size={10} className="shrink-0 opacity-80" />
-                          <span className="truncate">{contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName}</span>
-                        </span>
-                      )}
+                      {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (() => {
+                          const instColor = contact.instance_id ? instanceColorsMap[contact.instance_id] : undefined;
+                          return (
+                            <span 
+                              className="text-[10px] px-1.5 py-[2px] rounded-md border font-medium truncate mt-1 w-fit max-w-[140px] flex items-center gap-1 shadow-sm transition-all"
+                              style={instColor ? { 
+                                backgroundColor: `${instColor}15`, 
+                                borderColor: `${instColor}30`, 
+                                color: instColor 
+                              } : {
+                                backgroundColor: 'rgba(0,0,0,0.05)',
+                                borderColor: 'rgba(0,0,0,0.05)'
+                              }}
+                            >
+                              <Smartphone size={10} className="shrink-0 opacity-80" />
+                              <span className="truncate">{contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName}</span>
+                            </span>
+                          );
+                      })()}
                     </div>
                     <div className="flex items-center gap-1">
                       <span className={cn("text-[11px] font-medium min-w-fit ml-1 flex items-center gap-1", contact.unread > 0 ? "text-[#00a884]" : "text-[#54656f] dark:text-[#8696a0]")}>
@@ -1111,7 +1138,15 @@ export default function ChatDashboard() {
               <button className="sm:hidden p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1]" onClick={() => setActiveChat(null)}>
                 <ChevronLeft size={24} />
               </button>
-              <img src={activeChat.avatar} alt="Avatar" className="w-10 h-10 rounded-full object-cover" />
+              <img 
+                  src={activeChat.avatar} 
+                  alt="Avatar" 
+                  className="w-10 h-10 rounded-full object-cover hover:scale-105 transition-transform duration-200 cursor-pointer ring-2 ring-transparent hover:ring-[#00a884]/30" 
+                  onClick={(e) => { e.stopPropagation(); setFullscreenImage(activeChat.avatar); }}
+                  onError={(e) => {
+                    e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone))}&background=random&color=fff`;
+                  }}
+                />
               <div>
                 <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
                   <span className="truncate max-w-[200px] sm:max-w-md">{formatPhoneNumber(getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone))}</span>

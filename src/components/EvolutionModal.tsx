@@ -25,8 +25,18 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
   const [extApiKey, setExtApiKey] = useState('');
   const [customName, setCustomName] = useState<string>('');
   const [customApiKey, setCustomApiKey] = useState<string>('');
+  const [customColor, setCustomColor] = useState<string>('#10b981');
   const [activePollingId, setActivePollingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const INSTANCE_COLORS = [
+    { value: '#10b981', label: 'Esmeralda' },
+    { value: '#3b82f6', label: 'Azul' },
+    { value: '#a855f7', label: 'Roxo' },
+    { value: '#f97316', label: 'Laranja' },
+    { value: '#f43f5e', label: 'Rosa' },
+    { value: '#06b6d4', label: 'Ciano' },
+  ];
 
   useEffect(() => {
     fetchExistingInstances();
@@ -127,7 +137,8 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
           display_name: nameStr,
           status: 'offline',
           tenant_id: cId,
-          api_key: finalApiKey
+          api_key: finalApiKey,
+          color: customColor
         });
 
         if (dbErr) throw new Error('Falha ao registrar instância. ' + dbErr.message);
@@ -139,6 +150,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
         
         setCustomName('');
         setCustomApiKey('');
+        setCustomColor('#10b981');
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Erro de comunicação com o sistema.');
@@ -285,6 +297,37 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
                   <span className="flex items-center gap-1 text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
                     <Signal size={14} className="animate-pulse" /> NATIVO BAILLEYS CORE
                   </span>
+              </div>
+              
+              <div className="w-full mt-4 flex flex-col items-center">
+                 <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-tight">Cor da Instância</p>
+                 <div className="flex gap-2">
+                    {INSTANCE_COLORS.map(color => (
+                       <button
+                         key={color.value}
+                         onClick={async () => {
+                            const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                            if (!cId) return;
+                            const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                            if(!tInstanceId) return;
+                            
+                            const { error } = await supabase.from('whatsapp_instances')
+                              .update({ color: color.value })
+                              .eq('id', tInstanceId)
+                              .eq('tenant_id', cId);
+                              
+                            if (!error) {
+                               fetchExistingInstances();
+                            }
+                         }}
+                         className={`w-8 h-8 rounded-full transition-all flex items-center justify-center ${targetInstObj?.color === color.value ? 'ring-2 ring-offset-2 ring-emerald-500 scale-110' : 'hover:scale-105 border border-white/20'}`}
+                         style={{ backgroundColor: color.value }}
+                         title={color.label}
+                       >
+                         {targetInstObj?.color === color.value && <CheckCircle size={14} className="text-white drop-shadow" />}
+                       </button>
+                    ))}
+                 </div>
               </div>
               
               <div className="grid grid-cols-2 gap-2 w-full mt-6">
@@ -538,6 +581,24 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
                          className="w-full bg-white dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-2xl p-3 text-sm text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-all font-mono"
                        />
                     </div>
+                    
+                    <div className="w-full mb-4">
+                       <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase tracking-tight">Cor da Instância</label>
+                       <div className="flex gap-2">
+                          {INSTANCE_COLORS.map(color => (
+                             <button
+                               key={color.value}
+                               onClick={() => setCustomColor(color.value)}
+                               className={`w-8 h-8 rounded-full transition-all flex items-center justify-center ${customColor === color.value ? 'ring-2 ring-offset-2 ring-emerald-500 scale-110' : 'hover:scale-105 border border-black/10 dark:border-white/10'}`}
+                               style={{ backgroundColor: color.value }}
+                               title={color.label}
+                             >
+                               {customColor === color.value && <CheckCircle size={14} className="text-white drop-shadow" />}
+                             </button>
+                          ))}
+                       </div>
+                    </div>
+                    
                     <button 
                       onClick={handleGenerateNew}
                       className="bg-emerald-500 hover:bg-emerald-400 w-full text-white px-6 py-4 rounded-2xl text-sm font-bold transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 mt-4"

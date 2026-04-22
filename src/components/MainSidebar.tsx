@@ -32,7 +32,8 @@ import {
   Smartphone,
   Edit2,
   Plus,
-  CheckCircle2
+  CheckCircle2,
+  LogOut
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
@@ -53,8 +54,24 @@ export function MainSidebar() {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
-  const agentName = useChatStore(state => state.tenantInfo?.users?.find(u => u.user_id === state.currentUser?.id)?.full_name || 'Agente');
+  const handleLogout = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await supabase.auth.signOut();
+      localStorage.clear();
+      sessionStorage.clear();
+      navigate('/');
+    } catch (error) {
+      console.error('Erro ao sair:', error);
+    }
+  };
+
+  const storedName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
+  const storeNameFallback = useChatStore(state => state.tenantInfo?.users?.find(u => u.user_id === state.currentUser?.id)?.full_name);
+  const agentName = storedName || storeNameFallback || 'Agente';
   const agentInitial = agentName ? agentName.substring(0, 1).toUpperCase() : 'A';
+  const agentEmail = `${agentName.toLowerCase().replace(/\s/g, '')}@xpoint.com`;
+  const currentUserRole = localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role') || 'admin';
   const activeChannelFilter = useChatStore(state => state.activeChannelFilter);
   const setActiveChannelFilter = useChatStore(state => state.setActiveChannelFilter);
   const connectedInstanceName = useChatStore(state => state.connectedInstanceName);
@@ -72,18 +89,30 @@ export function MainSidebar() {
     if (!tenantId) return;
 
     const fetchInstances = async () => {
-      try {
-        const { data, error } = await supabase.from('whatsapp_instances')
-          .select('id, display_name, status')
-          .eq('tenant_id', tenantId)
-          .order('created_at', { ascending: false });
-          
-        if (error) {
-           console.error('Erro detalhado Supabase:', error);
-           return;
-        }
-        if (data) setInstances(data);
-      } catch (e) {
+        try {
+          const { data, error } = await supabase.from('whatsapp_instances')
+            .select('id, display_name, status')
+            .eq('tenant_id', tenantId)
+            .order('created_at', { ascending: false });
+            
+          if (error) {
+             console.error('Erro detalhado Supabase:', error);
+             return;
+          }
+          if (data) {
+             let finalData = data;
+             if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
+                const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+                if (allowedStr) {
+                   try {
+                       const allowedInstances = JSON.parse(allowedStr);
+                       finalData = data.filter(d => allowedInstances.includes(d.id));
+                   } catch(e) {}
+                }
+             }
+             setInstances(finalData);
+          }
+        } catch (e) {
         console.error('Erro ao buscar canais:', e);
       }
     };
@@ -392,45 +421,53 @@ export function MainSidebar() {
           <NavItem icon={<Megaphone size={16} />} title="Campanhas" />
           <NavItem icon={<BookOpen size={16} />} title="Central de Ajuda" />
           
-          <div className="pt-2 mt-2 border-t border-[#2a3942]/60">
-            <CollapsibleSection 
-              title="Configurações" 
-              icon={<Settings size={16} />}
-              isOpen={expandedSections.settings} 
-              onToggle={() => toggleSection('settings')}
-            >
-              <NavItem icon={<Briefcase size={16} />} title="Conta" isSub onClick={() => navigate('/settings/account')} />
-              <NavItem icon={<UserSquare2 size={16} />} title="Agentes" isSub onClick={() => navigate('/settings/agents')} />
-              <NavItem icon={<Users size={16} />} title="Times" isSub onClick={() => navigate('/settings/teams')} />
-              <NavItem icon={<Inbox size={16} />} title="Caixas de Entrada" isSub onClick={() => navigate('/settings/inboxes')} />
-              <NavItem icon={<Tag size={16} />} title="Etiquetas" isSub onClick={() => navigate('/settings/labels')} />
-              <NavItem icon={<Code2 size={16} />} title="Atributos Personalizados" isSub onClick={() => navigate('/settings/attributes')} />
-              <NavItem icon={<Repeat size={16} />} title="Automação" isSub onClick={() => navigate('/settings/automation')} />
-              <NavItem icon={<Bot size={16} />} title="Robôs" isSub onClick={() => navigate('/settings/bots')} />
-              <NavItem icon={<CalendarDays size={16} />} title="Macros" isSub onClick={() => navigate('/settings/macros')} />
-              <NavItem icon={<MessageSquareReply size={16} />} title="Respostas Prontas" isSub onClick={() => navigate('/settings/canned-responses')} />
-              <NavItem icon={<Puzzle size={16} />} title="Integrações" isSub onClick={() => navigate('/settings/integrations')} />
-              <NavItem icon={<Workflow size={16} />} title="Fluxo de Conversa" isSub onClick={() => navigate('/flows')} />
-            </CollapsibleSection>
-          </div>
+          {currentUserRole === 'admin' && (
+            <div className="pt-2 mt-2 border-t border-[#2a3942]/60">
+              <CollapsibleSection 
+                title="Configurações" 
+                icon={<Settings size={16} />}
+                isOpen={expandedSections.settings} 
+                onToggle={() => toggleSection('settings')}
+              >
+                <NavItem icon={<Briefcase size={16} />} title="Conta" isSub onClick={() => navigate('/settings/account')} />
+                <NavItem icon={<UserSquare2 size={16} />} title="Agentes" isSub onClick={() => navigate('/settings/agents')} />
+                <NavItem icon={<Users size={16} />} title="Times" isSub onClick={() => navigate('/settings/teams')} />
+                <NavItem icon={<Inbox size={16} />} title="Caixas de Entrada" isSub onClick={() => navigate('/settings/inboxes')} />
+                <NavItem icon={<Tag size={16} />} title="Etiquetas" isSub onClick={() => navigate('/settings/labels')} />
+                <NavItem icon={<Code2 size={16} />} title="Atributos Personalizados" isSub onClick={() => navigate('/settings/attributes')} />
+                <NavItem icon={<Repeat size={16} />} title="Automação" isSub onClick={() => navigate('/settings/automation')} />
+                <NavItem icon={<Bot size={16} />} title="Robôs" isSub onClick={() => navigate('/settings/bots')} />
+                <NavItem icon={<CalendarDays size={16} />} title="Macros" isSub onClick={() => navigate('/settings/macros')} />
+                <NavItem icon={<MessageSquareReply size={16} />} title="Respostas Prontas" isSub onClick={() => navigate('/settings/canned-responses')} />
+                <NavItem icon={<Puzzle size={16} />} title="Integrações" isSub onClick={() => navigate('/settings/integrations')} />
+                <NavItem icon={<Workflow size={16} />} title="Fluxo de Conversa" isSub onClick={() => navigate('/flows')} />
+              </CollapsibleSection>
+            </div>
+          )}
         </div>
 
-      </div>
-
-      {/* User Footer Profile */}
+         {/* User Footer Profile */}
       <div className="absolute bottom-0 w-full h-[60px] bg-[#202c33] border-t border-[#2a3942] flex items-center px-4 cursor-pointer hover:bg-[#2a3942] transition-colors group">
         <div className="relative">
           <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-500 p-[1px] shadow-sm">
             <div className="w-full h-full bg-[#111b21] rounded-full flex items-center justify-center overflow-hidden">
-               <span className="text-[#e9edef] font-semibold text-xs tracking-tight">{agentInitial}</span>
+              <span className="text-[#e9edef] font-semibold text-xs tracking-tight">{agentInitial}</span>
             </div>
           </div>
           <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#202c33] rounded-full group-hover:border-[#2a3942] transition-colors" />
         </div>
         <div className="ml-3 flex-1 min-w-0">
           <p className="text-[14px] font-medium text-[#e9edef] truncate">{agentName}</p>
-          <p className="text-[11px] text-[#8696a0] truncate opacity-80">{agentName.toLowerCase().replace(/\s/g, '')}@xpoint.com</p>
+          <p className="text-[11px] text-[#8696a0] truncate opacity-80">{agentEmail}</p>
         </div>
+        <button 
+          onClick={handleLogout}
+          className="ml-2 p-2 rounded-md text-[#8696a0] hover:text-[#f15c6d] hover:bg-[#2a3942] transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+          title="Sair da conta"
+        >
+          <LogOut size={16} />
+        </button>
+      </div>
       </div>
 {/* 
       // Tailwind custom utility pra rolagem discreta que usaremos globalmente em index.css futuramente.

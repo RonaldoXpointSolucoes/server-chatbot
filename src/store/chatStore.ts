@@ -18,6 +18,7 @@ export type MessageType = {
   buttons?: Array<{ id: string; text: string; url?: string; type: string }>; // Novo campo!
   transcription?: string; // Transcrição de áudio via Gemini
   isIgnored?: boolean; // Flag para mensagens ignoradas por automações
+  isIgnoredSilent?: boolean; // Flag para não atualizar posição no chat
 };
 
 
@@ -105,8 +106,8 @@ interface ChatState {
   
   // Omnichannel Actions
   fetchTenantAgents: () => Promise<void>;
-  createAgent: (payload: { full_name: string; email: string; role: string; password?: string }) => Promise<void>;
-  updateAgent: (id: string, payload: { full_name: string; email: string; role: string; password?: string }) => Promise<void>;
+  createAgent: (payload: { full_name: string; email: string; role: string; password?: string; allowed_instances?: string[]; allowed_companies?: string[] }) => Promise<void>;
+  updateAgent: (id: string, payload: { full_name: string; email: string; role: string; password?: string; allowed_instances?: string[]; allowed_companies?: string[] }) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
   updateConversationField: (contactId: string, payload: Record<string, any>) => Promise<void>;
   updateAgentProfile: (fullName: string, signature: string) => Promise<void>;
@@ -536,10 +537,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       const data = await res.json();
       if (res.ok && data.ok && data.result) {
-        const url = data.result;
-        await supabase.from('contacts').update({ profile_picture_url: url }).eq('id', contactId);
+        const baileysUrl = data.result;
+        let finalUrl = baileysUrl;
+        
+        try {
+          // Tenta baixar a imagem diretamente para contornar expirações futuras (WhatsApp CDN expiry)
+          const imgRes = await fetch(baileysUrl);
+          if (imgRes.ok) {
+            const blob = await imgRes.blob();
+            const fileName = `avatars/${state.tenantInfo.id}/${contactId}-${Date.now()}.jpg`;
+            
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('chat_media')
+              .upload(fileName, blob, { upsert: true, contentType: blob.type || 'image/jpeg' });
+              
+            if (!uploadError && uploadData) {
+              const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(fileName);
+              finalUrl = publicUrlData.publicUrl;
+            } else {
+              console.warn("[fetchContactPicture] Erro no upload para o Supabase Storage:", uploadError);
+            }
+          }
+        } catch (dlErr) {
+          console.warn("[fetchContactPicture] Falha ao baixar a imagem (possível CORS ou erro de rede). Usando URL original.", dlErr);
+        }
+
+        await supabase.from('contacts').update({ profile_picture_url: finalUrl }).eq('id', contactId);
         set((s) => ({
-          contacts: s.contacts.map(c => c.id === contactId ? { ...c, avatar: url } : c)
+          contacts: s.contacts.map(c => c.id === contactId ? { ...c, avatar: finalUrl } : c)
         }));
       }
     } catch(err) {
@@ -600,6 +625,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   upsertContactLocally: (contact) => {
+    // RBAC: Se for agente, só carrega contatos de instâncias permitidas
+    const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+    const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+    if (roleStr === 'agent' && contact.instance_id && allowedStr) {
+        try { 
+            const allowedInstances = JSON.parse(allowedStr); 
+            if (!allowedInstances.includes(contact.instance_id)) return;
+        } catch(e) {}
+    }
+
     // VALIDAÇÃO INTELIGENTE APPWEB (Realtime Barreira)
     if (contact.whatsapp_jid && contact.whatsapp_jid.includes('@lid')) return;
     if (contact.phone && contact.phone.length > 15 && !contact.phone.includes('+')) return;
@@ -635,7 +670,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           custom_name: finalCustomName,
           name: finalName,
           // Preserva o fallback avatar se a api ou realtime nao devolver algo util
-          avatar: (contact as any).avatar || existing.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contactPhoneMatch || 'U')}&background=random&color=fff`,
+          avatar: (contact as any).profile_picture_url || (contact as any).avatar || existing.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contactPhoneMatch || 'U')}&background=random&color=fff`,
         };
 
         const newContacts = [...state.contacts];
@@ -891,8 +926,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
        }
 
        if (dbContacts && dbContacts.length > 0) {
+           // RBAC: Se for agente, só carrega contatos de instâncias permitidas
+           let allowedInstances: string[] = [];
+           const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+           const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+           if (roleStr === 'agent' && allowedStr) {
+               try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
+           }
+
            // VALIDAÇÃO INTELIGENTE APPWEB: Filtra contatos que não tem telefone válido ou são LIDs de sistema (fantasma)
            const validContacts = dbContacts.filter(c => {
+               if (roleStr === 'agent' && c.instance_id) {
+                   if (!allowedInstances.includes(c.instance_id)) return false;
+               }
                const jid = c.whatsapp_jid || '';
                const phone = c.phone || '';
                if (jid.includes('@lid')) return false; // Bloqueia LIDs
@@ -1239,7 +1285,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         role: payload.role,
         full_name: payload.full_name,
         email: payload.email,
-        password: payload.password
+        password: payload.password,
+        allowed_instances: payload.allowed_instances || [],
+        allowed_companies: payload.allowed_companies || []
       }]);
       if (error) throw error;
       await get().fetchTenantAgents();
@@ -1257,7 +1305,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         role: payload.role,
         full_name: payload.full_name,
         email: payload.email,
-        password: payload.password
+        password: payload.password,
+        allowed_instances: payload.allowed_instances || [],
+        allowed_companies: payload.allowed_companies || []
       }).eq('id', id).eq('tenant_id', tenant.id);
       
       if (error) throw error;
@@ -1374,6 +1424,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const { data: cData } = await supabase.from('contacts').select('*').eq('id', targetContactId).single();
         if (!cData) return;
 
+        // RBAC: Verifica se o contato que recebeu a msg é de uma instância que o Agente tem acesso
+        const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+        const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+        if (roleStr === 'agent' && cData.instance_id && allowedStr) {
+            try { 
+                const allowedInstances = JSON.parse(allowedStr); 
+                if (!allowedInstances.includes(cData.instance_id)) return;
+            } catch(e) {}
+        }
+
         const currentState = get();
         const targetContactLocally = currentState.contacts.find((c: any) => c.id === targetContactId || (c.whatsapp_jid && c.whatsapp_jid === cData.whatsapp_jid) || c.phone === cData.phone);
         
@@ -1386,8 +1446,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const advanced = parseAdvancedMsgMetadata(m);
 
         // Verifica automações
-        const isIgnored = get().automations.some((auto: any) => {
-           if ((auto.action_type === 'ignore' || auto.action_type === 'ignore_message') && auto.is_active && m.text_content) {
+        const ignoredAuto = get().automations.find((auto: any) => {
+           if (['ignore', 'ignore_message', 'ignore_message_silent'].includes(auto.action_type) && auto.is_active && m.text_content) {
                // Handle variables like (X) replacing it with regex wildcard .*
                const patternText = auto.condition_text || auto.keyword || '';
                if (!patternText) return false;
@@ -1400,6 +1460,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
            }
            return false;
         });
+        const isIgnored = !!ignoredAuto;
+        const isIgnoredSilent = ignoredAuto?.action_type === 'ignore_message_silent';
 
         get().addMessageLocally(cid, {
           id: m.id,
@@ -1413,7 +1475,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           quoted: advanced.quoted,
           buttons: advanced.buttons,
           transcription: m.transcription,
-          isIgnored: isIgnored
+          isIgnored: isIgnored,
+          isIgnoredSilent: isIgnoredSilent
         });
 
         // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele

@@ -327,6 +327,7 @@ export default function AutomationSettings() {
                     className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
                   >
                     <option value="ignore_message">Marcar como Lida (Ignorar Notificação)</option>
+                    <option value="ignore_message_silent">Marcar como Lida e Silenciar (Não subir na lista)</option>
                     <option value="extract_contact_name">Extrair e Salvar Nome (Padrão: Nome: (X))</option>
                   </select>
                 </div>
