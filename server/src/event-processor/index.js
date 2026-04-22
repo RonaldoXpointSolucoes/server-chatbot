@@ -357,7 +357,7 @@ class EventProcessor {
                              };
                          }
                      } catch(err) {
-                         console.error('[BatchProcessor] Fallback Media Warning:', err.message);
+                         console.warn(`[BatchProcessor] Aviso: Mídia expirada/inacessível para JID ${b.jid}. (Normal em History Sync)`);
                      }
                  }
              }));
@@ -581,14 +581,18 @@ class EventProcessor {
 
     extractTextFromMessage(msg) {
         if (!msg.message) return '';
-        if (msg.message.conversation) return msg.message.conversation;
-        if (msg.message.extendedTextMessage) return msg.message.extendedTextMessage.text;
-        if (msg.message.imageMessage) return msg.message.imageMessage.caption || '📸 Imagem / Foto';
-        if (msg.message.audioMessage) return '🎵 Áudio';
-        if (msg.message.videoMessage) return msg.message.videoMessage.caption || '🎥 Vídeo';
-        if (msg.message.documentMessage) return '📁 Documento';
-        if (msg.message.reactionMessage) return '❤️ Reação: ' + msg.message.reactionMessage.text;
-        return '📎 Mensagem';
+        let text = '';
+        if (msg.message.conversation) text = msg.message.conversation;
+        else if (msg.message.extendedTextMessage) text = msg.message.extendedTextMessage.text;
+        else if (msg.message.imageMessage) text = msg.message.imageMessage.caption || '📸 Imagem / Foto';
+        else if (msg.message.audioMessage) text = '🎵 Áudio';
+        else if (msg.message.videoMessage) text = msg.message.videoMessage.caption || '🎥 Vídeo';
+        else if (msg.message.documentMessage) text = '📁 Documento';
+        else if (msg.message.reactionMessage) text = '❤️ Reação: ' + msg.message.reactionMessage.text;
+        else text = '📎 Mensagem';
+        
+        // Anti-Bug: Remove caracteres nulos (\x00) que quebram o cast de JSON do PostgreSQL no Supabase (Upsert)
+        return text ? String(text).replace(/\x00/g, '') : '';
     }
 
     extractTypeFromMessage(msg) {
