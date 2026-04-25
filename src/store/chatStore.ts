@@ -7,7 +7,7 @@ export type MessageType = {
   text: string;
   sender: 'client' | 'bot' | 'human' | 'system';
   mediaUrl?: string;
-  mediaType?: 'image' | 'video' | 'audio' | 'document';
+  mediaType?: 'image' | 'video' | 'audio' | 'document' | 'contact' | 'location' | 'interactive' | string;
   status?: string; // PENDING, SENT, DELIVERY_ACK, READ
   timestamp: Date;
   quoted?: {
@@ -19,6 +19,7 @@ export type MessageType = {
   transcription?: string; // Transcrição de áudio via Gemini
   isIgnored?: boolean; // Flag para mensagens ignoradas por automações
   isIgnoredSilent?: boolean; // Flag para não atualizar posição no chat
+  vcardWaid?: string; // WAID (Telefone) extraído de VCard
 };
 
 
@@ -121,12 +122,32 @@ interface ChatState {
   fetchTenantLabels: () => Promise<void>;
   assignLabelToConversation: (contactId: string, labelId: string) => Promise<void>;
   removeLabelFromConversation: (contactId: string, labelId: string) => Promise<void>;
+  
+  // Quick Replies
+  quickReplies: QuickReply[];
+  fetchQuickReplies: () => Promise<void>;
+  addQuickReply: (shortcut: string, content: string) => Promise<void>;
+  updateQuickReply: (id: string, shortcut: string, content: string) => Promise<void>;
+  deleteQuickReply: (id: string) => Promise<void>;
+  
+  // Theme Global
+  theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark') => void;
+}
+
+export interface QuickReply {
+  id: string;
+  tenant_id: string;
+  shortcut: string;
+  content: string;
+  created_at?: string;
 }
 
 function parseAdvancedMsgMetadata(m: any) {
   let derivedType = m.message_type;
   let derivedText = m.text_content;
   let derivedQuoted: any = undefined;
+  let vcardWaid: string | undefined = undefined;
 
   try {
       const payloadMessage = m.raw_payload?.message;
@@ -170,6 +191,10 @@ function parseAdvancedMsgMetadata(m: any) {
           } else if (payloadMessage.contactMessage) {
               derivedType = 'contact';
               derivedText = payloadMessage.contactMessage.displayName || payloadMessage.contactMessage.vcard?.match(/FN:(.+)/)?.[1] || 'Contato';
+              const waidMatch = payloadMessage.contactMessage.vcard?.match(/waid=(\d+)/);
+              if (waidMatch) {
+                  vcardWaid = waidMatch[1];
+              }
           } else if (payloadMessage.contactsArrayMessage) {
               derivedType = 'contact';
               derivedText = payloadMessage.contactsArrayMessage.displayName || 'Vários Contatos';
@@ -264,7 +289,7 @@ function parseAdvancedMsgMetadata(m: any) {
       }
   } catch(e){}
 
-  return { mediaType: derivedType, text: derivedText, quoted: derivedQuoted, buttons: buttons.length > 0 ? buttons : undefined };
+  return { mediaType: derivedType, text: derivedText, quoted: derivedQuoted, buttons: buttons.length > 0 ? buttons : undefined, vcardWaid };
 }
 
 function sanitizeContactName(targetName: string | null | undefined, fallbackPhone: string | null | undefined, tenantName: string | null | undefined): string | null {
@@ -294,6 +319,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   qrModalTargetInstance: null,
   automations: [],
   tenantLabels: [],
+  quickReplies: [],
+  theme: (localStorage.getItem('theme') as 'light' | 'dark') || 'light',
+  
+  setTheme: (theme) => {
+    localStorage.setItem('theme', theme);
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#111b21');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#f0f2f5');
+    }
+    set({ theme });
+  },
   
   fetchAutomations: async () => {
     try {
@@ -315,6 +354,63 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (err) {
       console.error('Failed to fetch automations:', err);
     }
+  },
+
+  fetchQuickReplies: async () => {
+    try {
+      const state = get();
+      if (!state.tenantInfo) return;
+      
+      const { data, error } = await supabase
+        .from('quick_replies')
+        .select('*')
+        .eq('tenant_id', state.tenantInfo.id)
+        .order('created_at', { ascending: false });
+        
+      if (error) {
+        console.error('Error fetching quick replies:', error);
+        return;
+      }
+      
+      set({ quickReplies: data || [] });
+    } catch (err) {
+      console.error('Failed to fetch quick replies:', err);
+    }
+  },
+
+  addQuickReply: async (shortcut: string, content: string) => {
+      const state = get();
+      if (!state.tenantInfo) throw new Error('Tenant não encontrado');
+      const { data, error } = await supabase.from('quick_replies').insert({
+         tenant_id: state.tenantInfo.id,
+         shortcut,
+         content
+      }).select().single();
+      
+      if (error) throw error;
+      if (data) {
+         set({ quickReplies: [data, ...state.quickReplies] });
+      }
+  },
+
+  updateQuickReply: async (id: string, shortcut: string, content: string) => {
+      const { error } = await supabase.from('quick_replies').update({
+         shortcut, content
+      }).eq('id', id);
+      
+      if (error) throw error;
+      set(s => ({
+         quickReplies: s.quickReplies.map(q => q.id === id ? { ...q, shortcut, content } : q)
+      }));
+  },
+
+  deleteQuickReply: async (id: string) => {
+      const { error } = await supabase.from('quick_replies').delete().eq('id', id);
+      
+      if (error) throw error;
+      set(s => ({
+         quickReplies: s.quickReplies.filter(q => q.id !== id)
+      }));
   },
 
   requestTranscription: async (messageId: string, mediaUrl: string) => {
@@ -581,7 +677,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await supabase.from('contacts').update({ bot_status: status }).eq('id', contactId);
   },
 
-  addMessageLocally: (contactId, msg) => {
+  addMessageLocally: (contactId, msg, options) => {
+    if (options?.isIgnored) msg.isIgnored = true;
+    if (options?.isIgnoredSilent) msg.isIgnoredSilent = true;
+
     set((state) => ({
       contacts: state.contacts.map((c) => {
         if (c.id === contactId) {
@@ -885,6 +984,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
        await get().fetchAutomations();
        // Buscar Labels
        await get().fetchTenantLabels();
+       // Buscar Quick Replies
+       await get().fetchQuickReplies();
 
        // Opcional: Buscar versão atual do app a partir do banco (tabela app_version)
        const { data: appVersionData } = await supabase.from('app_version').select('*').order('deploy_date', { ascending: false }).limit(1).maybeSingle();
@@ -1202,7 +1303,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                           timestamp: new Date(m.timestamp),
                           quoted: advanced.quoted,
                           buttons: advanced.buttons,
-                          transcription: m.transcription
+                          transcription: m.transcription,
+                          vcardWaid: advanced.vcardWaid
                       };
                   });
               }
@@ -1446,22 +1548,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const advanced = parseAdvancedMsgMetadata(m);
 
         // Verifica automações
-        const ignoredAuto = get().automations.find((auto: any) => {
-           if (['ignore', 'ignore_message', 'ignore_message_silent'].includes(auto.action_type) && auto.is_active && m.text_content) {
-               // Handle variables like (X) replacing it with regex wildcard .*
-               const patternText = auto.condition_text || auto.keyword || '';
-               if (!patternText) return false;
-               // Escapa caracteres especiais de regex, mas deixa o (X) ser substituído depois
-               const escapedPattern = patternText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-               // Substitui o (X) escapado por um wildcard real
-               const finalPattern = escapedPattern.replace(/\\\(X\\\)/ig, '.*');
-               const regex = new RegExp(finalPattern, 'i');
-               return regex.test(m.text_content);
+        let isIgnored = false;
+        let isIgnoredSilent = false;
+        
+        const activeAutomations = get().automations.filter((auto: any) => auto.is_active && m.text_content);
+        
+        for (const auto of activeAutomations) {
+           const patternText = auto.condition_text || auto.keyword || '';
+           if (!patternText) continue;
+           
+           // Escapa caracteres especiais de regex
+           const escapedPattern = patternText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+           // Substitui o (X) escapado por um grupo de captura (.*) que pega até o final da linha
+           const finalPattern = escapedPattern.replace(/\\\(X\\\)/ig, '(.*)');
+           // Flag 'i' para case-insensitive, 'm' para tratar múltiplas linhas (^ e $ funcionam por linha)
+           const regex = new RegExp(finalPattern, 'im');
+           const match = m.text_content.match(regex);
+           
+           if (match) {
+               if (['ignore', 'ignore_message', 'ignore_message_silent'].includes(auto.action_type)) {
+                   isIgnored = true;
+                   if (auto.action_type === 'ignore_message_silent') isIgnoredSilent = true;
+               } else if (auto.action_type === 'extract_contact_name') {
+                   // O grupo 1 (se houver) conterá o valor extraído de (X)
+                   const extractedVal = match.length > 1 ? match[1] : match[0];
+                   const extractedName = extractedVal?.trim();
+                   
+                   // Atualiza o nome apenas se for válido e diferente do vazio
+                   if (extractedName && extractedName.length > 1 && cid) {
+                       console.log(`[Automation] Extraindo e salvando nome do contato: ${extractedName}`);
+                       // Executa assincronamente sem bloquear o canal do Realtime
+                       setTimeout(() => {
+                           get().updateContactCRM(cid, { name: extractedName });
+                       }, 200);
+                   }
+               }
            }
-           return false;
-        });
-        const isIgnored = !!ignoredAuto;
-        const isIgnoredSilent = ignoredAuto?.action_type === 'ignore_message_silent';
+        }
 
         get().addMessageLocally(cid, {
           id: m.id,
@@ -1475,6 +1598,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           quoted: advanced.quoted,
           buttons: advanced.buttons,
           transcription: m.transcription,
+          vcardWaid: advanced.vcardWaid,
           isIgnored: isIgnored,
           isIgnoredSilent: isIgnoredSilent
         });

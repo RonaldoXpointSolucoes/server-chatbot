@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check } from 'lucide-react';
+import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 
 interface BaseModalProps {
@@ -587,26 +587,41 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
         </p>
 
         <div className="flex flex-col gap-2 max-h-60 overflow-y-auto styled-scrollbar pr-2 mb-6">
-            {tenantLabels.map(label => {
-              const isActive = activeLabels.includes(label.id);
-              return (
-                <label key={label.id} className="flex items-center gap-3 p-3 rounded-2xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors border border-transparent hover:border-black/5 dark:hover:border-white/5">
-                   <div className="relative flex items-center justify-center w-5 h-5 rounded border border-[#54656f] dark:border-[#8696a0] bg-transparent overflow-hidden">
-                     <input 
-                       type="checkbox" 
-                       checked={isActive} 
-                       onChange={() => toggleLabel(label.id)}
-                       className="opacity-0 absolute inset-0 cursor-pointer"
-                     />
-                     {isActive && <div className="absolute inset-0 bg-[#00a884] flex items-center justify-center"><Check size={12} className="text-white" /></div>}
-                   </div>
-                   <div className="flex-1 flex items-center gap-2">
-                     <span className="w-2.5 h-2.5 rounded-full shadow-inner" style={{ backgroundColor: label.color }}></span>
-                     <span className="text-sm font-medium text-[#3b4a54] dark:text-[#d1d7db] leading-none">{label.name}</span>
-                   </div>
-                </label>
-              );
-            })}
+            {tenantLabels.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-6 text-center animate-in fade-in zoom-in-95 duration-200">
+                <div className="w-14 h-14 mb-4 rounded-full bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center">
+                  <Tag size={24} className="text-blue-500" />
+                </div>
+                <h3 className="text-base font-semibold text-[#111b21] dark:text-[#e9edef]">Sem etiquetas criadas</h3>
+                <p className="text-xs text-[#54656f] dark:text-[#8696a0] mt-1.5 max-w-[220px]">
+                  Crie etiquetas personalizadas nas configurações para categorizar e filtrar seus contatos.
+                </p>
+                <a href="/settings/labels" onClick={onClose} className="mt-5 px-5 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 dark:text-blue-400 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 rounded-full transition-colors flex items-center gap-1.5">
+                  <Edit2 size={12} /> Gerenciar Etiquetas
+                </a>
+              </div>
+            ) : (
+              tenantLabels.map(label => {
+                const isActive = activeLabels.includes(label.id);
+                return (
+                  <label key={label.id} className="flex items-center gap-3 p-3 rounded-2xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors border border-transparent hover:border-black/5 dark:hover:border-white/5">
+                     <div className="relative flex items-center justify-center w-5 h-5 rounded border border-[#54656f] dark:border-[#8696a0] bg-transparent overflow-hidden">
+                       <input 
+                         type="checkbox" 
+                         checked={isActive} 
+                         onChange={() => toggleLabel(label.id)}
+                         className="opacity-0 absolute inset-0 cursor-pointer"
+                       />
+                       {isActive && <div className="absolute inset-0 bg-[#00a884] flex items-center justify-center"><Check size={12} className="text-white" /></div>}
+                     </div>
+                     <div className="flex-1 flex items-center gap-2">
+                       <span className="w-2.5 h-2.5 rounded-full shadow-inner" style={{ backgroundColor: label.color }}></span>
+                       <span className="text-sm font-medium text-[#3b4a54] dark:text-[#d1d7db] leading-none">{label.name}</span>
+                     </div>
+                  </label>
+                );
+              })
+            )}
         </div>
 
         <div className="flex items-center justify-between mt-2 pt-4 border-t border-black/5 dark:border-white/5">
@@ -760,6 +775,88 @@ export function ForwardMessageModal({ isOpen, onClose, contacts, onForward, mess
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// -- Snooze (Adiar) Modal
+export interface SnoozeModalProps extends BaseModalProps {
+  contactId: string;
+}
+
+export function SnoozeModal({ isOpen, onClose, contactId }: SnoozeModalProps) {
+  const updateConversationField = useChatStore(state => state.updateConversationField);
+  const [isSaving, setIsSaving] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleSnooze = async (hours: number, days: number = 0) => {
+    setIsSaving(true);
+    try {
+      const targetDate = new Date();
+      if (hours > 0) targetDate.setHours(targetDate.getHours() + hours);
+      if (days > 0) targetDate.setDate(targetDate.getDate() + days);
+
+      await updateConversationField(contactId, { 
+        status: 'snoozed', 
+        snoozed_until: targetDate.toISOString() 
+      });
+      onClose();
+    } catch (error) {
+      console.error(error);
+      alert('Erro ao agendar conversa.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const options = [
+    { label: '1 Hora', icon: <Clock size={16} />, onClick: () => handleSnooze(1, 0) },
+    { label: '2 Horas', icon: <Clock size={16} />, onClick: () => handleSnooze(2, 0) },
+    { label: '4 Horas', icon: <Clock size={16} />, onClick: () => handleSnooze(4, 0) },
+    { label: 'Amanhã', icon: <CalendarDays size={16} />, onClick: () => handleSnooze(24, 0) },
+    { label: 'Próx. Semana', icon: <CalendarDays size={16} />, onClick: () => handleSnooze(0, 7) },
+    { label: '15 Dias', icon: <CalendarDays size={16} />, onClick: () => handleSnooze(0, 15) },
+    { label: '30 Dias', icon: <CalendarDays size={16} />, onClick: () => handleSnooze(0, 30) },
+    { label: '60 Dias', icon: <CalendarDays size={16} />, onClick: () => handleSnooze(0, 60) },
+  ];
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-[#111b21] rounded-2xl w-full max-w-[400px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-black/5 dark:border-white/5 flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-black/5 dark:border-white/5 bg-[#f0f2f5] dark:bg-[#202c33]">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500">
+              <Clock size={18} />
+            </div>
+            <h2 className="text-base font-semibold text-[#111b21] dark:text-[#e9edef]">Adiar Conversa</h2>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full text-[#54656f] dark:text-[#8696a0] transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
+          <p className="text-[13px] text-[#54656f] dark:text-[#8696a0] mb-5 text-center px-4">
+            Escolha quando o atendimento deve retornar à lista principal. A conversa será reaberta e você será notificado.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+             {options.map((opt, i) => (
+                <button
+                  key={i}
+                  onClick={opt.onClick}
+                  disabled={isSaving}
+                  className="flex items-center justify-center gap-2 py-3 px-4 rounded-[14px] border border-black/5 dark:border-white/5 bg-[#f0f2f5] dark:bg-[#202c33] hover:bg-amber-500/10 hover:border-amber-500/30 hover:text-amber-500 text-[#111b21] dark:text-[#e9edef] font-medium transition-all text-[13px] disabled:opacity-50"
+                >
+                  <span className="opacity-70 group-hover:opacity-100">{opt.icon}</span>
+                  {opt.label}
+                </button>
+             ))}
+          </div>
+        </div>
       </div>
     </div>
   );

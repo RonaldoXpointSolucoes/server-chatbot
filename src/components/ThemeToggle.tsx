@@ -1,19 +1,8 @@
-import { useEffect, useState } from 'react';
 import { Sun, Moon } from 'lucide-react';
+import { useChatStore } from '../store/chatStore';
 
 export default function ThemeToggle() {
-  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');
-
-  useEffect(() => {
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#111b21');
-    } else {
-      document.documentElement.classList.remove('dark');
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#f0f2f5');
-    }
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+  const { theme, setTheme } = useChatStore();
 
   return (
     <button

@@ -25,6 +25,18 @@ import { MainLayout } from './components/MainLayout';
 import SettingsLayout from './pages/settings/SettingsLayout';
 import SettingsPreferences from './pages/settings/SettingsPreferences';
 import SettingsCredentials from './pages/settings/SettingsCredentials';
+import { CannedResponses } from './pages/CannedResponses';
+import PortalApp from './pages/PortalApp';
+
+// Inicializa o tema globalmente no boot
+const savedTheme = localStorage.getItem('theme') || 'light';
+if (savedTheme === 'dark') {
+  document.documentElement.classList.add('dark');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#111b21');
+} else {
+  document.documentElement.classList.remove('dark');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#f0f2f5');
+}
 
 function PushNotificationManager() {
   usePushNotifications();
@@ -42,7 +54,7 @@ export default function App() {
       <Routes>
         {/* Rota do Cliente Comum */}
         <Route path="/" element={<ClientLogin />} />
-        
+
         {/* Rotas Privadas (Client SaaS) */}
         <Route element={<ProtectedRoute role="client" />}>
           <Route element={<MainLayout />}>
@@ -52,28 +64,32 @@ export default function App() {
             <Route path="/knowledge" element={<ErrorBoundary><KnowledgeBase /></ErrorBoundary>} />
             <Route path="/flows" element={<ErrorBoundary><FlowManager /></ErrorBoundary>} />
             <Route path="/flows/:id/edit" element={<ErrorBoundary><FlowBuilder /></ErrorBoundary>} />
-            
+
             {/* Configurações Globais originais conectadas à Sidebar Principal */}
             <Route path="/settings/inboxes" element={<InboxesList />} />
             <Route path="/settings/inboxes/:id" element={<InboxSettings />} />
             <Route path="/settings/agents" element={<AgentsList />} />
             <Route path="/settings/labels" element={<LabelsSettings />} />
             <Route path="/settings/bots" element={<BotsList />} />
+            <Route path="/settings/canned-responses" element={<CannedResponses />} />
             <Route path="/settings/prompt-builder" element={<PromptBuilder />} />
             <Route path="/settings/automation" element={<AutomationSettings />} />
+
+            {/* Apps Embedados */}
+            <Route path="/apps/portal" element={<PortalApp />} />
           </Route>
-          
+
           {/* Settings do Modulo Flow (Typebot UI) */}
           <Route path="/flows/settings" element={<SettingsLayout />}>
-             <Route index element={<Navigate to="preferences" replace />} />
-             <Route path="preferences" element={<SettingsPreferences />} />
-             <Route path="credentials" element={<SettingsCredentials />} />
+            <Route index element={<Navigate to="preferences" replace />} />
+            <Route path="preferences" element={<SettingsPreferences />} />
+            <Route path="credentials" element={<SettingsCredentials />} />
           </Route>
         </Route>
 
         {/* Gerenciamento Master SaaS */}
         <Route path="/admin/login" element={<AdminLogin />} />
-        
+
         {/* Rotas Privadas (App Master Admin) */}
         <Route element={<ProtectedRoute role="admin" />}>
           <Route path="/admin/*" element={<AdminDashboard />} />

@@ -33,7 +33,8 @@ import {
   Edit2,
   Plus,
   CheckCircle2,
-  LogOut
+  LogOut,
+  Store
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
@@ -44,9 +45,11 @@ export function MainSidebar() {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     conversations: true,
     teams: true,
+    apps: false,
     channels: true,
     labels: false,
-    settings: false
+    settings: false,
+    appsDelivery: true
   });
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
 
@@ -70,8 +73,17 @@ export function MainSidebar() {
   const storeNameFallback = useChatStore(state => state.tenantInfo?.users?.find(u => u.user_id === state.currentUser?.id)?.full_name);
   const agentName = storedName || storeNameFallback || 'Agente';
   const agentInitial = agentName ? agentName.substring(0, 1).toUpperCase() : 'A';
-  const agentEmail = `${agentName.toLowerCase().replace(/\s/g, '')}@xpoint.com`;
-  const currentUserRole = localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role') || 'admin';
+  
+  const currentUserRole = typeof window !== 'undefined' ? (localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role')) || 'admin' : 'admin';
+  const storedEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+  
+  const storeEmailFallback = useChatStore(state => {
+    if (currentUserRole === 'admin') return state.tenantInfo?.email;
+    return state.tenantInfo?.users?.find((u: any) => u.full_name === agentName)?.email;
+  });
+  
+  const agentEmail = storedEmail || storeEmailFallback || `${agentName.toLowerCase().replace(/\\s/g, '')}@xpoint.com`;
+
   const activeChannelFilter = useChatStore(state => state.activeChannelFilter);
   const setActiveChannelFilter = useChatStore(state => state.setActiveChannelFilter);
   const connectedInstanceName = useChatStore(state => state.connectedInstanceName);
@@ -323,46 +335,87 @@ export function MainSidebar() {
             <NavItem title="Todas as conversas" isActive={!activeChannelFilter} onClick={() => {
               setActiveChannelFilter(null, null);
               useChatStore.getState().fetchInitialData();
+              navigate('/chat');
             }} />
-            <NavItem title="Menções" />
+            
+            {/* Lista de Canais (Inboxes) inserida abaixo de Todas as conversas */}
+            {instances.length > 0 && (
+               <div className="pl-1 border-l-2 border-[#2a3942]/50 ml-5 my-1 py-0.5 space-y-0.5">
+                 {instances.map(inst => (
+                    <div key={inst.id} className="relative group/channel">
+                      <NavItem 
+                        icon={<Brands.WhatsApp size={12} />} 
+                        title={inst.display_name || 'Sem nome'} 
+                        isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
+                        onClick={() => {
+                          if (inst.status !== 'connected') {
+                            useChatStore.getState().openQRModal(inst.id);
+                          } else {
+                            setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name);
+                            navigate('/chat');
+                          }
+                        }}
+                      />
+                      <button 
+                         className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-black/10 dark:hover:bg-white/10 opacity-0 group-hover/channel:opacity-100 transition-all z-10"
+                         onClick={(e) => { e.stopPropagation(); useChatStore.getState().openQRModal(inst.id); }}
+                         title={inst.status === 'connected' ? 'Instância Conectada' : 'Visualizar QRC / Conectar'}
+                      >
+                         <Smartphone size={12} className={cn("transition-colors", inst.status === 'connected' ? 'text-[#00a884]' : 'text-slate-400')} />
+                         {inst.status !== 'connected' && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
+                      </button>
+                    </div>
+                 ))}
+               </div>
+            )}
+
             <NavItem title="Não atendidas" />
           </CollapsibleSection>
           
-          <CollapsibleSection title="Times" icon={<Users size={16} />} isOpen={expandedSections.teams} onToggle={() => toggleSection('teams')}>
-            <NavItem title="comercial" isSub />
+          <CollapsibleSection title="Apps" icon={<Puzzle size={16} />} isOpen={expandedSections.apps} onToggle={() => toggleSection('apps')}>
+            <NavItem 
+              title="Portal / Cadastros" 
+              isSub 
+              onClick={() => navigate('/apps/portal')}
+              isActive={window.location.pathname === '/apps/portal'}
+            />
+            
+            <div className="pl-4 border-l border-[#2a3942] ml-4 my-2 relative">
+              <div className="absolute top-0 left-0 w-px h-full bg-gradient-to-b from-[#2a3942] via-[#3b4a54] to-transparent"></div>
+              <CollapsibleSection 
+                title="Menu Delivery" 
+                icon={<Store size={14} className="text-[#8696a0]" />} 
+                isOpen={expandedSections.appsDelivery} 
+                onToggle={() => toggleSection('appsDelivery')}
+                isSub={true}
+              >
+                <NavItem title="Gestor Delivery" isSub />
+                <NavItem title="Cardápio Digital" isSub />
+                <NavItem title="App Motoboy" isSub />
+                <NavItem title="Integrações" isSub />
+              </CollapsibleSection>
+            </div>
+
+            <NavItem 
+              title="Agenda Interna" 
+              icon={<CalendarDays size={18} className="text-[#8696a0]" />} 
+              onClick={() => navigate('/apps/agenda')}
+              isActive={window.location.pathname === '/apps/agenda'}
+              isSub 
+            />
+            <NavItem title="KDS" isSub />
+            <NavItem title="Painel de Senha" isSub />
+            <NavItem title="Totem App" isSub />
+            <NavItem title="Financeiro" isSub />
+            <NavItem title="App Fidelidade" isSub />
+            <NavItem title="NF-e" isSub />
+            <NavItem title="Painel Fiscal" isSub />
+            <NavItem title="App Etiquetas" isSub />
+            <NavItem title="Treinamento ERP" isSub />
           </CollapsibleSection>
 
-          <CollapsibleSection title="Canais" icon={<Layers size={16} />} isOpen={expandedSections.channels} onToggle={() => toggleSection('channels')}>
-            {instances.length > 0 ? (
-               instances.map(inst => (
-                  <div key={inst.id} className="relative group/channel">
-                    <NavItem 
-                      icon={<Brands.WhatsApp size={14} />} 
-                      title={inst.display_name || 'Sem nome'} 
-                      isSub 
-                      isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
-                      onClick={() => {
-                        if (inst.status !== 'connected') {
-                          useChatStore.getState().openQRModal(inst.id);
-                        } else {
-                          setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name);
-                          navigate('/chat');
-                        }
-                      }}
-                    />
-                    <button 
-                       className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-black/10 dark:hover:bg-white/10 opacity-0 group-hover/channel:opacity-100 transition-all z-10"
-                       onClick={(e) => { e.stopPropagation(); useChatStore.getState().openQRModal(inst.id); }}
-                       title={inst.status === 'connected' ? 'Instância Conectada' : 'Visualizar QRC / Conectar'}
-                    >
-                       <Smartphone size={14} className={cn("transition-colors", inst.status === 'connected' ? 'text-[#00a884]' : 'text-slate-400')} />
-                       {inst.status !== 'connected' && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
-                    </button>
-                  </div>
-               ))
-            ) : (
-               <NavItem title="Nenhum canal ativo" isSub />
-            )}
+          <CollapsibleSection title="Times" icon={<Users size={16} />} isOpen={expandedSections.teams} onToggle={() => toggleSection('teams')}>
+            <NavItem title="comercial" isSub />
           </CollapsibleSection>
 
           <CollapsibleSection title="Etiquetas" icon={<Tag size={16} />} isOpen={expandedSections.labels} onToggle={() => toggleSection('labels')}>
@@ -407,8 +460,17 @@ export function MainSidebar() {
                >
                  <Plus size={12} />
                </button>
-            </div>
+             </div>
           </CollapsibleSection>
+
+          <div className="mt-2">
+            <NavItem 
+              icon={<MessageSquareReply size={16} />} 
+              title="Respostas Prontas" 
+              onClick={() => navigate('/settings/canned-responses')} 
+              isActive={window.location.pathname === '/settings/canned-responses'}
+            />
+          </div>
         </div>
 
         <div className="h-px bg-[#2a3942]/60 mx-4 my-3" />
@@ -438,7 +500,6 @@ export function MainSidebar() {
                 <NavItem icon={<Repeat size={16} />} title="Automação" isSub onClick={() => navigate('/settings/automation')} />
                 <NavItem icon={<Bot size={16} />} title="Robôs" isSub onClick={() => navigate('/settings/bots')} />
                 <NavItem icon={<CalendarDays size={16} />} title="Macros" isSub onClick={() => navigate('/settings/macros')} />
-                <NavItem icon={<MessageSquareReply size={16} />} title="Respostas Prontas" isSub onClick={() => navigate('/settings/canned-responses')} />
                 <NavItem icon={<Puzzle size={16} />} title="Integrações" isSub onClick={() => navigate('/settings/integrations')} />
                 <NavItem icon={<Workflow size={16} />} title="Fluxo de Conversa" isSub onClick={() => navigate('/flows')} />
               </CollapsibleSection>

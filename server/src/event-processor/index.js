@@ -4,6 +4,7 @@ import qrcode from 'qrcode';
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import fs from 'fs';
 import FlowEngine from '../flow-runtime/index.js';
+import AutomationWorker from '../automation-worker/agent.js';
 
 class EventProcessor {
     constructor() {
@@ -422,17 +423,34 @@ class EventProcessor {
                          conversation_id: b.conversationId
                      });
 
-                     // Despacha para o Runtime do Flow Builder (apenas inbound de clientes)
-                     if (msg.direction === 'inbound') {
-                         FlowEngine.processIncomingMessage({
-                             tenantId: b.tenantId,
-                             instanceId: b.instanceId,
-                             jid: b.jid,
-                             textMessage: b.textMessage,
-                             rawPayload: b.rawMsg,
-                             sock: b.sock
-                         }).catch(e => console.error("[BatchProcessor] Erro no FlowEngine:", e));
-                     }
+                     // Busca se tem Bot de IA ativo para responder
+                     supabase.from('bots').select('*').eq('tenant_id', b.tenantId).eq('status', 'active').eq('autoReply', true).single()
+                         .then(({ data: botData }) => {
+                             if (botData) {
+                                 // Roteia para a Luna (AI Agent)
+                                 AutomationWorker.processMessage({
+                                     tenantId: b.tenantId,
+                                     instanceId: b.instanceId,
+                                     conversationId: b.conversationId,
+                                     contactId: contactIdMap.get(`${b.tenantId}_${b.phone}`),
+                                     jid: b.jid,
+                                     textMessage: b.textMessage,
+                                     botId: botData.id,
+                                     botSettings: botData,
+                                     sock: b.sock
+                                 });
+                             } else {
+                                 // Fallback para o Runtime do Flow Builder (Regras Antigas)
+                                 FlowEngine.processIncomingMessage({
+                                     tenantId: b.tenantId,
+                                     instanceId: b.instanceId,
+                                     jid: b.jid,
+                                     textMessage: b.textMessage,
+                                     rawPayload: b.rawMsg,
+                                     sock: b.sock
+                                 }).catch(e => console.error("[BatchProcessor] Erro no FlowEngine:", e));
+                             }
+                         }).catch(e => console.error("[BatchProcessor] Erro ao checar bots:", e));
                  }
                  
                  // Puxa a foto do perfil assincronamente (background level 2) sem estourar tempo

@@ -50,7 +50,7 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
            if (companies) setAllCompanies(companies);
 
            // Fetch all instances but select tenant_id so we can filter them by selected companies
-           const { data: instances } = await supabase.from('whatsapp_instances').select('id, whatsapp_name, tenant_id');
+           const { data: instances } = await supabase.from('whatsapp_instances').select('id, display_name, tenant_id');
            if (instances) setAllInstances(instances);
         } catch (error) {
            console.error("Erro ao buscar dados de RBAC", error);
@@ -211,7 +211,7 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
                              <div className={`w-5 h-5 rounded flex items-center justify-center border transition-all ${allowedInstances.includes(inst.id) ? 'bg-blue-500 border-blue-500' : 'border-white/20'}`}>
                                 {allowedInstances.includes(inst.id) && <Check className="w-3.5 h-3.5 text-white" />}
                              </div>
-                             <span className="text-sm text-white/80 truncate">{inst.whatsapp_name || 'Instância sem nome'}</span>
+                             <span className="text-sm text-white/80 truncate">{inst.display_name || 'Instância sem nome'}</span>
                           </div>
                        ))}
                        {allInstances.filter(inst => allowedCompanies.includes(inst.tenant_id)).length === 0 && <span className="text-sm text-white/40">Nenhuma caixa encontrada para a(s) empresa(s) selecionada(s).</span>}

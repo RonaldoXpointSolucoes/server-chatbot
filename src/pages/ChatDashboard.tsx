@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2 } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
-import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal } from '../components/ChatModals';
+import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal } from '../components/ChatModals';
 import { SettingsModal } from '../components/SettingsModal';
 import { AgentSettingsModal } from '../components/AgentSettingsModal';
 import { ChatOmniMenu } from '../components/ChatOmniMenu';
@@ -16,6 +16,7 @@ import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { supabase } from '../services/supabase';
 import { geminiService } from '../services/geminiService';
+import { useScheduleMonitor } from '../hooks/useScheduleMonitor';
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -23,7 +24,7 @@ export function cn(...inputs: (string | undefined | null | false)[]) {
 
 export function getContactDisplayName(name: string | undefined | null, pushName: string | undefined | null, phone: string | undefined | null): string {
   let finalName = name || pushName;
-  if (!finalName) return phone || '';
+  if (!finalName) return formatPhoneNumber(phone) || phone || '';
   return finalName;
 }
 
@@ -125,6 +126,9 @@ export default function ChatDashboard() {
   const navigate = useNavigate();
   const tenantName = (localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name'));
   const { isEnabled: isDevLoggerEnabled } = useDevStore();
+  // Monitor de agendamentos
+  useScheduleMonitor();
+
   const {  
     contacts, 
     activeChatId, 
@@ -161,6 +165,9 @@ export default function ChatDashboard() {
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
   const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen;
   const [inputText, setInputText] = useState('');
+  const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [quickReplyFilter, setQuickReplyFilter] = useState('');
+  const quickReplies = useChatStore(state => state.quickReplies);
   const [replyMessage, setReplyMessage] = useState<{ id: string, text: string, sender: string } | null>(null);
   const [pastedImage, setPastedImage] = useState<File | null>(null);
   const [pastedImagePreview, setPastedImagePreview] = useState<string | null>(null);
@@ -189,6 +196,7 @@ export default function ChatDashboard() {
   const [contactToBlock, setContactToBlock] = useState<{id: string; name: string; isBlocked: boolean} | null>(null);
   const [contactForLabels, setContactForLabels] = useState<any | null>(null);
   const [isNewChatOpen, setIsNewChatOpen] = useState(false);
+  const [showSnoozeModal, setShowSnoozeModal] = useState<string | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [activeChatDropdown, setActiveChatDropdown] = useState(false);
   const [activeMsgDropdown, setActiveMsgDropdown] = useState<string | null>(null);
@@ -351,6 +359,36 @@ export default function ChatDashboard() {
      }
   }, [activeChatId, activeChat?.instance_id, connectedInstanceName, evolutionConnected, loadHistoricalMessages]);
 
+  const handleOpenVCardContact = (vcardWaid: string | undefined, contactName: string) => {
+    if (!vcardWaid) {
+      alert('Número de telefone não encontrado no vCard.');
+      return;
+    }
+    const cleanWaid = vcardWaid.replace(/[^0-9]/g, '');
+    const jid = `${cleanWaid}@s.whatsapp.net`;
+    const existing = contacts.find(c => c.whatsapp_jid === jid || c.phone === cleanWaid);
+    
+    if (existing) {
+      setActiveChatId(existing.id);
+    } else {
+      const tempId = `temp_${Date.now()}`;
+      useChatStore.getState().upsertContactLocally({
+        id: tempId,
+        phone: cleanWaid,
+        whatsapp_jid: jid,
+        name: contactName || 'Contato vCard',
+        unread: 0,
+        messages: [],
+        timestamp: Date.now()
+      } as any);
+      setActiveChatId(tempId);
+    }
+
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 150);
+  };
+
   const handleSendHuman = (e: React.FormEvent) => {
     e.preventDefault();
     const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
@@ -493,6 +531,12 @@ export default function ChatDashboard() {
         messagePreview={messageToForward?.text ? messageToForward.text.substring(0, 40) + '...' : (messageToForward?.mediaType ? `Mídia: ${messageToForward.mediaType}` : undefined)}
       />
 
+      <SnoozeModal 
+        isOpen={!!showSnoozeModal}
+        onClose={() => setShowSnoozeModal(null)}
+        contactId={showSnoozeModal || ''}
+      />
+
       {/* Modal de Preview de Imagem Colada */}
       {pastedImagePreview && (
         <div className="fixed inset-0 z-[9999] bg-black/80 flex flex-col items-center justify-center p-4">
@@ -622,7 +666,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.28 | Deploy: 22/04/2026, 18:05"}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.33 | Deploy: 22/04/2026, 22:24"}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -879,14 +923,14 @@ export default function ChatDashboard() {
              let aLastMsg;
              if (a.messages) {
                for (let i = a.messages.length - 1; i >= 0; i--) {
-                 if (!a.messages[i].isIgnoredSilent) { aLastMsg = a.messages[i]; break; }
+                 if (!a.messages[i].isIgnoredSilent && !a.messages[i].isIgnored) { aLastMsg = a.messages[i]; break; }
                }
              }
 
              let bLastMsg;
              if (b.messages) {
                for (let i = b.messages.length - 1; i >= 0; i--) {
-                 if (!b.messages[i].isIgnoredSilent) { bLastMsg = b.messages[i]; break; }
+                 if (!b.messages[i].isIgnoredSilent && !b.messages[i].isIgnored) { bLastMsg = b.messages[i]; break; }
                }
              }
              
@@ -942,7 +986,7 @@ export default function ChatDashboard() {
                   <div className="flex justify-between items-center mb-0.5">
                     <div className="flex flex-col truncate pr-2">
                        <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate flex items-center gap-1.5">
-                         <span className="truncate">{formatPhoneNumber(getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone))}</span>
+                         <span className="truncate">{getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone)}</span>
                          {contact.priority === 'urgent' && <Flag size={12} className="fill-rose-500 text-rose-500 shrink-0" />}
                          {contact.priority === 'high' && <Flag size={12} className="fill-orange-500 text-orange-500 shrink-0" />}
                          {contact.conv_status === 'snoozed' && contact.snoozed_until && new Date(contact.snoozed_until).getTime() > Date.now() && <Clock size={12} className="text-amber-500 shrink-0" />}
@@ -1033,6 +1077,13 @@ export default function ChatDashboard() {
                             </button>
                             
                             {/* Novos botões inseridos */}
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setShowSnoozeModal(contact.id); setActiveDropdown(null); }}
+                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                            >
+                              <Clock size={14} className="text-amber-500" />
+                              Adiar
+                            </button>
                             <button 
                               onClick={(e) => { e.stopPropagation(); setContactForLabels(contact); setActiveDropdown(null); }}
                               className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
@@ -1149,7 +1200,7 @@ export default function ChatDashboard() {
                 />
               <div>
                 <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
-                  <span className="truncate max-w-[200px] sm:max-w-md">{formatPhoneNumber(getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone))}</span>
+                  <span className="truncate max-w-[200px] sm:max-w-md">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
                   {activeChat.phone && getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone) !== formatPhoneNumber(activeChat.phone) && (
                     <span className="text-[12px] text-[#54656f] dark:text-[#8696a0] font-mono inline-block mt-0.5 border border-black/5 dark:border-white/10 px-1.5 rounded-md bg-black/5 dark:bg-white/5 hidden sm:inline-block">
                       {formatPhoneNumber(activeChat.phone)}
@@ -1411,7 +1462,7 @@ export default function ChatDashboard() {
                             </div>
                             <div className="border-t border-gray-100 dark:border-gray-700/50 mt-1 p-2">
                                <button 
-                                  onClick={() => alert(`Funcionalidade de enviar mensagem para este contato vCard será implementada no próximo ciclo (Nome: ${msg.text})`)}
+                                  onClick={() => handleOpenVCardContact(msg.vcardWaid, msg.text)}
                                   className="w-full text-xs text-brand-primary font-medium flex items-center justify-center bg-[#00a884]/10 p-2 rounded-lg cursor-pointer hover:bg-[#00a884]/20 transition-colors">
                                   Abrir / Enviar Mensagem
                                </button>
@@ -1514,12 +1565,52 @@ export default function ChatDashboard() {
             />
 
             <div className="flex flex-1 items-end bg-white dark:bg-[#2a3942] rounded-xl px-4 py-2 border border-transparent focus-within:border-[#00a884]/50 transition-colors shadow-sm relative">
+              {/* Quick Replies Popover */}
+              {showQuickReplies && quickReplies.length > 0 && (
+                <div className="absolute bottom-full left-0 mb-2 w-[350px] max-w-[90vw] bg-white dark:bg-[#202c33] rounded-2xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden z-[100] animate-in fade-in zoom-in-95 slide-in-from-bottom-4">
+                  <div className="p-3 bg-gray-50/50 dark:bg-[#111b21]/50 border-b border-gray-100 dark:border-white/5 text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                    ⚡ Respostas Prontas
+                  </div>
+                  <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                    {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).map(qr => (
+                      <button
+                        key={qr.id}
+                        type="button"
+                        className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-[#2a3942] transition-colors border-b border-gray-50 dark:border-white/5 last:border-0 group"
+                        onClick={() => {
+                          setInputText(qr.content);
+                          setShowQuickReplies(false);
+                          setTimeout(() => textareaRef.current?.focus(), 10);
+                        }}
+                      >
+                        <div className="font-semibold text-blue-600 dark:text-blue-400 text-[13px] mb-1 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors">{qr.shortcut}</div>
+                        <div className="text-gray-600 dark:text-gray-300 text-[13px] line-clamp-2 leading-relaxed">{qr.content}</div>
+                      </button>
+                    ))}
+                    {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).length === 0 && (
+                      <div className="p-6 text-center text-gray-500 dark:text-gray-400 text-[13px]">
+                        Nenhuma resposta encontrada para "{quickReplyFilter}"
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              
               <textarea 
                 ref={textareaRef}
                 value={inputText}
                 spellCheck={true}
                 lang="pt-BR"
-                onChange={e => setInputText(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setInputText(val);
+                  if (val.startsWith('/')) {
+                    setShowQuickReplies(true);
+                    setQuickReplyFilter(val.substring(1).toLowerCase());
+                  } else {
+                    setShowQuickReplies(false);
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();

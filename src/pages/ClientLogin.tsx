@@ -5,8 +5,8 @@ import { supabase } from '../services/supabase';
 import ThemeToggle from '../components/ThemeToggle';
 
 export default function ClientLogin() {
-  const [email, setEmail] = useState('ronaldo.xpointsolucoes@gmail.com');
-  const [password, setPassword] = useState('Xx@gh03360102');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [keepLogged, setKeepLogged] = useState(false);
@@ -108,6 +108,7 @@ export default function ClientLogin() {
       storage.setItem('current_tenant_name', tenantData.name);
       storage.setItem('current_user_name', userName);
       storage.setItem('current_user_role', userRole);
+      storage.setItem('current_user_email', email.trim().toLowerCase());
       
       if (userRole === 'agent' || userRole === 'Agente') {
           storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));

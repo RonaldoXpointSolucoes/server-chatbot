@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@google/generative-ai": "^0.24.1",
     "@hapi/boom": "^10.0.1",
     "@supabase/supabase-js": "^2.42.0",
     "@whiskeysockets/baileys": "file:../baileys-core",
