@@ -41,10 +41,23 @@ class AutomationWorker {
         if (!data) return [];
         
         // Return chronologically
-        return data.reverse().map(m => ({
+        const rawHistory = data.reverse().map(m => ({
             role: m.sender_type === 'bot' || m.sender_type === 'agent' ? 'model' : 'user',
             parts: [{ text: m.text_content || '' }]
         }));
+
+        // Sanitize history for Gemini (Must start with 'user', roles must alternate)
+        const sanitizedHistory = [];
+        for (const msg of rawHistory) {
+            if (sanitizedHistory.length === 0 && msg.role !== 'user') continue;
+            if (sanitizedHistory.length > 0 && sanitizedHistory[sanitizedHistory.length - 1].role === msg.role) {
+                sanitizedHistory[sanitizedHistory.length - 1].parts[0].text += '\n' + msg.parts[0].text;
+            } else {
+                sanitizedHistory.push({ role: msg.role, parts: [{ text: msg.parts[0].text }] });
+            }
+        }
+
+        return sanitizedHistory;
     }
 
     async processMessage({ tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock }) {

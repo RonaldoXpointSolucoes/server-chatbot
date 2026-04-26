@@ -427,36 +427,39 @@ class EventProcessor {
 
                      if (b.direction === 'inbound') {
                          PushService.sendNotification(b.tenantId, msg, b.phone, b.conversationId);
-                     }
 
-                     // Busca se tem Bot de IA ativo para responder
-                     supabase.from('bots').select('*').eq('tenant_id', b.tenantId).eq('status', 'active').eq('autoReply', true).single()
-                         .then(({ data: botData }) => {
-                             if (botData) {
-                                 // Roteia para a Luna (AI Agent)
-                                 AutomationWorker.processMessage({
-                                     tenantId: b.tenantId,
-                                     instanceId: b.instanceId,
-                                     conversationId: b.conversationId,
-                                     contactId: contactIdMap.get(`${b.tenantId}_${b.phone}`),
-                                     jid: b.jid,
-                                     textMessage: b.textMessage,
-                                     botId: botData.id,
-                                     botSettings: botData,
-                                     sock: b.sock
-                                 });
-                             } else {
-                                 // Fallback para o Runtime do Flow Builder (Regras Antigas)
-                                 FlowEngine.processIncomingMessage({
-                                     tenantId: b.tenantId,
-                                     instanceId: b.instanceId,
-                                     jid: b.jid,
-                                     textMessage: b.textMessage,
-                                     rawPayload: b.rawMsg,
-                                     sock: b.sock
-                                 }).catch(e => console.error("[BatchProcessor] Erro no FlowEngine:", e));
-                             }
-                         }).catch(e => console.error("[BatchProcessor] Erro ao checar bots:", e));
+                         // Busca se tem Bot de IA ativo para responder
+                         supabase.from('bots').select('*').eq('tenant_id', b.tenantId).eq('status', 'active').eq('autoReply', true)
+                             .then(({ data: botsData }) => {
+                                 // Filtra bots que estão atrelados a esta instância de WhatsApp
+                                 const botData = (botsData || []).find(bot => bot.channels && bot.channels.includes(b.instanceId));
+                                 
+                                 if (botData) {
+                                     // Roteia para a Luna (AI Agent)
+                                     AutomationWorker.processMessage({
+                                         tenantId: b.tenantId,
+                                         instanceId: b.instanceId,
+                                         conversationId: b.conversationId,
+                                         contactId: contactIdMap.get(`${b.tenantId}_${b.phone}`),
+                                         jid: b.jid,
+                                         textMessage: b.textMessage,
+                                         botId: botData.id,
+                                         botSettings: botData,
+                                         sock: b.sock
+                                     });
+                                 } else {
+                                     // Fallback para o Runtime do Flow Builder (Regras Antigas)
+                                     FlowEngine.processIncomingMessage({
+                                         tenantId: b.tenantId,
+                                         instanceId: b.instanceId,
+                                         jid: b.jid,
+                                         textMessage: b.textMessage,
+                                         rawPayload: b.rawMsg,
+                                         sock: b.sock
+                                     }).catch(e => console.error("[BatchProcessor] Erro no FlowEngine:", e));
+                                 }
+                             }).catch(e => console.error("[BatchProcessor] Erro ao checar bots:", e));
+                     }
                  }
                  
                  // Puxa a foto do perfil assincronamente (background level 2) sem estourar tempo

@@ -59,7 +59,7 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit }: BotModalProps) 
     if (isOpen) {
       // Fetch available channels/instances
       const fetchInstances = async () => {
-        const { data, error } = await supabase.from('whatsapp_instances').select('id, display_name, status');
+        const { data, error } = await supabase.from('whatsapp_instances').select('id, display_name, status, tenant_id');
         if (!error && data) {
           setInstances(data);
         }
@@ -110,6 +110,7 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit }: BotModalProps) 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (onSave) {
+      const activeTenant = instances.length > 0 ? instances[0].tenant_id : null;
       onSave({
         name,
         description,
@@ -121,7 +122,8 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit }: BotModalProps) 
         channels: selectedChannels,
         autoReply,
         handoffKeyword,
-        handoffMessage
+        handoffMessage,
+        tenant_id: activeTenant
       });
     }
     onClose();
