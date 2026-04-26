@@ -20,7 +20,10 @@ serve(async (req) => {
       return new Response("No valid record or tenant_id", { status: 400 });
     }
 
-    if (record.sender_type === 'bot' || record.sender_type === 'human') {
+    const isOutgoing = record.direction === 'outbound';
+    const isSystemSender = ['bot', 'human', 'agent', 'system'].includes(record.sender_type);
+
+    if (isOutgoing || isSystemSender) {
       return new Response(JSON.stringify({ success: true, message: "No push for outgoing messages" }), { status: 200 });
     }
 

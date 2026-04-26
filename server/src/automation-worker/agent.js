@@ -115,6 +115,11 @@ class AutomationWorker {
                             name: "Enviar_texto_separado",
                             description: "Envia uma mensagem parcial antes da resposta final.",
                             parameters: { type: "OBJECT", properties: { texto: { type: "STRING" } }, required: ["texto"] }
+                        },
+                        {
+                            name: "Atualizar_nome_contato",
+                            description: "Atualiza o nome do contato no sistema quando o cliente informar seu nome na conversa ou no resumo de pedidos.",
+                            parameters: { type: "OBJECT", properties: { nome_cliente: { type: "STRING" } }, required: ["nome_cliente"] }
                         }
                     ]
                 }]
@@ -176,6 +181,12 @@ class AutomationWorker {
                             // Desativa bot desta conversa se houver algum log ou state (depende de como o event-processor roteia)
                         }
                         functionResult = { status: "Atendimento transferido. Encerre sua participação." };
+                    }
+                    else if (call.name === "Atualizar_nome_contato") {
+                        if (contactId) {
+                            await supabase.from('contacts').update({ name: call.args.nome_cliente }).eq('id', contactId);
+                        }
+                        functionResult = { status: "Nome do contato atualizado com sucesso no sistema para " + call.args.nome_cliente };
                     }
                     else {
                         functionResult = { erro: "Ferramenta desconhecida" };

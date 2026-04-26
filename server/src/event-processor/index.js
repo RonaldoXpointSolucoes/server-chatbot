@@ -5,6 +5,7 @@ import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import fs from 'fs';
 import FlowEngine from '../flow-runtime/index.js';
 import AutomationWorker from '../automation-worker/agent.js';
+import PushService from '../push-service/index.js';
 
 class EventProcessor {
     constructor() {
@@ -167,7 +168,7 @@ class EventProcessor {
              let existingMap = new Map();
              if (tenantIdTarget && phonesToSeek.length > 0) {
                  const { data: existingDbContacts } = await supabase.from('contacts')
-                     .select('phone, name, custom_name')
+                     .select('*')
                      .eq('tenant_id', tenantIdTarget)
                      .in('phone', phonesToSeek);
                      
@@ -179,12 +180,13 @@ class EventProcessor {
              }
 
              const safeContactsArray = contactsArray.map(c => {
-                 const ex = existingMap.get(c.phone);
+                 const ex = existingMap.get(c.phone) || {};
                  // Respeita o custom_name ou o nome antigo se válido frente ao fallback bruto
                  const hasValidOldName = ex && ex.name && ex.name !== ex.phone && ex.name !== c.phone;
                  const finalName = ex?.custom_name ? ex.custom_name : (hasValidOldName ? ex.name : c.name);
                  
                  return {
+                     ...ex,
                      tenant_id: c.tenant_id,
                      phone: c.phone,
                      name: finalName,
@@ -422,6 +424,10 @@ class EventProcessor {
                          contact_phone: b.phone,
                          conversation_id: b.conversationId
                      });
+
+                     if (b.direction === 'inbound') {
+                         PushService.sendNotification(b.tenantId, msg, b.phone, b.conversationId);
+                     }
 
                      // Busca se tem Bot de IA ativo para responder
                      supabase.from('bots').select('*').eq('tenant_id', b.tenantId).eq('status', 'active').eq('autoReply', true).single()
