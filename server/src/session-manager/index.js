@@ -15,6 +15,18 @@ class SessionManager {
             write: (msg) => {
                 try {
                     const parsed = JSON.parse(msg);
+                    
+                    // Filtra avisos nativos do Baileys que são inofensivos e poluem o terminal/logs
+                    const ignoredLogs = [
+                        'Buffer timeout reached',
+                        'Timeout after',
+                        'timed out waiting for message'
+                    ];
+                    
+                    if (parsed.msg && ignoredLogs.some(text => parsed.msg.includes(text))) {
+                        return; // Ignora silenciosamente
+                    }
+
                     const lvl = parsed.level >= 50 ? 'error' : parsed.level >= 40 ? 'warn' : 'info';
                     addLog(lvl, `[Baileys] ${parsed.msg || ''} ${JSON.stringify(parsed, (k,v) => ['msg','level','time','pid','hostname'].includes(k) ? undefined : v)}`);
                 } catch(e) {
