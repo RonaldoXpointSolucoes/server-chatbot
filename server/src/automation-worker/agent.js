@@ -98,7 +98,10 @@ class AutomationWorker {
                 history.pop();
             }
 
-            const modelName = botSettings.model || 'gemini-1.5-pro';
+            let modelName = botSettings.model || 'gemini-2.5-flash';
+            if (modelName === 'gemini-1.5-pro' || modelName === 'gemini-1.5-flash') {
+                modelName = 'gemini-2.5-flash';
+            }
             const model = this.genAI.getGenerativeModel({ 
                 model: modelName,
                 systemInstruction: { parts: [{ text: systemPrompt }] },
