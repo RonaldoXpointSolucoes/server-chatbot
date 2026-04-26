@@ -429,8 +429,8 @@ class EventProcessor {
                      if (b.direction === 'inbound') {
                          PushService.sendNotification(b.tenantId, msg, b.phone, b.conversationId);
 
-                         // Busca se tem Bot de IA ativo para responder
-                         if (b.convStatus === 'bot') {
+                         // Busca se tem Bot de IA ativo para responder (Responde se não estiver em Agente Off)
+                         if (b.convStatus !== 'agent_off') {
                              supabase.from('bots').select('*').eq('tenant_id', b.tenantId).eq('status', 'active').eq('autoReply', true)
                                  .then(({ data: botsData }) => {
                                      // Filtra bots que estão atrelados a esta instância de WhatsApp

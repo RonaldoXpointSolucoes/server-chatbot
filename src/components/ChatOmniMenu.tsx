@@ -33,8 +33,10 @@ export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
     switch(status) {
       case 'open': return { label: 'Aberta', color: 'text-blue-500 bg-blue-100/50 dark:bg-blue-500/10', icon: AlertCircle };
       case 'resolved': return { label: 'Resolvida', color: 'text-emerald-500 bg-emerald-100/50 dark:bg-emerald-500/10', icon: CheckCircle2 };
+      case 'agent_off': return { label: 'Agente Off', color: 'text-rose-500 bg-rose-100/50 dark:bg-rose-500/10', icon: XCircle };
       case 'snoozed': return { label: 'Adiada', color: 'text-amber-500 bg-amber-100/50 dark:bg-amber-500/10', icon: Clock };
       case 'pending': return { label: 'Pendente', color: 'text-purple-500 bg-purple-100/50 dark:bg-purple-500/10', icon: AlertCircle };
+      case 'bot': return { label: 'Bot Ativo', color: 'text-indigo-500 bg-indigo-100/50 dark:bg-indigo-500/10', icon: CheckCircle2 };
       default: return { label: 'Aberta', color: 'text-blue-500 bg-blue-100/50 dark:bg-blue-500/10', icon: AlertCircle };
     }
   };
@@ -189,7 +191,7 @@ export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
                <button onClick={() => handleStatusChange('open')} className="flex items-center justify-between px-3 py-2.5 hover:bg-blue-50/50 dark:hover:bg-blue-500/10 rounded-xl transition-colors">
                  <div className="flex items-center gap-3">
                    <AlertCircle size={16} className="text-blue-500" />
-                   <span className="text-sm font-medium text-gray-700 dark:text-[#d1d7db]">Abrir</span>
+                   <span className="text-sm font-medium text-gray-700 dark:text-[#d1d7db]">Abrir (IA Responde)</span>
                  </div>
                  {currentStatus === 'open' && <Check size={16} className="text-blue-500"/>}
                </button>
@@ -199,6 +201,13 @@ export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
                    <span className="text-sm font-medium text-gray-700 dark:text-[#d1d7db]">Resolver</span>
                  </div>
                  {currentStatus === 'resolved' && <Check size={16} className="text-emerald-500"/>}
+               </button>
+               <button onClick={() => handleStatusChange('agent_off')} className="flex items-center justify-between px-3 py-2.5 hover:bg-rose-50/50 dark:hover:bg-rose-500/10 rounded-xl transition-colors">
+                 <div className="flex items-center gap-3">
+                   <XCircle size={16} className="text-rose-500" />
+                   <span className="text-sm font-medium text-gray-700 dark:text-[#d1d7db]">Agente Off (Pausar IA)</span>
+                 </div>
+                 {currentStatus === 'agent_off' && <Check size={16} className="text-rose-500"/>}
                </button>
              </div>
 
