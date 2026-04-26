@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Clock, Flag, UserPlus, CheckCircle2, AlertCircle, XCircle, ChevronDown, Check, User } from 'lucide-react';
+import { Clock, Flag, UserPlus, CheckCircle2, AlertCircle, XCircle, ChevronDown, Check, User, Bot } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 
 interface ChatOmniMenuProps {
@@ -37,6 +37,7 @@ export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
       case 'snoozed': return { label: 'Adiada', color: 'text-amber-500 bg-amber-100/50 dark:bg-amber-500/10', icon: Clock };
       case 'pending': return { label: 'Pendente', color: 'text-purple-500 bg-purple-100/50 dark:bg-purple-500/10', icon: AlertCircle };
       case 'bot': return { label: 'Bot Ativo', color: 'text-indigo-500 bg-indigo-100/50 dark:bg-indigo-500/10', icon: CheckCircle2 };
+      case 'teste_robo': return { label: 'Teste Robô', color: 'text-fuchsia-500 bg-fuchsia-100/50 dark:bg-fuchsia-500/10', icon: Bot };
       default: return { label: 'Aberta', color: 'text-blue-500 bg-blue-100/50 dark:bg-blue-500/10', icon: AlertCircle };
     }
   };
@@ -208,6 +209,13 @@ export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
                    <span className="text-sm font-medium text-gray-700 dark:text-[#d1d7db]">Agente Off (Pausar IA)</span>
                  </div>
                  {currentStatus === 'agent_off' && <Check size={16} className="text-rose-500"/>}
+               </button>
+               <button onClick={() => handleStatusChange('teste_robo')} className="flex items-center justify-between px-3 py-2.5 hover:bg-fuchsia-50/50 dark:hover:bg-fuchsia-500/10 rounded-xl transition-colors">
+                 <div className="flex items-center gap-3">
+                   <Bot size={16} className="text-fuchsia-500" />
+                   <span className="text-sm font-medium text-gray-700 dark:text-[#d1d7db]">Teste Robô</span>
+                 </div>
+                 {currentStatus === 'teste_robo' && <Check size={16} className="text-fuchsia-500"/>}
                </button>
              </div>
 

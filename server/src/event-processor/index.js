@@ -429,12 +429,28 @@ class EventProcessor {
                      if (b.direction === 'inbound') {
                          PushService.sendNotification(b.tenantId, msg, b.phone, b.conversationId);
 
-                         // Busca se tem Bot de IA ativo para responder (Responde se não estiver em Agente Off)
-                         if (b.convStatus !== 'agent_off') {
-                             supabase.from('bots').select('*').eq('tenant_id', b.tenantId).eq('status', 'active').eq('autoReply', true)
-                                 .then(({ data: botsData }) => {
-                                     // Filtra bots que estão atrelados a esta instância de WhatsApp
-                                     const botData = (botsData || []).find(bot => bot.channels && bot.channels.includes(b.instanceId));
+                         // Responde apenas se a conversa estiver sob os cuidados do bot ('bot' ou 'teste_robo')
+                         if (b.convStatus === 'bot' || b.convStatus === 'teste_robo') {
+                             
+                             supabase.from('companies').select('global_ai_enabled').eq('id', b.tenantId).single()
+                                 .then(({ data: companyData }) => {
+                                     // Se o IA estiver desativado globalmente e NÃO for um teste, aborta o processamento.
+                                     if (companyData && companyData.global_ai_enabled === false && b.convStatus !== 'teste_robo') {
+                                         console.log(`[BatchProcessor] IA e Automações Globais estão DESATIVADAS para o tenant ${b.tenantId}`);
+                                         return;
+                                     }
+
+                                     // Busca TODOS os bots do tenant para evitar fallback indevido ao FlowEngine
+                                     supabase.from('bots').select('*').eq('tenant_id', b.tenantId)
+                                         .then(({ data: allBotsData }) => {
+                                     const botsData = allBotsData || [];
+                                     // Encontra bot ativo e com autoReply ligado para esta instância
+                                     let botData = botsData.find(bot => bot.status === 'active' && bot.autoReply === true && bot.channels && bot.channels.includes(b.instanceId));
+                                     
+                                     // Se for teste_robo, ignora as validações de ativação para testes e tenta capturar a configuração base
+                                     if (!botData && b.convStatus === 'teste_robo') {
+                                         botData = botsData.find(bot => bot.channels && bot.channels.includes(b.instanceId)) || botsData[0];
+                                     }
                                      
                                      if (botData) {
                                          // Roteia para a Luna (AI Agent)
@@ -449,8 +465,8 @@ class EventProcessor {
                                              botSettings: botData,
                                              sock: b.sock
                                          });
-                                     } else if (!botsData || botsData.length === 0) {
-                                         // Fallback para o Runtime do Flow Builder (apenas se o tenant NÃO possuir IAs configuradas)
+                                     } else if (botsData.length === 0) {
+                                         // Fallback para o Runtime do Flow Builder APENAS se o tenant não tiver nenhuma configuração de bot (evita double-talk)
                                          FlowEngine.processIncomingMessage({
                                              tenantId: b.tenantId,
                                              instanceId: b.instanceId,
@@ -461,6 +477,7 @@ class EventProcessor {
                                          }).catch(e => console.error("[BatchProcessor] Erro no FlowEngine:", e));
                                      }
                                  }).catch(e => console.error("[BatchProcessor] Erro ao checar bots:", e));
+                             }).catch(e => console.error("[BatchProcessor] Erro ao checar companies global flag:", e));
                          }
                      }
                  }

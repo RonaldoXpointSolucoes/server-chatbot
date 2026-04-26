@@ -92,6 +92,7 @@ export function MainSidebar() {
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [currentCompanyContext, setCurrentCompanyContext] = useState<any>(null);
+  const [globalAiEnabled, setGlobalAiEnabled] = useState(true);
 
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
   const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
@@ -140,6 +141,7 @@ export function MainSidebar() {
         if (currentError || !currentCompany) return;
         
         setCurrentCompanyContext(currentCompany);
+        setGlobalAiEnabled(currentCompany.global_ai_enabled ?? true);
 
         if (currentCompany.email) {
             const { data: companies, error: companiesError } = await supabase
@@ -164,6 +166,11 @@ export function MainSidebar() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, () => {
          fetchInstances();
       })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'companies', filter: `id=eq.${tenantId}` }, (payload) => {
+         if (payload.new && 'global_ai_enabled' in payload.new) {
+             setGlobalAiEnabled(payload.new.global_ai_enabled);
+         }
+      })
       .subscribe();
 
     return () => {
@@ -183,6 +190,20 @@ export function MainSidebar() {
     }
     
     window.location.reload();
+  };
+
+  const handleToggleGlobalAi = async () => {
+    if (!currentCompanyContext || !tenantId) return;
+    const newValue = !globalAiEnabled;
+    setGlobalAiEnabled(newValue);
+    
+    try {
+       const { error } = await supabase.from('companies').update({ global_ai_enabled: newValue }).eq('id', tenantId);
+       if (error) throw error;
+    } catch(e) {
+       console.error("Erro ao atualizar status global do IA:", e);
+       setGlobalAiEnabled(!newValue); // revert on error
+    }
   };
 
   const handleCreateWorkspace = async () => {
@@ -325,6 +346,27 @@ export function MainSidebar() {
             />
             <div className="absolute right-2 px-1.5 py-0.5 rounded bg-black/20 font-mono text-[9px] text-[#8696a0] tracking-tighter">/</div>
           </div>
+        </div>
+
+        {/* Switch Robo I.A Global */}
+        <div className="px-3 pb-3">
+           <div className="flex items-center justify-between px-3 py-2 bg-[#202c33] rounded-lg border border-[#2a3942]/50 hover:border-[#00a884]/30 transition-colors">
+             <div className="flex items-center gap-2.5">
+               <div className={cn("p-1.5 rounded-md transition-colors", globalAiEnabled ? "bg-[#00a884]/20" : "bg-[#2a3942]")}>
+                 <Bot size={14} className={globalAiEnabled ? "text-[#00a884]" : "text-[#8696a0]"} />
+               </div>
+               <span className="text-[13px] font-medium text-[#d1d7db]">Robô I.A</span>
+             </div>
+             <label className="relative inline-flex items-center cursor-pointer">
+               <input 
+                 type="checkbox" 
+                 className="sr-only peer" 
+                 checked={globalAiEnabled} 
+                 onChange={handleToggleGlobalAi}
+               />
+               <div className="w-8 h-4 bg-[#3b4a54] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-[16px] peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#8696a0] peer-checked:after:bg-white after:border-transparent after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-[#00a884]"></div>
+             </label>
+           </div>
         </div>
 
         {/* Global Nav */}

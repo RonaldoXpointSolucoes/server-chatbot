@@ -120,6 +120,12 @@ class AutomationWorker {
             }
             history = finalHistory;
 
+            // Garantia extra: O histórico enviado para o .startChat() não pode terminar com 'user'
+            // pois o sendMessage logo em seguida fará um push de um novo 'user', quebrando a regra de alternância
+            if (history.length > 0 && history[history.length - 1].role === 'user') {
+                history.pop();
+            }
+
             let modelName = botSettings.model || 'gemini-2.5-flash';
             if (modelName === 'gemini-1.5-pro' || modelName === 'gemini-1.5-flash') {
                 modelName = 'gemini-2.5-flash';
@@ -179,70 +185,76 @@ class AutomationWorker {
             // Executa com Function Calling Loop
             while (keepLooping && loopCount < MAX_LOOPS) {
                 loopCount++;
-                const result = await chat.sendMessage(currentMessageText);
-                const response = result.response;
-                const calls = response.functionCalls();
+                try {
+                    const result = await chat.sendMessage(currentMessageText);
+                    const response = result.response;
+                    const calls = response.functionCalls();
 
-                if (calls && calls.length > 0) {
-                    const call = calls[0];
-                    console.log(`[AutomationWorker] AI quer chamar a tool: ${call.name}`);
-                    
-                    let functionResult = {};
+                    if (calls && calls.length > 0) {
+                        const call = calls[0];
+                        console.log(`[AutomationWorker] AI quer chamar a tool: ${call.name}`);
+                        
+                        let functionResult = {};
 
-                    if (call.name === "Buscar_janelas_disponiveis") {
-                        // Simulação de janelas (Mock para o exemplo, poderia consultar o BD)
-                        functionResult = { disponiveis: ["09:00", "10:30", "14:00", "16:00"] };
-                    } 
-                    else if (call.name === "Criar_agendamento") {
-                        const { data, error } = await supabase.from('appointments').insert({
-                            tenant_id: tenantId,
-                            contact_id: contactId,
-                            start_time: call.args.data_hora,
-                            end_time: new Date(new Date(call.args.data_hora).getTime() + 60*60*1000).toISOString(),
-                            notes: call.args.assunto
-                        }).select('id');
-                        functionResult = error ? { erro: error.message } : { sucesso: true, id: data[0].id };
-                    }
-                    else if (call.name === "Buscar_agendamentos_do_contato") {
-                        const { data } = await supabase.from('appointments')
-                            .select('*')
-                            .eq('contact_id', contactId)
-                            .in('status', ['scheduled']);
-                        functionResult = data && data.length > 0 ? { agendamentos: data } : { agendamentos: [] };
-                    }
-                    else if (call.name === "Enviar_texto_separado") {
-                        if (sock) {
-                            await sock.sendMessage(jid, { text: call.args.texto });
+                        if (call.name === "Buscar_janelas_disponiveis") {
+                            // Simulação de janelas (Mock para o exemplo, poderia consultar o BD)
+                            functionResult = { disponiveis: ["09:00", "10:30", "14:00", "16:00"] };
+                        } 
+                        else if (call.name === "Criar_agendamento") {
+                            const { data, error } = await supabase.from('appointments').insert({
+                                tenant_id: tenantId,
+                                contact_id: contactId,
+                                start_time: call.args.data_hora,
+                                end_time: new Date(new Date(call.args.data_hora).getTime() + 60*60*1000).toISOString(),
+                                notes: call.args.assunto
+                            }).select('id');
+                            functionResult = error ? { erro: error.message } : { sucesso: true, id: data[0].id };
                         }
-                        functionResult = { status: "Mensagem enviada com sucesso" };
-                    }
-                    else if (call.name === "Escalar_humano") {
-                        if (conversationId) {
-                            await supabase.from('conversations').update({ status: 'open' }).eq('id', conversationId);
-                            // Desativa bot desta conversa se houver algum log ou state (depende de como o event-processor roteia)
+                        else if (call.name === "Buscar_agendamentos_do_contato") {
+                            const { data } = await supabase.from('appointments')
+                                .select('*')
+                                .eq('contact_id', contactId)
+                                .in('status', ['scheduled']);
+                            functionResult = data && data.length > 0 ? { agendamentos: data } : { agendamentos: [] };
                         }
-                        functionResult = { status: "Atendimento transferido. Encerre sua participação." };
-                    }
-                    else if (call.name === "Atualizar_nome_contato") {
-                        if (contactId) {
-                            await supabase.from('contacts').update({ name: call.args.nome_cliente }).eq('id', contactId);
+                        else if (call.name === "Enviar_texto_separado") {
+                            if (sock) {
+                                await sock.sendMessage(jid, { text: call.args.texto });
+                            }
+                            functionResult = { status: "Mensagem enviada com sucesso" };
                         }
-                        functionResult = { status: "Nome do contato atualizado com sucesso no sistema para " + call.args.nome_cliente };
-                    }
-                    else {
-                        functionResult = { erro: "Ferramenta desconhecida" };
-                    }
+                        else if (call.name === "Escalar_humano") {
+                            if (conversationId) {
+                                await supabase.from('conversations').update({ status: 'open' }).eq('id', conversationId);
+                                // Desativa bot desta conversa se houver algum log ou state (depende de como o event-processor roteia)
+                            }
+                            functionResult = { status: "Atendimento transferido. Encerre sua participação." };
+                        }
+                        else if (call.name === "Atualizar_nome_contato") {
+                            if (contactId) {
+                                await supabase.from('contacts').update({ name: call.args.nome_cliente }).eq('id', contactId);
+                            }
+                            functionResult = { status: "Nome do contato atualizado com sucesso no sistema para " + call.args.nome_cliente };
+                        }
+                        else {
+                            functionResult = { erro: "Ferramenta desconhecida" };
+                        }
 
-                    // Envia o resultado da função de volta para a IA continuar o raciocínio
-                    currentMessageText = [{
-                        functionResponse: {
-                            name: call.name,
-                            response: functionResult
-                        }
-                    }];
-                } else {
-                    // Sem tools a chamar, extrai texto final
-                    finalResponseText = response.text();
+                        // Envia o resultado da função de volta para a IA continuar o raciocínio
+                        currentMessageText = [{
+                            functionResponse: {
+                                name: call.name,
+                                response: functionResult
+                            }
+                        }];
+                    } else {
+                        // Sem tools a chamar, extrai texto final
+                        finalResponseText = response.text();
+                        keepLooping = false;
+                    }
+                } catch (loopError) {
+                    console.error(`[AutomationWorker] Erro durante o loop de função (Iteração ${loopCount}):`, loopError);
+                    finalResponseText = "Desculpe, ocorreu um pequeno erro interno ao processar sua requisição. Pode tentar novamente?";
                     keepLooping = false;
                 }
             }
