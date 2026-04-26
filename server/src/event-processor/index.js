@@ -238,7 +238,7 @@ class EventProcessor {
              // Verifica quais conversas já existem no banco
              const contactIds = Array.from(new Set(Array.from(convMap.values()).map(c => c.contact_id)));
              const { data: existingConvs, error: existError } = await supabase.from('conversations')
-                  .select('id, tenant_id, contact_id, unread_count')
+                  .select('id, tenant_id, contact_id, unread_count, status')
                   .in('contact_id', contactIds);
                   
              if(existError) throw new Error("Conversation Select Error: " + existError.message);
@@ -329,6 +329,7 @@ class EventProcessor {
              await Promise.all(activeBatch.map(async b => {
                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
                  b.conversationId = finalConvIdMap.get(`${b.tenantId}_${cid}`);
+                 b.convStatus = existingConvMap.get(`${b.tenantId}_${cid}`)?.status || 'bot';
                  
                  if (!b.conversationId) return; // ignora falha bruta
                  
@@ -429,36 +430,38 @@ class EventProcessor {
                          PushService.sendNotification(b.tenantId, msg, b.phone, b.conversationId);
 
                          // Busca se tem Bot de IA ativo para responder
-                         supabase.from('bots').select('*').eq('tenant_id', b.tenantId).eq('status', 'active').eq('autoReply', true)
-                             .then(({ data: botsData }) => {
-                                 // Filtra bots que estão atrelados a esta instância de WhatsApp
-                                 const botData = (botsData || []).find(bot => bot.channels && bot.channels.includes(b.instanceId));
-                                 
-                                 if (botData) {
-                                     // Roteia para a Luna (AI Agent)
-                                     AutomationWorker.processMessage({
-                                         tenantId: b.tenantId,
-                                         instanceId: b.instanceId,
-                                         conversationId: b.conversationId,
-                                         contactId: contactIdMap.get(`${b.tenantId}_${b.phone}`),
-                                         jid: b.jid,
-                                         textMessage: b.textMessage,
-                                         botId: botData.id,
-                                         botSettings: botData,
-                                         sock: b.sock
-                                     });
-                                 } else {
-                                     // Fallback para o Runtime do Flow Builder (Regras Antigas)
-                                     FlowEngine.processIncomingMessage({
-                                         tenantId: b.tenantId,
-                                         instanceId: b.instanceId,
-                                         jid: b.jid,
-                                         textMessage: b.textMessage,
-                                         rawPayload: b.rawMsg,
-                                         sock: b.sock
-                                     }).catch(e => console.error("[BatchProcessor] Erro no FlowEngine:", e));
-                                 }
-                             }).catch(e => console.error("[BatchProcessor] Erro ao checar bots:", e));
+                         if (b.convStatus === 'bot') {
+                             supabase.from('bots').select('*').eq('tenant_id', b.tenantId).eq('status', 'active').eq('autoReply', true)
+                                 .then(({ data: botsData }) => {
+                                     // Filtra bots que estão atrelados a esta instância de WhatsApp
+                                     const botData = (botsData || []).find(bot => bot.channels && bot.channels.includes(b.instanceId));
+                                     
+                                     if (botData) {
+                                         // Roteia para a Luna (AI Agent)
+                                         AutomationWorker.processMessage({
+                                             tenantId: b.tenantId,
+                                             instanceId: b.instanceId,
+                                             conversationId: b.conversationId,
+                                             contactId: contactIdMap.get(`${b.tenantId}_${b.phone}`),
+                                             jid: b.jid,
+                                             textMessage: b.textMessage,
+                                             botId: botData.id,
+                                             botSettings: botData,
+                                             sock: b.sock
+                                         });
+                                     } else if (!botsData || botsData.length === 0) {
+                                         // Fallback para o Runtime do Flow Builder (apenas se o tenant NÃO possuir IAs configuradas)
+                                         FlowEngine.processIncomingMessage({
+                                             tenantId: b.tenantId,
+                                             instanceId: b.instanceId,
+                                             jid: b.jid,
+                                             textMessage: b.textMessage,
+                                             rawPayload: b.rawMsg,
+                                             sock: b.sock
+                                         }).catch(e => console.error("[BatchProcessor] Erro no FlowEngine:", e));
+                                     }
+                                 }).catch(e => console.error("[BatchProcessor] Erro ao checar bots:", e));
+                         }
                      }
                  }
                  

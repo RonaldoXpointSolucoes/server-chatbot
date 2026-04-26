@@ -98,6 +98,28 @@ class AutomationWorker {
                 history.pop();
             }
 
+            // Garantia de Integridade Estrita para Gemini API
+            if (history.length > 0 && history[0].role !== 'user') {
+                history.shift(); // Histórico DEVE iniciar com 'user'
+            }
+            // Filtra partes com texto vazio (Gemini crasha)
+            history = history.filter(h => h.parts && h.parts[0] && h.parts[0].text && typeof h.parts[0].text === 'string' && h.parts[0].text.trim() !== '');
+
+            // Reagrupa caso haja roles subsequentes iguais (Gemini exige alternância estrita)
+            const finalHistory = [];
+            for (const h of history) {
+                if (finalHistory.length === 0) {
+                    if (h.role === 'user') finalHistory.push(h);
+                } else {
+                    if (finalHistory[finalHistory.length - 1].role !== h.role) {
+                        finalHistory.push(h);
+                    } else {
+                        finalHistory[finalHistory.length - 1].parts[0].text += '\n' + h.parts[0].text;
+                    }
+                }
+            }
+            history = finalHistory;
+
             let modelName = botSettings.model || 'gemini-2.5-flash';
             if (modelName === 'gemini-1.5-pro' || modelName === 'gemini-1.5-flash') {
                 modelName = 'gemini-2.5-flash';
@@ -151,9 +173,12 @@ class AutomationWorker {
             let finalResponseText = '';
             let keepLooping = true;
             let currentMessageText = textMessage;
+            let loopCount = 0;
+            const MAX_LOOPS = 5;
 
             // Executa com Function Calling Loop
-            while (keepLooping) {
+            while (keepLooping && loopCount < MAX_LOOPS) {
+                loopCount++;
                 const result = await chat.sendMessage(currentMessageText);
                 const response = result.response;
                 const calls = response.functionCalls();
@@ -220,6 +245,11 @@ class AutomationWorker {
                     finalResponseText = response.text();
                     keepLooping = false;
                 }
+            }
+
+            if (loopCount >= MAX_LOOPS) {
+                console.warn(`[AutomationWorker] Loop infinito detectado para a conversa ${conversationId}. Abortando geração.`);
+                finalResponseText = finalResponseText || "Desculpe, encontrei uma dificuldade técnica. Em que posso ajudar?";
             }
 
             // 4. Envia resposta final
