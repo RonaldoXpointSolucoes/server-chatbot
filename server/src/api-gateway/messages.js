@@ -21,9 +21,22 @@ router.post('/messages/send', requireTenant, async (req, res) => {
             return res.status(400).json({ error: 'Missing required parameters' });
         }
 
-        const sock = sessionManager.getSocket(instanceId);
+        let sock = sessionManager.getSocket(instanceId);
+        
+        // Anti-Bug: Se o socket estiver no meio do boot (deploy/restart), aguarda
+        if (!sock && sessionManager.connectingState.has(instanceId)) {
+            console.log(`[Messages API] Segurando req de envio. Aguardando socket conectar: ${instanceId}`);
+            sock = await sessionManager.connectingState.get(instanceId);
+        }
+        
+        // Anti-Bug: Se o socket não existe na memória (servidor reiniciou e não carregou ainda), força o boot!
         if (!sock) {
-             return res.status(400).json({ error: 'WhatsApp socket offline para esta instancia.' });
+             console.log(`[Messages API] Forçando boot emergencial do socket na rota de envio: ${instanceId}`);
+             try {
+                 sock = await sessionManager.createSession(tenantId, instanceId);
+             } catch (e) {
+                 return res.status(400).json({ error: 'WhatsApp socket offline para esta instancia.' });
+             }
         }
         
         const remoteJid = contactPhone.includes('@') ? contactPhone : `${contactPhone}@s.whatsapp.net`;
