@@ -120,6 +120,11 @@ interface ChatState {
   automations: any[];
   fetchAutomations: () => Promise<void>;
   
+  // User Settings
+  userSettings: any;
+  filterType: string;
+  setFilterType: (filter: string) => Promise<void>;
+
   // Labels
   fetchTenantLabels: () => Promise<void>;
   assignLabelToConversation: (contactId: string, labelId: string) => Promise<void>;
@@ -326,8 +331,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
   automations: [],
   tenantLabels: [],
   quickReplies: [],
+  userSettings: {},
+  filterType: 'all',
   theme: (localStorage.getItem('theme') as 'light' | 'dark') || 'light',
   
+  setFilterType: async (filter) => {
+    set({ filterType: filter });
+    try {
+      const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+      const state = get();
+      if (email && state.tenantInfo) {
+         const newSettings = { ...state.userSettings, filterType: filter };
+         const { error } = await supabase.from('tenant_users')
+            .update({ settings: newSettings })
+            .eq('email', email)
+            .eq('tenant_id', state.tenantInfo.id);
+         
+         if (error) {
+           console.error("Erro ao salvar filtro no Supabase:", error);
+         } else {
+           set({ userSettings: newSettings });
+         }
+      }
+    } catch(e) {
+      console.error('[setFilterType] Exceção:', e);
+    }
+  },
+
   setTheme: (theme) => {
     localStorage.setItem('theme', theme);
     if (theme === 'dark') {
@@ -1091,6 +1121,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
        // Buscar Quick Replies
        await get().fetchQuickReplies();
 
+       // Buscar settings do usuário logado
+       try {
+         const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+         if (email && tenant) {
+           const { data: userData } = await supabase.from('tenant_users')
+             .select('settings')
+             .eq('email', email)
+             .eq('tenant_id', tenant.id)
+             .maybeSingle();
+             
+           if (userData && userData.settings) {
+             set({ userSettings: userData.settings });
+             if (userData.settings.filterType) {
+                set({ filterType: userData.settings.filterType });
+             }
+           }
+         }
+       } catch (err) {
+          console.warn('Erro ao carregar settings do usuario:', err);
+       }
+
        // Opcional: Buscar versão atual do app a partir do banco (tabela app_version)
        const { data: appVersionData } = await supabase.from('app_version').select('*').order('deploy_date', { ascending: false }).limit(1).maybeSingle();
        if (appVersionData) {
@@ -1451,7 +1502,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     try {
                         const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
                         const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
-                        await fetch(`${API_URL}/api/v1/conversations/${conv.id}/sync-history`, {
+                        const res = await fetch(`${API_URL}/api/v1/conversations/${conv.id}/sync-history`, {
                             method: 'POST',
                             headers: { 
                                'Content-Type': 'application/json',
@@ -1461,9 +1512,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
                             body: JSON.stringify({ instanceId: instanceName })
                         });
                         
-                        // Supabase deve ter sido populado pelo Node. Aguarda 1.0s para propagação de DB/replica
-                        await new Promise(r => setTimeout(r, 1000));
+                        const result = await res.json();
+                        if (!res.ok) {
+                            alert(result.error || 'Falha ao solicitar histórico.');
+                        } else {
+                            // O gateway do Node despacha a History Sync (Baileys) que entra numa fila assíncrona.
+                            // Vamos aguardar 5 segundos para que as mensagens cheguem e sejam atualizadas pelo Realtime (no on('postgres_changes')).
+                            // Mostramos um alert informativo (mas como é bloqueante, vamos só confiar no spinner).
+                            await new Promise(r => setTimeout(r, 6000));
+                        }
                         
+                        // Atualiza a vista atual caso algo não tenha vindo pelo realtime ou pra forçar atualização
                         const { data: fetchNewMsgs } = await supabase.from('messages')
                            .select('*')
                            .eq('tenant_id', tenant.id)

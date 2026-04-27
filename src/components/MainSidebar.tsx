@@ -154,7 +154,19 @@ export function MainSidebar() {
               .order('created_at', { ascending: false });
 
             if (!companiesError && companies) {
-               setUserCompanies(companies);
+               let finalCompanies = companies;
+               if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
+                 const allowedCompsStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_companies') || localStorage.getItem('allowed_companies')) : null;
+                 if (allowedCompsStr) {
+                   try {
+                     const allowedCompanies = JSON.parse(allowedCompsStr);
+                     if (Array.isArray(allowedCompanies)) {
+                       finalCompanies = companies.filter((c: any) => allowedCompanies.includes(c.id));
+                     }
+                   } catch(e) {}
+                 }
+               }
+               setUserCompanies(finalCompanies);
             }
         }
       } catch (err) {
@@ -258,8 +270,15 @@ export function MainSidebar() {
       
       {/* Workspace Header Premium */}
       <div 
-        className="h-16 flex items-center px-4 border-b border-[#2a3942]/60 hover:bg-[#202c33] cursor-pointer transition-colors group relative z-50"
-        onClick={() => setShowWorkspaceMenu(!showWorkspaceMenu)}
+        className={cn(
+          "h-16 flex items-center px-4 border-b border-[#2a3942]/60 transition-colors group relative z-50",
+          (userCompanies.length > 1 || currentUserRole === 'admin') ? "hover:bg-[#202c33] cursor-pointer" : ""
+        )}
+        onClick={() => {
+          if (userCompanies.length > 1 || currentUserRole === 'admin') {
+            setShowWorkspaceMenu(!showWorkspaceMenu);
+          }
+        }}
       >
         <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center shrink-0 border border-indigo-400 shadow-sm">
           <div className="w-2 h-2 bg-white rounded-sm"></div>
@@ -269,12 +288,14 @@ export function MainSidebar() {
             {currentCompanyContext?.name || 'Carregando...'}
           </h2>
         </div>
-        <div className={cn("bg-[#2a3942] group-hover:bg-[#3b4a54] p-1 rounded transition-colors", "group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!block")}>
-           <ChevronDown size={14} className="text-[#8696a0] group-hover:text-white transition-colors" />
-        </div>
+        {(userCompanies.length > 1 || currentUserRole === 'admin') && (
+          <div className={cn("bg-[#2a3942] group-hover:bg-[#3b4a54] p-1 rounded transition-colors", "group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!block")}>
+             <ChevronDown size={14} className="text-[#8696a0] group-hover:text-white transition-colors" />
+          </div>
+        )}
 
         {/* Workspace Dropdown Panel */}
-        {showWorkspaceMenu && (
+        {showWorkspaceMenu && (userCompanies.length > 1 || currentUserRole === 'admin') && (
           <div className="absolute top-[68px] left-2 w-[340px] bg-[#1e1e24] border border-[#2a2a2f] rounded-xl shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
              
              <div className="max-h-[300px] overflow-y-auto styled-scrollbar py-2">
@@ -301,55 +322,57 @@ export function MainSidebar() {
              </div>
 
              {/* Add New Workspace Action */}
-             <div className="p-3 bg-[#18181b] border-t border-[#2a2a2f]" onClick={e => e.stopPropagation()}>
-               {isCreatingWorkspace ? (
-                  <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                     <input 
-                       autoFocus
-                       type="text"
-                       value={newWorkspaceName}
-                       onChange={(e) => setNewWorkspaceName(e.target.value)}
-                       placeholder="Nome da Nova Empresa..."
-                       className="w-full bg-[#202027] border border-[#2a2a2f] rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors"
-                       onKeyDown={(e) => {
-                         if (e.key === 'Enter') handleCreateWorkspace()
-                         if (e.key === 'Escape') setIsCreatingWorkspace(false)
-                       }}
-                     />
-                     <div className="flex gap-2">
-                       <button 
-                         onClick={(e) => {
-                           e.stopPropagation();
-                           handleCreateWorkspace();
+             {currentUserRole === 'admin' && (
+               <div className="p-3 bg-[#18181b] border-t border-[#2a2a2f]" onClick={e => e.stopPropagation()}>
+                 {isCreatingWorkspace ? (
+                    <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                       <input 
+                         autoFocus
+                         type="text"
+                         value={newWorkspaceName}
+                         onChange={(e) => setNewWorkspaceName(e.target.value)}
+                         placeholder="Nome da Nova Empresa..."
+                         className="w-full bg-[#202027] border border-[#2a2a2f] rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors"
+                         onKeyDown={(e) => {
+                           if (e.key === 'Enter') handleCreateWorkspace()
+                           if (e.key === 'Escape') setIsCreatingWorkspace(false)
                          }}
-                         disabled={!newWorkspaceName.trim()}
-                         className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium py-2 rounded-md transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
-                       >
-                         Criar
-                       </button>
-                       <button 
-                         onClick={(e) => {
-                           e.stopPropagation();
-                           setIsCreatingWorkspace(false);
-                         }}
-                         className="flex-1 bg-[#2a2a2f] hover:bg-[#323238] text-slate-300 text-xs font-medium py-2 rounded-md transition-colors"
-                       >
-                         Cancelar
-                       </button>
-                     </div>
-                  </div>
-               ) : (
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsCreatingWorkspace(true);
-                    }}
-                    className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-[#2a2a2f] hover:border-indigo-500/50 hover:bg-indigo-500/5 text-slate-400 hover:text-indigo-400 transition-all text-sm font-medium"
-                  >
-                    <Plus size={16} /> Criar nova empresa
-                  </button>
-               )}
-             </div>
+                       />
+                       <div className="flex gap-2">
+                         <button 
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             handleCreateWorkspace();
+                           }}
+                           disabled={!newWorkspaceName.trim()}
+                           className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium py-2 rounded-md transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                         >
+                           Criar
+                         </button>
+                         <button 
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             setIsCreatingWorkspace(false);
+                           }}
+                           className="flex-1 bg-[#2a2a2f] hover:bg-[#323238] text-slate-300 text-xs font-medium py-2 rounded-md transition-colors"
+                         >
+                           Cancelar
+                         </button>
+                       </div>
+                    </div>
+                 ) : (
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsCreatingWorkspace(true);
+                      }}
+                      className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-[#2a2a2f] hover:border-indigo-500/50 hover:bg-indigo-500/5 text-slate-400 hover:text-indigo-400 transition-all text-sm font-medium"
+                    >
+                      <Plus size={16} /> Criar nova empresa
+                    </button>
+                 )}
+               </div>
+             )}
           </div>
         )}
       </div>

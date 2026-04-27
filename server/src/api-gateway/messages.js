@@ -137,11 +137,12 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
             : Math.floor(new Date(oldestMsgs[0].timestamp).getTime() / 1000);
 
         try {
-            console.log(`[Sync-History] Solicitando últimas 50 mensagems (on-demand) para ${jid} a partir do ID ${oldestKey.id}`);
+            console.log(`[Sync-History] [Tenant: ${tenantId}] [Instance: ${instanceId}] Solicitando últimas 50 mensagems (on-demand) para JID: ${jid} a partir do MsgID: ${oldestKey.id}`);
             
             // Chama a API NATIVA DO BAILEYS para o MD:
             await sock.fetchMessageHistory(50, oldestKey, timestampSeconds);
             
+            console.log(`[Sync-History] Pedido enviado para a rede do WhatsApp. JID: ${jid}. Aguardando eventos de upsert assíncronos via Baileys.`);
             // Retorna ao front que o processo foi despachado para a Meta/WhatsApp, e logo mais cairão eventos upsert assíncronos.
             res.json({
                 ok: true,
@@ -150,7 +151,7 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
                 message: "Busca despachada com sucesso. As mensagens aparecerão em tempo real conforme forem chegando do WhatsApp."
             });
         } catch (fetchErr) {
-             console.error("[Sync-History] Erro na engine Baileys ao solicitar histórico:", fetchErr);
+             console.error(`[Sync-History] [ERRO] Falha na engine Baileys ao solicitar histórico para JID ${jid}:`, fetchErr);
              res.status(500).json({ error: 'Falha do protocolo ao solicitar histórico à API do WhatsApp', detalhes: fetchErr.message });
         }
 

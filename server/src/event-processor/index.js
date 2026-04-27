@@ -516,8 +516,12 @@ class EventProcessor {
     }
 
     async handleMessagingHistorySet(tenantId, instanceId, sock, payload) {
-        const { chats, contacts, messages, isLatest } = payload;
-        console.log(`[EventProcessor] Histórico Completo Recebido: ${chats.length} chats, ${contacts.length} contatos, ${messages.length} msgs. IsLatest: ${isLatest}`);
+        const chats = payload.chats || [];
+        const contacts = payload.contacts || [];
+        const messages = payload.messages || [];
+        const isLatest = payload.isLatest || false;
+        
+        console.log(`[EventProcessor] Histórico Recebido: ${chats.length} chats, ${contacts.length} contatos, ${messages.length} msgs. IsLatest: ${isLatest}`);
         
         
         const ownerJid = sock?.user?.id;

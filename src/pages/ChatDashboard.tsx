@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2 } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal } from '../components/ChatModals';
@@ -154,8 +154,11 @@ export default function ChatDashboard() {
     markAllAsRead,
     togglePinContact,
     toggleFavorite,
+    toggleBlockContact,
     activeChannelFilter,
-    activeChannelName
+    activeChannelName,
+    filterType,
+    setFilterType
   } = useChatStore();
 
   // Execucao Incial Reativa
@@ -222,7 +225,6 @@ export default function ChatDashboard() {
 
   // Estados para Filtros
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'unread' | 'favorite' | 'labels'>('all');
   const [showFilters, setShowFilters] = useState(false);
   const [filterContextMenu, setFilterContextMenu] = useState<{ type: string, x: number, y: number } | null>(null);
   const [instanceNamesMap, setInstanceNamesMap] = useState<Record<string, string>>({});
@@ -610,9 +612,13 @@ export default function ChatDashboard() {
       <BlockModal 
         isOpen={!!contactToBlock}
         onClose={() => setContactToBlock(null)}
-        contactId={contactToBlock?.id || ''}
-        contactName={contactToBlock?.name || contactToBlock?.jid?.split('@')[0] || ''}
-        isCurrentlyBlocked={contactToBlock?.is_blocked || false}
+        contactName={contactToBlock?.name || ''}
+        isBlocked={contactToBlock?.isBlocked || false}
+        onConfirm={async () => {
+          if (contactToBlock?.id) {
+            await toggleBlockContact(contactToBlock.id);
+          }
+        }}
       />
 
       <ContactLabelsModal
@@ -656,8 +662,8 @@ export default function ChatDashboard() {
 
       {/* Middle Sidebar (Contacts List) */}
       <div className={cn(
-        "w-full sm:w-[30%] sm:min-w-[320px] lg:w-[320px] lg:max-w-[340px] border-r border-[#d1d7db] dark:border-[#222d34] flex flex-col bg-white dark:bg-[#111b21] transition-all",
-        activeChatId ? "hidden sm:flex" : "flex"
+        "w-full md:w-[30%] md:min-w-[320px] lg:w-[320px] lg:max-w-[340px] border-r border-[#d1d7db] dark:border-[#222d34] flex flex-col bg-white dark:bg-[#111b21] transition-all",
+        activeChatId ? "hidden md:flex" : "flex"
       )}
         onClick={() => setActiveDropdown(null)} // fecha qq dropdown ao clicar fora
       >
@@ -666,7 +672,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.40 | Deploy: 26/04/2026, 21:41"}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.47 | Deploy: 27/04/2026, 11:07"}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -902,7 +908,7 @@ export default function ChatDashboard() {
                return false;
              }
              // Filtros de Pills
-             if (filterType === 'unread' && c.unread <= 0) return false;
+             if (filterType === 'unread' && c.unread <= 0 && c.id !== activeChatId) return false;
              if (filterType === 'favorite' && !c.is_favorite) return false;
              if (filterType === 'labels' && !(c.conv_labels && c.conv_labels.length > 0)) return false;
              
@@ -1175,7 +1181,7 @@ export default function ChatDashboard() {
       {activeChat ? (
         <div 
           onClick={() => setActiveChatDropdown(false)}
-          className={cn("flex-1 flex flex-col relative w-full h-full max-w-[100vw] overflow-hidden min-w-0 bg-[#efeae2] dark:bg-[#0b141a]", !activeChatId && "hidden sm:flex")} 
+          className={cn("flex-1 flex flex-col relative w-full h-full max-w-[100vw] overflow-hidden min-w-0 bg-[#efeae2] dark:bg-[#0b141a]", !activeChatId && "hidden md:flex")} 
           style={{
            backgroundImage: 'url("https://w7.pngwing.com/pngs/946/407/png-transparent-whatsapp-background-theme-pattern-design.png")',
            backgroundSize: 'cover',
@@ -1185,28 +1191,55 @@ export default function ChatDashboard() {
           
           {/* Chat Header */}
           <div className="relative h-16 shrink-0 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 relative">
               <button className="sm:hidden p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1]" onClick={() => setActiveChat(null)}>
                 <ChevronLeft size={24} />
               </button>
-              <img 
-                  src={activeChat.avatar} 
-                  alt="Avatar" 
-                  className="w-10 h-10 rounded-full object-cover hover:scale-105 transition-transform duration-200 cursor-pointer ring-2 ring-transparent hover:ring-[#00a884]/30" 
-                  onClick={(e) => { e.stopPropagation(); setFullscreenImage(activeChat.avatar); }}
-                  onError={(e) => {
-                    e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone))}&background=random&color=fff`;
-                  }}
-                />
-              <div>
-                <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
-                  <span className="truncate max-w-[200px] sm:max-w-md">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
-                  {activeChat.phone && getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone) !== formatPhoneNumber(activeChat.phone) && (
-                    <span className="text-[12px] text-[#54656f] dark:text-[#8696a0] font-mono inline-block mt-0.5 border border-black/5 dark:border-white/10 px-1.5 rounded-md bg-black/5 dark:bg-white/5 hidden sm:inline-block">
-                      {formatPhoneNumber(activeChat.phone)}
-                    </span>
-                  )}
-                </h2>
+              
+              <div className="flex items-center gap-3 relative">
+                {/* Badge flutuante cobrindo foto e nome */}
+                {(() => {
+                   const otherUnreadCount = contacts.filter(c => c.id !== activeChatId).reduce((acc, c) => acc + (c.unread || 0), 0);
+                   if (otherUnreadCount > 0) {
+                      return (
+                        <div className="sm:hidden absolute -inset-y-2 -inset-x-2 z-30 flex items-center bg-[#f0f2f5] dark:bg-[#202c33] rounded-r-lg">
+                          <button 
+                            onClick={() => setActiveChat(null)}
+                            className="group flex items-center gap-2.5 bg-[#00a884] px-4 py-1.5 rounded-full shadow-[0_0_20px_rgba(0,168,132,0.6)] animate-pulse hover:scale-105 transition-all w-full"
+                          >
+                            <div className="relative flex items-center justify-center w-7 h-7 bg-white/20 rounded-full text-white">
+                              <MessageCircle size={14} className="group-hover:animate-bounce" />
+                              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 border border-[#00a884] rounded-full" />
+                            </div>
+                            <span className="text-[13px] font-bold text-white tracking-tight whitespace-nowrap">
+                              {otherUnreadCount} {otherUnreadCount === 1 ? 'nova' : 'novas'}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                   }
+                   return null;
+                })()}
+
+                <img 
+                    src={activeChat.avatar} 
+                    alt="Avatar" 
+                    className="w-10 h-10 rounded-full object-cover hover:scale-105 transition-transform duration-200 cursor-pointer ring-2 ring-transparent hover:ring-[#00a884]/30" 
+                    onClick={(e) => { e.stopPropagation(); setFullscreenImage(activeChat.avatar); }}
+                    onError={(e) => {
+                      e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone))}&background=random&color=fff`;
+                    }}
+                  />
+                <div>
+                  <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
+                    <span className="truncate max-w-[200px] sm:max-w-md">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
+                    {activeChat.phone && getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone) !== formatPhoneNumber(activeChat.phone) && (
+                      <span className="text-[12px] text-[#54656f] dark:text-[#8696a0] font-mono inline-block mt-0.5 border border-black/5 dark:border-white/10 px-1.5 rounded-md bg-black/5 dark:bg-white/5 hidden sm:inline-block">
+                        {formatPhoneNumber(activeChat.phone)}
+                      </span>
+                    )}
+                  </h2>
+                </div>
               </div>
             </div>
 
@@ -1272,6 +1305,8 @@ export default function ChatDashboard() {
               </div>
             </div>
           </div>
+
+          {/* Badge flutuante de novas mensagens foi movido para o cabeçalho */}
 
           {/* Chat Messages */}
           <div 
@@ -1723,7 +1758,7 @@ export default function ChatDashboard() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#222d34] border-l border-white/5 relative z-10">
+        <div className="hidden sm:flex flex-1 flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#222d34] border-l border-white/5 relative z-10">
           <Bot size={80} className="text-gray-300 dark:text-[#2a3942] mb-6" />
           <h1 className="text-3xl font-light text-[#54656f] dark:text-[#8696a0]">SaaS Multi-Agente Híbrido</h1>
           <div className="text-sm text-[#54656f] dark:text-[#8696a0] mt-2 flex items-center gap-2"><div className="w-2 h-2 bg-[#00a884] rounded-full animate-pulse"></div> Conectado com banco de dados</div>

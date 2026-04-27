@@ -462,11 +462,23 @@ export function NewChatModal({ isOpen, onClose, contacts, onStartChat }: NewChat
 export interface BlockModalProps extends BaseModalProps {
   contactName: string;
   isBlocked: boolean;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
 }
 
 export function BlockModal({ isOpen, onClose, contactName, isBlocked, onConfirm }: BlockModalProps) {
+  const [isProcessing, setIsProcessing] = useState(false);
+
   if (!isOpen) return null;
+
+  const handleConfirm = async () => {
+    try {
+      setIsProcessing(true);
+      await onConfirm();
+    } finally {
+      setIsProcessing(false);
+      onClose();
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
@@ -496,20 +508,24 @@ export function BlockModal({ isOpen, onClose, contactName, isBlocked, onConfirm 
           <button 
             type="button" 
             onClick={onClose}
-            className="px-5 py-2.5 rounded-full text-sm font-semibold text-[#54656f] dark:text-[#aebac1] hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+            disabled={isProcessing}
+            className="px-5 py-2.5 rounded-full text-sm font-semibold text-[#54656f] dark:text-[#aebac1] hover:bg-gray-100 dark:hover:bg-white/5 transition-colors disabled:opacity-50"
           >
             Cancelar
           </button>
           <button
-            onClick={() => {
-              onConfirm();
-              onClose();
-            }}
+            onClick={handleConfirm}
             disabled={isProcessing}
-            className={`flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white shadow-md transition-all active:scale-95 ${isBlocked ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"}`}
+            className={`flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white shadow-md transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed ${isBlocked ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"}`}
           >
-            {isBlocked ? <CheckCircle2 size={16} /> : <ShieldAlert size={16} />} 
-            {isBlocked ? "Sim, Desbloquear" : "Sim, Bloquear"}
+            {isProcessing ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : isBlocked ? (
+              <CheckCircle2 size={16} />
+            ) : (
+              <ShieldAlert size={16} />
+            )}
+            {isProcessing ? "Processando..." : (isBlocked ? "Sim, Desbloquear" : "Sim, Bloquear")}
           </button>
         </div>
       </div>
