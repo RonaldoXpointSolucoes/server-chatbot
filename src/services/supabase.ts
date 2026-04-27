@@ -50,4 +50,6 @@ export type ContactRow = {
   whatsapp_jid?: string;
   bot_status: 'active' | 'paused';
   created_at: string;
+  is_pinned?: boolean;
+  pinned_instances?: string[];
 }

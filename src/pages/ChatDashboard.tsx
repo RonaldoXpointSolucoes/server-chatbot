@@ -504,6 +504,12 @@ export default function ChatDashboard() {
     }
   };
 
+  const isContactPinned = (c: any) => {
+    if (c.is_pinned) return true;
+    const currentBox = activeChannelFilter || c.instance_id || connectedInstanceName;
+    return currentBox && c.pinned_instances?.includes(currentBox);
+  };
+
   return (
     <div className="flex w-full h-[100dvh] min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
       
@@ -924,8 +930,10 @@ export default function ChatDashboard() {
 
              return true;
           }).sort((a,b) => {
-             if (a.is_pinned && !b.is_pinned) return -1;
-             if (!a.is_pinned && b.is_pinned) return 1;
+             const aPinned = isContactPinned(a);
+             const bPinned = isContactPinned(b);
+             if (aPinned && !bPinned) return -1;
+             if (!aPinned && bPinned) return 1;
              
              let aLastMsg;
              if (a.messages) {
@@ -1035,7 +1043,7 @@ export default function ChatDashboard() {
                     </div>
                     <div className="flex items-center gap-1">
                       <span className={cn("text-[11px] font-medium min-w-fit ml-1 flex items-center gap-1", contact.unread > 0 ? "text-[#00a884]" : "text-[#54656f] dark:text-[#8696a0]")}>
-                        {contact.is_pinned && <Pin size={12} className="text-[#00a884] rotate-45 fill-current opacity-80" />}
+                        {isContactPinned(contact) && <Pin size={12} className="text-[#00a884] rotate-45 fill-current opacity-80" />}
                         {timeDisplay}
                       </span>
                       
@@ -1054,11 +1062,16 @@ export default function ChatDashboard() {
                         {activeDropdown === contact.id && (
                           <div className="absolute right-0 top-6 w-52 bg-white dark:bg-[#233138] border border-black/5 dark:border-white/5 rounded-xl shadow-xl py-2 z-[99] animate-in fade-in zoom-in-95 duration-100">
                             <button 
-                              onClick={(e) => { e.stopPropagation(); togglePinContact(contact.id); setActiveDropdown(null); }}
-                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                              className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 border-t border-gray-100 dark:border-[#304046]"
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                const instanceToPin = activeChannelFilter || contact.instance_id || connectedInstanceName;
+                                togglePinContact(contact.id, instanceToPin); 
+                                setActiveDropdown(null); 
+                              }}
                             >
-                              <Pin size={14} className={contact.is_pinned ? "rotate-45" : ""} />
-                              {contact.is_pinned ? "Desafixar conversa" : "Fixar no topo"}
+                              <Pin size={14} className={isContactPinned(contact) ? "rotate-45" : ""} />
+                              {isContactPinned(contact) ? "Desafixar conversa" : "Fixar no topo"}
                             </button>
                             <button 
                               onClick={(e) => { e.stopPropagation(); toggleFavorite(contact.id); setActiveDropdown(null); }}

@@ -101,7 +101,7 @@ interface ChatState {
   uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean, caption?: string) => Promise<void>;
   updateContactCRM: (contactId: string, payload: Partial<ContactRow>) => Promise<void>;
   deleteContact: (contactId: string) => Promise<void>;
-  togglePinContact: (contactId: string) => Promise<void>;
+  togglePinContact: (contactId: string, instanceId?: string) => Promise<void>;
   toggleFavorite: (contactId: string) => Promise<void>;
   toggleBlockContact: (contactId: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
@@ -973,23 +973,47 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  togglePinContact: async (contactId) => {
+  togglePinContact: async (contactId, instanceId) => {
     const contact = get().contacts.find(c => c.id === contactId);
     if (!contact) return;
-    const newStatus = !contact.is_pinned;
+    
+    let newPinned = [...(contact.pinned_instances || [])];
+    const isCurrentlyPinned = instanceId ? newPinned.includes(instanceId) : contact.is_pinned;
+    
+    const legacyNewStatus = !contact.is_pinned;
+    
+    if (instanceId) {
+       if (isCurrentlyPinned) {
+          newPinned = newPinned.filter(id => id !== instanceId);
+       } else {
+          newPinned.push(instanceId);
+       }
+    }
 
     // Atualiza otimista UI
     set((state) => ({
-      contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_pinned: newStatus } : c)
+      contacts: state.contacts.map((c) => c.id === contactId ? { 
+          ...c, 
+          is_pinned: instanceId ? c.is_pinned : legacyNewStatus,
+          pinned_instances: newPinned 
+      } : c)
     }));
 
     try {
-      await supabase.from('contacts').update({ is_pinned: newStatus }).eq('id', contactId);
+      if (instanceId) {
+          await supabase.from('contacts').update({ pinned_instances: newPinned }).eq('id', contactId);
+      } else {
+          await supabase.from('contacts').update({ is_pinned: legacyNewStatus, pinned_instances: newPinned }).eq('id', contactId);
+      }
     } catch (e) {
       console.error('Erro ao fixar contato no DB:', e);
       // Reverter alteração otimista
       set((state) => ({
-        contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_pinned: !newStatus } : c)
+        contacts: state.contacts.map((c) => c.id === contactId ? { 
+            ...c, 
+            is_pinned: contact.is_pinned,
+            pinned_instances: contact.pinned_instances
+        } : c)
       }));
     }
   },
