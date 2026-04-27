@@ -17,7 +17,8 @@ interface RenameModalProps {
 export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModalProps) {
   const [formData, setFormData] = useState({
     name: '',
-    document_type: 'cpf',
+    fantasy_name: '',
+    document_type: 'contato',
     document_number: '',
     cep: '',
     address_neighborhood: '',
@@ -39,7 +40,8 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
     if (contactData && isOpen) {
       setFormData({
         name: contactData.custom_name || contactData.name || '',
-        document_type: contactData.document_type || 'cpf',
+        fantasy_name: contactData.fantasy_name || '',
+        document_type: contactData.document_type || 'contato',
         document_number: contactData.document_number || '',
         email: contactData.email || '',
         cep: contactData.cep || '',
@@ -160,6 +162,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                       onChange={e => setFormData({...formData, document_type: e.target.value})}
                       className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
                     >
+                       <option value="contato">Contato</option>
                        <option value="cpf">CPF</option>
                        <option value="cnpj">CNPJ</option>
                     </select>
@@ -167,7 +170,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                   <div className="w-full sm:w-2/3">
                     <label className="flex justify-between text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">
                        <span>Número do Documento</span>
-                       {formData.document_type === 'cnpj' && (
+                       {(formData.document_type === 'cnpj' || formData.document_type === 'contato') && (
                          <span className="text-[#00a884] cursor-pointer hover:underline flex items-center gap-1" onClick={handleCnpjSearch}>
                            {isSearchingDoc ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />} Autocompletar
                          </span>
@@ -214,7 +217,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                </div>
 
                <div>
-                 <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Nome Completo / Razão Social <span className="text-red-500">*</span></label>
+                 <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Nome Completo <span className="text-red-500">*</span></label>
                  <div className="relative">
                    <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                    <input 
@@ -223,6 +226,19 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                      onChange={e => setFormData({...formData, name: e.target.value})}
                      className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
                      autoFocus
+                   />
+                 </div>
+               </div>
+
+               <div>
+                 <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Nome Fantasia</label>
+                 <div className="relative">
+                   <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                   <input 
+                     type="text" 
+                     value={formData.fantasy_name}
+                     onChange={e => setFormData({...formData, fantasy_name: e.target.value})}
+                     className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
                    />
                  </div>
                </div>

@@ -6,6 +6,7 @@ import fs from 'fs';
 import FlowEngine from '../flow-runtime/index.js';
 import AutomationWorker from '../automation-worker/agent.js';
 import PushService from '../push-service/index.js';
+import crypto from 'crypto';
 
 class EventProcessor {
     constructor() {
@@ -187,6 +188,7 @@ class EventProcessor {
                  
                  return {
                      ...ex,
+                     id: ex.id || crypto.randomUUID(),
                      tenant_id: c.tenant_id,
                      phone: c.phone,
                      name: finalName,

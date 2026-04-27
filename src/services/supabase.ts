@@ -31,6 +31,7 @@ export type ContactRow = {
   tenant_id: string;
   name: string;
   custom_name?: string;
+  fantasy_name?: string;
   push_name?: string;
   profile_picture_url?: string;
   document_type?: string;
