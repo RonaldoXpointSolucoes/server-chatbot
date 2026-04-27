@@ -247,6 +247,7 @@ export default function ChatDashboard() {
     const closeCb = () => {
        setFilterContextMenu(null);
        setActiveMsgDropdown(null);
+       setActiveDropdown(null);
     };
     window.addEventListener('click', closeCb);
     return () => window.removeEventListener('click', closeCb);

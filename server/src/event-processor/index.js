@@ -591,8 +591,8 @@ class EventProcessor {
                  const delayMs = index === 0 ? 5000 : index * 600000;
                  
                  setTimeout(async () => {
-                      if (!sock || sock.ws?.readyState !== 1) {
-                          console.log(`[EventProcessor] Abortando Lote ${index+1}/${batches.length} do History Sync. Sock fechado.`);
+                      if (!sock) {
+                          console.log(`[EventProcessor] Abortando Lote ${index+1}/${batches.length} do History Sync. Sock is undefined.`);
                           return;
                       }
                       await this.handleMessageUpsert(tenantId, instanceId, sock, { messages: chronologicMessages, type: 'append' });
