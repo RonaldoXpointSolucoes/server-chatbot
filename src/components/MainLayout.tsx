@@ -8,6 +8,12 @@ export function MainLayout() {
   const isQRModalOpen = useChatStore(s => s.isQRModalOpen);
   const modalReason = useChatStore(s => s.modalReason);
 
+  React.useEffect(() => {
+    // Garante que o tenantInfo esteja sempre carregado globalmente no Layout,
+    // essencial se o usuário der F5 diretamente em páginas como /settings/account ou /settings/logs
+    useChatStore.getState().fetchTenantConfig();
+  }, []);
+
   return (
     <div className="flex h-[100dvh] w-full min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
       {isQRModalOpen && <EvolutionModal 
@@ -29,10 +35,10 @@ export function MainLayout() {
 
       {/* Global Sidebar (Estilo SaaS / Chatwoot) */}
       <div 
-        className={`fixed lg:static inset-y-0 left-0 z-[100] lg:z-auto flex shrink-0 transition-all duration-300 bg-white dark:bg-[#111b21] border-r border-[#f2f2f2] dark:border-[#222d34] ${
+        className={`fixed lg:static inset-y-0 left-0 z-[100] lg:z-auto flex shrink-0 transition-all duration-300 bg-transparent ${
           showMainSidebar 
-            ? "translate-x-0 w-[260px] opacity-100 shadow-2xl lg:shadow-none" 
-            : "-translate-x-full lg:translate-x-0 w-[260px] lg:w-0 opacity-0 overflow-hidden pointer-events-none lg:pointer-events-auto"
+            ? "translate-x-0 opacity-100 shadow-2xl lg:shadow-none" 
+            : "-translate-x-full lg:translate-x-0 lg:w-0 opacity-0 overflow-hidden pointer-events-none lg:pointer-events-auto"
         }`}
       >
         <MainSidebar />

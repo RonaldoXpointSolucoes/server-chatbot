@@ -14,7 +14,8 @@ export default function AgentsList() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    if (tenantInfo?.id) {
+    const activeTenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    if (activeTenantId) {
       fetchTenantAgents();
     }
   }, [fetchTenantAgents, tenantInfo?.id]);

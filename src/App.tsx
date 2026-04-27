@@ -16,6 +16,7 @@ import LabelsSettings from './pages/settings/LabelsSettings';
 import BotsList from './pages/settings/BotsList';
 import PromptBuilder from './pages/settings/PromptBuilder';
 import AutomationSettings from './pages/settings/AutomationSettings';
+import OperationLogs from './pages/settings/OperationLogs';
 import DevLogger from './components/DevLogger';
 import { InstallPWA } from './components/InstallPWA';
 import { usePushNotifications } from './hooks/usePushNotifications';
@@ -27,6 +28,11 @@ import SettingsPreferences from './pages/settings/SettingsPreferences';
 import SettingsCredentials from './pages/settings/SettingsCredentials';
 import { CannedResponses } from './pages/CannedResponses';
 import PortalApp from './pages/PortalApp';
+import DeliveryApp from './pages/DeliveryApp';
+import KdsApp from './pages/KdsApp';
+import CardapioApp from './pages/CardapioApp';
+import FinanceiroApp from './pages/FinanceiroApp';
+import AccountSettings from './pages/settings/AccountSettings';
 
 // Inicializa o tema globalmente no boot
 const savedTheme = localStorage.getItem('theme') || 'light';
@@ -74,9 +80,15 @@ export default function App() {
             <Route path="/settings/canned-responses" element={<CannedResponses />} />
             <Route path="/settings/prompt-builder" element={<PromptBuilder />} />
             <Route path="/settings/automation" element={<AutomationSettings />} />
+            <Route path="/settings/logs" element={<OperationLogs />} />
+            <Route path="/settings/account" element={<AccountSettings />} />
 
             {/* Apps Embedados */}
             <Route path="/apps/portal" element={<PortalApp />} />
+            <Route path="/apps/delivery" element={<DeliveryApp />} />
+            <Route path="/apps/kds" element={<KdsApp />} />
+            <Route path="/apps/cardapio" element={<CardapioApp />} />
+            <Route path="/apps/financeiro" element={<FinanceiroApp />} />
           </Route>
 
           {/* Settings do Modulo Flow (Typebot UI) */}

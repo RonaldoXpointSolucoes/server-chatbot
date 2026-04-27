@@ -53,6 +53,7 @@ export interface TenantInfo {
   id: string;
   name: string;
   evolution_api_instance: string | null;
+  settings?: any; // Novo campo
 }
 
 interface ChatState {
@@ -85,6 +86,7 @@ interface ChatState {
   fetchTenantConfig: () => Promise<void>;
   setModalReason: (reason: string | null) => void;
   updateTenantInstance: (newInstance: string) => Promise<void>;
+  updateTenantSettings: (newSettings: any) => Promise<void>; // Novo campo
   fetchInitialData: () => Promise<void>;
   subscribeToNewMessages: () => void;
   // Historical Sync
@@ -133,6 +135,10 @@ interface ChatState {
   // Theme Global
   theme: 'light' | 'dark';
   setTheme: (theme: 'light' | 'dark') => void;
+
+  // Operations Logs
+  logOperation: (action: 'INSERT' | 'UPDATE' | 'DELETE', tableName: string, recordId: string, beforeState: any, afterState: any) => Promise<void>;
+  undoOperation: (logId: string, password: string) => Promise<{success: boolean; error?: string}>;
 }
 
 export interface QuickReply {
@@ -411,6 +417,87 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set(s => ({
          quickReplies: s.quickReplies.filter(q => q.id !== id)
       }));
+  },
+
+  logOperation: async (action, tableName, recordId, beforeState, afterState) => {
+    try {
+      const tenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (!tenantId) return;
+      
+      const userStr = localStorage.getItem('user_info');
+      const storedEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+      const storedName = localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name');
+      
+      let userName = 'Sistema';
+      
+      if (storedEmail) {
+        userName = storedEmail;
+      } else if (storedName) {
+        userName = storedName;
+      } else if (userStr) {
+        try {
+           const user = JSON.parse(userStr);
+           userName = user.email || user.name || 'Sistema';
+        } catch(e) {}
+      }
+
+      await supabase.from('operation_logs').insert({
+        tenant_id: tenantId,
+        user_name: userName,
+        action,
+        table_name: tableName,
+        record_id: recordId,
+        before_state: beforeState,
+        after_state: afterState
+      });
+    } catch(e) {
+      console.error('Falha ao gerar log de operação:', e);
+    }
+  },
+
+  undoOperation: async (logId, password) => {
+    const UNDO_PASSWORD = import.meta.env.VITE_UNDO_PASSWORD || 'xpoint2025undo';
+    if (password !== UNDO_PASSWORD) {
+      return { success: false, error: 'Senha master incorreta.' };
+    }
+
+    try {
+      // fetch log
+      const { data: log, error: logError } = await supabase.from('operation_logs').select('*').eq('id', logId).single();
+      if (logError || !log) return { success: false, error: 'Log não encontrado.' };
+
+      const { action, table_name, record_id, before_state } = log;
+
+      if (action === 'DELETE') {
+        // Re-insert
+        if (!before_state) return { success: false, error: 'Não há estado anterior para restaurar.' };
+        const { error } = await supabase.from(table_name).insert(before_state);
+        if (error) throw error;
+      } else if (action === 'UPDATE') {
+        // Restore before_state
+        if (!before_state) return { success: false, error: 'Não há estado anterior para restaurar.' };
+        const { error } = await supabase.from(table_name).update(before_state).eq('id', record_id);
+        if (error) throw error;
+      } else if (action === 'INSERT') {
+        // Delete record
+        if (!record_id) return { success: false, error: 'ID do registro não encontrado para desfazer a inserção.' };
+        const { error } = await supabase.from(table_name).delete().eq('id', record_id);
+        if (error) throw error;
+      }
+
+      await get().logOperation(
+        'INSERT',
+        'operation_logs',
+        logId,
+        null,
+        { status: 'UNDONE', original_action: action }
+      );
+
+      return { success: true };
+    } catch(err: any) {
+      console.error('Erro ao desfazer:', err);
+      return { success: false, error: err.message };
+    }
   },
 
   requestTranscription: async (messageId: string, mediaUrl: string) => {
@@ -797,6 +884,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   updateContactCRM: async (contactId, payload) => {
+    const currentState = get().contacts.find(c => c.id === contactId);
+    let beforeState = currentState ? { ...currentState } : null;
+
     // UI Otimista: caso seja passado 'name', garantimos custom_name = name e name renderizado
     set((state) => ({
       contacts: state.contacts.map((c) => {
@@ -807,6 +897,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
          return c;
       })
     }));
+
     try {
       const dbPayload = { ...payload } as any;
       if (payload.name) {
@@ -816,8 +907,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Omit values that do not exist strictly in the Supabase Schema to prevent PGRST204 errors
       delete dbPayload.bot_status;
 
+      // Recupera o estado original puro do banco para o log
+      let rawBeforeState = null;
+      try {
+        const { data } = await supabase.from('contacts').select('*').eq('id', contactId).single();
+        if (data) rawBeforeState = data;
+      } catch (e) {}
+
       const { error } = await supabase.from('contacts').update(dbPayload).eq('id', contactId);
       if (error) throw error;
+
+      // Log Operation
+      if (rawBeforeState) {
+        const rawAfterState = { ...rawBeforeState, ...dbPayload };
+        await get().logOperation('UPDATE', 'contacts', contactId, rawBeforeState, rawAfterState);
+      }
     } catch (e) {
       console.error('Erro ao editar contato no DB (CRM):', e);
       throw e;
@@ -1205,6 +1309,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  updateTenantSettings: async (newSettings: any) => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+
+    try {
+      const currentSettings = tenant.settings || {};
+      const mergedSettings = { ...currentSettings, ...newSettings };
+      
+      const { error } = await supabase
+        .from('companies')
+        .update({ settings: mergedSettings })
+        .eq('id', tenant.id);
+
+      if (error) throw error;
+
+      await get().logOperation('UPDATE', 'companies', tenant.id, currentSettings, mergedSettings);
+
+      set({ tenantInfo: { ...tenant, settings: mergedSettings } });
+    } catch (error) {
+      console.error('Erro ao atualizar configurações da conta:', error);
+      throw error;
+    }
+  },
+
   setEvolutionConnection: async (status, newInst) => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
@@ -1364,10 +1492,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchTenantAgents: async () => {
-    const tenant = get().tenantInfo;
-    if (!tenant) return;
+    const tenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    if (!tenantId) return;
     try {
-      const { data: agentsData, error } = await supabase.from('tenant_users').select('*').eq('tenant_id', tenant.id).order('created_at', { ascending: true });
+      const { data: agentsData, error } = await supabase.from('tenant_users').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: true });
       if (error) throw error;
       set({ agents: agentsData || [] });
     } catch (e) {
@@ -1376,13 +1504,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   createAgent: async (payload) => {
-    const tenant = get().tenantInfo;
-    if (!tenant) return;
+    const tenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    if (!tenantId) return;
     try {
       // Gera um UUID local para o user_id provisório
       const tempUserId = crypto.randomUUID();
       const { error } = await supabase.from('tenant_users').insert([{
-        tenant_id: tenant.id,
+        tenant_id: tenantId,
         user_id: tempUserId,
         role: payload.role,
         full_name: payload.full_name,
@@ -1400,8 +1528,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   updateAgent: async (id, payload) => {
-    const tenant = get().tenantInfo;
-    if (!tenant) return;
+    const tenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    if (!tenantId) return;
     try {
       const { error } = await supabase.from('tenant_users').update({
         role: payload.role,
@@ -1410,7 +1538,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         password: payload.password,
         allowed_instances: payload.allowed_instances || [],
         allowed_companies: payload.allowed_companies || []
-      }).eq('id', id).eq('tenant_id', tenant.id);
+      }).eq('id', id).eq('tenant_id', tenantId);
       
       if (error) throw error;
       await get().fetchTenantAgents();
@@ -1421,11 +1549,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   deleteAgent: async (id) => {
-    const tenant = get().tenantInfo;
-    if (!tenant) return;
+    const tenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    if (!tenantId) return;
     try {
       const { error } = await supabase.from('tenant_users').delete()
-        .eq('id', id).eq('tenant_id', tenant.id);
+        .eq('id', id).eq('tenant_id', tenantId);
       
       if (error) throw error;
       await get().fetchTenantAgents();

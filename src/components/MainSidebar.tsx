@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   Search, 
   Inbox, 
@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronRight,
   Briefcase,
+  History,
   Mails,
   Bot,
   ScrollText,
@@ -42,6 +43,8 @@ import { supabase } from '../services/supabase';
 
 export function MainSidebar() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const isAppEmbedded = location.pathname.startsWith('/apps/');
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     conversations: true,
     teams: true,
@@ -166,8 +169,12 @@ export function MainSidebar() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, () => {
          fetchInstances();
       })
+      .subscribe();
+
+    const companyChannel = supabase.channel(`public:companies:id=${tenantId}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'companies', filter: `id=eq.${tenantId}` }, (payload) => {
-         if (payload.new && 'global_ai_enabled' in payload.new) {
+         console.log("Realtime event for company received:", payload);
+         if (payload.new && typeof payload.new.global_ai_enabled !== 'undefined') {
              setGlobalAiEnabled(payload.new.global_ai_enabled);
          }
       })
@@ -175,6 +182,7 @@ export function MainSidebar() {
 
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(companyChannel);
     };
   }, [tenantId]);
 
@@ -200,6 +208,14 @@ export function MainSidebar() {
     try {
        const { error } = await supabase.from('companies').update({ global_ai_enabled: newValue }).eq('id', tenantId);
        if (error) throw error;
+       
+       useChatStore.getState().logOperation(
+         'UPDATE',
+         'companies',
+         tenantId,
+         { global_ai_enabled: !newValue },
+         { global_ai_enabled: newValue }
+       );
     } catch(e) {
        console.error("Erro ao atualizar status global do IA:", e);
        setGlobalAiEnabled(!newValue); // revert on error
@@ -233,7 +249,12 @@ export function MainSidebar() {
   };
 
   return (
-    <div className="w-[260px] h-full bg-[#182229] dark:bg-[#111b21] flex flex-col text-[#d1d7db] font-sans text-sm border-r border-[#2a3942] z-20 shrink-0 shadow-lg relative overflow-hidden transition-all duration-300">
+    <div 
+      className={cn(
+        "h-full bg-[#182229] dark:bg-[#111b21] flex flex-col text-[#d1d7db] font-sans text-sm border-r border-[#2a3942] z-50 shrink-0 shadow-lg relative overflow-x-hidden transition-all duration-300 group/sidebar",
+        isAppEmbedded ? "w-[68px] hover:w-[260px] is-minimized" : "w-[260px]"
+      )}
+    >
       
       {/* Workspace Header Premium */}
       <div 
@@ -243,12 +264,12 @@ export function MainSidebar() {
         <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center shrink-0 border border-indigo-400 shadow-sm">
           <div className="w-2 h-2 bg-white rounded-sm"></div>
         </div>
-        <div className="flex-1 min-w-0 ml-3">
+        <div className={cn("flex-1 min-w-0 ml-3 transition-all duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto group-hover/sidebar:!block")}>
           <h2 className="font-semibold text-[#e9edef] truncate text-[15px] tracking-tight group-hover:text-white transition-colors">
             {currentCompanyContext?.name || 'Carregando...'}
           </h2>
         </div>
-        <div className="bg-[#2a3942] group-hover:bg-[#3b4a54] p-1 rounded transition-colors">
+        <div className={cn("bg-[#2a3942] group-hover:bg-[#3b4a54] p-1 rounded transition-colors", "group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!block")}>
            <ChevronDown size={14} className="text-[#8696a0] group-hover:text-white transition-colors" />
         </div>
 
@@ -337,27 +358,46 @@ export function MainSidebar() {
         
         {/* Search */}
         <div className="px-3 py-3">
-          <div className="relative flex items-center w-full h-8 bg-[#202c33] rounded-md border border-transparent focus-within:border-[#00a884]/50 focus-within:ring-1 focus-within:ring-[#00a884]/50 transition-all">
-            <Search size={14} className="absolute left-2.5 text-[#8696a0]" />
+          <div className="relative flex items-center w-full h-8 bg-[#202c33] rounded-md border border-transparent focus-within:border-[#00a884]/50 focus-within:ring-1 focus-within:ring-[#00a884]/50 transition-all overflow-hidden">
+            <Search size={14} className="absolute left-2.5 text-[#8696a0] shrink-0" />
             <input 
               type="text" 
               placeholder="Pesquisar..." 
-              className="w-full h-full bg-transparent border-none focus:outline-none focus:ring-0 text-[#d1d7db] text-[13px] pl-8 pr-8 placeholder-[#8696a0]"
+              className={cn(
+                "w-full h-full bg-transparent border-none focus:outline-none focus:ring-0 text-[#d1d7db] text-[13px] pl-8 pr-8 placeholder-[#8696a0] transition-opacity duration-200",
+                "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100"
+              )}
             />
-            <div className="absolute right-2 px-1.5 py-0.5 rounded bg-black/20 font-mono text-[9px] text-[#8696a0] tracking-tighter">/</div>
+            <div className={cn(
+              "absolute right-2 px-1.5 py-0.5 rounded bg-black/20 font-mono text-[9px] text-[#8696a0] tracking-tighter transition-opacity duration-200",
+              "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100"
+            )}>/</div>
           </div>
         </div>
 
         {/* Switch Robo I.A Global */}
         <div className="px-3 pb-3">
-           <div className="flex items-center justify-between px-3 py-2 bg-[#202c33] rounded-lg border border-[#2a3942]/50 hover:border-[#00a884]/30 transition-colors">
-             <div className="flex items-center gap-2.5">
+           <div className={cn(
+             "flex items-center bg-[#202c33] rounded-lg border border-[#2a3942]/50 hover:border-[#00a884]/30 transition-all overflow-hidden",
+             "px-3 py-2 justify-between",
+             "group-[.is-minimized]/sidebar:justify-center group-[.is-minimized]/sidebar:px-0",
+             "group-hover/sidebar:!justify-between group-hover/sidebar:!px-3"
+           )}>
+             <div className="flex items-center gap-2.5 shrink-0">
                <div className={cn("p-1.5 rounded-md transition-colors", globalAiEnabled ? "bg-[#00a884]/20" : "bg-[#2a3942]")}>
                  <Bot size={14} className={globalAiEnabled ? "text-[#00a884]" : "text-[#8696a0]"} />
                </div>
-               <span className="text-[13px] font-medium text-[#d1d7db]">Robô I.A</span>
+               <span className={cn(
+                 "text-[13px] font-medium text-[#d1d7db] transition-all duration-200 whitespace-nowrap", 
+                 "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0",
+                 "group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto"
+               )}>Robô I.A</span>
              </div>
-             <label className="relative inline-flex items-center cursor-pointer">
+             <label className={cn(
+               "relative inline-flex items-center cursor-pointer transition-all duration-200 shrink-0", 
+               "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:overflow-hidden group-[.is-minimized]/sidebar:pointer-events-none",
+               "group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-[32px] group-hover/sidebar:!pointer-events-auto"
+             )}>
                <input 
                  type="checkbox" 
                  className="sr-only peer" 
@@ -422,22 +462,40 @@ export function MainSidebar() {
               isActive={window.location.pathname === '/apps/portal'}
             />
             
-            <div className="pl-4 border-l border-[#2a3942] ml-4 my-2 relative">
-              <div className="absolute top-0 left-0 w-px h-full bg-gradient-to-b from-[#2a3942] via-[#3b4a54] to-transparent"></div>
-              <CollapsibleSection 
-                title="Menu Delivery" 
-                icon={<Store size={14} className="text-[#8696a0]" />} 
-                isOpen={expandedSections.appsDelivery} 
-                onToggle={() => toggleSection('appsDelivery')}
-                isSub={true}
-              >
-                <NavItem title="Gestor Delivery" isSub />
-                <NavItem title="Cardápio Digital" isSub />
-                <NavItem title="App Motoboy" isSub />
-                <NavItem title="Integrações" isSub />
-              </CollapsibleSection>
-            </div>
-
+            <NavItem 
+              title="Gestor Delivery" 
+              isSub 
+              onClick={() => navigate('/apps/delivery')}
+              isActive={window.location.pathname === '/apps/delivery'}
+            />
+            <NavItem 
+              title="KDS" 
+              isSub 
+              onClick={() => navigate('/apps/kds')}
+              isActive={window.location.pathname === '/apps/kds'}
+            />
+            <NavItem 
+              title="Cardápio Digital" 
+              isSub 
+              onClick={() => navigate('/apps/cardapio')}
+              isActive={window.location.pathname === '/apps/cardapio'}
+            />
+            <NavItem 
+              title="Financeiro" 
+              isSub 
+              onClick={() => navigate('/apps/financeiro')}
+              isActive={window.location.pathname === '/apps/financeiro'}
+            />
+            <NavItem title="App Motoboy" isSub />
+            <NavItem title="Integrações" isSub />
+            <NavItem title="Painel de Senha" isSub />
+            <NavItem title="Totem App" isSub />
+            <NavItem title="App Fidelidade" isSub />
+            <NavItem title="NF-e" isSub />
+            <NavItem title="Painel Fiscal" isSub />
+            <NavItem title="App Etiquetas" isSub />
+            <NavItem title="Treinamento ERP" isSub />
+            
             <NavItem 
               title="Agenda Interna" 
               icon={<CalendarDays size={18} className="text-[#8696a0]" />} 
@@ -445,15 +503,6 @@ export function MainSidebar() {
               isActive={window.location.pathname === '/apps/agenda'}
               isSub 
             />
-            <NavItem title="KDS" isSub />
-            <NavItem title="Painel de Senha" isSub />
-            <NavItem title="Totem App" isSub />
-            <NavItem title="Financeiro" isSub />
-            <NavItem title="App Fidelidade" isSub />
-            <NavItem title="NF-e" isSub />
-            <NavItem title="Painel Fiscal" isSub />
-            <NavItem title="App Etiquetas" isSub />
-            <NavItem title="Treinamento ERP" isSub />
           </CollapsibleSection>
 
           <CollapsibleSection title="Times" icon={<Users size={16} />} isOpen={expandedSections.teams} onToggle={() => toggleSection('teams')}>
@@ -539,6 +588,7 @@ export function MainSidebar() {
                 <NavItem icon={<Inbox size={16} />} title="Caixas de Entrada" isSub onClick={() => navigate('/settings/inboxes')} />
                 <NavItem icon={<Tag size={16} />} title="Etiquetas" isSub onClick={() => navigate('/settings/labels')} />
                 <NavItem icon={<Code2 size={16} />} title="Atributos Personalizados" isSub onClick={() => navigate('/settings/attributes')} />
+                <NavItem icon={<History size={16} />} title="Log de Operações" isSub onClick={() => navigate('/settings/logs')} />
                 <NavItem icon={<Repeat size={16} />} title="Automação" isSub onClick={() => navigate('/settings/automation')} />
                 <NavItem icon={<Bot size={16} />} title="Robôs" isSub onClick={() => navigate('/settings/bots')} />
                 <NavItem icon={<CalendarDays size={16} />} title="Macros" isSub onClick={() => navigate('/settings/macros')} />
@@ -559,13 +609,13 @@ export function MainSidebar() {
           </div>
           <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#202c33] rounded-full group-hover:border-[#2a3942] transition-colors" />
         </div>
-        <div className="ml-3 flex-1 min-w-0">
+        <div className={cn("ml-3 flex-1 min-w-0 transition-opacity duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100")}>
           <p className="text-[14px] font-medium text-[#e9edef] truncate">{agentName}</p>
           <p className="text-[11px] text-[#8696a0] truncate opacity-80">{agentEmail}</p>
         </div>
         <button 
           onClick={handleLogout}
-          className="ml-2 p-2 rounded-md text-[#8696a0] hover:text-[#f15c6d] hover:bg-[#2a3942] transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+          className={cn("ml-2 p-2 rounded-md text-[#8696a0] hover:text-[#f15c6d] hover:bg-[#2a3942] transition-all opacity-0 group-hover/sidebar:opacity-100 focus:opacity-100", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:pointer-events-none group-hover/sidebar:!opacity-100 group-hover/sidebar:!pointer-events-auto")}
           title="Sair da conta"
         >
           <LogOut size={16} />
@@ -620,21 +670,33 @@ function NavItem({
       className={cn(
         "flex items-center justify-between px-3 py-1.5 rounded-md cursor-pointer transition-colors group relative",
         isActive ? "bg-[#202c33]" : "hover:bg-[#202c33]/60",
-        isSub ? "pl-5" : ""
+        isSub ? "ml-4 pl-3 border-l border-[#2a3942] hover:border-[#8696a0]" : "",
+        isActive && isSub ? "border-[#00a884] bg-[#202c33]" : ""
       )}
     >
       <div className="flex items-center min-w-0 gap-3 flex-1">
         {icon && <span className={cn("shrink-0", isActive ? "text-[#e9edef]" : "text-[#8696a0] group-hover:text-[#d1d7db]")}>{icon}</span>}
+        {!icon && isSub && (
+          <div className={cn(
+            "w-1.5 h-1.5 rounded-full shrink-0 transition-colors",
+            isActive ? "bg-[#00a884]" : "bg-[#2a3942] group-hover:bg-[#8696a0]"
+          )} />
+        )}
         <span className={cn(
-          "truncate tracking-tight flex-1", 
+          "truncate tracking-tight flex-1 transition-all duration-200", 
           isActive ? "text-[#e9edef] font-medium" : "text-[#aebac1] group-hover:text-[#d1d7db]",
-          isSub && !icon ? "text-[13px]" : "text-[14px]"
+          isSub && !icon ? "text-[13px]" : "text-[14px]",
+          "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto"
         )}>
           {title}
         </span>
       </div>
       
-      <div className="flex items-center gap-1.5 shrink-0 ml-2">
+      <div className={cn(
+        "flex items-center gap-1.5 shrink-0 ml-2 transition-all duration-200", 
+        "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:pointer-events-none group-[.is-minimized]/sidebar:overflow-hidden",
+        "group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto group-hover/sidebar:!pointer-events-auto"
+      )}>
          {actionNode && (
             <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                {actionNode}
@@ -676,9 +738,9 @@ function CollapsibleSection({
       >
         <div className="flex items-center gap-3">
           {icon && <span className="text-[#8696a0] group-hover:text-[#d1d7db] transition-colors">{icon}</span>}
-          <span className="text-[14px] text-[#aebac1] group-hover:text-[#d1d7db] tracking-tight">{title}</span>
+          <span className={cn("text-[14px] text-[#aebac1] group-hover:text-[#d1d7db] tracking-tight transition-all duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto group-hover/sidebar:!inline")}>{title}</span>
         </div>
-        <div className="text-[#8696a0]">
+        <div className={cn("text-[#8696a0]", "group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!block")}>
           {isOpen ? <ChevronDown size={14} className="opacity-70 group-hover:opacity-100 transition-all" /> : <ChevronRight size={14} className="opacity-70 group-hover:opacity-100 transition-all" />}
         </div>
       </div>
