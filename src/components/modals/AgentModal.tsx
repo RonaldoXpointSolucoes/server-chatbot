@@ -15,6 +15,8 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('Agente');
   const [loading, setLoading] = useState(false);
+  const [signature, setSignature] = useState('');
+  const [useSignature, setUseSignature] = useState(false);
 
   // States for RBAC
   const [allowedInstances, setAllowedInstances] = useState<string[]>([]);
@@ -33,6 +35,8 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
         setRole(agentToEdit.role === 'admin' ? 'Administrador' : 'Agente');
         setAllowedInstances(agentToEdit.allowed_instances || []);
         setAllowedCompanies(agentToEdit.allowed_companies || []);
+        setSignature(agentToEdit.signature || '');
+        setUseSignature(agentToEdit.use_signature || false);
       } else {
         setFullName('');
         setEmail('');
@@ -40,6 +44,8 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
         setRole('Agente');
         setAllowedInstances([]);
         setAllowedCompanies(tenantInfo ? [tenantInfo.id] : []);
+        setSignature('');
+        setUseSignature(false);
       }
       
       // Fetch available instances and companies
@@ -83,7 +89,9 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
         password: password,
         role: role === 'Administrador' ? 'admin' : 'agent',
         allowed_instances: allowedInstances,
-        allowed_companies: allowedCompanies
+        allowed_companies: allowedCompanies,
+        signature: signature,
+        use_signature: useSignature
       };
 
       if (agentToEdit) {
@@ -175,50 +183,76 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
                   required
                 />
               </div>
+              
+              <div className="space-y-2 col-span-1 md:col-span-2">
+                <div className="flex items-center justify-between bg-black/20 p-4 rounded-xl border border-white/10">
+                  <div>
+                    <label className="block text-sm font-medium text-white/90">Assinatura de Mensagem</label>
+                    <p className="text-xs text-white/50 mt-1">Ative para enviar automaticamente uma assinatura nas suas mensagens.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setUseSignature(!useSignature)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${useSignature ? 'bg-blue-600' : 'bg-white/10'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${useSignature ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+                
+                {useSignature && (
+                  <div className="animate-in fade-in slide-in-from-top-2 mt-3">
+                    <input
+                      type="text"
+                      value={signature}
+                      onChange={(e) => setSignature(e.target.value)}
+                      placeholder="Ex: Ronaldo Clemente:"
+                      className="w-full px-4 py-3 bg-black/20 border border-white/10 rounded-xl text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 transition-all"
+                    />
+                  </div>
+                )}
+              </div>
           </div>
           
-          {role === 'Agente' && (
-              <div className="space-y-6 pt-6 border-t border-white/5 animate-in fade-in slide-in-from-bottom-2">
-                 <h4 className="text-lg font-medium text-white/90">Permissões de Acesso</h4>
-                 
-                 <div className="space-y-3">
-                    <label className="block text-sm font-medium text-white/80">Empresas Permitidas</label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[150px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
-                       {allCompanies.map((comp) => (
-                          <div 
-                             key={comp.id} 
-                             onClick={() => toggleCompany(comp.id)}
-                             className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${allowedCompanies.includes(comp.id) ? 'bg-blue-500/10 border-blue-500/50' : 'bg-black/20 border-white/5 hover:border-white/20'}`}
-                          >
-                             <div className={`w-5 h-5 rounded flex items-center justify-center border transition-all ${allowedCompanies.includes(comp.id) ? 'bg-blue-500 border-blue-500' : 'border-white/20'}`}>
-                                {allowedCompanies.includes(comp.id) && <Check className="w-3.5 h-3.5 text-white" />}
-                             </div>
-                             <span className="text-sm text-white/80 truncate">{comp.name}</span>
-                          </div>
-                       ))}
-                    </div>
-                 </div>
+          <div className="space-y-6 pt-6 border-t border-white/5 animate-in fade-in slide-in-from-bottom-2">
+             <h4 className="text-lg font-medium text-white/90">Permissões de Acesso</h4>
+             
+             <div className="space-y-3">
+                <label className="block text-sm font-medium text-white/80">Empresas Permitidas</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[150px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
+                   {allCompanies.map((comp) => (
+                      <div 
+                         key={comp.id} 
+                         onClick={() => toggleCompany(comp.id)}
+                         className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${allowedCompanies.includes(comp.id) ? 'bg-blue-500/10 border-blue-500/50' : 'bg-black/20 border-white/5 hover:border-white/20'}`}
+                      >
+                         <div className={`w-5 h-5 rounded flex items-center justify-center border transition-all ${allowedCompanies.includes(comp.id) ? 'bg-blue-500 border-blue-500' : 'border-white/20'}`}>
+                            {allowedCompanies.includes(comp.id) && <Check className="w-3.5 h-3.5 text-white" />}
+                         </div>
+                         <span className="text-sm text-white/80 truncate">{comp.name}</span>
+                      </div>
+                   ))}
+                </div>
+             </div>
 
-                 <div className="space-y-3">
-                    <label className="block text-sm font-medium text-white/80">Caixas Permitidas (Instâncias)</label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[150px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
-                       {allInstances.filter(inst => allowedCompanies.includes(inst.tenant_id)).map((inst) => (
-                          <div 
-                             key={inst.id} 
-                             onClick={() => toggleInstance(inst.id)}
-                             className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${allowedInstances.includes(inst.id) ? 'bg-blue-500/10 border-blue-500/50' : 'bg-black/20 border-white/5 hover:border-white/20'}`}
-                          >
-                             <div className={`w-5 h-5 rounded flex items-center justify-center border transition-all ${allowedInstances.includes(inst.id) ? 'bg-blue-500 border-blue-500' : 'border-white/20'}`}>
-                                {allowedInstances.includes(inst.id) && <Check className="w-3.5 h-3.5 text-white" />}
-                             </div>
-                             <span className="text-sm text-white/80 truncate">{inst.display_name || 'Instância sem nome'}</span>
-                          </div>
-                       ))}
-                       {allInstances.filter(inst => allowedCompanies.includes(inst.tenant_id)).length === 0 && <span className="text-sm text-white/40">Nenhuma caixa encontrada para a(s) empresa(s) selecionada(s).</span>}
-                    </div>
-                 </div>
-              </div>
-          )}
+             <div className="space-y-3">
+                <label className="block text-sm font-medium text-white/80">Caixas Permitidas (Instâncias)</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[150px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
+                   {allInstances.filter(inst => allowedCompanies.includes(inst.tenant_id)).map((inst) => (
+                      <div 
+                         key={inst.id} 
+                         onClick={() => toggleInstance(inst.id)}
+                         className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${allowedInstances.includes(inst.id) ? 'bg-blue-500/10 border-blue-500/50' : 'bg-black/20 border-white/5 hover:border-white/20'}`}
+                      >
+                         <div className={`w-5 h-5 rounded flex items-center justify-center border transition-all ${allowedInstances.includes(inst.id) ? 'bg-blue-500 border-blue-500' : 'border-white/20'}`}>
+                            {allowedInstances.includes(inst.id) && <Check className="w-3.5 h-3.5 text-white" />}
+                         </div>
+                         <span className="text-sm text-white/80 truncate">{inst.display_name || 'Instância sem nome'}</span>
+                      </div>
+                   ))}
+                   {allInstances.filter(inst => allowedCompanies.includes(inst.tenant_id)).length === 0 && <span className="text-sm text-white/40">Nenhuma caixa encontrada para a(s) empresa(s) selecionada(s).</span>}
+                </div>
+             </div>
+          </div>
 
           <div className="sticky bottom-0 flex items-center justify-end gap-3 pt-6 pb-2 border-t border-white/5 bg-[#1a1b1e]/95 backdrop-blur-xl">
             <button

@@ -414,11 +414,19 @@ export function DeleteModal({ isOpen, onClose, contactName, onConfirm }: DeleteM
 // -- Nova Conversa Modal
 export interface NewChatModalProps extends BaseModalProps {
   contacts: any[];
-  onStartChat: (contactId: string) => void;
+  instances?: { id: string; display_name: string; color: string }[];
+  onStartChat: (contactId: string, instanceId: string) => void;
 }
 
-export function NewChatModal({ isOpen, onClose, contacts, onStartChat }: NewChatModalProps) {
+export function NewChatModal({ isOpen, onClose, contacts, instances = [], onStartChat }: NewChatModalProps) {
   const [search, setSearch] = useState('');
+  const [selectedInstance, setSelectedInstance] = useState<string>('');
+
+  useEffect(() => {
+    if (isOpen && instances.length > 0 && !selectedInstance) {
+      setSelectedInstance(instances[0].id);
+    }
+  }, [isOpen, instances, selectedInstance]);
 
   if (!isOpen) return null;
 
@@ -442,6 +450,26 @@ export function NewChatModal({ isOpen, onClose, contacts, onStartChat }: NewChat
           </button>
         </div>
         
+        {instances.length > 0 && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Selecione a Caixa (Remetente)
+            </label>
+            <select
+              value={selectedInstance}
+              onChange={(e) => setSelectedInstance(e.target.value)}
+              className="w-full px-4 py-3 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all appearance-none cursor-pointer"
+            >
+              <option value="" disabled>Selecione uma caixa...</option>
+              {instances.map(inst => (
+                <option key={inst.id} value={inst.id}>
+                  {inst.display_name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <input 
           type="text" 
           placeholder="Pesquisar contatos..." 
@@ -458,8 +486,12 @@ export function NewChatModal({ isOpen, onClose, contacts, onStartChat }: NewChat
              filtered.map(c => (
                <div 
                  key={c.id} 
-                 onClick={() => { onStartChat(c.id); onClose(); }}
-                 className="flex items-center gap-3 p-3 rounded-xl hover:bg-[#f0f2f5] dark:hover:bg-[#111b21] cursor-pointer transition-colors"
+                 onClick={() => { 
+                    if (!selectedInstance) return;
+                    onStartChat(c.id, selectedInstance); 
+                    onClose(); 
+                 }}
+                 className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${!selectedInstance ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#f0f2f5] dark:hover:bg-[#111b21] cursor-pointer'}`}
                >
                  <img src={c.avatar} alt={c.name} className="w-12 h-12 rounded-full object-cover shadow-sm bg-gray-200" />
                  <div className="flex flex-col flex-1 min-w-0">

@@ -110,10 +110,9 @@ export default function ClientLogin() {
       storage.setItem('current_user_role', userRole);
       storage.setItem('current_user_email', email.trim().toLowerCase());
       
-      if (userRole === 'agent' || userRole === 'Agente') {
-          storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
-          storage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
-      }
+      // RBAC Global: Salva as instâncias e empresas permitidas independentemente do papel
+      storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
+      storage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
 
       window.location.href = '/chat';
     } catch (err) {

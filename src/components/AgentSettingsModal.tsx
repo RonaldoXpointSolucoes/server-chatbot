@@ -11,6 +11,7 @@ interface AgentSettingsModalProps {
 export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({ isOpen, onClose }) => {
   const [fullName, setFullName] = useState('');
   const [signature, setSignature] = useState('');
+  const [useSignature, setUseSignature] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   
@@ -20,16 +21,17 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({ isOpen, 
     if (isOpen) {
        loadProfile();
     }
-  }, [isOpen]);
+  }, [isOpen, agents]);
 
   const loadProfile = async () => {
      try {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-            const me = agents.find(a => a.user_id === user.id);
+            const me = agents.find(a => a.user_id === user.id || (a.email && user.email && a.email.toLowerCase() === user.email.toLowerCase()));
             if (me) {
                setFullName(me.full_name || '');
                setSignature(me.signature || '');
+               setUseSignature(me.use_signature || false);
             }
         }
      } catch (e) {}
@@ -38,7 +40,7 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({ isOpen, 
   const handleSave = async () => {
      setLoading(true);
      try {
-       await updateAgentProfile(fullName, signature);
+       await updateAgentProfile(fullName, signature, useSignature);
        setSuccess(true);
        setTimeout(() => setSuccess(false), 2000);
      } catch (e) {
@@ -80,10 +82,19 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({ isOpen, 
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1.5 flex items-center gap-2">
-               Assinatura (Signature)
+            <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1.5 flex items-center justify-between">
+               <span className="flex items-center gap-2">Assinatura (Signature)</span>
+               <button
+                 type="button"
+                 onClick={() => setUseSignature(!useSignature)}
+                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${useSignature ? 'bg-[#00a884]' : 'bg-gray-300 dark:bg-slate-700'}`}
+               >
+                 <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${useSignature ? 'translate-x-4' : 'translate-x-1'}`} />
+               </button>
             </label>
-            <div className="relative">
+            {useSignature && (
+              <div className="animate-in fade-in slide-in-from-top-2">
+                <div className="relative">
               <input 
                 type="text" 
                 value={signature}
@@ -91,11 +102,13 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({ isOpen, 
                 className="w-full bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-2xl px-4 py-3 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#00a884]/50 focus:border-[#00a884] outline-none transition pl-11"
                 placeholder="Ex: David - Suporte Técnico"
               />
-              <Edit3 size={18} className="absolute left-4 top-3.5 text-gray-400 dark:text-slate-500" />
+                <Edit3 size={18} className="absolute left-4 top-3.5 text-gray-400 dark:text-slate-500" />
+              </div>
+              <p className="text-xs text-gray-500 dark:text-slate-500 mt-2 flex items-center gap-1">
+                 A assinatura será automaticamente adicionada no final de cada mensagem que você enviar para o cliente. Deixe em branco se não quiser assinatura.
+              </p>
             </div>
-            <p className="text-xs text-gray-500 dark:text-slate-500 mt-2 flex items-center gap-1">
-               A assinatura será automaticamente adicionada no final de cada mensagem que você enviar para o cliente. Deixe em branco se não quiser assinatura.
-            </p>
+            )}
           </div>
         </div>
 

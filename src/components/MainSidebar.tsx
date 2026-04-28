@@ -107,7 +107,7 @@ export function MainSidebar() {
     const fetchInstances = async () => {
         try {
           const { data, error } = await supabase.from('whatsapp_instances')
-            .select('id, display_name, status')
+            .select('id, display_name, status, color')
             .eq('tenant_id', tenantId)
             .order('created_at', { ascending: false });
             
@@ -117,14 +117,16 @@ export function MainSidebar() {
           }
           if (data) {
              let finalData = data;
-             if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
-                const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-                if (allowedStr) {
-                   try {
-                       const allowedInstances = JSON.parse(allowedStr);
-                       finalData = data.filter(d => allowedInstances.includes(d.id));
-                   } catch(e) {}
-                }
+             const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+             if (allowedStr) {
+                try {
+                    const allowedInstances = JSON.parse(allowedStr);
+                    if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+                        finalData = data.filter(d => allowedInstances.includes(d.id));
+                    } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
+                        finalData = [];
+                    }
+                } catch(e) {}
              }
              setInstances(finalData);
           }
@@ -155,16 +157,16 @@ export function MainSidebar() {
 
             if (!companiesError && companies) {
                let finalCompanies = companies;
-               if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
-                 const allowedCompsStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_companies') || localStorage.getItem('allowed_companies')) : null;
-                 if (allowedCompsStr) {
-                   try {
-                     const allowedCompanies = JSON.parse(allowedCompsStr);
-                     if (Array.isArray(allowedCompanies)) {
-                       finalCompanies = companies.filter((c: any) => allowedCompanies.includes(c.id));
-                     }
-                   } catch(e) {}
-                 }
+               const allowedCompsStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_companies') || localStorage.getItem('allowed_companies')) : null;
+               if (allowedCompsStr) {
+                 try {
+                   const allowedCompanies = JSON.parse(allowedCompsStr);
+                   if (Array.isArray(allowedCompanies) && allowedCompanies.length > 0) {
+                     finalCompanies = companies.filter((c: any) => allowedCompanies.includes(c.id));
+                   } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
+                     finalCompanies = [];
+                   }
+                 } catch(e) {}
                }
                setUserCompanies(finalCompanies);
             }
@@ -434,8 +436,7 @@ export function MainSidebar() {
 
         {/* Global Nav */}
         <div className="px-2 space-y-0.5">
-          <NavItem icon={<Inbox size={16} />} title="Caixa de Entrada" badge="99+" />
-          
+
           <CollapsibleSection title="Conversas" icon={<MessageCircle size={16} />} isOpen={expandedSections.conversations} onToggle={() => toggleSection('conversations')}>
             <NavItem title="Todas as conversas" isActive={!activeChannelFilter} onClick={() => {
               setActiveChannelFilter(null, null);
@@ -449,7 +450,12 @@ export function MainSidebar() {
                  {instances.map(inst => (
                     <div key={inst.id} className="relative group/channel">
                       <NavItem 
-                        icon={<Brands.WhatsApp size={12} />} 
+                        icon={
+                          <div className="flex items-center gap-2">
+                            {inst.color && <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: inst.color }}></div>}
+                            <Brands.WhatsApp size={12} />
+                          </div>
+                        } 
                         title={inst.display_name || 'Sem nome'} 
                         isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
                         onClick={() => {
@@ -475,8 +481,10 @@ export function MainSidebar() {
             )}
 
             <NavItem title="Não atendidas" />
+            <NavItem icon={<Contact size={16} />} title="Contatos" onClick={() => navigate('/contacts')} />
+            <NavItem icon={<LayoutDashboard size={16} />} title="Kanban" />
           </CollapsibleSection>
-          
+
           <CollapsibleSection title="Apps" icon={<Puzzle size={16} />} isOpen={expandedSections.apps} onToggle={() => toggleSection('apps')}>
             <NavItem 
               title="Portal / Cadastros" 
@@ -591,8 +599,6 @@ export function MainSidebar() {
 
         <div className="px-2 space-y-0.5 pb-4">
           <NavItem icon={<MessageCircle size={16} />} title="Chat Interno" />
-          <NavItem icon={<LayoutDashboard size={16} />} title="Kanban" />
-          <NavItem icon={<Contact size={16} />} title="Contatos" onClick={() => navigate('/contacts')} />
           <NavItem icon={<BarChart3 size={16} />} title="Relatórios" />
           <NavItem icon={<Megaphone size={16} />} title="Campanhas" />
           <NavItem icon={<BookOpen size={16} />} title="Central de Ajuda" />

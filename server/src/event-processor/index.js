@@ -632,28 +632,60 @@ class EventProcessor {
         }
     }
 
+    extractMessageContent(msg) {
+        let content = msg.message;
+        if (!content) return null;
+        if (content.viewOnceMessage) content = content.viewOnceMessage.message;
+        if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
+        if (content.ephemeralMessage) content = content.ephemeralMessage.message;
+        if (content.documentWithCaptionMessage) content = content.documentWithCaptionMessage.message;
+        return content;
+    }
+
     extractTextFromMessage(msg) {
-        if (!msg.message) return '';
+        let content = this.extractMessageContent(msg);
+        if (!content) return '';
         let text = '';
-        if (msg.message.conversation) text = msg.message.conversation;
-        else if (msg.message.extendedTextMessage) text = msg.message.extendedTextMessage.text;
-        else if (msg.message.imageMessage) text = msg.message.imageMessage.caption || '📸 Imagem / Foto';
-        else if (msg.message.audioMessage) text = '🎵 Áudio';
-        else if (msg.message.videoMessage) text = msg.message.videoMessage.caption || '🎥 Vídeo';
-        else if (msg.message.documentMessage) text = '📁 Documento';
-        else if (msg.message.reactionMessage) text = '❤️ Reação: ' + msg.message.reactionMessage.text;
-        else text = '📎 Mensagem';
+        if (content.conversation) text = content.conversation;
+        else if (content.extendedTextMessage) text = content.extendedTextMessage.text;
+        else if (content.imageMessage) text = content.imageMessage.caption || '📸 Imagem / Foto';
+        else if (content.audioMessage) text = '🎵 Áudio';
+        else if (content.videoMessage) text = content.videoMessage.caption || '🎥 Vídeo';
+        else if (content.documentMessage) text = content.documentMessage.fileName || content.documentMessage.title || '📁 Documento';
+        else if (content.reactionMessage) text = '❤️ Reação: ' + content.reactionMessage.text;
+        else if (content.contactMessage) text = '👤 Contato: ' + (content.contactMessage.displayName || '');
+        else if (content.contactsArrayMessage) text = '👥 Múltiplos Contatos';
+        else if (content.locationMessage) text = '📍 Localização';
+        else if (content.stickerMessage) text = '🎫 Figurinha';
+        else if (content.templateButtonReplyMessage) text = content.templateButtonReplyMessage.selectedDisplayText;
+        else if (content.buttonsResponseMessage) text = content.buttonsResponseMessage.selectedDisplayText;
+        else if (content.listResponseMessage) text = content.listResponseMessage.title;
+        else if (content.interactiveResponseMessage) {
+            try {
+                if (content.interactiveResponseMessage.nativeFlowResponseMessage) {
+                   const params = JSON.parse(content.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);
+                   text = params.id || 'Opção selecionada';
+                } else {
+                   text = content.interactiveResponseMessage.body?.text || 'Interação Selecionada';
+                }
+            } catch(e) { text = 'Interação Selecionada'; }
+        }
+        else text = '📎 Formato não suportado (' + Object.keys(content)[0] + ')';
         
         // Anti-Bug: Remove caracteres nulos (\x00) que quebram o cast de JSON do PostgreSQL no Supabase (Upsert)
         return text ? String(text).replace(/\x00/g, '') : '';
     }
 
     extractTypeFromMessage(msg) {
-        if (!msg.message) return 'text';
-        if (msg.message.imageMessage) return 'image';
-        if (msg.message.audioMessage) return 'audio';
-        if (msg.message.videoMessage) return 'video';
-        if (msg.message.documentMessage) return 'document';
+        let content = this.extractMessageContent(msg);
+        if (!content) return 'text';
+        if (content.imageMessage) return 'image';
+        if (content.audioMessage) return 'audio';
+        if (content.videoMessage) return 'video';
+        if (content.documentMessage) return 'document';
+        if (content.contactMessage || content.contactsArrayMessage) return 'contact';
+        if (content.locationMessage) return 'location';
+        if (content.stickerMessage) return 'sticker';
         return 'text';
     }
 

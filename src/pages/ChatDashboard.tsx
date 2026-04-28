@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal } from '../components/ChatModals';
@@ -125,9 +125,11 @@ export function renderMessageText(text: string) {
 export default function ChatDashboard() {
   const navigate = useNavigate();
   const tenantName = (localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name'));
+  const currentUserRole = typeof window !== 'undefined' ? (localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role')) || 'admin' : 'admin';
   const { isEnabled: isDevLoggerEnabled } = useDevStore();
   // Monitor de agendamentos
   useScheduleMonitor();
+  const [copiedDoc, setCopiedDoc] = useState(false);
 
   const {  
     contacts, 
@@ -229,6 +231,7 @@ export default function ChatDashboard() {
   const [filterContextMenu, setFilterContextMenu] = useState<{ type: string, x: number, y: number } | null>(null);
   const [instanceNamesMap, setInstanceNamesMap] = useState<Record<string, string>>({});
   const [instanceColorsMap, setInstanceColorsMap] = useState<Record<string, string>>({});
+  const [availableInstancesList, setAvailableInstancesList] = useState<{id: string, display_name: string, color: string}[]>([]);
 
   // Estados de Paginação Local Virtual
   const [contactPageLimit, setContactPageLimit] = useState(20);
@@ -342,15 +345,48 @@ export default function ChatDashboard() {
       if (data) {
         const nameMap: Record<string, string> = {};
         const colorMap: Record<string, string> = {};
+        
+        const allowedStr = sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances');
+        let allowedInstances: string[] = [];
+        if (allowedStr) {
+           try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
+        }
+        
+        const availableInstances = data.filter(d => {
+           if (allowedInstances.length > 0 && !allowedInstances.includes(d.id)) return false;
+           return true;
+        });
+
         data.forEach(d => { 
            nameMap[d.id] = d.display_name; 
            if(d.color) colorMap[d.id] = d.color;
         });
+        
         setInstanceNamesMap(nameMap);
         setInstanceColorsMap(colorMap);
+        setAvailableInstancesList(availableInstances);
       }
     });
   }, []);
+
+  // Solução PWA: Atualiza os dados (contatos e mensagens) e força reconexão Realtime quando o app volta de background
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[PWA Sync] App no foreground, sincronizando...');
+        fetchInitialData();
+        subscribeToNewMessages(); // Restabelece/Reconecta canal realtime
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+    };
+  }, [fetchInitialData, subscribeToNewMessages]);
 
   // Carrega mensagens do Evolution ao clicar num chat novo
   useEffect(() => {
@@ -639,10 +675,12 @@ export default function ChatDashboard() {
         isOpen={isNewChatOpen}
         onClose={() => setIsNewChatOpen(false)}
         contacts={contacts}
-        onStartChat={(contactId) => {
+        instances={availableInstancesList}
+        onStartChat={(contactId, instanceId) => {
           setActiveChat(contactId);
-          if (connectedInstanceName) {
-            useChatStore.getState().loadHistoricalMessages(contactId, connectedInstanceName);
+          const properInstance = instanceId || connectedInstanceName;
+          if (properInstance) {
+            useChatStore.getState().loadHistoricalMessages(contactId, properInstance);
           }
         }}
       />
@@ -679,7 +717,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.48 | Deploy: 27/04/2026, 11:44"}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.51 | Deploy: 27/04/2026, 22:33"}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -807,6 +845,12 @@ export default function ChatDashboard() {
                  Não Lidas
                </button>
                <button 
+                  onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'mine', x: e.clientX, y: e.clientY }); }}
+                  onClick={() => setFilterType('mine')} 
+                  className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'mine' ? "bg-indigo-500/10 text-indigo-600 ring-1 ring-indigo-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                 <User size={14} className={filterType === 'mine' ? "text-indigo-600" : ""} /> Minhas
+               </button>
+               <button 
                   onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'favorite', x: e.clientX, y: e.clientY }); }}
                   onClick={() => setFilterType('favorite')} 
                   className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'favorite' ? "bg-yellow-500/10 text-yellow-600 ring-1 ring-yellow-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
@@ -918,6 +962,11 @@ export default function ChatDashboard() {
              if (filterType === 'unread' && c.unread <= 0 && c.id !== activeChatId) return false;
              if (filterType === 'favorite' && !c.is_favorite) return false;
              if (filterType === 'labels' && !(c.conv_labels && c.conv_labels.length > 0)) return false;
+             if (filterType === 'mine') {
+                 const currentUserEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
+                 const currentAgent = agents.find(a => a.email === currentUserEmail);
+                 if (!currentAgent || c.assigned_to !== currentAgent.id) return false;
+             }
              
              // Filtro de Adiado (Snoozed)
              if (c.conv_status === 'snoozed' && c.snoozed_until) {
@@ -1021,6 +1070,12 @@ export default function ChatDashboard() {
                            </div>
                          )}
                        </span>
+                       {contact.fantasy_name && (
+                         <span className="text-[11px] text-gray-500 dark:text-[#8696a0] truncate flex items-center gap-1">
+                           <Building2 size={10} className="shrink-0" />
+                           {contact.fantasy_name}
+                         </span>
+                       )}
                       {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (() => {
                           const instColor = contact.instance_id ? instanceColorsMap[contact.instance_id] : undefined;
                           return (
@@ -1121,20 +1176,24 @@ export default function ChatDashboard() {
 
                             <div className="h-px w-full bg-gray-100 dark:bg-white/10 my-1" />
 
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setContactToBlock({id: contact.id, name: contact.name || contact.phone, isBlocked: !!contact.is_blocked}); setActiveDropdown(null); }}
-                              className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex items-center gap-2"
-                            >
-                              <ShieldAlert size={14} />
-                              {contact.is_blocked ? "Desbloquear contato" : "Bloquear contato"}
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setContactToDelete({id: contact.id, name: contact.name || contact.phone}); setActiveDropdown(null); }}
-                              className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex items-center gap-2"
-                            >
-                              <Trash2 size={14} />
-                              Apagar conversa
-                            </button>
+                            {currentUserRole === 'admin' && (
+                              <>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setContactToBlock({id: contact.id, name: contact.name || contact.phone, isBlocked: !!contact.is_blocked}); setActiveDropdown(null); }}
+                                  className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex items-center gap-2"
+                                >
+                                  <ShieldAlert size={14} />
+                                  {contact.is_blocked ? "Desbloquear contato" : "Bloquear contato"}
+                                </button>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setContactToDelete({id: contact.id, name: contact.name || contact.phone}); setActiveDropdown(null); }}
+                                  className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex items-center gap-2"
+                                >
+                                  <Trash2 size={14} />
+                                  Apagar conversa
+                                </button>
+                              </>
+                            )}
 
                             <div className="h-px w-full bg-gray-100 dark:bg-white/10 my-1" />
 
@@ -1244,7 +1303,7 @@ export default function ChatDashboard() {
                       e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone))}&background=random&color=fff`;
                     }}
                   />
-                <div>
+                <div className="flex flex-col justify-center">
                   <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
                     <span className="truncate max-w-[200px] sm:max-w-md">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
                     {activeChat.phone && getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone) !== formatPhoneNumber(activeChat.phone) && (
@@ -1253,6 +1312,41 @@ export default function ChatDashboard() {
                       </span>
                     )}
                   </h2>
+                  
+                  {/* Premium Company Info & Document */}
+                  {(activeChat.fantasy_name || activeChat.document_number) && (
+                    <div className="flex items-center gap-2 text-[12px] text-[#54656f] dark:text-[#8696a0] mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                      {activeChat.fantasy_name && (
+                        <div className="flex items-center gap-1.5 bg-black/5 dark:bg-white/5 px-2 py-0.5 rounded-full border border-black/5 dark:border-white/5 backdrop-blur-sm" title="Empresa">
+                          <Building2 size={12} className="text-[#00a884] opacity-80" />
+                          <span className="font-medium truncate max-w-[150px]">{activeChat.fantasy_name}</span>
+                        </div>
+                      )}
+                      
+                      {activeChat.document_number && (
+                        <div className="flex items-center gap-1.5 group/doc bg-black/5 dark:bg-white/5 px-2 py-0.5 rounded-full border border-black/5 dark:border-white/5 backdrop-blur-sm transition-all hover:border-[#00a884]/30">
+                          <span className="font-mono tracking-wide">{activeChat.document_number}</span>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (activeChat.document_number) {
+                                navigator.clipboard.writeText(activeChat.document_number);
+                                setCopiedDoc(true);
+                                setTimeout(() => setCopiedDoc(false), 2000);
+                              }
+                            }}
+                            className={cn(
+                              "transition-all p-0.5 rounded cursor-pointer duration-300 flex items-center justify-center",
+                              copiedDoc ? "text-[#00a884] opacity-100 scale-110" : "text-[#54656f] dark:text-[#aebac1] opacity-40 group-hover/doc:opacity-100 hover:text-[#00a884] hover:bg-black/5 dark:hover:bg-white/10"
+                            )}
+                            title="Copiar Documento"
+                          >
+                            {copiedDoc ? <CheckCircle2 size={12} className="animate-in zoom-in" /> : <Copy size={12} />}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1520,7 +1614,7 @@ export default function ChatDashboard() {
                       )}
                       
                       {(!msg.mediaType || (msg.mediaType !== 'document' && msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
-                         <span className="text-[14px] leading-[1.4] block whitespace-pre-wrap break-words sm:break-normal word-break shadow-none mt-1">
+                         <span className="text-[14px] leading-[1.4] block whitespace-pre-wrap break-words overflow-hidden shadow-none mt-1">
                             {renderMessageText(msg.text)}
                             {!msg.buttons && <span className="inline-block w-[110px] h-3 ml-2 shrink-0"></span>}
                          </span>

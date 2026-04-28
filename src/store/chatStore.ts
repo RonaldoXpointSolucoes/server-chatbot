@@ -46,6 +46,7 @@ export interface AgentType {
   role: string;
   full_name?: string | null;
   signature?: string | null;
+  use_signature?: boolean;
   email?: string | null;
 }
 
@@ -109,11 +110,11 @@ interface ChatState {
   
   // Omnichannel Actions
   fetchTenantAgents: () => Promise<void>;
-  createAgent: (payload: { full_name: string; email: string; role: string; password?: string; allowed_instances?: string[]; allowed_companies?: string[] }) => Promise<void>;
-  updateAgent: (id: string, payload: { full_name: string; email: string; role: string; password?: string; allowed_instances?: string[]; allowed_companies?: string[] }) => Promise<void>;
+  createAgent: (payload: { full_name: string; email: string; role: string; password?: string; allowed_instances?: string[]; allowed_companies?: string[]; signature?: string; use_signature?: boolean; }) => Promise<void>;
+  updateAgent: (id: string, payload: { full_name: string; email: string; role: string; password?: string; allowed_instances?: string[]; allowed_companies?: string[]; signature?: string; use_signature?: boolean; }) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
   updateConversationField: (contactId: string, payload: Record<string, any>) => Promise<void>;
-  updateAgentProfile: (fullName: string, signature: string) => Promise<void>;
+  updateAgentProfile: (fullName: string, signature: string, use_signature: boolean) => Promise<void>;
   
   // Gemini Actions
   // Automations
@@ -573,9 +574,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-         const agent = state.agents.find(a => a.user_id === user.id);
-         if (agent && agent.signature && agent.signature.trim().length > 0) {
-            finalMessageText = `${text}\n\n_${agent.signature}_`;
+         const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+         const agent = state.agents.find(a => a.user_id === user.id || a.email === currentUserEmail);
+         if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
+            finalMessageText = `${agent.signature}\n${text}`;
          }
       }
     } catch (e) {}
@@ -844,10 +846,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // RBAC: Se for agente, só carrega contatos de instâncias permitidas
     const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
     const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-    if (roleStr === 'agent' && contact.instance_id && allowedStr) {
+    if (contact.instance_id && allowedStr) {
         try { 
             const allowedInstances = JSON.parse(allowedStr); 
-            if (!allowedInstances.includes(contact.instance_id)) return;
+            if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+                if (!allowedInstances.includes(contact.instance_id)) return;
+            } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                return; // Agents with no allowed instances get nothing
+            }
         } catch(e) {}
     }
 
@@ -1210,14 +1216,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
            let allowedInstances: string[] = [];
            const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
            const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-           if (roleStr === 'agent' && allowedStr) {
+           if (allowedStr) {
                try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
            }
 
            // VALIDAÇÃO INTELIGENTE APPWEB: Filtra contatos que não tem telefone válido ou são LIDs de sistema (fantasma)
            const validContacts = dbContacts.filter(c => {
-               if (roleStr === 'agent' && c.instance_id) {
-                   if (!allowedInstances.includes(c.instance_id)) return false;
+               if (c.instance_id) {
+                   if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+                       if (!allowedInstances.includes(c.instance_id)) return false;
+                   } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                       return false; // Agents with no allowed instances get nothing
+                   }
                }
                const jid = c.whatsapp_jid || '';
                const phone = c.phone || '';
@@ -1600,7 +1610,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         email: payload.email,
         password: payload.password,
         allowed_instances: payload.allowed_instances || [],
-        allowed_companies: payload.allowed_companies || []
+        allowed_companies: payload.allowed_companies || [],
+        signature: payload.signature || null,
+        use_signature: payload.use_signature || false
       }]);
       if (error) throw error;
       await get().fetchTenantAgents();
@@ -1620,7 +1632,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         email: payload.email,
         password: payload.password,
         allowed_instances: payload.allowed_instances || [],
-        allowed_companies: payload.allowed_companies || []
+        allowed_companies: payload.allowed_companies || [],
+        signature: payload.signature !== undefined ? payload.signature : null,
+        use_signature: payload.use_signature !== undefined ? payload.use_signature : false
       }).eq('id', id).eq('tenant_id', tenantId);
       
       if (error) throw error;
@@ -1646,15 +1660,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  updateAgentProfile: async (fullName, signature) => {
+  updateAgentProfile: async (fullName, signature, use_signature) => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
     try {
       const userRes = await supabase.auth.getUser();
       if (!userRes.data.user) return;
+
+      const me = get().agents.find(a => a.user_id === userRes.data.user?.id || (a.email && userRes.data.user?.email && a.email.toLowerCase() === userRes.data.user.email.toLowerCase()));
+      if (!me) return;
       
-      const { error } = await supabase.from('tenant_users').update({ full_name: fullName, signature: signature })
-        .eq('tenant_id', tenant.id).eq('user_id', userRes.data.user.id);
+      const { error } = await supabase.from('tenant_users').update({ full_name: fullName, signature: signature, use_signature: use_signature })
+        .eq('tenant_id', tenant.id).eq('id', me.id);
       
       if (error) throw error;
       await get().fetchTenantAgents(); // Sincroniza localmente
@@ -1740,10 +1757,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // RBAC: Verifica se o contato que recebeu a msg é de uma instância que o Agente tem acesso
         const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
         const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-        if (roleStr === 'agent' && cData.instance_id && allowedStr) {
+        if (cData.instance_id && allowedStr) {
             try { 
                 const allowedInstances = JSON.parse(allowedStr); 
-                if (!allowedInstances.includes(cData.instance_id)) return;
+                if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+                    if (!allowedInstances.includes(cData.instance_id)) return;
+                } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                    return; // Agents with no allowed instances get nothing
+                }
             } catch(e) {}
         }
 
