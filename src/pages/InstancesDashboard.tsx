@@ -152,8 +152,9 @@ export default function InstancesDashboard() {
       const defaultSettings = { reject_calls: false, ignore_groups: false, always_online: true, sync_history: false, read_messages: false };
       
       const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-      const newEngineId = crypto.randomUUID(); 
-      const finalApiKey = 'sk_' + Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
+      const { v4: uuidv4 } = await import('uuid');
+      const newEngineId = uuidv4(); 
+      const finalApiKey = 'sk_' + uuidv4().replace(/-/g, '');
 
       const { error } = await supabase.from('whatsapp_instances').insert([{
         id: newEngineId,

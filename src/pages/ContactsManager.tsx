@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase, ContactRow } from '../services/supabase';
 import { useChatStore } from '../store/chatStore';
 import { 
-  Search, Plus, Edit2, Trash2, X, Phone, Mail, 
+  Search, Plus, Edit2, Trash2, X, Phone, Mail, FileText,
   User, CheckCircle2, AlertCircle, Building2, UserCircle2, ArrowLeft
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -23,14 +23,22 @@ export default function ContactsManager() {
   const [editingContact, setEditingContact] = useState<ContactRow | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  const fetchContacts = async () => {
+  const fetchContacts = async (search = '') => {
     if (!tenantId) return;
     setLoading(true);
-    const { data, error } = await supabase
+
+    let query = supabase
       .from('contacts')
       .select('*')
       .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(1000);
+
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%,document_number.ilike.%${search}%,phone.ilike.%${search}%`);
+    }
+
+    const { data, error } = await query;
 
     if (!error && data) {
       setContacts(data);
@@ -39,8 +47,12 @@ export default function ContactsManager() {
   };
 
   useEffect(() => {
-    fetchContacts();
-  }, [tenantId]);
+    const delayDebounceFn = setTimeout(() => {
+      fetchContacts(searchTerm);
+    }, 400);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [tenantId, searchTerm]);
 
   const handleOpenModal = (contact?: ContactRow) => {
     if (contact) {
@@ -67,6 +79,7 @@ export default function ContactsManager() {
        tenant_id: tenantId,
        name: payload.name,
        custom_name: payload.name, // Utilizamos name como custom_name no CRM
+       fantasy_name: payload.fantasy_name,
        phone: cleanPhone,
        email: payload.email,
        document_type: payload.document_type || 'cpf',
@@ -104,7 +117,9 @@ export default function ContactsManager() {
   const filteredContacts = contacts.filter(c => 
     c.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
     c.custom_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.phone?.includes(searchTerm)
+    c.fantasy_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.phone?.includes(searchTerm) ||
+    c.document_number?.includes(searchTerm)
   );
 
   return (
@@ -182,14 +197,38 @@ export default function ContactsManager() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-3">
                           {contact.profile_picture_url ? (
-                            <img src={contact.profile_picture_url} alt="Profile" className="w-10 h-10 rounded-full object-cover border border-[#2a3942]" />
+                            <>
+                               <img 
+                                 src={contact.profile_picture_url} 
+                                 alt="Profile" 
+                                 className="w-10 h-10 rounded-full object-cover border border-[#2a3942]" 
+                                 onError={(e) => {
+                                   e.currentTarget.style.display = 'none';
+                                   if (e.currentTarget.nextElementSibling) {
+                                      e.currentTarget.nextElementSibling.classList.remove('hidden');
+                                      e.currentTarget.nextElementSibling.classList.add('flex');
+                                   }
+                                 }}
+                               />
+                               <div className="hidden w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 items-center justify-center font-bold text-lg shrink-0">
+                                  {(contact.custom_name || contact.name || 'U').charAt(0).toUpperCase()}
+                               </div>
+                            </>
                           ) : (
                             <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-center justify-center font-bold text-lg shrink-0">
                                {(contact.custom_name || contact.name || 'U').charAt(0).toUpperCase()}
                             </div>
                           )}
                           <div className="flex flex-col">
-                             <span className="font-semibold text-sm text-[#e9edef] group-hover:text-emerald-400 transition-colors">{contact.custom_name || contact.name}</span>
+                             <div className="flex items-center gap-2">
+                               <span className="font-semibold text-sm text-[#e9edef] group-hover:text-emerald-400 transition-colors">{contact.custom_name || contact.name}</span>
+                               {contact.fantasy_name && (
+                                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#202c33] border border-[#2a3942] text-[10px] font-bold text-emerald-400">
+                                     <Building2 size={10} />
+                                     {contact.fantasy_name}
+                                  </span>
+                               )}
+                             </div>
                              {contact.custom_name && contact.name && contact.custom_name !== contact.name && (
                                 <span className="text-xs text-[#8696a0]">Orig: {contact.name}</span>
                              )}
@@ -205,7 +244,7 @@ export default function ContactsManager() {
                       <td className="px-6 py-4 whitespace-nowrap">
                          <div className="flex flex-col gap-1 text-sm text-[#8696a0]">
                             <span className="flex items-center gap-2"><Mail size={12}/> {contact.email || '-'}</span>
-                            <span className="flex items-center gap-2"><Building2 size={12}/> {contact.document_number || '-'}</span>
+                            <span className="flex items-center gap-2 font-mono"><FileText size={12}/> {contact.document_number || '-'}</span>
                          </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">

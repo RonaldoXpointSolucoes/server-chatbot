@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { v4 as uuidv4 } from 'uuid';
 import { persist } from 'zustand/middleware';
 import { supabase } from '../services/supabase';
 
@@ -30,7 +31,7 @@ export const useDevStore = create<DevStore>()(
       addLog: (log) => {
         const newLog: LogEntry = {
           ...log,
-          id: crypto.randomUUID(),
+          id: uuidv4(),
           timestamp: new Date().toISOString()
         };
         

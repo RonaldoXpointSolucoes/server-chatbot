@@ -187,8 +187,6 @@ class EventProcessor {
                  const finalName = ex?.custom_name ? ex.custom_name : (hasValidOldName ? ex.name : c.name);
                  
                  return {
-                     ...ex,
-                     id: ex.id || crypto.randomUUID(),
                      tenant_id: c.tenant_id,
                      phone: c.phone,
                      name: finalName,

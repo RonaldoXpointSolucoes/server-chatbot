@@ -575,12 +575,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
          const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-         const agent = state.agents.find(a => a.user_id === user.id || a.email === currentUserEmail);
+         let agent = state.agents.find(a => a.user_id === user.id || (a.email && a.email === currentUserEmail));
+         
+         if (!agent) {
+             // Fallback direto no banco caso a store não tenha sido populada ainda
+             const { data: agentData } = await supabase.from('agents').select('use_signature, signature').eq('user_id', user.id).single();
+             if (agentData) agent = agentData as any;
+         }
+
          if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
             finalMessageText = `${agent.signature}\n${text}`;
          }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Erro na injeção de assinatura:", e);
+    }
 
     // Atualiza otimista UI
     const pseudoId = 'optimistic-' + Math.random().toString();
@@ -624,12 +633,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
 
+    // Injeção Mágica de Assinatura na mídia
+    let finalCaption = caption?.trim() ? caption.trim() : (mediaType === 'image' || mediaType === 'video' ? '' : (file.name || ''));
+    
+    if (!isPtt) {
+       try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+             const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+             let agent = state.agents.find(a => a.user_id === user.id || (a.email && a.email === currentUserEmail));
+             
+             if (!agent) {
+                 const { data: agentData } = await supabase.from('agents').select('use_signature, signature').eq('user_id', user.id).single();
+                 if (agentData) agent = agentData as any;
+             }
+
+             if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
+                finalCaption = finalCaption ? `${agent.signature}\n${finalCaption}` : agent.signature;
+             }
+          }
+       } catch (e) {
+          console.error("Erro na injeção de assinatura na mídia:", e);
+       }
+    }
+
     // Atualiza otimista (Render Instantâneo Premium)
     const pseudoId = 'optimistic-media-' + Math.random().toString();
     const tempUrl = URL.createObjectURL(file);
     state.addMessageLocally(contactId, { 
       id: pseudoId, 
-      text: caption?.trim() ? caption.trim() : file.name, 
+      text: finalCaption, 
       sender: 'human', 
       mediaType: mediaType,
       mediaUrl: tempUrl,
@@ -644,7 +677,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       formData.append('jid', jid);
       formData.append('messageType', mediaType);
       
-      const finalCaption = caption?.trim() ? caption.trim() : (file.name || '');
       if (finalCaption) formData.append('caption', finalCaption);
       
       if (isPtt) formData.append('ptt', 'true');
@@ -983,16 +1015,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const contact = get().contacts.find(c => c.id === contactId);
     if (!contact) return;
     
+    const tenant = get().tenantInfo;
+    const state = get();
+    // Resolvemos a instancia alvo para array
+    const currentBox = state.activeChannelFilter || contact.instance_id || state.connectedInstanceName;
+    const effectiveInstanceId = instanceId || currentBox;
+    
     let newPinned = [...(contact.pinned_instances || [])];
-    const isCurrentlyPinned = instanceId ? newPinned.includes(instanceId) : contact.is_pinned;
-    
-    const legacyNewStatus = !contact.is_pinned;
-    
-    if (instanceId) {
-       if (isCurrentlyPinned) {
-          newPinned = newPinned.filter(id => id !== instanceId);
+    const isCurrentlyPinned = contact.is_pinned || (effectiveInstanceId && newPinned.includes(effectiveInstanceId));
+    const newStatus = !isCurrentlyPinned;
+
+    if (effectiveInstanceId) {
+       if (newStatus) {
+          if (!newPinned.includes(effectiveInstanceId)) newPinned.push(effectiveInstanceId);
        } else {
-          newPinned.push(instanceId);
+          newPinned = newPinned.filter(id => id !== effectiveInstanceId);
        }
     }
 
@@ -1000,16 +1037,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       contacts: state.contacts.map((c) => c.id === contactId ? { 
           ...c, 
-          is_pinned: instanceId ? c.is_pinned : legacyNewStatus,
+          is_pinned: newStatus,
           pinned_instances: newPinned 
       } : c)
     }));
 
     try {
-      if (instanceId) {
-          await supabase.from('contacts').update({ pinned_instances: newPinned }).eq('id', contactId);
-      } else {
-          await supabase.from('contacts').update({ is_pinned: legacyNewStatus, pinned_instances: newPinned }).eq('id', contactId);
+      // 1. Atualiza na tabela Contacts (Legacy & Arrays)
+      await supabase.from('contacts').update({ 
+         is_pinned: newStatus,
+         pinned_instances: newPinned 
+      }).eq('id', contactId);
+
+      // 2. Atualiza na tabela Conversations (Nova Arquitetura)
+      if (tenant) {
+         const { data: conv } = await supabase.from('conversations')
+            .select('id')
+            .eq('contact_id', contactId)
+            .eq('tenant_id', tenant.id)
+            .order('last_message_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+            
+         if (conv) {
+            await supabase.from('conversations').update({ is_pinned: newStatus }).eq('id', conv.id);
+         }
       }
     } catch (e) {
       console.error('Erro ao fixar contato no DB:', e);
@@ -1222,8 +1274,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
            // VALIDAÇÃO INTELIGENTE APPWEB: Filtra contatos que não tem telefone válido ou são LIDs de sistema (fantasma)
            const validContacts = dbContacts.filter(c => {
-               if (c.instance_id) {
-                   if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+                const conv = dbConvs.find(cv => cv.contact_id === c.id);
+                const effectiveInstanceId = conv?.instance_id || c.instance_id;
+                
+                if (effectiveInstanceId) {
+                    if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
                        if (!allowedInstances.includes(c.instance_id)) return false;
                    } else if (roleStr === 'agent' || roleStr === 'Agente') {
                        return false; // Agents with no allowed instances get nothing
@@ -1290,7 +1345,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         priority: conv.priority,
                         assigned_to: conv.assigned_to,
                         conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.labels) : [],
-                        instance_id: dbC.instance_id || null
+                        instance_id: conv.instance_id || dbC.instance_id || null
                      };
                      
                      // Injeta um preview fake se messages tiver vazio e tem preview no banco 
@@ -1322,7 +1377,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         snoozed_until: conv.snoozed_until,
                         priority: conv.priority,
                         assigned_to: conv.assigned_to,
-                        instance_id: dbC.instance_id || null
+                        instance_id: conv.instance_id || dbC.instance_id || null
                      });
                   }
                });
@@ -1601,7 +1656,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!tenantId) return;
     try {
       // Gera um UUID local para o user_id provisório
-      const tempUserId = crypto.randomUUID();
+      const { v4: uuidv4 } = await import('uuid');
+      const tempUserId = uuidv4();
       const { error } = await supabase.from('tenant_users').insert([{
         tenant_id: tenantId,
         user_id: tempUserId,
