@@ -152,6 +152,7 @@ interface ChatState {
   // Operations Logs
   logOperation: (action: 'INSERT' | 'UPDATE' | 'DELETE', tableName: string, recordId: string, beforeState: any, afterState: any) => Promise<void>;
   undoOperation: (logId: string, password: string) => Promise<{success: boolean; error?: string}>;
+  toggleUnread: (contactId: string, currentUnread: number) => Promise<void>;
 }
 
 export interface QuickReply {
@@ -993,7 +994,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // 1. Resolvemos os dois principais identificadores unicos independentes (JID ou Telefone Formatado/Puro)
       const contactPhoneMatch = contact.phone || (contact.whatsapp_jid ? contact.whatsapp_jid.split('@')[0] : null);
 
+      const effectiveInstanceId = contact.instance_id || 'default';
+      const compositeId = contact.id.includes('_') ? contact.id : `${contact.id}_${effectiveInstanceId}`;
+
       let targetIndex = state.contacts.findIndex(c => 
+         c.id === compositeId ||
          c.id === contact.id ||
          (((c.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) || 
          (c.phone && c.phone === contactPhoneMatch)) && c.instance_id === (contact.instance_id || null))
@@ -1005,7 +1010,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const isExistingTemp = existing.id.includes('temp-');
         const isNewTemp = contact.id.includes('temp-');
         
-        const finalId = (!isExistingTemp) ? existing.id : (!isNewTemp ? contact.id : existing.id);
+        const baseId = (!isExistingTemp) ? getRealContactId(existing.id) : (!isNewTemp ? getRealContactId(contact.id) : existing.id);
+        const finalId = baseId.includes('temp-') ? baseId : (baseId.includes('_') ? baseId : `${baseId}_${effectiveInstanceId}`);
+        
         const finalCustomName = existing.custom_name || contact.custom_name;
         const fallbackName = existing.name !== existing.phone && existing.name ? existing.name : contact.name;
         
@@ -1034,6 +1041,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         
         const newContact: ContactType = {
           ...contact,
+          id: compositeId,
           name: finalName,
           avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contact.phone)}&background=random&color=fff`, // Avatar ui-avatars idêntico ao Chatwoot
           messages: [],
@@ -1248,6 +1256,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  toggleUnread: async (contactId: string, currentUnread: number) => {
+    const newUnread = currentUnread > 0 ? 0 : 1; // Alterna entre 0 (lida) e 1 (não lida)
+    
+    // UI Otimista
+    set((state) => ({
+      contacts: state.contacts.map(c => c.id === contactId ? { ...c, unread: newUnread } : c)
+    }));
+
+    try {
+      const { error } = await supabase.from('conversations').update({ unread_count: newUnread }).eq('contact_id', getRealContactId(contactId));
+      if (error) throw error;
+    } catch (e) {
+      console.error('Erro ao alternar unread:', e);
+      // Reverter atualização otimista
+      set((state) => ({
+        contacts: state.contacts.map(c => c.id === contactId ? { ...c, unread: currentUnread } : c)
+      }));
+    }
+  },
+
   fetchTenantLabels: async () => {
      const tenant = get().tenantInfo;
      if (!tenant) return;
@@ -1338,10 +1366,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             .select('*, conversation_labels(label_id)')
             .in('contact_id', contactIds);
 
+        const conversationIds = dbConvs?.map(cv => cv.id) || [];
+
         const { data: dbMessages } = await supabase
             .from('messages')
-            .select('contact_id, text_content, media_type, timestamp, sender_type, status')
-            .in('contact_id', contactIds)
+            .select('conversation_id, text_content, media_type, timestamp, sender_type, status')
+            .in('conversation_id', conversationIds)
             .order('timestamp', { ascending: false })
             .limit(100);
 
@@ -1365,7 +1395,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         const newContacts: ContactType[] = validContacts.map(dbC => {
             const conv = dbConvs?.find(cv => cv.contact_id === dbC.id);
-            const msgs = dbMessages?.filter(m => m.contact_id === dbC.id) || [];
+            const msgs = conv ? (dbMessages?.filter(m => m.conversation_id === conv.id) || []) : [];
             
             const mappedMessages: MessageType[] = msgs.map((m: any) => ({
                 id: m.id || Math.random().toString(),
@@ -1533,7 +1563,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                   const phoneMatch = dbC.phone || (dbC.whatsapp_jid ? dbC.whatsapp_jid.split('@')[0] : null);
                   const compositeId = dbC.id + '_' + (conv.instance_id || dbC.instance_id || 'default');
-                  const idx = newContacts.findIndex(c => c.id === compositeId);
+                  const idx = newContacts.findIndex(c => 
+                      c.id === compositeId || 
+                      c.id === dbC.id // also match the raw UUID to upgrade it!
+                  );
                   
                   const tname = tenant?.name || '';
                   let finalName = dbC.custom_name || dbC.name || dbC.push_name || phoneMatch || dbC.phone;
@@ -1612,8 +1645,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      });
                   }
                });
+               const deduplicated: any[] = [];
+               const seenIds = new Set();
+               
+               // Força que todos os contatos no estado tenham ID composto, para evitar bugs de state antigo
+               const normalizedContacts = newContacts.map(c => {
+                   if (!String(c.id).includes('_')) {
+                       return { ...c, id: `${c.id}_${c.instance_id || 'default'}` };
+                   }
+                   return c;
+               });
 
-               return { contacts: newContacts.sort((a,b) => b.timestamp - a.timestamp) };
+               // Mantém a ordem decrescente pra pegar sempre o mais recente em caso de duplicatas
+               normalizedContacts.sort((a,b) => {
+                  const tsA = a.timestamp || a.lastMsgTimestamp || 0;
+                  const tsB = b.timestamp || b.lastMsgTimestamp || 0;
+                  return tsB - tsA;
+               });
+               
+               for (const c of normalizedContacts) {
+                   if (!seenIds.has(c.id)) {
+                       seenIds.add(c.id);
+                       deduplicated.push(c);
+                   }
+               }
+               
+               return { contacts: deduplicated };
            });
 
            // Gatilho Automático: Busca capa na instância caso falte (após popular o state)
@@ -2070,7 +2127,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         const currentState = get();
+        const expectedCompositeId = targetContactId + '_' + (effectiveInstanceId || 'default');
+
         const targetContactLocally = currentState.contacts.find((c: any) => 
+            c.id === expectedCompositeId ||
             c.id === targetContactId || 
             (
                 ((c.whatsapp_jid && c.whatsapp_jid === cData.whatsapp_jid) || (c.phone && c.phone === cData.phone)) &&
@@ -2082,7 +2142,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
            get().upsertContactLocally(cData as any);
         }
 
-        const cid = targetContactLocally ? targetContactLocally.id : cData.id;
+        const cid = targetContactLocally ? targetContactLocally.id : expectedCompositeId;
+
+        const isBlocked = cData.is_blocked || (targetContactLocally && targetContactLocally.is_blocked);
+        if (isBlocked) {
+            console.log(`[Realtime] Mensagem ignorada silenciosamente (Contato Bloqueado). CID: ${cid}`);
+            return;
+        }
 
         const advanced = parseAdvancedMsgMetadata(m);
 

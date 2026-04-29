@@ -15,6 +15,7 @@ export default function DevLogger() {
   const [showServerLogs, setShowServerLogs] = useState(false);
   const [showEndpoints, setShowEndpoints] = useState(false);
   const [telemetry, setTelemetry] = useState<{ cpu: number, memory: number, uptime: number } | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   
   const engineUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -145,10 +146,34 @@ export default function DevLogger() {
       }
     };
 
+    const handleWindowError = (event: ErrorEvent) => {
+      if (event.message === 'Script error.') return;
+      addLog({
+        type: 'error',
+        message: String(event.message),
+        source: 'Window Error',
+        details: { filename: event.filename, lineno: event.lineno, colno: event.colno, stack: event.error?.stack }
+      });
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      addLog({
+        type: 'error',
+        message: event.reason?.message || String(event.reason) || 'Unhandled Promise Rejection',
+        source: 'Promise Rejection',
+        details: { stack: event.reason?.stack }
+      });
+    };
+
+    window.addEventListener('error', handleWindowError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
     return () => {
       console.error = originalConsoleError;
       console.warn = originalConsoleWarn;
       window.fetch = originalFetch;
+      window.removeEventListener('error', handleWindowError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
     };
   }, [addLog]);
 
@@ -187,6 +212,9 @@ export default function DevLogger() {
   const copyLogs = () => {
     const textStr = logs.map(l => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.type.toUpperCase()}] ${l.source}: ${l.message}\n${l.details ? JSON.stringify(l.details) : ''}`).join('\n\n');
     navigator.clipboard.writeText(textStr || 'Nenhum log para copiar.');
+    const errorCount = logs.filter(l => l.type === 'error').length;
+    setCopyFeedback(`Copiado ${errorCount} erro(s) e ${logs.length - errorCount} logs gerais`);
+    setTimeout(() => setCopyFeedback(null), 3000);
   };
 
   const handleTestEngine = async () => {
@@ -275,9 +303,17 @@ export default function DevLogger() {
                 <Smartphone size={14} />
              </button>
              <div className="w-px h-4 bg-gray-700/50 mx-1"></div>
-             <button onClick={(e) => { e.stopPropagation(); copyLogs(); }} className="text-gray-400 hover:text-emerald-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Copiar Logs">
-                <Copy size={14} />
-             </button>
+             <div className="w-px h-4 bg-gray-700/50 mx-1"></div>
+             <div className="relative flex items-center">
+               <button onClick={(e) => { e.stopPropagation(); copyLogs(); }} className="text-gray-400 hover:text-emerald-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Copiar Logs">
+                  <Copy size={14} />
+               </button>
+               {copyFeedback && (
+                 <div className="absolute right-full mr-2 whitespace-nowrap bg-emerald-500 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg animate-in fade-in slide-in-from-right-2">
+                   {copyFeedback}
+                 </div>
+               )}
+             </div>
              <button onClick={(e) => { e.stopPropagation(); clearLogs(); }} className="text-gray-400 hover:text-red-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Limpar Logs">
                 <Trash2 size={14} />
              </button>

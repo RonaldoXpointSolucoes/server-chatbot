@@ -112,9 +112,21 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
       
       try {
         const data = JSON.parse(event.data);
+        
+        // Função de filtro para ignorar logs desnecessários
+        const isSpamLog = (msg: string) => {
+          if (!msg) return false;
+          if (msg.includes('Mídia expirada/inacessível para JID') && msg.includes('Normal em History Sync')) return true;
+          if (msg.includes('stream errored out') && msg.includes('"reasonNode":{"tag":"conflict","attrs":{"type":"replaced"}}')) return true;
+          return false;
+        };
+
         if (data.type === 'init') {
-          setLogs(data.logs || []);
+          const filteredLogs = (data.logs || []).filter((log: LogEntry) => !isSpamLog(log.message));
+          setLogs(filteredLogs);
         } else if (data.message) {
+          if (isSpamLog(data.message)) return;
+
           setLogs(prev => {
             const next = [...prev, data];
             if (next.length > 200) return next.slice(next.length - 200);
