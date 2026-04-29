@@ -561,7 +561,7 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
         
         // Formatar o vCard no padrão WhatsApp
         const formattedNumber = contactNumber.replace(/\\D/g, '');
-        const vcard = \`BEGIN:VCARD\\nVERSION:3.0\\nFN:\${contactName}\\nTEL;type=CELL;type=VOICE;waid=\${formattedNumber}:+\${formattedNumber}\\nEND:VCARD\`;
+        const vcard = `BEGIN:VCARD\nVERSION:3.0\nFN:${contactName}\nTEL;type=CELL;type=VOICE;waid=${formattedNumber}:+${formattedNumber}\nEND:VCARD`;
         
         const msgResult = await sock.sendMessage(remoteJid, {
             contacts: {
