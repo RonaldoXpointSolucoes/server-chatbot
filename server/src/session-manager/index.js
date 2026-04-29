@@ -20,11 +20,31 @@ class SessionManager {
                     const ignoredLogs = [
                         'Buffer timeout reached',
                         'Timeout after',
-                        'timed out waiting for message'
+                        'timed out waiting for message',
+                        'transaction failed, rolling back',
+                        'failed to decrypt message',
+                        'PreKeyError',
+                        'SessionError',
+                        'Invalid PreKey ID',
+                        'No session record',
+                        'conflict',
+                        'replaced',
+                        'Stream Errored (conflict)'
                     ];
                     
                     if (parsed.msg && ignoredLogs.some(text => parsed.msg.includes(text))) {
                         return; // Ignora silenciosamente
+                    }
+
+                    if (parsed.reasonNode && parsed.reasonNode.tag === 'conflict') {
+                        return; // Ignora silenciosamente
+                    }
+
+                    if (parsed.error && typeof parsed.error === 'object') {
+                        const errStr = JSON.stringify(parsed.error);
+                        if (ignoredLogs.some(text => errStr.includes(text))) {
+                            return; // Ignora silenciosamente
+                        }
                     }
 
                     const lvl = parsed.level >= 50 ? 'error' : parsed.level >= 40 ? 'warn' : 'info';
@@ -107,7 +127,9 @@ class SessionManager {
                 const { connection, lastDisconnect } = update;
                 if (connection === 'close') {
                     const status = lastDisconnect?.error?.output?.statusCode;
+                    const reason = lastDisconnect?.error?.message || '';
                     const loggedOut = status === DisconnectReason.loggedOut;
+                    const isConflict = status === 440 || reason.includes('conflict') || reason.includes('replaced');
 
                     this.sessions.delete(instanceId);
 
@@ -119,6 +141,10 @@ class SessionManager {
                         
                         // Tentar reconectar limpo após 5s
                         setTimeout(() => this.createSession(tenantId, instanceId), 5000);
+                    } else if (isConflict) {
+                        console.warn(`[SessionManager] CONFLITO detectado na instância ${instanceId}. Outro dispositivo conectou? Aguardando 30s antes de tentar novamente...`);
+                        // Delay maior para conflitos (30s) para evitar ban ou loops infinitos
+                        setTimeout(() => this.createSession(tenantId, instanceId), 30000);
                     } else {
                         console.log(`[SessionManager] Instância ${instanceId} fechou. Motivo: ${status}. Tentando reconectar em 5s...`);
                         setTimeout(() => this.createSession(tenantId, instanceId), 5000);
