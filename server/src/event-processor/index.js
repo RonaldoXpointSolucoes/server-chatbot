@@ -215,7 +215,7 @@ class EventProcessor {
                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
                  if(!cid) continue; 
                  
-                 const key = `${b.tenantId}_${cid}`;
+                 const key = `${b.tenantId}_${b.instanceId}_${cid}`;
                  if(!convMap.has(key)) {
                      convMap.set(key, {
                          tenant_id: b.tenantId,
@@ -241,14 +241,16 @@ class EventProcessor {
              // Verifica quais conversas já existem no banco
              const contactIds = Array.from(new Set(Array.from(convMap.values()).map(c => c.contact_id)));
              const { data: existingConvs, error: existError } = await supabase.from('conversations')
-                  .select('id, tenant_id, contact_id, unread_count, status')
+                  .select('id, tenant_id, instance_id, contact_id, unread_count, status')
                   .in('contact_id', contactIds);
                   
              if(existError) throw new Error("Conversation Select Error: " + existError.message);
              
              const existingConvMap = new Map();
              for(const e of existingConvs) {
-                 existingConvMap.set(`${e.tenant_id}_${e.contact_id}`, e);
+                 // Usa tenant + instance + contact como chave de isolamento da conversa
+                 const safeInstance = e.instance_id || 'null_instance';
+                 existingConvMap.set(`${e.tenant_id}_${safeInstance}_${e.contact_id}`, e);
              }
              
              const toInsertConvs = [];
@@ -296,8 +298,8 @@ class EventProcessor {
              
              // Agrupa os IDs das conversas finais no MAPA
              const finalConvIdMap = new Map();
-             for(const e of existingConvs) finalConvIdMap.set(`${e.tenant_id}_${e.contact_id}`, e.id);
-             for(const e of insertedConvs) finalConvIdMap.set(`${e.tenant_id}_${e.contact_id}`, e.id);
+             for(const e of existingConvs) finalConvIdMap.set(`${e.tenant_id}_${e.instance_id || 'null_instance'}_${e.contact_id}`, e.id);
+             for(const e of insertedConvs) finalConvIdMap.set(`${e.tenant_id}_${e.instance_id || 'null_instance'}_${e.contact_id}`, e.id);
              
              // 2.5 Resolve Duplicatas de Mensagens ANTES do processo pesado de mídias e inserções
              const allMessageIds = batch.map(b => b.rawMsg.key.id).filter(Boolean);
@@ -331,8 +333,8 @@ class EventProcessor {
              // 3. Processa Mídias em Paralelo Segura (evitando Memory leaks)
              await Promise.all(activeBatch.map(async b => {
                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
-                 b.conversationId = finalConvIdMap.get(`${b.tenantId}_${cid}`);
-                 b.convStatus = existingConvMap.get(`${b.tenantId}_${cid}`)?.status || 'bot';
+                 b.conversationId = finalConvIdMap.get(`${b.tenantId}_${b.instanceId}_${cid}`);
+                 b.convStatus = existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.status || 'bot';
                  
                  if (!b.conversationId) return; // ignora falha bruta
                  

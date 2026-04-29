@@ -1366,7 +1366,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 
                 if (effectiveInstanceId) {
                     if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                       if (!allowedInstances.includes(c.instance_id)) return false;
+                       if (!allowedInstances.includes(effectiveInstanceId)) return false;
                    } else if (roleStr === 'agent' || roleStr === 'Agente') {
                        return false; // Agents with no allowed instances get nothing
                    }
@@ -1912,7 +1912,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         const currentState = get();
-        const targetContactLocally = currentState.contacts.find((c: any) => c.id === targetContactId || (c.whatsapp_jid && c.whatsapp_jid === cData.whatsapp_jid) || c.phone === cData.phone);
+        const targetContactLocally = currentState.contacts.find((c: any) => 
+            c.id === targetContactId || 
+            (
+                ((c.whatsapp_jid && c.whatsapp_jid === cData.whatsapp_jid) || (c.phone && c.phone === cData.phone)) &&
+                c.instance_id === cData.instance_id
+            )
+        );
         
         if (!targetContactLocally) {
            get().upsertContactLocally(cData as any);
