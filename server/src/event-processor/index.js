@@ -1,8 +1,11 @@
 import { supabase } from '../supabase.js';
 import realtime from '../realtime-publisher/index.js';
 import qrcode from 'qrcode';
-import { downloadMediaMessage } from '@whiskeysockets/baileys';
+import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import * as tus from 'tus-js-client';
 import FlowEngine from '../flow-runtime/index.js';
 import AutomationWorker from '../automation-worker/agent.js';
 import PushService from '../push-service/index.js';
@@ -335,33 +338,70 @@ class EventProcessor {
                  
                  if (!b.mediaUrl && ['image', 'video', 'audio', 'document'].includes(b.msgType)) {
                      try {
-                         const buffer = await downloadMediaMessage(b.rawMsg, 'buffer', {}, { 
-                             logger: console, 
-                             reuploadRequest: b.sock.updateMediaMessage 
-                         });
-                         
                          const mediaMeta = b.rawMsg.message[b.msgType + 'Message'] || {};
+                         const stream = await downloadContentFromMessage(mediaMeta, b.msgType.replace('Message', ''));
+                         
                          const mimeType = mediaMeta.mimetype || 'application/octet-stream';
                          const fileName = mediaMeta.fileName || 'media_' + Date.now();
                          const safeName = fileName.replace(/[^a-zA-Z0-9.\-]/g, '_');
                          const storagePath = `tenant_${b.tenantId}/instance_${b.instanceId}/${b.conversationId}/${Date.now()}_${safeName}`;
                          
-                         const { error: uploadErr } = await supabase.storage
-                             .from('chat_media')
-                             .upload(storagePath, buffer, { contentType: mimeType });
+                         const tmpFilePath = path.join(os.tmpdir(), `${Date.now()}_${safeName}`);
+                         const writeStream = fs.createWriteStream(tmpFilePath);
                          
-                         if (!uploadErr) {
-                             const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(storagePath);
-                             b.mediaUrl = publicUrlData.publicUrl;
-                             b.mediaMetadata = {
-                                 mime_type: mimeType, file_name: fileName,
-                                 file_size: mediaMeta.fileLength?.low || mediaMeta.fileLength || buffer.length,
-                                 duration: mediaMeta.seconds, width: mediaMeta.width, height: mediaMeta.height,
-                                 page_count: mediaMeta.pageCount, is_voice_note: mediaMeta.ptt || false
-                             };
+                         for await(const chunk of stream) {
+                             writeStream.write(chunk);
                          }
+                         writeStream.end();
+                         await new Promise((resolve) => writeStream.on('finish', resolve));
+
+                         const stats = fs.statSync(tmpFilePath);
+                         const fileSize = stats.size;
+
+                         const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+                         const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+                         await new Promise((resolve, reject) => {
+                             const fileStream = fs.createReadStream(tmpFilePath);
+                             const upload = new tus.Upload(fileStream, {
+                                 endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
+                                 retryDelays: [0, 3000, 5000, 10000, 20000],
+                                 headers: {
+                                     Authorization: `Bearer ${supabaseKey}`,
+                                     'x-upsert': 'true'
+                                 },
+                                 uploadDataDuringCreation: true,
+                                 metadata: {
+                                     bucketName: 'chat_media',
+                                     objectName: storagePath,
+                                     contentType: mimeType
+                                 },
+                                 chunkSize: 6 * 1024 * 1024,
+                                 uploadSize: fileSize,
+                                 onError: function (error) {
+                                     console.error('[TUS-BACKEND] Upload falhou:', error);
+                                     reject(error);
+                                 },
+                                 onSuccess: function () {
+                                     const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(storagePath);
+                                     b.mediaUrl = publicUrlData.publicUrl;
+                                     resolve();
+                                 }
+                             });
+                             upload.start();
+                         });
+
+                         // Limpeza e Setagem
+                         fs.unlinkSync(tmpFilePath);
+                         
+                         b.mediaMetadata = {
+                             mime_type: mimeType, file_name: fileName,
+                             file_size: fileSize,
+                             duration: mediaMeta.seconds, width: mediaMeta.width, height: mediaMeta.height,
+                             page_count: mediaMeta.pageCount, is_voice_note: mediaMeta.ptt || false
+                         };
                      } catch(err) {
-                         console.warn(`[BatchProcessor] Aviso: Mídia expirada/inacessível para JID ${b.jid}. (Normal em History Sync)`);
+                         console.warn(`[BatchProcessor] Aviso: Mídia expirada/inacessível para JID ${b.jid}. (Normal em History Sync) -> ${err.message}`);
                      }
                  }
              }));

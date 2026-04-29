@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal } from '../components/ChatModals';
@@ -11,7 +11,7 @@ import { GeminiEditorModal } from '../components/GeminiEditorModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Flag, Clock } from 'lucide-react'; // Adicionado lucide pro flag
+import { Flag, Clock, Mail, MailOpen } from 'lucide-react'; // Adicionado lucide pro flag
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { supabase } from '../services/supabase';
@@ -154,6 +154,7 @@ export default function ChatDashboard() {
     deleteContact,
     isSyncingHistory,
     markAllAsRead,
+    toggleUnread,
     togglePinContact,
     toggleFavorite,
     toggleBlockContact,
@@ -717,7 +718,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.52 | Deploy: 28/04/2026, 11:54"}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.53 | Deploy: 28/04/2026, 23:25"}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1153,6 +1154,16 @@ export default function ChatDashboard() {
                             
                             {/* Novos botões inseridos */}
                             <button 
+                              onClick={(e) => { e.stopPropagation(); toggleUnread(contact.id, contact.unread); setActiveDropdown(null); }}
+                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                            >
+                              {contact.unread > 0 ? (
+                                <><MailOpen size={14} className="text-gray-500" /> Marcar como lida</>
+                              ) : (
+                                <><Mail size={14} className="text-[#00a884]" /> Marcar como não lida</>
+                              )}
+                            </button>
+                            <button 
                               onClick={(e) => { e.stopPropagation(); setShowSnoozeModal(contact.id); setActiveDropdown(null); }}
                               className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
                             >
@@ -1536,6 +1547,18 @@ export default function ChatDashboard() {
                          </div>
                       )}
                       
+                      {!msg.mediaUrl && msg.mediaType === 'video' && (
+                         <div className="flex items-center gap-3 bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-gray-200 dark:border-gray-700/50 group">
+                            <div className="bg-red-500/10 p-2 text-red-500 rounded-lg group-hover:scale-110 transition-transform">
+                              <VideoOff size={20} />
+                            </div>
+                            <div className="flex flex-col flex-1 overflow-hidden">
+                               <span className="text-[14px] font-medium text-gray-700 dark:text-gray-200">Vídeo Recebido</span>
+                               <span className="text-[11px] text-red-500 font-medium">Download indisponível (limite de 50MB excedido)</span>
+                            </div>
+                         </div>
+                      )}
+                      
                       {msg.mediaUrl && msg.mediaType === 'audio' && (
                          <div className="flex flex-col gap-1 mb-1">
                            <div className={`flex items-center gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-[#1d272b] dark:to-[#172124] p-1.5 rounded-3xl border border-emerald-100/50 dark:border-emerald-900/30 ${msg.transcription ? 'rounded-b-md' : ''}`}>
@@ -1615,7 +1638,7 @@ export default function ChatDashboard() {
                       
                       {(!msg.mediaType || (msg.mediaType !== 'document' && msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
                          <span className="text-[14px] leading-[1.4] block whitespace-pre-wrap break-words overflow-hidden shadow-none mt-1">
-                            {renderMessageText(msg.text)}
+                            {renderMessageText(msg.text ? msg.text.replace(/^(?:🎥|🎬)\s*Vídeo\s*\n?/i, '') : msg.text)}
                             {!msg.buttons && <span className="inline-block w-[110px] h-3 ml-2 shrink-0"></span>}
                          </span>
                       )}
@@ -1720,13 +1743,43 @@ export default function ChatDashboard() {
                         key={qr.id}
                         type="button"
                         className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-[#2a3942] transition-colors border-b border-gray-50 dark:border-white/5 last:border-0 group"
-                        onClick={() => {
-                          setInputText(qr.content);
+                        onClick={async () => {
                           setShowQuickReplies(false);
-                          setTimeout(() => textareaRef.current?.focus(), 10);
+                          if (qr.media_url) {
+                            try {
+                              const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+                              if (activeChat && properTargetInstance) {
+                                await useChatStore.getState().sendMediaFromUrl(
+                                  activeChat.id, 
+                                  qr.media_url, 
+                                  (qr.media_type as 'image'|'video'|'audio'|'document') || 'image', 
+                                  properTargetInstance, 
+                                  qr.content
+                                );
+                              }
+                              setInputText('');
+                              setTimeout(() => textareaRef.current?.focus(), 10);
+                            } catch (e) {
+                              console.error('Erro ao enviar mídia da resposta rápida:', e);
+                              alert('Falha ao enviar mídia da resposta pronta.');
+                              setInputText(qr.content);
+                              setTimeout(() => textareaRef.current?.focus(), 10);
+                            }
+                          } else {
+                            setInputText(qr.content);
+                            setTimeout(() => textareaRef.current?.focus(), 10);
+                          }
                         }}
                       >
-                        <div className="font-semibold text-blue-600 dark:text-blue-400 text-[13px] mb-1 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors">{qr.shortcut}</div>
+                        <div className="font-semibold text-blue-600 dark:text-blue-400 text-[13px] mb-1 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors flex items-center gap-1.5">
+                          {qr.shortcut}
+                          {qr.media_url && (
+                             <span className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded-md">
+                                {qr.media_type === 'video' ? <Video className="w-3 h-3" /> : qr.media_type === 'audio' ? <Mic className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
+                                Mídia
+                             </span>
+                          )}
+                        </div>
                         <div className="text-gray-600 dark:text-gray-300 text-[13px] line-clamp-2 leading-relaxed">{qr.content}</div>
                       </button>
                     ))}

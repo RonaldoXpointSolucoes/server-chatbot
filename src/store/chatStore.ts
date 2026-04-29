@@ -99,6 +99,7 @@ interface ChatState {
   upsertContactLocally: (contact: ContactRow) => void;
   sendHumanMessage: (contactId: string, text: string, instanceName: string) => Promise<void>;
   forwardMessage: (contactId: string, message: MessageType, instanceName: string) => Promise<void>;
+  sendMediaFromUrl: (contactId: string, mediaUrl: string, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, caption?: string) => Promise<void>;
   uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean, caption?: string) => Promise<void>;
   updateContactCRM: (contactId: string, payload: Partial<ContactRow>) => Promise<void>;
   deleteContact: (contactId: string) => Promise<void>;
@@ -752,6 +753,92 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  sendMediaFromUrl: async (contactId, mediaUrl, mediaType, instanceName, caption) => {
+    const state = get();
+    const contact = state.contacts.find(c => c.id === contactId);
+    if (!contact || !state.tenantInfo) return;
+
+    // Injeção Mágica de Assinatura na mídia
+    let finalCaption = caption?.trim() ? caption.trim() : '';
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+         const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+         let agent = state.agents.find(a => a.user_id === user.id || (a.email && a.email === currentUserEmail));
+         if (!agent) {
+             const { data: agentData } = await supabase.from('agents').select('use_signature, signature').eq('user_id', user.id).single();
+             if (agentData) agent = agentData as any;
+         }
+         
+         if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
+             finalCaption = finalCaption ? `${agent.signature}\n${finalCaption}` : agent.signature;
+         }
+      }
+    } catch (e) {
+      console.warn("Erro ao injetar assinatura na midia por URL", e);
+    }
+
+    // 1) Otimistic render - Criamos a bolha de mensagem simulando carregamento
+    const pseudoId = 'optimistic-media-' + Math.random().toString();
+    const isLocalUrl = mediaUrl.startsWith('blob:') || mediaUrl.startsWith('data:');
+    
+    state.addMessageLocally(contactId, { 
+      id: pseudoId, 
+      text: finalCaption, 
+      sender: 'human', 
+      mediaType: mediaType,
+      mediaUrl: mediaUrl, // Always keep the mediaUrl so it renders the video properly
+      timestamp: new Date() 
+    });
+
+    try {
+      const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
+      const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+      const apiKey = instDataDB?.api_key || '';
+
+      let mimetype = 'application/octet-stream';
+      if (mediaType === 'video') mimetype = 'video/mp4';
+      else if (mediaType === 'image') mimetype = 'image/jpeg';
+      else if (mediaType === 'audio') mimetype = 'audio/ogg';
+      else if (mediaType === 'document') mimetype = 'application/pdf';
+
+      const fileName = `canned_media_${Date.now()}`;
+
+      console.log(`[sendMediaFromUrl] Disparando webhook para URL: ${mediaUrl}`);
+
+      const res = await fetch(`${API_URL}/api/v1/instances/${instanceName}/send-media-url`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': state.tenantInfo.id,
+          'apikey': apiKey
+        },
+        body: JSON.stringify({
+          jid: jid,
+          messageType: mediaType,
+          mimetype: mimetype,
+          caption: finalCaption,
+          mediaUrl: mediaUrl,
+          fileName: fileName,
+          ptt: false
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Erro ao processar mídia via URL no motor');
+      }
+
+      console.log(`[sendMediaFromUrl] Retorno do webhook:`, data);
+
+    } catch (err: any) {
+      console.error('[sendMediaFromUrl] Falha:', err);
+      alert('Falha ao enviar mídia da resposta pronta: ' + err.message);
+    }
+  },
+
   fetchContactPicture: async (contactId, jid, instanceName) => {
     const state = get();
     const now = Date.now();
@@ -899,8 +986,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       let targetIndex = state.contacts.findIndex(c => 
          c.id === contact.id ||
-         (c.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) || 
-         (c.phone && c.phone === contactPhoneMatch)
+         (((c.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) || 
+         (c.phone && c.phone === contactPhoneMatch)) && c.instance_id === (contact.instance_id || null))
       );
 
       if (targetIndex !== -1) {
@@ -1301,8 +1388,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   const phoneMatch = dbC.phone || (dbC.whatsapp_jid ? dbC.whatsapp_jid.split('@')[0] : null);
                   const idx = newContacts.findIndex(c => 
                      c.id === dbC.id || 
-                     c.whatsapp_jid === dbC.whatsapp_jid || 
-                     c.phone === phoneMatch
+                     (((c.whatsapp_jid && c.whatsapp_jid === dbC.whatsapp_jid) || 
+                     (c.phone && c.phone === phoneMatch)) && c.instance_id === (conv.instance_id || dbC.instance_id || null))
                   );
                   
                   const tname = tenant?.name || '';

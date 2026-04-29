@@ -127,6 +127,63 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
     }
 });
 
+// ENVIAR MEDIA POR URL (Pós-upload TUS via Frontend)
+router.post('/instances/:instanceId/send-media-url', requireTenant, express.json(), async (req, res) => {
+    try {
+        const { instanceId } = req.params;
+        const sock = sessionManager.getSocket(instanceId);
+        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const { mediaUrl, mimetype, fileName, jid, caption, messageType, ptt } = req.body;
+
+        if (!mediaUrl || !jid || !messageType) {
+            return res.status(400).json({ error: 'Missing mediaUrl, jid or messageType' });
+        }
+
+        console.log(`[send-media-url] Sending ${messageType} from URL: ${mediaUrl} to ${jid}`);
+
+        const sendPayload = {};
+        if (messageType === 'image') {
+            sendPayload.image = { url: mediaUrl };
+            if (caption) sendPayload.caption = caption;
+        } else if (messageType === 'video') {
+            sendPayload.video = { url: mediaUrl };
+            if (caption) sendPayload.caption = caption;
+        } else if (messageType === 'audio') {
+            sendPayload.audio = { url: mediaUrl };
+            if (mimetype) sendPayload.mimetype = mimetype;
+            if (ptt === 'true' || ptt === true) sendPayload.ptt = true;
+        } else if (messageType === 'document') {
+            sendPayload.document = { url: mediaUrl };
+            if (mimetype) sendPayload.mimetype = mimetype;
+            if (fileName) sendPayload.fileName = fileName;
+            if (caption) sendPayload.caption = caption;
+        } else {
+            return res.status(400).json({ error: 'Unsupported messageType' });
+        }
+
+        const result = await sock.sendMessage(jid, sendPayload);
+
+        // Armazena no cache
+        if (result?.key?.id && mediaUrl && mediaUrl !== 'upload_failed') {
+            try {
+                const { EventProcessor } = await import('../event-processor/index.js');
+                if (EventProcessor && EventProcessor.pendingMediaCache) {
+                    EventProcessor.pendingMediaCache.set(result.key.id, mediaUrl);
+                    setTimeout(() => EventProcessor.pendingMediaCache.delete(result.key.id), 60000);
+                }
+            } catch (err) {
+                console.error("Erro importando EventProcessor:", err);
+            }
+        }
+
+        res.json({ ok: true, result, media_url: mediaUrl });
+    } catch (e) {
+        console.error('Send media url error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // ENVIAR MEDIA
 router.post('/instances/:instanceId/send-media', requireTenant, upload.single('media'), async (req, res) => {
     try {
