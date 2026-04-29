@@ -77,6 +77,7 @@ interface ChatState {
   qrModalTargetInstance: string | null;
   automations: any[];
   tenantLabels: any[];
+  appVersion: { version: string, deploy_date: string } | null;
   isSearchingGlobally: boolean;
   
   searchGlobalContacts: (term: string) => Promise<void>;
@@ -333,10 +334,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pictureFetchLocks: {},
   appVersion: null,
   activeChannelFilter: null,
+  activeChannelName: null,
   isQRModalOpen: false,
   qrModalTargetInstance: null,
   automations: [],
   tenantLabels: [],
+  appVersion: null,
   isSearchingGlobally: false,
   quickReplies: [],
   userSettings: {},

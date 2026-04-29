@@ -79,6 +79,8 @@ export function usePushNotifications() {
             const role = localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role');
             const allowedStr = localStorage.getItem('allowed_instances') || sessionStorage.getItem('allowed_instances');
             
+            const isLoggedIn = !!(localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+
             let allowedInstances = [];
             if (allowedStr) {
                 try { allowedInstances = JSON.parse(allowedStr); } catch (e) {}
@@ -86,7 +88,7 @@ export function usePushNotifications() {
 
             navigator.serviceWorker.controller.postMessage({
                 type: 'SYNC_USER_CONFIG',
-                config: { role, allowedInstances }
+                config: { role, allowedInstances, isLoggedIn }
             });
           }
         };

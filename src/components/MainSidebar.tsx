@@ -63,6 +63,20 @@ export function MainSidebar() {
   const handleLogout = async (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        try {
+          const registration = await navigator.serviceWorker.ready;
+          const subscription = await registration.pushManager.getSubscription();
+          if (subscription) {
+            const endpoint = subscription.endpoint;
+            await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint);
+            await subscription.unsubscribe();
+          }
+        } catch (pushErr) {
+          console.error('Erro ao remover push subscription:', pushErr);
+        }
+      }
+
       await supabase.auth.signOut();
       localStorage.clear();
       sessionStorage.clear();

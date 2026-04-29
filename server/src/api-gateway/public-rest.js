@@ -464,6 +464,222 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
 
 /**
  * @swagger
+ * /message/sendLocation:
+ *   post:
+ *     tags: [Message]
+ *     summary: Enviar Localização (Coordenadas)
+ *     parameters:
+ *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               number:
+ *                 type: string
+ *               instance:
+ *                 type: string
+ *               latitude:
+ *                 type: number
+ *               longitude:
+ *                 type: number
+ *               name:
+ *                 type: string
+ *               address:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Localização enviada com sucesso
+ */
+router.post('/message/sendLocation', requireApiKey, async (req, res) => {
+    try {
+        const { number, instance, latitude, longitude, name, address } = req.body;
+        const { id } = req.instanceData;
+        if (!number || !latitude || !longitude) return res.status(400).json({ error: 'number, latitude and longitude required' });
+
+        const sock = sessionManager.getSocket(id);
+        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+        const msgResult = await sock.sendMessage(remoteJid, {
+            location: { degreesLatitude: latitude, degreesLongitude: longitude, name, address }
+        });
+
+        res.json({ key: msgResult.key, status: "PENDING" });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * @swagger
+ * /message/sendContact:
+ *   post:
+ *     tags: [Message]
+ *     summary: Enviar Contato (vCard)
+ *     parameters:
+ *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               number:
+ *                 type: string
+ *               instance:
+ *                 type: string
+ *               contactName:
+ *                 type: string
+ *               contactNumber:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Contato enviado com sucesso
+ */
+router.post('/message/sendContact', requireApiKey, async (req, res) => {
+    try {
+        const { number, instance, contactName, contactNumber } = req.body;
+        const { id } = req.instanceData;
+        if (!number || !contactName || !contactNumber) return res.status(400).json({ error: 'number, contactName and contactNumber required' });
+
+        const sock = sessionManager.getSocket(id);
+        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+        
+        // Formatar o vCard no padrão WhatsApp
+        const formattedNumber = contactNumber.replace(/\\D/g, '');
+        const vcard = \`BEGIN:VCARD\\nVERSION:3.0\\nFN:\${contactName}\\nTEL;type=CELL;type=VOICE;waid=\${formattedNumber}:+\${formattedNumber}\\nEND:VCARD\`;
+        
+        const msgResult = await sock.sendMessage(remoteJid, {
+            contacts: {
+                displayName: contactName,
+                contacts: [{ vcard }]
+            }
+        });
+
+        res.json({ key: msgResult.key, status: "PENDING" });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * @swagger
+ * /message/sendReaction:
+ *   post:
+ *     tags: [Message]
+ *     summary: Reagir a uma mensagem
+ *     parameters:
+ *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               number:
+ *                 type: string
+ *               instance:
+ *                 type: string
+ *               messageId:
+ *                 type: string
+ *                 description: O ID da mensagem que será reagida
+ *               reaction:
+ *                 type: string
+ *                 description: O emoji da reação
+ *                 example: "❤️"
+ *               fromMe:
+ *                 type: boolean
+ *                 description: Informe "true" se a mensagem original foi enviada pela sua própria instância (você). Padrão é false (recebida do contato).
+ *     responses:
+ *       200:
+ *         description: Reação enviada com sucesso
+ */
+router.post('/message/sendReaction', requireApiKey, async (req, res) => {
+    try {
+        const { number, instance, messageId, reaction, fromMe = false } = req.body;
+        const { id } = req.instanceData;
+        if (!number || !messageId || !reaction) return res.status(400).json({ error: 'number, messageId and reaction required' });
+
+        const sock = sessionManager.getSocket(id);
+        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+        
+        const msgResult = await sock.sendMessage(remoteJid, {
+            react: {
+                text: reaction,
+                key: { id: messageId, remoteJid, fromMe }
+            }
+        });
+
+        res.json({ key: msgResult.key, status: "PENDING" });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * @swagger
+ * /instance/{name}/restart:
+ *   put:
+ *     tags: [Instance]
+ *     summary: Reiniciar a Instância
+ *     description: Derruba o socket atual e reconecta automaticamente sem precisar ler o QR Code novamente (se já estiver logado).
+ *     parameters:
+ *       - in: path
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: apikey
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Instância reiniciada
+ */
+router.put('/instance/:name/restart', requireApiKey, async (req, res) => {
+    try {
+        const { id, tenant_id } = req.instanceData;
+        const sock = sessionManager.getSocket(id);
+        
+        if (sock) {
+            sock.ws.close();
+            await new Promise(r => setTimeout(r, 1000));
+        }
+        
+        // Chama a inicialização
+        sessionManager.createSession(tenant_id, id).catch(console.error);
+
+        res.json({ status: 'SUCCESS', error: false, message: 'Instance restarting' });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * @swagger
  * /instance/{name}/chats:
  *   get:
  *     tags: [Instance]

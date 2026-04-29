@@ -200,8 +200,8 @@ class EventProcessor {
              });
              
              const { data: upsertedContacts, error: contactErr } = await supabase.from('contacts')
-                 .upsert(safeContactsArray, { onConflict: 'tenant_id, phone' })
-                 .select('id, tenant_id, phone');
+                  .upsert(safeContactsArray, { onConflict: 'tenant_id, phone' })
+                  .select('id, tenant_id, phone, whatsapp_jid');
                  
              if(contactErr) throw new Error("Contact Upsert Error: " + contactErr.message);
              
@@ -284,10 +284,14 @@ class EventProcessor {
              
              const insertedConvs = [];
              if(toInsertConvs.length > 0) {
-                 const { data: res, error: errInst } = await supabase.from('conversations').insert(toInsertConvs).select('id, tenant_id, contact_id');
+                 // Usando upsert com a nova restrição de unicidade para evitar race conditions
+                 const { data: res, error: errInst } = await supabase.from('conversations')
+                     .upsert(toInsertConvs, { onConflict: 'tenant_id, instance_id, contact_id' })
+                     .select('id, tenant_id, contact_id');
+                     
                  if(errInst) {
-                       console.error('[BatchProcessor] Tentando recuperação fallback insert logs...', errInst);
-                 } else {
+                       console.error('[BatchProcessor] Falha no upsert de conversas:', errInst.message);
+                 } else if (res) {
                        insertedConvs.push(...res);
                  }
              }
@@ -470,7 +474,12 @@ class EventProcessor {
                      });
 
                      if (b.direction === 'inbound') {
-                         PushService.sendNotification(b.tenantId, msg, b.phone, b.conversationId);
+                         const messageAgeSecs = (Date.now() - new Date(msg.timestamp).getTime()) / 1000;
+                         if (messageAgeSecs < 120) {
+                             PushService.sendNotification(b.tenantId, msg, b.phone, b.conversationId);
+                         } else {
+                             console.log(`[BatchProcessor] Push abortado para mensagem atrasada/offline (${Math.round(messageAgeSecs)}s atrás)`);
+                         }
 
                          // Responde apenas se a conversa estiver sob os cuidados do bot ('bot' ou 'teste_robo')
                          if (b.convStatus === 'bot' || b.convStatus === 'teste_robo') {

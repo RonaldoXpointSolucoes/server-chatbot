@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { clientsClaim } from 'workbox-core';
 import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
 
 declare let self: ServiceWorkerGlobalScope;
@@ -8,6 +9,10 @@ cleanupOutdatedCaches();
 
 // Precache resources
 precacheAndRoute(self.__WB_MANIFEST);
+
+// Força a ativação imediata do novo Service Worker
+self.skipWaiting();
+clientsClaim();
 
 // --- INÍCIO INDEXEDDB RBAC CONFIG ---
 const DB_NAME = 'ChatBootSWConfig';
@@ -40,7 +45,7 @@ async function saveConfigToDB(config: any) {
   }
 }
 
-async function getConfigFromDB(): Promise<{ role?: string, allowedInstances?: string[] } | null> {
+async function getConfigFromDB(): Promise<{ role?: string, allowedInstances?: string[], isLoggedIn?: boolean } | null> {
   try {
     const db = await openDB();
     const tx = db.transaction(STORE_NAME, 'readonly');
@@ -80,6 +85,11 @@ self.addEventListener('push', (event) => {
     const instanceId = data.data?.instanceId;
     const userConfig = await getConfigFromDB();
     
+    if (userConfig && userConfig.isLoggedIn === false) {
+        console.log('[SW] Push abortado (Background): Usuário deslogado na aplicação.');
+        return; // Cancela a exibição
+    }
+
     const role = userConfig?.role?.toLowerCase() || '';
     if (userConfig && (role === 'agent' || role === 'agente') && instanceId) {
         const allowed = userConfig.allowedInstances || [];
