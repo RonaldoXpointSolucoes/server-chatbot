@@ -116,6 +116,15 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
 
         try {
             const result = await sock[method](...(args || []));
+            if (method === 'sendMessage' && result?.key?.id) {
+                try {
+                    const { EventProcessor } = await import('../event-processor/index.js');
+                    if (EventProcessor && EventProcessor.humanMessagesCache) {
+                        EventProcessor.humanMessagesCache.set(result.key.id, true);
+                        setTimeout(() => EventProcessor.humanMessagesCache.delete(result.key.id), 60000);
+                    }
+                } catch(e) {}
+            }
             res.json({ ok: true, result });
         } catch (sockError) {
             // Se o Baileys disparar um erro (ex: not-authorized ao buscar avatar protegido)
@@ -171,6 +180,10 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
                 if (EventProcessor && EventProcessor.pendingMediaCache) {
                     EventProcessor.pendingMediaCache.set(result.key.id, mediaUrl);
                     setTimeout(() => EventProcessor.pendingMediaCache.delete(result.key.id), 60000);
+                }
+                if (EventProcessor && EventProcessor.humanMessagesCache) {
+                    EventProcessor.humanMessagesCache.set(result.key.id, true);
+                    setTimeout(() => EventProcessor.humanMessagesCache.delete(result.key.id), 60000);
                 }
             } catch (err) {
                 console.error("Erro importando EventProcessor:", err);

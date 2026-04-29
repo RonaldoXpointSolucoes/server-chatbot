@@ -307,6 +307,14 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
         const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
         const msgResult = await sock.sendMessage(remoteJid, { text });
 
+        try {
+            const { EventProcessor } = await import('../event-processor/index.js');
+            if (EventProcessor?.humanMessagesCache && msgResult?.key?.id) {
+                EventProcessor.humanMessagesCache.set(msgResult.key.id, true);
+                setTimeout(() => EventProcessor.humanMessagesCache.delete(msgResult.key.id), 60000);
+            }
+        } catch(e) {}
+
         // A mensagem também será processada no `messages.upsert` de forma nativa e registrada no front.
         res.json({
             key: msgResult.key,
@@ -431,9 +439,13 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
         // Armazena URL no eventProcessor (opcional, só p renderizar imagem no UI frontend se ele assinar o socket interno)
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
-            if (EventProcessor?.pendingMediaCache && result?.key?.id) {
+            if (EventProcessor?.pendingMediaCache && msgResult?.key?.id) {
                 EventProcessor.pendingMediaCache.set(msgResult.key.id, mediaUrl);
                 setTimeout(() => EventProcessor.pendingMediaCache.delete(msgResult.key.id), 60000);
+            }
+            if (EventProcessor?.humanMessagesCache && msgResult?.key?.id) {
+                EventProcessor.humanMessagesCache.set(msgResult.key.id, true);
+                setTimeout(() => EventProcessor.humanMessagesCache.delete(msgResult.key.id), 60000);
             }
         } catch(e) {}
 

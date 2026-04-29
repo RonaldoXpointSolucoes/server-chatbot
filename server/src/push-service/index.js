@@ -50,6 +50,16 @@ class PushService {
                 }
             }
 
+            let instanceId = null;
+            if (conversationId) {
+                const { data: conv } = await supabase
+                    .from("conversations")
+                    .select("instance_id")
+                    .eq("id", conversationId)
+                    .single();
+                if (conv) instanceId = conv.instance_id;
+            }
+
             let messageBody = message.text_content 
                 ? `${message.text_content.substring(0, 100)}${message.text_content.length > 100 ? '...' : ''}` 
                 : 'Nova mídia recebida';
@@ -65,6 +75,7 @@ class PushService {
                 icon: contactAvatar,
                 data: {
                     url: `/?conversation=${conversationId}`,
+                    instanceId: instanceId
                 }
             });
 

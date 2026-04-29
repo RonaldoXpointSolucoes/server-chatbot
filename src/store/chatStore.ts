@@ -39,6 +39,9 @@ export type ContactType = ContactRow & {
   is_blocked?: boolean;
 };
 
+export const getRealContactId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
+export const getInstanceIdFromContact = (id: string) => id.includes('_') ? id.split('_')[1] : null;
+
 export interface AgentType {
   id: string;
   tenant_id: string;
@@ -74,7 +77,9 @@ interface ChatState {
   qrModalTargetInstance: string | null;
   automations: any[];
   tenantLabels: any[];
+  isSearchingGlobally: boolean;
   
+  searchGlobalContacts: (term: string) => Promise<void>;
   openQRModal: (instanceId?: string | null) => void;
   closeQRModal: () => void;
   
@@ -332,6 +337,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   qrModalTargetInstance: null,
   automations: [],
   tenantLabels: [],
+  isSearchingGlobally: false,
   quickReplies: [],
   userSettings: {},
   filterType: 'all',
@@ -580,7 +586,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
          
          if (!agent) {
              // Fallback direto no banco caso a store não tenha sido populada ainda
-             const { data: agentData } = await supabase.from('agents').select('use_signature, signature').eq('user_id', user.id).single();
+             const { data: agentData } = await supabase.from('tenant_users').select('use_signature, signature').eq('user_id', user.id).single();
              if (agentData) agent = agentData as any;
          }
 
@@ -767,7 +773,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
          const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
          let agent = state.agents.find(a => a.user_id === user.id || (a.email && a.email === currentUserEmail));
          if (!agent) {
-             const { data: agentData } = await supabase.from('agents').select('use_signature, signature').eq('user_id', user.id).single();
+             const { data: agentData } = await supabase.from('tenant_users').select('use_signature, signature').eq('user_id', user.id).single();
              if (agentData) agent = agentData as any;
          }
          
@@ -1065,17 +1071,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Recupera o estado original puro do banco para o log
       let rawBeforeState = null;
       try {
-        const { data } = await supabase.from('contacts').select('*').eq('id', contactId).single();
+        const { data } = await supabase.from('contacts').select('*').eq('id', getRealContactId(contactId)).single();
         if (data) rawBeforeState = data;
       } catch (e) {}
 
-      const { error } = await supabase.from('contacts').update(dbPayload).eq('id', contactId);
+      const { error } = await supabase.from('contacts').update(dbPayload).eq('id', getRealContactId(contactId));
       if (error) throw error;
 
       // Log Operation
       if (rawBeforeState) {
         const rawAfterState = { ...rawBeforeState, ...dbPayload };
-        await get().logOperation('UPDATE', 'contacts', contactId, rawBeforeState, rawAfterState);
+        await get().logOperation('UPDATE', 'contacts', getRealContactId(contactId), rawBeforeState, rawAfterState);
       }
     } catch (e) {
       console.error('Erro ao editar contato no DB (CRM):', e);
@@ -1091,8 +1097,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     
     try {
       // Garantimos exclusão forte apagando mensagens antes de contatos, prevenindo falta de CASCADE
-      await supabase.from('messages').delete().eq('contact_id', contactId);
-      await supabase.from('contacts').delete().eq('id', contactId);
+      await supabase.from('messages').delete().eq('contact_id', getRealContactId(contactId));
+      await supabase.from('contacts').delete().eq('id', getRealContactId(contactId));
     } catch (e) {
       console.error('Erro ao excluir contato no DB:', e);
     }
@@ -1134,14 +1140,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       await supabase.from('contacts').update({ 
          is_pinned: newStatus,
          pinned_instances: newPinned 
-      }).eq('id', contactId);
+      }).eq('id', getRealContactId(contactId));
 
       // 2. Atualiza na tabela Conversations (Nova Arquitetura)
       if (tenant) {
-         const { data: conv } = await supabase.from('conversations')
+         const realContactId = getRealContactId(contactId);
+         const instId = getInstanceIdFromContact(contactId);
+         let query = supabase.from('conversations')
             .select('id')
-            .eq('contact_id', contactId)
-            .eq('tenant_id', tenant.id)
+            .eq('contact_id', realContactId)
+            .eq('tenant_id', tenant.id);
+            
+         if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+
+         const { data: conv } = await query
             .order('last_message_at', { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -1177,7 +1189,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const tenant = get().tenantInfo;
     if(tenant) {
       try {
-        const { data: conv } = await supabase.from('conversations').select('id').eq('contact_id', contactId).eq('tenant_id', tenant.id).order('last_message_at', { ascending: false }).limit(1).single();
+        const realContactId = getRealContactId(contactId);
+        const instId = getInstanceIdFromContact(contactId);
+        let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
+        if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+        const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
         if(conv) {
           await supabase.from('conversations').update({ is_favorite: newStatus }).eq('id', conv.id);
         }
@@ -1201,7 +1217,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const { error } = await supabase.from('contacts').update({ is_blocked: newBlockedState }).eq('id', contactId);
+      const { error } = await supabase.from('contacts').update({ is_blocked: newBlockedState }).eq('id', getRealContactId(contactId));
       if (error) throw error;
     } catch (e) {
       console.error('Erro ao bloquear contato:', e);
@@ -1249,7 +1265,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const conv = state.contacts.find(c => c.id === contactId);
       if (!conv) return;
 
-      const { data: convRecord } = await supabase.from('conversations').select('id').eq('contact_id', contactId).eq('tenant_id', tenant.id).single();
+      const realContactId = getRealContactId(contactId);
+      const instId = getInstanceIdFromContact(contactId);
+      let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
+      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      const { data: convRecord } = await query.single();
       if (!convRecord) return;
 
       const { error } = await supabase.from('conversation_labels').insert({
@@ -1267,7 +1287,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const tenant = state.tenantInfo;
       if (!tenant) return;
 
-      const { data: convRecord } = await supabase.from('conversations').select('id').eq('contact_id', contactId).eq('tenant_id', tenant.id).single();
+      const realContactId = getRealContactId(contactId);
+      const instId = getInstanceIdFromContact(contactId);
+      let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
+      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      const { data: convRecord } = await query.single();
       if (!convRecord) return;
 
       const { error } = await supabase.from('conversation_labels').delete()
@@ -1277,6 +1301,117 @@ export const useChatStore = create<ChatState>((set, get) => ({
          await state.fetchInitialData();
       }
    },
+
+  searchGlobalContacts: async (term: string) => {
+    const state = get();
+    const tenant = state.tenantInfo;
+    if (!tenant || !term || term.trim().length < 3) return;
+
+    set({ isSearchingGlobally: true });
+
+    try {
+        const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+        let allowedInstances: string[] = [];
+        const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+        if (allowedStr) {
+            try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
+        }
+
+        const { data: dbContacts, error: contactError } = await supabase
+            .from('contacts')
+            .select('*')
+            .eq('tenant_id', tenant.id)
+            .or(`name.ilike.%${term}%,custom_name.ilike.%${term}%,phone.ilike.%${term}%,whatsapp_jid.ilike.%${term}%`)
+            .limit(50);
+
+        if (contactError || !dbContacts || dbContacts.length === 0) {
+            set({ isSearchingGlobally: false });
+            return;
+        }
+
+        const contactIds = dbContacts.map(c => c.id);
+        const { data: dbConvs } = await supabase
+            .from('conversations')
+            .select('*, conversation_labels(label_id)')
+            .in('contact_id', contactIds);
+
+        const { data: dbMessages } = await supabase
+            .from('messages')
+            .select('contact_id, text_content, media_type, timestamp, sender_type, status')
+            .in('contact_id', contactIds)
+            .order('timestamp', { ascending: false })
+            .limit(100);
+
+        const validContacts = dbContacts.filter(c => {
+             const conv = dbConvs?.find(cv => cv.contact_id === c.id);
+             const effectiveInstanceId = conv?.instance_id || c.instance_id;
+             
+             if (effectiveInstanceId) {
+                 if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+                    if (!allowedInstances.includes(effectiveInstanceId)) return false;
+                } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                    return false;
+                }
+            }
+            const jid = c.whatsapp_jid || '';
+            const phone = c.phone || '';
+            if (jid.includes('@lid')) return false;
+            if (phone.length > 15 && !phone.includes('+')) return false;
+            return true;
+        });
+
+        const newContacts: ContactType[] = validContacts.map(dbC => {
+            const conv = dbConvs?.find(cv => cv.contact_id === dbC.id);
+            const msgs = dbMessages?.filter(m => m.contact_id === dbC.id) || [];
+            
+            const mappedMessages: MessageType[] = msgs.map((m: any) => ({
+                id: m.id || Math.random().toString(),
+                text: m.text_content,
+                sender: m.sender_type,
+                timestamp: new Date(m.timestamp),
+                mediaType: m.media_type,
+                status: m.status
+            })).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+            return {
+                ...dbC,
+                avatar: dbC.profile_picture_url || '',
+                messages: mappedMessages,
+                unread: conv?.unread_count || 0,
+                lastMsgTimestamp: conv?.last_interaction_at ? new Date(conv.last_interaction_at).getTime() : new Date(dbC.created_at).getTime(),
+                is_pinned: conv?.is_pinned || false,
+                is_favorite: conv?.is_favorite || false,
+                conv_status: conv?.status || 'pending',
+                snoozed_until: conv?.snoozed_until,
+                priority: conv?.priority,
+                assigned_to: conv?.assigned_to,
+                conv_labels: conv?.conversation_labels || [],
+                instance_id: conv?.instance_id || dbC.instance_id
+            } as ContactType;
+        });
+
+        set(state => {
+            const existingContacts = [...state.contacts];
+            let changed = false;
+            newContacts.forEach(nc => {
+                const idx = existingContacts.findIndex(c => c.id === nc.id);
+                if (idx === -1) {
+                    existingContacts.push(nc);
+                    changed = true;
+                }
+            });
+            // Ordenar contatos para que os recém pesquisados possam aparecer no topo caso tenham lastMsgTimestamp maior
+            if (changed) {
+                existingContacts.sort((a, b) => b.lastMsgTimestamp - a.lastMsgTimestamp);
+            }
+            return changed ? { contacts: existingContacts, isSearchingGlobally: false } : { isSearchingGlobally: false };
+        });
+
+    } catch (e) {
+        console.error("Global search failed", e);
+        set({ isSearchingGlobally: false });
+    }
+  },
 
   fetchInitialData: async () => {
     const tenant = get().tenantInfo;
@@ -1361,16 +1496,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
            // VALIDAÇÃO INTELIGENTE APPWEB: Filtra contatos que não tem telefone válido ou são LIDs de sistema (fantasma)
            const validContacts = dbContacts.filter(c => {
-                const conv = dbConvs.find(cv => cv.contact_id === c.id);
-                const effectiveInstanceId = conv?.instance_id || c.instance_id;
-                
-                if (effectiveInstanceId) {
-                    if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                       if (!allowedInstances.includes(effectiveInstanceId)) return false;
-                   } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                       return false; // Agents with no allowed instances get nothing
-                   }
-               }
                const jid = c.whatsapp_jid || '';
                const phone = c.phone || '';
                if (jid.includes('@lid')) return false; // Bloqueia LIDs
@@ -1378,19 +1503,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
                return true;
            });
 
+           // RBAC: Filtra as conversas pela instância permitida
+           const validConvs = dbConvs.filter(conv => {
+               const dbC = validContacts.find(c => c.id === conv.contact_id);
+               if (!dbC) return false; // Ignora se perder integridade ou for LID bloqueado
+               
+               const effectiveInstanceId = conv.instance_id || dbC.instance_id;
+               
+               if (effectiveInstanceId) {
+                   if (allowedStr) {
+                       if (allowedInstances.length === 0) return false; // Agente sem instâncias -> nada
+                       if (!allowedInstances.includes(effectiveInstanceId)) return false; // Bloqueado
+                   } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                       return false; // Bloqueado por falta de config
+                   }
+               }
+               return true;
+           });
+
            set((s) => {
                const newContacts = [...s.contacts];
                
-               dbConvs.forEach(conv => {
+               validConvs.forEach(conv => {
                   const dbC = validContacts.find(c => c.id === conv.contact_id);
-                  if (!dbC) return; // Ignora se perder integridade
+                  if (!dbC) return; // Segurança extra
 
                   const phoneMatch = dbC.phone || (dbC.whatsapp_jid ? dbC.whatsapp_jid.split('@')[0] : null);
-                  const idx = newContacts.findIndex(c => 
-                     c.id === dbC.id || 
-                     (((c.whatsapp_jid && c.whatsapp_jid === dbC.whatsapp_jid) || 
-                     (c.phone && c.phone === phoneMatch)) && c.instance_id === (conv.instance_id || dbC.instance_id || null))
-                  );
+                  const compositeId = dbC.id + '_' + (conv.instance_id || dbC.instance_id || 'default');
+                  const idx = newContacts.findIndex(c => c.id === compositeId);
                   
                   const tname = tenant?.name || '';
                   let finalName = dbC.custom_name || dbC.name || dbC.push_name || phoneMatch || dbC.phone;
@@ -1418,7 +1558,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      newContacts[idx] = {
                         ...existing,
                         ...dbC,
-                        id: dbC.id,
+                        id: compositeId,
                         custom_name: finalCustomName,
                         name: finalName,
                         avatar: dbC.profile_picture_url || (existing.avatar?.includes('ui-avatars') ? avatarFallback : (existing.avatar || avatarFallback)),
@@ -1451,6 +1591,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                      newContacts.push({
                         ...dbC,
+                        id: compositeId,
                         custom_name: finalCustomName,
                         name: finalName,
                         avatar: dbC.profile_picture_url || avatarFallback,
@@ -1590,11 +1731,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const tenant = get().tenantInfo;
         if (!tenant) return;
         
-        // Puxa conversa pra este contato (mesmo que n exista msg)
+        // Puxa conversa pra este contato respeitando a instância!
         const { data: convs } = await supabase.from('conversations')
               .select('id')
               .eq('tenant_id', tenant.id)
-              .eq('contact_id', contactId)
+              .eq('contact_id', getRealContactId(contactId))
+              .eq('instance_id', instanceName)
               .order('last_message_at', { ascending: false, nullsFirst: false })
               .limit(1);
         
@@ -1603,7 +1745,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!conv) {
              const { data: newConv, error: insertErr } = await supabase.from('conversations').insert({
                  tenant_id: tenant.id,
-                 contact_id: contactId,
+                 contact_id: getRealContactId(contactId),
+                 instance_id: instanceName,
                  unread_count: 0,
                  status: 'open',
                  last_message_at: new Date().toISOString()
@@ -1844,7 +1987,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const { data: conv } = await supabase.from('conversations').select('id').eq('contact_id', contactId).eq('tenant_id', tenant.id).order('last_message_at', { ascending: false }).limit(1).single();
+      const realContactId = getRealContactId(contactId);
+      const instId = getInstanceIdFromContact(contactId);
+      let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
+      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
       if (!conv) return;
 
       const { error } = await supabase.from('conversations').update(payload).eq('id', conv.id);
@@ -1886,10 +2033,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (m.sender_type === 'system') return; // Ignore echoes that don't need realtime sync
 
         let targetContactId = m.conversation_id ? null : m.contact_id;
+        let convInstanceId = null;
         
-        if (m.conversation_id && !targetContactId) {
-             const { data: conv } = await supabase.from('conversations').select('contact_id').eq('id', m.conversation_id).single();
-             if (conv) targetContactId = conv.contact_id;
+        if (m.conversation_id) {
+             const { data: conv } = await supabase.from('conversations').select('contact_id, instance_id').eq('id', m.conversation_id).single();
+             if (conv) {
+                 targetContactId = conv.contact_id;
+                 convInstanceId = conv.instance_id;
+             }
         }
 
         if (!targetContactId) return;
@@ -1897,14 +2048,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const { data: cData } = await supabase.from('contacts').select('*').eq('id', targetContactId).single();
         if (!cData) return;
 
+        // CRITICAL FIX: O contato local deve assumir a instância da conversa ativa para não sumir da caixa correta
+        const effectiveInstanceId = convInstanceId || cData.instance_id;
+        cData.instance_id = effectiveInstanceId;
+
         // RBAC: Verifica se o contato que recebeu a msg é de uma instância que o Agente tem acesso
         const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
         const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-        if (cData.instance_id && allowedStr) {
+        if (effectiveInstanceId && allowedStr) {
             try { 
                 const allowedInstances = JSON.parse(allowedStr); 
                 if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                    if (!allowedInstances.includes(cData.instance_id)) return;
+                    if (!allowedInstances.includes(effectiveInstanceId)) return;
                 } else if (roleStr === 'agent' || roleStr === 'Agente') {
                     return; // Agents with no allowed instances get nothing
                 }

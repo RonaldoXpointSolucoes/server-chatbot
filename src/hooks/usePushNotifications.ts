@@ -73,6 +73,29 @@ export function usePushNotifications() {
           console.log('Push Subscription ativada com sucesso para o usuário!');
         }
 
+        // --- INÍCIO SINCRONIZAÇÃO RBAC ---
+        const syncConfigToSW = () => {
+          if (navigator.serviceWorker.controller) {
+            const role = localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role');
+            const allowedStr = localStorage.getItem('allowed_instances') || sessionStorage.getItem('allowed_instances');
+            
+            let allowedInstances = [];
+            if (allowedStr) {
+                try { allowedInstances = JSON.parse(allowedStr); } catch (e) {}
+            }
+
+            navigator.serviceWorker.controller.postMessage({
+                type: 'SYNC_USER_CONFIG',
+                config: { role, allowedInstances }
+            });
+          }
+        };
+
+        // Sincroniza imediatamente ao carregar e depois a cada 2 minutos
+        syncConfigToSW();
+        setInterval(syncConfigToSW, 2 * 60 * 1000);
+        // --- FIM SINCRONIZAÇÃO RBAC ---
+
       } catch (error) {
         console.error('Erro ao inicializar push notifications:', error);
       }

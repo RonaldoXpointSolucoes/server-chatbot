@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2 } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal } from '../components/ChatModals';
@@ -158,8 +158,14 @@ export default function ChatDashboard() {
     togglePinContact,
     toggleFavorite,
     toggleBlockContact,
+    sendMediaFromUrl,
+    uploadAndSendMedia,
     activeChannelFilter,
+    setActiveChannelFilter,
     activeChannelName,
+    fetchAutomations,
+    searchGlobalContacts,
+    isSearchingGlobally,
     filterType,
     setFilterType
   } = useChatStore();
@@ -246,6 +252,15 @@ export default function ChatDashboard() {
     }
   };
 
+  // Debounce para Busca Global
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (searchTerm && searchTerm.trim().length >= 3) {
+         searchGlobalContacts(searchTerm);
+      }
+    }, 600);
+    return () => clearTimeout(handler);
+  }, [searchTerm, searchGlobalContacts]);
   
   useEffect(() => {
     const closeCb = () => {
@@ -392,7 +407,7 @@ export default function ChatDashboard() {
   // Carrega mensagens do Evolution ao clicar num chat novo
   useEffect(() => {
      if (activeChatId && activeChat && evolutionConnected) {
-       const properTargetInstance = activeChat.instance_id || connectedInstanceName;
+       const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
        if (properTargetInstance) {
           loadHistoricalMessages(activeChatId, properTargetInstance);
        }
@@ -431,7 +446,7 @@ export default function ChatDashboard() {
 
   const handleSendHuman = (e: React.FormEvent) => {
     e.preventDefault();
-    const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
     if (!inputText.trim() || !activeChatId || !properTargetInstance) return;
     
     let finalMessageText = inputText;
@@ -453,7 +468,7 @@ export default function ChatDashboard() {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
     if (!file || !activeChatId || !properTargetInstance) return;
     
     let mediaType: 'image' | 'video' | 'audio' | 'document' = 'document';
@@ -466,7 +481,7 @@ export default function ChatDashboard() {
   };
 
   const handleMicClick = async () => {
-    const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
     if (!activeChatId || !properTargetInstance) return;
 
     if (isRecording) {
@@ -620,7 +635,7 @@ export default function ChatDashboard() {
                 id="btn-send-paste"
                 onClick={() => {
                   if (pastedImage && activeChatId) {
-                    const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+                    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
                     
                     const imageToSend = pastedImage;
                     const captionToSend = pastedImageCaption;
@@ -693,7 +708,7 @@ export default function ChatDashboard() {
         suggestedText={geminiModalState.suggestedText}
         intent={geminiModalState.intent}
         onSend={(finalText) => {
-           const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+           const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
            if (activeChatId && properTargetInstance) {
              sendHumanMessage(activeChatId, finalText, properTargetInstance as string);
              setInputText('');
@@ -718,7 +733,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.0.53 | Deploy: 28/04/2026, 23:25"}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.1.2 | Deploy: 29/04/2026, 11:30"}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -813,7 +828,11 @@ export default function ChatDashboard() {
         <div className="flex flex-col border-b border-[#f2f2f2] dark:border-[#222d34] px-3 py-2 gap-3 bg-white dark:bg-[#111b21]">
           <div className="flex items-center gap-2 w-full">
             <div className="flex w-full bg-[#f0f2f5] dark:bg-[#202c33] px-3 py-2 rounded-xl items-center gap-2 group transition-all ring-1 ring-transparent focus-within:ring-[#00a884]/50 shadow-inner">
-              <Search size={18} className="text-[#54656f] dark:text-[#aebac1] group-focus-within:text-[#00a884] transition-colors" />
+              {isSearchingGlobally ? (
+                  <Loader2 size={18} className="text-[#00a884] animate-spin flex-shrink-0" />
+              ) : (
+                  <Search size={18} className="text-[#54656f] dark:text-[#aebac1] group-focus-within:text-[#00a884] transition-colors flex-shrink-0" />
+              )}
               <input 
                 type="text" 
                 placeholder="Pesquisar chat ou contato" 
@@ -934,28 +953,45 @@ export default function ChatDashboard() {
           )}
 
           {contacts.filter(c => {
-             // Debug para entender o bug do filtro quando Comercial X-Point é clicado!
+             // 1) RBAC ENFORCEMENT - A REGRA DE OURO (Nunca mostrar conversas que não tenho acesso)
+             const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+             const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
+             
+             if (!isGlobalAdmin) {
+                 const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+                 let allowedInstances: string[] = [];
+                 if (allowedStr) {
+                     try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
+                 }
+                 
+                 // Agente sem array de permissões não vê nada.
+                 if (allowedStr) {
+                     if (allowedInstances.length === 0) return false; // Sem instâncias -> Sem acesso
+
+                     const effectiveInstId = c.instance_id || connectedInstanceName; // fallback pra órfãos
+                     if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) {
+                         return false; // BLOQUEADO!
+                     }
+                 } else {
+                     return false; // BLOQUEADO! Agente logado precisa de permissão clara
+                 }
+             }
+
+             // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo)
              if (activeChannelFilter) {
                  const dbInstId = c.instance_id;
                  const effectiveId = connectedInstanceName;
-                 console.log("DEBUG CHANNEL FILTER:", {
-                     contactName: c.contact_name,
-                     dbInstId,
-                     effectiveId,
-                     activeFilter: activeChannelFilter,
-                     activeName: activeChannelName
-                 });
 
                  if (!dbInstId) {
-                     // Fallback conversas antigas órfãs. Vão para a instância padrão (connectedInstanceName)
+                     // Fallback conversas antigas órfãs
                      if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
                  } else {
-                     // Conversas nativas. Compara com ID gerado UUID ou Legacy Name
+                     // Conversas nativas
                      if (dbInstId !== activeChannelFilter && dbInstId !== activeChannelName) return false;
                  }
              }
 
-             // Busca em texto
+             // 3) BUSCA EM TEXTO
              if (searchTerm && !c.name?.toLowerCase().includes(searchTerm.toLowerCase()) && !c.whatsapp_jid?.includes(searchTerm)) {
                return false;
              }
@@ -1023,7 +1059,7 @@ export default function ChatDashboard() {
                 key={contact.id}
                 onClick={() => {
                   setActiveChat(contact.id);
-                  const properTargetInstance = contact.instance_id || connectedInstanceName;
+                  const properTargetInstance = activeChannelFilter || contact.instance_id || connectedInstanceName;
                   if (properTargetInstance) {
                     useChatStore.getState().loadHistoricalMessages(contact.id, properTargetInstance);
                     if (contact.avatar?.includes('ui-avatars')) {
@@ -1139,7 +1175,7 @@ export default function ChatDashboard() {
                             <button 
                               onClick={async (e) => { 
                                 e.stopPropagation(); 
-                                const properTargetInstance = contact.instance_id || connectedInstanceName;
+                                const properTargetInstance = activeChannelFilter || contact.instance_id || connectedInstanceName;
                                 if (properTargetInstance) {
                                   await useChatStore.getState().loadHistoricalMessages(contact.id, properTargetInstance, true);
                                 }
@@ -1405,7 +1441,7 @@ export default function ChatDashboard() {
 
                     <button 
                       onClick={async () => {
-                        const properTargetInstance = activeChat.instance_id || connectedInstanceName;
+                        const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
                         if (properTargetInstance) {
                           await loadHistoricalMessages(activeChat.id, properTargetInstance, true);
                         }
@@ -1747,7 +1783,7 @@ export default function ChatDashboard() {
                           setShowQuickReplies(false);
                           if (qr.media_url) {
                             try {
-                              const properTargetInstance = activeChat?.instance_id || connectedInstanceName;
+                              const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
                               if (activeChat && properTargetInstance) {
                                 await useChatStore.getState().sendMediaFromUrl(
                                   activeChat.id, 

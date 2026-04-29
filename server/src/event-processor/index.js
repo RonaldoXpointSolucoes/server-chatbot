@@ -96,7 +96,8 @@ class EventProcessor {
                      continue;
                 }
 
-                const senderType = msg.key.fromMe ? 'bot' : 'client';
+                const isHuman = EventProcessor.humanMessagesCache && EventProcessor.humanMessagesCache.has(msg.key.id);
+                const senderType = msg.key.fromMe ? (isHuman ? 'human' : 'bot') : 'client';
                 const direction = msg.key.fromMe ? 'outbound' : 'inbound';
                 
                 // Se for outbound (fromMe), o msg.pushName é o nome do PRÓPRIO aparelho (ex: Burguer Plus).
@@ -534,7 +535,7 @@ class EventProcessor {
                              .then(async (url) => {
                                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
                                  if(cid) { 
-                                     await supabase.from('contacts').update({ profile_picture_url: url }).eq('id', cid).is('profile_picture_url', null); 
+                                     await supabase.from('contacts').update({ profile_picture_url: url }).eq('id', cid); 
                                  }
                              })
                              .catch(() => {});
@@ -779,4 +780,5 @@ class EventProcessor {
 
 export { EventProcessor };
 EventProcessor.pendingMediaCache = new Map();
+EventProcessor.humanMessagesCache = new Map();
 export default new EventProcessor();
