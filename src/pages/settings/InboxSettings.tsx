@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
-import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X, QrCode, RefreshCcw, LogOut } from 'lucide-react';
-
+import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X, QrCode, RefreshCcw, LogOut, CheckCircle } from 'lucide-react';
+import { NOTIFICATION_SOUNDS, playNotificationSound } from '../../utils/AudioEngine';
 interface InstanceData {
   id: string;
   display_name: string;
@@ -42,6 +42,17 @@ export default function InboxSettings() {
   const [apiKey, setApiKey] = useState('');
   const [readReceipts, setReadReceipts] = useState(false);
   const [engineProvider, setEngineProvider] = useState('Baileys');
+  const [instanceColor, setInstanceColor] = useState('#10b981');
+  const [notificationSound, setNotificationSound] = useState('default');
+
+  const INSTANCE_COLORS = [
+    { value: '#10b981', label: 'Esmeralda' },
+    { value: '#3b82f6', label: 'Azul' },
+    { value: '#a855f7', label: 'Roxo' },
+    { value: '#f97316', label: 'Laranja' },
+    { value: '#f43f5e', label: 'Rosa' },
+    { value: '#06b6d4', label: 'Ciano' },
+  ];
 
   // Assigned Agents
   const [assignedAgents, setAssignedAgents] = useState<string[]>([]);
@@ -67,6 +78,8 @@ export default function InboxSettings() {
           setReadReceipts(data.settings?.read_messages || false);
           setAssignedAgents(data.settings?.assigned_agents || []);
           setAutoAssignment(data.settings?.auto_assignment || false);
+          setInstanceColor(data.color || '#10b981');
+          setNotificationSound(data.notification_sound || 'default');
         }
       } catch (err) {
         console.error('Falha ao buscar instância:', err);
@@ -94,13 +107,15 @@ export default function InboxSettings() {
         .update({ 
            display_name: displayName,
            api_key: apiKey,
+           color: instanceColor,
+           notification_sound: notificationSound,
            settings: updatedSettings
         })
         .eq('id', instance.id);
 
       if (error) throw error;
       
-      setInstance({ ...instance, display_name: displayName, api_key: apiKey, settings: updatedSettings });
+      setInstance({ ...instance, display_name: displayName, api_key: apiKey, color: instanceColor, notification_sound: notificationSound, settings: updatedSettings });
       alert('Configurações salvas sucesso!');
     } catch (e) {
       console.error(e);
@@ -269,6 +284,39 @@ export default function InboxSettings() {
                        <div className="flex flex-col gap-2">
                          <label className="text-sm font-bold text-gray-300">Provedor de API</label>
                          <input type="text" disabled value={engineProvider} className="w-full bg-[#182229]/50 border border-white/5 rounded-xl p-3 text-gray-500 cursor-not-allowed font-medium" />
+                       </div>
+
+                       <div className="flex flex-col gap-2 mt-4">
+                         <label className="text-sm font-bold text-gray-300">Cor da Instância</label>
+                         <div className="flex gap-2">
+                            {INSTANCE_COLORS.map(color => (
+                               <button
+                                 key={color.value}
+                                 onClick={() => setInstanceColor(color.value)}
+                                 className={`w-8 h-8 rounded-full transition-all flex items-center justify-center ${instanceColor === color.value ? 'ring-2 ring-offset-2 ring-emerald-500 scale-110' : 'hover:scale-105 border border-white/20'}`}
+                                 style={{ backgroundColor: color.value }}
+                                 title={color.label}
+                               >
+                                 {instanceColor === color.value && <CheckCircle size={14} className="text-white drop-shadow" />}
+                               </button>
+                            ))}
+                         </div>
+                       </div>
+
+                       <div className="flex flex-col gap-2 mt-4">
+                         <label className="text-sm font-bold text-gray-300">Som de Notificação</label>
+                         <select
+                           value={notificationSound}
+                           onChange={e => {
+                             setNotificationSound(e.target.value);
+                             playNotificationSound(e.target.value);
+                           }}
+                           className="w-full bg-[#182229] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-medium"
+                         >
+                           {NOTIFICATION_SOUNDS.map(s => (
+                             <option key={s.id} value={s.id}>{s.name}</option>
+                           ))}
+                         </select>
                        </div>
 
                        <div className="flex flex-col gap-2 mt-4">

@@ -10,8 +10,12 @@ cleanupOutdatedCaches();
 // Precache resources
 precacheAndRoute(self.__WB_MANIFEST);
 
-// Força a ativação imediata do novo Service Worker
-self.skipWaiting();
+// Permite que o cliente dite a ativação via botão "Atualizar"
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
 clientsClaim();
 
 // --- INÍCIO INDEXEDDB RBAC CONFIG ---

@@ -544,6 +544,30 @@ export default function ChatDashboard() {
     }
   };
 
+  const handleAiReplySuggestion = async (msg: Message) => {
+    if (!activeChat) return;
+    
+    setIsGeminiProcessing(true);
+    try {
+      const history = activeChat.messages
+        ? activeChat.messages.slice(-50).map(m => ({ 
+            role: m.sender === 'client' ? 'user' : 'model', 
+            text: m.text || '' 
+          }))
+        : [];
+        
+      const suggestion = await geminiService.suggestReplyWithContext(msg.text || '', history);
+      
+      setReplyMessage({ id: msg.id, text: msg.text || 'Mídia enviada', sender: msg.sender });
+      setInputText(suggestion);
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    } catch (error: any) {
+      alert(error.message || 'Erro ao gerar sugestão de resposta com IA.');
+    } finally {
+      setIsGeminiProcessing(false);
+    }
+  };
+
   const handleTranscribeAudio = async (msgId: string, mediaUrl: string) => {
     if (!mediaUrl || transcribingIds[msgId] || !activeChatId) return;
     setTranscribingIds(s => ({ ...s, [msgId]: true }));
@@ -733,7 +757,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.1.5 | Deploy: 29/04/2026, 16:58"}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.1.10 | Deploy: 30/04/2026, 12:45"}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1533,6 +1557,15 @@ export default function ChatDashboard() {
                                 className="w-full text-left px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors text-[14px] text-[#3b4a54] dark:text-[#d1d7db]"
                               >
                                 Responder
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  handleAiReplySuggestion(msg);
+                                  setActiveMsgDropdown(null);
+                                }}
+                                className="w-full text-left px-4 py-2 hover:bg-[#d9fdd3]/50 dark:hover:bg-[#005c4b]/30 flex items-center gap-3 transition-all duration-300 text-[14px] text-[#00a884] font-medium"
+                              >
+                                <Sparkles size={16} className="text-[#00a884] animate-pulse" /> Responder com I.A
                               </button>
                               <button 
                                 onClick={() => {

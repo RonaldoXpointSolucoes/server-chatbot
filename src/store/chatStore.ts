@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { supabase, ContactRow } from '../services/supabase';
+import { playNotificationSound } from '../utils/AudioEngine';
 
 export type MessageType = {
   id: string;
@@ -340,7 +341,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   qrModalTargetInstance: null,
   automations: [],
   tenantLabels: [],
-  appVersion: null,
   isSearchingGlobally: false,
   quickReplies: [],
   userSettings: {},
@@ -583,21 +583,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Injeção Mágica de Assinatura (Signature)
     let finalMessageText = text;
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-         const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-         let agent = state.agents.find(a => a.user_id === user.id || (a.email && a.email === currentUserEmail));
-         
-         if (!agent) {
-             // Fallback direto no banco caso a store não tenha sido populada ainda
-             const { data: agentData } = await supabase.from('tenant_users').select('use_signature, signature').eq('user_id', user.id).single();
-             if (agentData) agent = agentData as any;
-         }
+       const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+       if (currentUserEmail) {
+           let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+           
+           if (!agent && state.tenantInfo) {
+               // Fallback direto no banco caso a store não tenha sido populada ainda
+               const { data: agentData } = await supabase.from('tenant_users')
+                  .select('use_signature, signature')
+                  .eq('email', currentUserEmail)
+                  .eq('tenant_id', state.tenantInfo.id)
+                  .limit(1)
+                  .maybeSingle();
+               if (agentData) agent = agentData as any;
+           }
 
-         if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
-            finalMessageText = `${agent.signature}\n${text}`;
-         }
-      }
+           if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
+              finalMessageText = `*${agent.signature}*\n\n${text}`;
+           }
+       }
     } catch (e) {
       console.error("Erro na injeção de assinatura:", e);
     }
@@ -649,20 +653,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     
     if (!isPtt) {
        try {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-             const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-             let agent = state.agents.find(a => a.user_id === user.id || (a.email && a.email === currentUserEmail));
-             
-             if (!agent) {
-                 const { data: agentData } = await supabase.from('agents').select('use_signature, signature').eq('user_id', user.id).single();
-                 if (agentData) agent = agentData as any;
-             }
+           const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+           if (currentUserEmail) {
+               let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+               
+               if (!agent && state.tenantInfo) {
+                   const { data: agentData } = await supabase.from('tenant_users')
+                      .select('use_signature, signature')
+                      .eq('email', currentUserEmail)
+                      .eq('tenant_id', state.tenantInfo.id)
+                      .limit(1)
+                      .maybeSingle();
+                   if (agentData) agent = agentData as any;
+               }
 
-             if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
-                finalCaption = finalCaption ? `${agent.signature}\n${finalCaption}` : agent.signature;
-             }
-          }
+               if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
+                  finalCaption = finalCaption ? `*${agent.signature}*\n\n${finalCaption}` : `*${agent.signature}*`;
+               }
+           }
        } catch (e) {
           console.error("Erro na injeção de assinatura na mídia:", e);
        }
@@ -772,19 +780,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     let finalCaption = caption?.trim() ? caption.trim() : '';
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-         const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-         let agent = state.agents.find(a => a.user_id === user.id || (a.email && a.email === currentUserEmail));
-         if (!agent) {
-             const { data: agentData } = await supabase.from('tenant_users').select('use_signature, signature').eq('user_id', user.id).single();
-             if (agentData) agent = agentData as any;
-         }
-         
-         if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
-             finalCaption = finalCaption ? `${agent.signature}\n${finalCaption}` : agent.signature;
-         }
-      }
+       const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+       if (currentUserEmail) {
+           let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+           if (!agent && state.tenantInfo) {
+               const { data: agentData } = await supabase.from('tenant_users')
+                  .select('use_signature, signature')
+                  .eq('email', currentUserEmail)
+                  .eq('tenant_id', state.tenantInfo.id)
+                  .limit(1)
+                  .maybeSingle();
+               if (agentData) agent = agentData as any;
+           }
+           
+           if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
+               finalCaption = finalCaption ? `*${agent.signature}*\n\n${finalCaption}` : `*${agent.signature}*`;
+           }
+       }
     } catch (e) {
       console.warn("Erro ao injetar assinatura na midia por URL", e);
     }
@@ -1537,17 +1549,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
            });
 
            // RBAC: Filtra as conversas pela instância permitida
+           const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
            const validConvs = dbConvs.filter(conv => {
                const dbC = validContacts.find(c => c.id === conv.contact_id);
                if (!dbC) return false; // Ignora se perder integridade ou for LID bloqueado
                
                const effectiveInstanceId = conv.instance_id || dbC.instance_id;
                
-               if (effectiveInstanceId) {
+               if (effectiveInstanceId && !isGlobalAdmin) {
                    if (allowedStr) {
                        if (allowedInstances.length === 0) return false; // Agente sem instâncias -> nada
                        if (!allowedInstances.includes(effectiveInstanceId)) return false; // Bloqueado
-                   } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                   } else {
                        return false; // Bloqueado por falta de config
                    }
                }
@@ -1984,6 +1997,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }).eq('id', id).eq('tenant_id', tenantId);
       
       if (error) throw error;
+
+      // Update storage if the updated agent is the currently logged in user
+      const currentEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+      if (currentEmail === payload.email) {
+          const allowedStr = JSON.stringify(payload.allowed_instances || []);
+          if (localStorage.getItem('current_user_email')) {
+              localStorage.setItem('allowed_instances', allowedStr);
+          }
+          if (sessionStorage.getItem('current_user_email')) {
+              sessionStorage.setItem('allowed_instances', allowedStr);
+          }
+          window.location.reload();
+      }
+
       await get().fetchTenantAgents();
     } catch (e) {
       console.error('Erro ao atualizar agente:', e);
@@ -2007,19 +2034,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   updateAgentProfile: async (fullName, signature, use_signature) => {
-    const tenant = get().tenantInfo;
-    if (!tenant) return;
+    const tenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    if (!tenantId) return;
     try {
-      const userRes = await supabase.auth.getUser();
-      if (!userRes.data.user) return;
+      const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+      if (!currentUserEmail) return;
 
-      const me = get().agents.find(a => a.user_id === userRes.data.user?.id || (a.email && userRes.data.user?.email && a.email.toLowerCase() === userRes.data.user.email.toLowerCase()));
-      if (!me) return;
+      let me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
       
-      const { error } = await supabase.from('tenant_users').update({ full_name: fullName, signature: signature, use_signature: use_signature })
-        .eq('tenant_id', tenant.id).eq('id', me.id);
+      if (!me) {
+          const { data: dbMe } = await supabase.from('tenant_users')
+              .select('id')
+              .eq('email', currentUserEmail)
+              .eq('tenant_id', tenantId)
+              .limit(1)
+              .maybeSingle();
+          if (dbMe) me = dbMe as any;
+      }
       
-      if (error) throw error;
+      if (!me) {
+          // Criar on the fly para o Owner (Company Admin)
+          const { v4: uuidv4 } = await import('uuid');
+          const tempUserId = uuidv4();
+          const { data: newMe, error: insertErr } = await supabase.from('tenant_users').insert([{
+             tenant_id: tenantId,
+             user_id: tempUserId,
+             role: 'admin',
+             full_name: fullName,
+             email: currentUserEmail,
+             signature: signature,
+             use_signature: use_signature
+          }]).select('id').single();
+          
+          if (insertErr) throw insertErr;
+          me = newMe as any;
+      } else {
+          const { error } = await supabase.from('tenant_users')
+              .update({ full_name: fullName, signature: signature, use_signature: use_signature })
+              .eq('tenant_id', tenantId)
+              .eq('id', me.id);
+          
+          if (error) throw error;
+      }
+      
       await get().fetchTenantAgents(); // Sincroniza localmente
     } catch (e) {
       console.error('Erro ao atualizar perfil do agente:', e);
@@ -2115,15 +2172,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // RBAC: Verifica se o contato que recebeu a msg é de uma instância que o Agente tem acesso
         const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
         const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-        if (effectiveInstanceId && allowedStr) {
-            try { 
-                const allowedInstances = JSON.parse(allowedStr); 
-                if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                    if (!allowedInstances.includes(effectiveInstanceId)) return;
-                } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                    return; // Agents with no allowed instances get nothing
-                }
-            } catch(e) {}
+        const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
+        if (effectiveInstanceId && !isGlobalAdmin) {
+            if (allowedStr) {
+                try { 
+                    const allowedInstances = JSON.parse(allowedStr); 
+                    if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+                        if (!allowedInstances.includes(effectiveInstanceId)) return;
+                    } else {
+                        return; // Agents with no allowed instances get nothing
+                    }
+                } catch(e) {}
+            } else {
+                return; // Bloqueado por falta de config
+            }
         }
 
         const currentState = get();
@@ -2218,8 +2280,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
               if (!isIgnored) {
                  updatedContact.lastMsgTimestamp = new Date(m.timestamp).getTime();
                  const isClient = (m.sender_type === 'client' || !m.sender_type);
-                 if (s.activeChatId !== cid && isClient) {
-                     updatedContact.unread = (updatedContact.unread || 0) + 1;
+                 
+                 if (isClient) {
+                     if (s.activeChatId !== cid) {
+                         updatedContact.unread = (updatedContact.unread || 0) + 1;
+                     }
+                     
+                     if (!isIgnoredSilent) {
+                         if (effectiveInstanceId) {
+                             supabase.from('whatsapp_instances').select('notification_sound').eq('id', effectiveInstanceId).single()
+                               .then(({ data }) => {
+                                   playNotificationSound(data?.notification_sound || 'default');
+                               }).catch(() => {
+                                   playNotificationSound('default');
+                               });
+                         } else {
+                             playNotificationSound('default');
+                         }
+                     }
                  }
               }
               

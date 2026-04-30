@@ -25,16 +25,35 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({ isOpen, 
 
   const loadProfile = async () => {
      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-            const me = agents.find(a => a.user_id === user.id || (a.email && user.email && a.email.toLowerCase() === user.email.toLowerCase()));
-            if (me) {
-               setFullName(me.full_name || '');
-               setSignature(me.signature || '');
-               setUseSignature(me.use_signature || false);
-            }
+        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+        if (!currentUserEmail) return;
+
+        let me = agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+        
+        if (!me) {
+           const currentTenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+           if (currentTenantId) {
+               const { data: dbMe } = await supabase.from('tenant_users')
+                   .select('*')
+                   .eq('email', currentUserEmail)
+                   .eq('tenant_id', currentTenantId)
+                   .limit(1)
+                   .maybeSingle();
+               if (dbMe) me = dbMe as any;
+           }
         }
-     } catch (e) {}
+
+        if (me) {
+           setFullName(me.full_name || '');
+           setSignature(me.signature || '');
+           setUseSignature(me.use_signature || false);
+        } else {
+           const currentName = localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name');
+           setFullName(currentName || '');
+        }
+     } catch (e) {
+        console.error('Erro ao carregar perfil do agente:', e);
+     }
   };
 
   const handleSave = async () => {
@@ -105,7 +124,7 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({ isOpen, 
                 <Edit3 size={18} className="absolute left-4 top-3.5 text-gray-400 dark:text-slate-500" />
               </div>
               <p className="text-xs text-gray-500 dark:text-slate-500 mt-2 flex items-center gap-1">
-                 A assinatura será automaticamente adicionada no final de cada mensagem que você enviar para o cliente. Deixe em branco se não quiser assinatura.
+                 A assinatura será automaticamente adicionada no topo de cada mensagem que você enviar para o cliente, em negrito. Deixe em branco se não quiser assinatura.
               </p>
             </div>
             )}

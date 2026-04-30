@@ -19,6 +19,7 @@ import AutomationSettings from './pages/settings/AutomationSettings';
 import OperationLogs from './pages/settings/OperationLogs';
 import DevLogger from './components/DevLogger';
 import { InstallPWA } from './components/InstallPWA';
+import { UpdatePrompt } from './components/UpdatePrompt';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import FlowManager from './pages/FlowManager';
 import FlowBuilder from './pages/FlowBuilder';
@@ -50,10 +51,12 @@ function PushNotificationManager() {
 }
 
 
+
 // Provedor Global de Rotas
 export default function App() {
   return (
     <BrowserRouter>
+      <UpdatePrompt />
       <InstallPWA />
       <DevLogger />
       <PushNotificationManager />

@@ -43,8 +43,8 @@ class GeminiService {
 
     let formatRules = `
 ATENÇÃO E REGRAS DE FORMATO:
-1. Separe BEM o texto em parágrafos curtos pulando uma linha em branco entre eles (isso ajuda a não ficar maçante de ler no celular).
-2. Utilize alguns EMOJIS sutis que combinam com o assunto para deixar a mensagem mais leve e bonita.
+1. Separe BEM o texto em parágrafos curtos pulando uma linha em branco entre eles.
+2. Mantenha um tom mais formal e profissional. Use emojis de forma MUITO restrita (no máximo 1 ou 2 em toda a mensagem) apenas se estritamente necessário para quebrar o gelo.
 3. Retorne APENAS a mensagem pronta para envio, sem aspas, sem marcadores de markdown, sem responder ou adicionar conversinha antes da resposta real.`;
 
     if (intent === 'analyze') {
@@ -183,6 +183,40 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
       console.error("Erro em transcribeAudio:", err);
       throw err;
     }
+  }
+
+  async suggestReplyWithContext(targetMessageText: string, contextHistory: {role: string, text: string}[]): Promise<string> {
+    if (!this.isConfigured()) {
+      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+    }
+    const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+    // Format the context
+    const historyText = contextHistory.map(m => `${m.role === 'user' ? 'Cliente' : 'Atendente'}: ${m.text}`).join('\n');
+
+    const promptObj = `Aja como um atendente especializado de altíssimo nível. 
+Preciso de uma sugestão de resposta para enviar ao cliente.
+Eu, o Atendente, cliquei para "Responder" ESPECIFICAMENTE a esta mensagem do cliente: "${targetMessageText}"
+
+Aqui está o histórico das últimas mensagens (até 50) para você entender perfeitamente o contexto geral:
+--- HISTÓRICO ---
+${historyText}
+-----------------
+
+Sua tarefa: Crie a MELHOR resposta possível focada nessa mensagem específica ("${targetMessageText}"), baseando-se no contexto de toda a conversa.
+Seja educado, prestativo e mantenha uma postura profissional e mais formal, evitando linguagem excessivamente descontraída.`;
+
+    const formatRules = `
+ATENÇÃO E REGRAS DE FORMATO:
+1. Retorne APENAS o texto da mensagem sugerida pronta para envio. Não adicione textos como "Aqui está a sugestão" ou aspas.
+2. Formate a mensagem com quebras de linha claras.
+3. Mantenha o tom profissional e levemente mais formal. Limite drasticamente o uso de emojis (use no máximo 1 ou 2 por mensagem inteira, ou nenhum se o contexto for sério).`;
+
+    const prompt = `${promptObj}\n${formatRules}`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text().trim();
   }
 }
 

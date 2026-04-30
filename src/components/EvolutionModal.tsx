@@ -3,6 +3,7 @@ import { useChatStore } from '../store/chatStore';
 import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link, PlusCircle, LogOut, RefreshCcw, UserCircle2, Trash2, QrCode } from 'lucide-react';
 import { createInstance, fetchEngineStatus, logoutEngine, reconnectEngine, clearEngineStore, syncEngineContacts, forceEnginePresence } from '../services/whatsappEngine';
 import { supabase } from '../services/supabase';
+import { NOTIFICATION_SOUNDS, playNotificationSound } from '../utils/AudioEngine';
 
 function uuidv4() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -26,6 +27,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
   const [customName, setCustomName] = useState<string>('');
   const [customApiKey, setCustomApiKey] = useState<string>('');
   const [customColor, setCustomColor] = useState<string>('#10b981');
+  const [customSound, setCustomSound] = useState<string>('default');
   const [activePollingId, setActivePollingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -138,7 +140,8 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
           status: 'offline',
           tenant_id: cId,
           api_key: finalApiKey,
-          color: customColor
+          color: customColor,
+          notification_sound: customSound
         });
 
         if (dbErr) throw new Error('Falha ao registrar instância. ' + dbErr.message);
@@ -151,6 +154,7 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
         setCustomName('');
         setCustomApiKey('');
         setCustomColor('#10b981');
+        setCustomSound('default');
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Erro de comunicação com o sistema.');
@@ -328,6 +332,35 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
                        </button>
                     ))}
                  </div>
+              </div>
+              
+              <div className="w-full mt-4 flex flex-col items-center">
+                 <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-tight">Som de Notificação</p>
+                 <select
+                   value={targetInstObj?.notification_sound || 'default'}
+                   onChange={async (e) => {
+                      const val = e.target.value;
+                      playNotificationSound(val);
+                      const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                      if (!cId) return;
+                      const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                      if(!tInstanceId) return;
+                      
+                      const { error } = await supabase.from('whatsapp_instances')
+                        .update({ notification_sound: val })
+                        .eq('id', tInstanceId)
+                        .eq('tenant_id', cId);
+                        
+                      if (!error) {
+                         fetchExistingInstances();
+                      }
+                   }}
+                   className="w-full max-w-[200px] bg-white/50 dark:bg-black/40 border border-gray-200 dark:border-white/10 rounded-xl p-2 text-xs text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-all shadow-sm text-center"
+                 >
+                   {NOTIFICATION_SOUNDS.map(s => (
+                     <option key={s.id} value={s.id}>{s.name}</option>
+                   ))}
+                 </select>
               </div>
               
               <div className="grid grid-cols-2 gap-2 w-full mt-6">
@@ -598,6 +631,22 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
                           ))}
                        </div>
                     </div>
+                     
+                     <div className="w-full mb-4">
+                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase tracking-tight">Som de Notificação</label>
+                        <select
+                          value={customSound}
+                          onChange={e => {
+                            setCustomSound(e.target.value);
+                            playNotificationSound(e.target.value);
+                          }}
+                          className="w-full bg-white dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-2xl p-3 text-sm text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-all"
+                        >
+                          {NOTIFICATION_SOUNDS.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                     </div>
                     
                     <button 
                       onClick={handleGenerateNew}

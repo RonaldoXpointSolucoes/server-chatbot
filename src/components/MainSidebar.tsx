@@ -143,6 +143,13 @@ export function MainSidebar() {
                 } catch(e) {}
              }
              setInstances(finalData);
+
+             // Auto-seleciona a única caixa disponível
+             const { activeChannelFilter, setActiveChannelFilter, fetchInitialData } = useChatStore.getState();
+             if (!activeChannelFilter && finalData.length === 1) {
+                 setActiveChannelFilter(finalData[0].id, finalData[0].display_name);
+                 fetchInitialData();
+             }
           }
         } catch (e) {
         console.error('Erro ao buscar canais:', e);
@@ -452,11 +459,13 @@ export function MainSidebar() {
         <div className="px-2 space-y-0.5">
 
           <CollapsibleSection title="Conversas" icon={<MessageCircle size={16} />} isOpen={expandedSections.conversations} onToggle={() => toggleSection('conversations')}>
-            <NavItem title="Todas as conversas" isActive={!activeChannelFilter} onClick={() => {
-              setActiveChannelFilter(null, null);
-              useChatStore.getState().fetchInitialData();
-              navigate('/chat');
-            }} />
+            {instances.length !== 1 && (
+              <NavItem title="Todas as conversas" isActive={!activeChannelFilter} onClick={() => {
+                setActiveChannelFilter(null, null);
+                useChatStore.getState().fetchInitialData();
+                navigate('/chat');
+              }} />
+            )}
             
             {/* Lista de Canais (Inboxes) inserida abaixo de Todas as conversas */}
             {instances.length > 0 && (

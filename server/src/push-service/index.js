@@ -90,9 +90,10 @@ class PushService {
                 };
 
                 return webpush.sendNotification(pushSubscription, payload).catch(async (err) => {
-                    console.error("[PushService] Erro enviando push para", sub.endpoint, err.message);
-                    if (err.statusCode === 410 || err.statusCode === 404) {
-                        // The endpoint is no longer valid, delete it from the database
+                    console.error(`[PushService] Erro enviando push para ${sub.endpoint} (Status: ${err.statusCode}): ${err.message}`);
+                    if (err.statusCode === 410 || err.statusCode === 404 || err.statusCode === 401 || err.statusCode === 400) {
+                        // The endpoint is no longer valid or unauthorized, delete it from the database
+                        console.log("[PushService] Removendo subscription inválida do banco de dados (Status", err.statusCode, ")");
                         await supabase.from("push_subscriptions").delete().eq("id", sub.id);
                     }
                 });
