@@ -83,6 +83,14 @@ class EventProcessor {
             // Ignora grupos dependendo da opção da empresa
             if (config.ignore_groups && this.isGroup(jid)) continue;
 
+            // [LID Sync / Ciphertext Error Override]
+            // Ignora stubs de falha de descriptografia (ex: Message absent from node)
+            // Se salvarmos isso como mensagem vazia, o retry natural da Baileys será descartado por duplicidade de ID.
+            if (msg.messageStubType && !msg.message) {
+                console.log(`[EventProcessor] Ignorando Stub Type ${msg.messageStubType} s/conteudo. (Evitando perda por dup-id no retry) - JID: ${jid}`);
+                continue;
+            }
+
             try {
                 const ownerJid = sock?.user?.id;
                 let ownerPhone = null;
