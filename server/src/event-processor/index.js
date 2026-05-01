@@ -273,7 +273,7 @@ class EventProcessor {
                          tenant_id: data.tenant_id,
                          contact_id: data.contact_id,
                          unread_count: Number(exist.unread_count || 0) + Number(data.unread_count || 0),
-                         last_message_preview: String(data.last_message_preview || '').substring(0, 50),
+                         last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
                          last_message_at: new Date(data.last_message_at).toISOString(),
                          updated_at: new Date().toISOString()
                      });
@@ -284,7 +284,7 @@ class EventProcessor {
                          contact_id: data.contact_id,
                          status: 'bot',
                          unread_count: data.unread_count,
-                         last_message_preview: data.last_message_preview.substring(0, 50),
+                         last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
                          last_message_at: data.last_message_at.toISOString()
                      });
                  }
