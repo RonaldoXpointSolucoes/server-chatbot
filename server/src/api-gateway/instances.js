@@ -119,11 +119,24 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
             if (method === 'sendMessage' && result?.key?.id) {
                 try {
                     const { EventProcessor } = await import('../event-processor/index.js');
-                    if (EventProcessor && EventProcessor.humanMessagesCache) {
-                        EventProcessor.humanMessagesCache.set(result.key.id, true);
-                        setTimeout(() => EventProcessor.humanMessagesCache.delete(result.key.id), 60000);
+                    if (EventProcessor) {
+                        // Protege contra duplicação de human messages cache
+                        if (EventProcessor.humanMessagesCache) {
+                            EventProcessor.humanMessagesCache.set(result.key.id, true);
+                            setTimeout(() => EventProcessor.humanMessagesCache.delete(result.key.id), 60000);
+                        }
+
+                        // Emula um evento messages.upsert para garantir a persistência imediata
+                        const mockUpsert = {
+                            messages: [result],
+                            type: 'append'
+                        };
+                        
+                        await EventProcessor.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
                     }
-                } catch(e) {}
+                } catch(e) {
+                    console.error("Erro ao injetar a mensagem de saída no EventProcessor (invoke):", e);
+                }
             }
             res.json({ ok: true, result });
         } catch (sockError) {
