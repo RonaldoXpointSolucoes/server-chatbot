@@ -20,6 +20,7 @@ class EventProcessor {
         setInterval(() => this.flushQueue(), 2000);
         
         this.tenantConfigs = new Map();
+        this.lastGlobalMessageTimestamp = 0;
     }
     
     async getTenantConfig(tenantId) {
@@ -130,6 +131,15 @@ class EventProcessor {
                 } else if (timestampSecs && typeof timestampSecs.low === 'number') {
                     tsDate = new Date(timestampSecs.low * 1000);
                 }
+
+                // Garantir ordem estrita cronológica global para envios/recebimentos massivos no mesmo segundo
+                let tsMs = tsDate.getTime();
+                if (tsMs <= this.lastGlobalMessageTimestamp) {
+                    tsMs = this.lastGlobalMessageTimestamp + 1;
+                }
+                this.lastGlobalMessageTimestamp = tsMs;
+                tsDate = new Date(tsMs);
+
 
                 const textMessage = this.extractTextFromMessage(msg);
                 const msgType = this.extractTypeFromMessage(msg);
