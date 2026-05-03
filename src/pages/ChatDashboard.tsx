@@ -167,8 +167,7 @@ export default function ChatDashboard() {
     searchGlobalContacts,
     isSearchingGlobally,
     filterType,
-    setFilterType,
-    appVersion
+    setFilterType
   } = useChatStore();
 
   // Execucao Incial Reativa
