@@ -747,6 +747,115 @@ class EventProcessor {
         return 'text';
     }
 
+    async handleMessageReceiptUpdate(tenantId, instanceId, sock, updates) {
+        if (!updates || updates.length === 0) return;
+
+        try {
+            const messageIds = [];
+            const idToStatus = new Map();
+
+            for (const update of updates) {
+                if (!update.key || !update.key.id) continue;
+                
+                // Type mapeia para read, se não for, consideramos delivered.
+                let newStatus = 'delivered';
+                if (update.receipt?.type === 'read' || update.receipt?.type === 'read-self') {
+                    newStatus = 'read';
+                }
+
+                messageIds.push(update.key.id);
+                idToStatus.set(update.key.id, newStatus);
+            }
+
+            if (messageIds.length === 0) return;
+
+            const { data: messages, error: selectErr } = await supabase
+                .from('messages')
+                .select('id, whatsapp_message_id, status')
+                .eq('tenant_id', tenantId)
+                .in('whatsapp_message_id', messageIds);
+
+            if (selectErr || !messages || messages.length === 0) return;
+
+            for (const msg of messages) {
+                const pendingStatus = idToStatus.get(msg.whatsapp_message_id);
+                
+                // Evita regressão (ex: de read voltar para delivered)
+                if (msg.status === 'read' && pendingStatus !== 'read') continue;
+                
+                if (msg.status !== pendingStatus) {
+                    // Fire-and-forget update
+                    supabase.from('messages')
+                        .update({ status: pendingStatus })
+                        .eq('id', msg.id)
+                        .then(({error}) => {
+                            if (error) console.error(`[EventProcessor] Erro atualizando status (recibo):`, error);
+                        });
+                }
+            }
+
+        } catch (e) {
+             console.error(`[EventProcessor] Erro processando recibo (message-receipt.update):`, e);
+        }
+    }
+
+    async handleMessagesUpdate(tenantId, instanceId, sock, updates) {
+        if (!updates || updates.length === 0) return;
+
+        try {
+            const messageIds = [];
+            const idToStatus = new Map();
+
+            for (const item of updates) {
+                // updates de mensagem vêm com a key e um objeto update
+                const { key, update } = item;
+                if (!key || !key.id || update.status === undefined || update.status === null) continue;
+
+                // WAMessageStatus enum: 
+                // 2 = SERVER_ACK, 3 = DELIVERY_ACK, 4 = READ, 5 = PLAYED
+                let newStatus = null;
+                if (update.status === 2) newStatus = 'SERVER_ACK';
+                if (update.status === 3) newStatus = 'delivered';
+                if (update.status === 4 || update.status === 5) newStatus = 'read';
+
+                if (newStatus) {
+                    messageIds.push(key.id);
+                    idToStatus.set(key.id, newStatus);
+                }
+            }
+
+            if (messageIds.length === 0) return;
+
+            const { data: messages, error: selectErr } = await supabase
+                .from('messages')
+                .select('id, whatsapp_message_id, status')
+                .eq('tenant_id', tenantId)
+                .in('whatsapp_message_id', messageIds);
+
+            if (selectErr || !messages || messages.length === 0) return;
+
+            for (const msg of messages) {
+                const pendingStatus = idToStatus.get(msg.whatsapp_message_id);
+                
+                // Evita regressão
+                if (msg.status === 'read' && pendingStatus !== 'read') continue;
+                if (msg.status === 'delivered' && pendingStatus === 'SERVER_ACK') continue;
+                
+                if (msg.status !== pendingStatus) {
+                    // Fire-and-forget update
+                    supabase.from('messages')
+                        .update({ status: pendingStatus })
+                        .eq('id', msg.id)
+                        .then(({error}) => {
+                            if (error) console.error(`[EventProcessor] Erro atualizando status (messages.update):`, error);
+                        });
+                }
+            }
+        } catch (e) {
+             console.error(`[EventProcessor] Erro processando status (messages.update):`, e);
+        }
+    }
+
     async handleConnectionUpdate(tenantId, instanceId, update) {
         const { connection, lastDisconnect, qr } = update;
         const payload = {};

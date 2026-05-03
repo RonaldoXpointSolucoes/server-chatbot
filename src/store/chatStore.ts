@@ -1252,16 +1252,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   markAllAsRead: async () => {
+    const { activeChannelFilter, activeChannelName } = get();
+
     // UI Otimista
     set((state) => ({
-      contacts: state.contacts.map(c => ({...c, unread: 0}))
+      contacts: state.contacts.map(c => {
+         let isMatch = true;
+         if (activeChannelFilter) {
+            const currentBox = c.instance_id || state.connectedInstanceName;
+            if (currentBox !== activeChannelFilter && currentBox !== activeChannelName) {
+                // tenta fallback para url de evolution
+                const isEvoUrlMatch = c.instance_id && c.instance_id.includes(activeChannelFilter);
+                if (!isEvoUrlMatch) {
+                    isMatch = false;
+                }
+            }
+         }
+         return isMatch ? { ...c, unread: 0 } : c;
+      })
     }));
     
     const tenant = get().tenantInfo;
     if(tenant) {
-      const activeContacts = get().contacts.filter(c => c.unread > 0);
       try {
-         await supabase.from('conversations').update({ unread_count: 0 }).eq('tenant_id', tenant.id).gt('unread_count', 0);
+         let query = supabase.from('conversations').update({ unread_count: 0 }).eq('tenant_id', tenant.id).gt('unread_count', 0);
+         
+         if (activeChannelFilter) {
+             // Opcional fallback de OR com name caso seja preciso, mas geralmente o DB é o ID:
+             query = query.eq('instance_id', activeChannelFilter);
+         }
+         
+         await query;
       } catch(e) {
          console.error('Erro ao marcar_todas_lidas: ', e);
       }

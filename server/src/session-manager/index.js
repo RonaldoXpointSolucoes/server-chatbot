@@ -167,6 +167,14 @@ class SessionManager {
             sock.ev.on('messages.upsert', async (m) => {
                 await eventProcessor.handleMessageUpsert(tenantId, instanceId, sock, m);
             });
+
+            sock.ev.on('message-receipt.update', async (updates) => {
+                await eventProcessor.handleMessageReceiptUpdate(tenantId, instanceId, sock, updates);
+            });
+
+            sock.ev.on('messages.update', async (updates) => {
+                await eventProcessor.handleMessagesUpdate(tenantId, instanceId, sock, updates);
+            });
             
             this.sessions.set(instanceId, { sock, tenantId });
 

@@ -11,7 +11,7 @@ import { GeminiEditorModal } from '../components/GeminiEditorModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Flag, Clock, Mail, MailOpen } from 'lucide-react'; // Adicionado lucide pro flag
+import { Flag, Clock, Mail, MailOpen, CircleDollarSign } from 'lucide-react'; // Adicionado lucide pro flag
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { supabase } from '../services/supabase';
@@ -757,7 +757,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.1.10 | Deploy: 30/04/2026, 12:45"}
+            {appVersion ? `${appVersion.version} | Deploy: ${new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : "v2.1.11 | Deploy: 30/04/2026, 17:42"}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1296,8 +1296,8 @@ export default function ChatDashboard() {
                   <div className="flex text-[13px] text-[#54656f] dark:text-[#8696a0] truncate mt-0.5 items-center justify-between">
                     <div className="flex items-center gap-1.5 truncate w-full pr-2">
                        {isMe && (
-                           lastMsg?.status === 'READ' ? <CheckCheck size={14} className="text-[#53bdeb] shrink-0" /> : 
-                           lastMsg?.status === 'DELIVERY_ACK' || lastMsg?.status === 'SERVER_ACK' ? <CheckCheck size={14} className="text-gray-400 shrink-0" /> :
+                           lastMsg?.status === 'READ' || lastMsg?.status === 'read' ? <CheckCheck size={14} className="text-[#53bdeb] shrink-0" /> : 
+                           lastMsg?.status === 'DELIVERY_ACK' || lastMsg?.status === 'SERVER_ACK' || lastMsg?.status === 'delivered' ? <CheckCheck size={14} className="text-gray-400 shrink-0" /> :
                            <Check size={14} className="text-gray-400 shrink-0" />
                        )}
                        {contact.bot_status === 'paused' ? <span className="w-2 h-2 rounded-full bg-yellow-500 shrink-0 mr-1" /> : !isMe && <Bot size={13} className="text-[#00a884] shrink-0" />}
@@ -1410,6 +1410,19 @@ export default function ChatDashboard() {
                       {activeChat.document_number && (
                         <div className="flex items-center gap-1.5 group/doc bg-black/5 dark:bg-white/5 px-2 py-0.5 rounded-full border border-black/5 dark:border-white/5 backdrop-blur-sm transition-all hover:border-[#00a884]/30">
                           <span className="font-mono tracking-wide">{activeChat.document_number}</span>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (activeChat.document_number) {
+                                const rawCnpj = activeChat.document_number.replace(/\D/g, '');
+                                window.open(`https://service.xpointsolucoes.com.br/notafiscalx/mensalidade/?e=${rawCnpj}`, '_blank');
+                              }
+                            }}
+                            className="transition-all p-0.5 rounded cursor-pointer duration-300 flex items-center justify-center text-[#54656f] dark:text-[#aebac1] opacity-40 group-hover/doc:opacity-100 hover:text-emerald-500 hover:bg-black/5 dark:hover:bg-white/10"
+                            title="Ver Faturamento (NF-e)"
+                          >
+                            <CircleDollarSign size={12} />
+                          </button>
                           <button 
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1749,8 +1762,8 @@ export default function ChatDashboard() {
                       <div className="absolute right-2 bottom-1 flex items-center gap-1 text-[9px] text-[#54656f] dark:text-gray-400 bg-white/40 dark:bg-[#202c33]/40 px-1.5 py-0.5 rounded-full backdrop-blur-sm">
                         {format(msg.timestamp, "HH:mm'h' dd/MM/yy")}
                         {isMe && (
-                           msg.status === 'READ' ? <CheckCheck size={12} className="text-[#53bdeb] ml-0.5" /> : 
-                           msg.status === 'DELIVERY_ACK' || msg.status === 'SERVER_ACK' ? <CheckCheck size={12} className="text-gray-400 ml-0.5" /> :
+                           msg.status === 'READ' || msg.status === 'read' ? <CheckCheck size={12} className="text-[#53bdeb] ml-0.5" /> : 
+                           msg.status === 'DELIVERY_ACK' || msg.status === 'SERVER_ACK' || msg.status === 'delivered' ? <CheckCheck size={12} className="text-gray-400 ml-0.5" /> :
                            <Check size={12} className="text-gray-400 ml-0.5" />
                         )}
                       </div>
