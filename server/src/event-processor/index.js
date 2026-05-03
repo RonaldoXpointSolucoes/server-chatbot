@@ -802,7 +802,7 @@ class EventProcessor {
                 .from('messages')
                 .select('id, whatsapp_message_id, status')
                 .eq('tenant_id', tenantId)
-                .eq('instance_id', instanceId)
+                .or(`instance_id.eq.${instanceId},instance_id.is.null`)
                 .in('whatsapp_message_id', messageIds);
 
             if (selectErr || !messages || messages.length === 0) {
@@ -812,7 +812,7 @@ class EventProcessor {
                     .from('messages')
                     .select('id, whatsapp_message_id, status')
                     .eq('tenant_id', tenantId)
-                    .eq('instance_id', instanceId)
+                    .or(`instance_id.eq.${instanceId},instance_id.is.null`)
                     .in('whatsapp_message_id', messageIds);
                 
                 selectErr = retryQuery.error;
@@ -877,7 +877,7 @@ class EventProcessor {
                 .from('messages')
                 .select('id, whatsapp_message_id, status')
                 .eq('tenant_id', tenantId)
-                .eq('instance_id', instanceId)
+                .or(`instance_id.eq.${instanceId},instance_id.is.null`)
                 .in('whatsapp_message_id', messageIds);
 
             if (selectErr || !messages || messages.length === 0) {
@@ -887,7 +887,7 @@ class EventProcessor {
                     .from('messages')
                     .select('id, whatsapp_message_id, status')
                     .eq('tenant_id', tenantId)
-                    .eq('instance_id', instanceId)
+                    .or(`instance_id.eq.${instanceId},instance_id.is.null`)
                     .in('whatsapp_message_id', messageIds);
                 
                 selectErr = retryQuery.error;
