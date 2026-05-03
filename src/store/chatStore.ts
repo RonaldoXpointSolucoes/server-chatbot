@@ -38,6 +38,7 @@ export type ContactType = ContactRow & {
   conv_labels?: any[];
   instance_id?: string | null;
   is_blocked?: boolean;
+  conv_id?: string;
 };
 
 export const getRealContactId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
@@ -1642,7 +1643,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         priority: conv.priority,
                         assigned_to: conv.assigned_to,
                         conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.labels) : [],
-                        instance_id: conv.instance_id || dbC.instance_id || null
+                        instance_id: conv.instance_id || dbC.instance_id || null,
+                        conv_id: conv.id
                      };
                      
                      // Injeta um preview fake se messages tiver vazio e tem preview no banco 
@@ -1675,7 +1677,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         snoozed_until: conv.snoozed_until,
                         priority: conv.priority,
                         assigned_to: conv.assigned_to,
-                        instance_id: conv.instance_id || dbC.instance_id || null
+                        instance_id: conv.instance_id || dbC.instance_id || null,
+                        conv_id: conv.id
                      });
                   }
                });
@@ -1826,15 +1829,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!tenant) return;
         
         // Puxa conversa pra este contato respeitando a instância!
-        const { data: convs } = await supabase.from('conversations')
-              .select('id')
-              .eq('tenant_id', tenant.id)
-              .eq('contact_id', getRealContactId(contactId))
-              .eq('instance_id', instanceName)
-              .order('last_message_at', { ascending: false, nullsFirst: false })
-              .limit(1);
-        
-        let conv = convs && convs.length > 0 ? convs[0] : null;
+        const localContact = get().contacts.find(c => c.id === contactId);
+        let conv_id = localContact?.conv_id;
+        let conv = null;
+
+        if (conv_id) {
+           const { data: convs } = await supabase.from('conversations').select('id, status').eq('id', conv_id).limit(1);
+           if (convs && convs.length > 0) conv = convs[0];
+        }
+
+        if (!conv) {
+            const { data: convs } = await supabase.from('conversations')
+                  .select('id, status')
+                  .eq('tenant_id', tenant.id)
+                  .eq('contact_id', getRealContactId(contactId))
+                  .eq('instance_id', instanceName)
+                  .order('last_message_at', { ascending: false, nullsFirst: false })
+                  .limit(1);
+            
+            conv = convs && convs.length > 0 ? convs[0] : null;
+        }
 
         if (!conv) {
              const { data: newConv, error: insertErr } = await supabase.from('conversations').insert({
@@ -1881,24 +1895,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
               const updated = [...s.contacts];
               const idx = updated.findIndex(c => c.id === contactId);
               if (idx !== -1) {
-                  updated[idx].unread = 0;
-                  updated[idx].messages = uniqueMsgs.map(m => {
-                      const advanced = parseAdvancedMsgMetadata(m);
-                      return {
-                          id: m.id,
-                          whatsapp_id: m.whatsapp_message_id,
-                          text: advanced.text || m.text_content,
-                          sender: m.sender_type,
-                          mediaUrl: m.media_url,
-                          mediaType: advanced.mediaType,
-                          status: m.status,
-                          timestamp: new Date(m.timestamp),
-                          quoted: advanced.quoted,
-                          buttons: advanced.buttons,
-                          transcription: m.transcription,
-                          vcardWaid: advanced.vcardWaid
-                      };
-                  });
+                  updated[idx] = {
+                      ...updated[idx],
+                      unread: 0,
+                      messages: uniqueMsgs.map(m => {
+                          const advanced = parseAdvancedMsgMetadata(m);
+                          return {
+                              id: m.id,
+                              whatsapp_id: m.whatsapp_message_id,
+                              text: advanced.text || m.text_content,
+                              sender: m.sender_type,
+                              mediaUrl: m.media_url,
+                              mediaType: advanced.mediaType,
+                              status: m.status,
+                              timestamp: new Date(m.timestamp),
+                              quoted: advanced.quoted,
+                              buttons: advanced.buttons,
+                              transcription: m.transcription,
+                              vcardWaid: advanced.vcardWaid
+                          };
+                      })
+                  };
               }
               return { contacts: updated };
            });

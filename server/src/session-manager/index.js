@@ -108,6 +108,7 @@ class SessionManager {
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: false,
                 markOnlineOnConnect: true,
+                emitOwnEvents: true,
                 connectTimeoutMs: 60000,
                 keepAliveIntervalMs: 25000,
                 defaultQueryTimeoutMs: 120000,
