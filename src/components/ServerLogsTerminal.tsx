@@ -75,7 +75,48 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
       }
     }
 
-    const textToCopy = filteredLogs.map(log => `[${new Date(log.timestamp).toLocaleTimeString()}] [${log.level.toUpperCase()}] ${log.message}`).join('\n');
+    let textToCopy = '';
+    
+    if (mode === 'errors') {
+      const counts = new Map<string, { count: number, log: LogEntry }>();
+      filteredLogs.forEach(log => {
+        const key = `[${log.level.toUpperCase()}] ${log.message}`;
+        if (counts.has(key)) {
+          counts.get(key)!.count++;
+        } else {
+          counts.set(key, { count: 1, log });
+        }
+      });
+      
+      textToCopy = Array.from(counts.values()).map(({ count, log }) => {
+        const baseString = `[${new Date(log.timestamp).toLocaleTimeString()}] [${log.level.toUpperCase()}] ${log.message}`;
+        if (count > 1) {
+          return `Este erro ocorreu ${count} vezes:\n${baseString}\n`;
+        }
+        return baseString;
+      }).join('\n');
+    } else {
+      const aggregatedLogs: { count: number; log: LogEntry }[] = [];
+      for (const log of filteredLogs) {
+        if (aggregatedLogs.length > 0) {
+          const last = aggregatedLogs[aggregatedLogs.length - 1];
+          if (last.log.message === log.message && last.log.level === log.level) {
+            last.count++;
+            continue;
+          }
+        }
+        aggregatedLogs.push({ count: 1, log });
+      }
+
+      textToCopy = aggregatedLogs.map(({ count, log }) => {
+        const baseString = `[${new Date(log.timestamp).toLocaleTimeString()}] [${log.level.toUpperCase()}] ${log.message}`;
+        if (count > 1) {
+          return `Este evento repetiu ${count} vezes sequencialmente:\n${baseString}\n`;
+        }
+        return baseString;
+      }).join('\n');
+    }
+
     navigator.clipboard.writeText(textToCopy).then(() => {
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2000);

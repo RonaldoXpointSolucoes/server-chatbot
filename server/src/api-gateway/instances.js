@@ -173,20 +173,33 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
 
         const result = await sock.sendMessage(jid, sendPayload);
 
-        // Armazena no cache
-        if (result?.key?.id && mediaUrl && mediaUrl !== 'upload_failed') {
+        // Resolvendo o Bug do F5: Força a persistência imediata da mensagem de saída no BD
+        if (result?.key?.id) {
             try {
                 const { EventProcessor } = await import('../event-processor/index.js');
-                if (EventProcessor && EventProcessor.pendingMediaCache) {
-                    EventProcessor.pendingMediaCache.set(result.key.id, mediaUrl);
-                    setTimeout(() => EventProcessor.pendingMediaCache.delete(result.key.id), 60000);
-                }
-                if (EventProcessor && EventProcessor.humanMessagesCache) {
-                    EventProcessor.humanMessagesCache.set(result.key.id, true);
-                    setTimeout(() => EventProcessor.humanMessagesCache.delete(result.key.id), 60000);
+                if (EventProcessor) {
+                    // Protege contra duplicação de human messages cache
+                    if (EventProcessor.humanMessagesCache) {
+                        EventProcessor.humanMessagesCache.set(result.key.id, true);
+                        setTimeout(() => EventProcessor.humanMessagesCache.delete(result.key.id), 60000);
+                    }
+                    
+                    // Armazena URL de mídia se aplicável
+                    if (mediaUrl && mediaUrl !== 'upload_failed' && EventProcessor.pendingMediaCache) {
+                        EventProcessor.pendingMediaCache.set(result.key.id, mediaUrl);
+                        setTimeout(() => EventProcessor.pendingMediaCache.delete(result.key.id), 60000);
+                    }
+                    
+                    // Emula um evento messages.upsert para garantir a persistência imediata
+                    const mockUpsert = {
+                        messages: [result],
+                        type: 'append'
+                    };
+                    
+                    await EventProcessor.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
                 }
             } catch (err) {
-                console.error("Erro importando EventProcessor:", err);
+                console.error("Erro ao injetar a mensagem de saída no EventProcessor (send-media-url):", err);
             }
         }
 
@@ -306,21 +319,35 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
 
         const result = await sock.sendMessage(jid, sendPayload);
 
-        // Armazena no cache pra qdo o events.upsert disparar ele saiba a URL real no Supabase
-        if (result?.key?.id && mediaUrl && mediaUrl !== 'upload_failed') {
+        // Resolvendo o Bug do F5: Força a persistência imediata da mensagem de saída no BD
+        if (result?.key?.id) {
             try {
                 const { EventProcessor } = await import('../event-processor/index.js');
-                if (EventProcessor && EventProcessor.pendingMediaCache) {
-                    EventProcessor.pendingMediaCache.set(result.key.id, mediaUrl);
-                    setTimeout(() => EventProcessor.pendingMediaCache.delete(result.key.id), 60000);
+                if (EventProcessor) {
+                    // Protege contra duplicação de human messages cache
+                    if (EventProcessor.humanMessagesCache) {
+                        EventProcessor.humanMessagesCache.set(result.key.id, true);
+                        setTimeout(() => EventProcessor.humanMessagesCache.delete(result.key.id), 60000);
+                    }
+                    
+                    // Armazena URL de mídia se aplicável
+                    if (mediaUrl && mediaUrl !== 'upload_failed' && EventProcessor.pendingMediaCache) {
+                        EventProcessor.pendingMediaCache.set(result.key.id, mediaUrl);
+                        setTimeout(() => EventProcessor.pendingMediaCache.delete(result.key.id), 60000);
+                    }
+                    
+                    // Emula um evento messages.upsert para garantir a persistência imediata
+                    const mockUpsert = {
+                        messages: [result],
+                        type: 'append'
+                    };
+                    
+                    await EventProcessor.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
                 }
             } catch (err) {
-                console.error("Erro importando EventProcessor:", err);
+                console.error("Erro ao injetar a mensagem de saída no EventProcessor:", err);
             }
         }
-
-        // Note: The message saving in DB is mostly handled by messages.upsert event in event-processor
-        // but we can pass realtime events or rely entirely on event-processor.
 
         res.json({ ok: true, result, media_url: mediaUrl });
     } catch (e) {
