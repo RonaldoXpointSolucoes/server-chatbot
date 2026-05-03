@@ -918,7 +918,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           console.warn("[fetchContactPicture] Falha ao baixar a imagem (possível CORS ou erro de rede). Usando URL original.", dlErr);
         }
 
-        await supabase.from('contacts').update({ profile_picture_url: finalUrl }).eq('id', contactId);
+        await supabase.from('contacts').update({ profile_picture_url: finalUrl }).eq('id', getRealContactId(contactId));
         set((s) => ({
           contacts: s.contacts.map(c => c.id === contactId ? { ...c, avatar: finalUrl } : c)
         }));
@@ -934,7 +934,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       contacts: state.contacts.map((c) => c.id === contactId ? { ...c, bot_status: status } : c)
     }));
     // Assíncrono no DB
-    await supabase.from('contacts').update({ bot_status: status }).eq('id', contactId);
+    await supabase.from('contacts').update({ bot_status: status }).eq('id', getRealContactId(contactId));
   },
 
   addMessageLocally: (contactId, msg, options) => {

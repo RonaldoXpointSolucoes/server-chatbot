@@ -1,7 +1,9 @@
 import express from 'express';
 
 const MAX_LOGS = 200;
+const MAX_ERRORS = 100;
 const logBuffer = [];
+const errorBuffer = [];
 let clients = [];
 
 const router = express.Router();
@@ -41,6 +43,11 @@ function interceptConsole() {
     logBuffer.push(logEntry);
     if (logBuffer.length > MAX_LOGS) {
       logBuffer.shift(); // Mantem o buffer num tamanho aceitavel (Custo de RAM)
+    }
+
+    if (level === 'error' || level === 'warn') {
+      errorBuffer.push(logEntry);
+      if (errorBuffer.length > MAX_ERRORS) errorBuffer.shift();
     }
     
     broadcast(logEntry);
@@ -103,6 +110,21 @@ router.post('/level', async (req, res) => {
     } else {
       res.status(400).json({ error: 'Nível inválido. Use "info" ou "trace".' });
     }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para polling de erros (Frontend DevLogger)
+router.get('/recent-errors', (req, res) => {
+  try {
+    const since = req.query.since;
+    let newErrors = errorBuffer;
+    if (since) {
+      const sinceTime = parseInt(since, 10);
+      newErrors = errorBuffer.filter(e => new Date(e.timestamp).getTime() > sinceTime);
+    }
+    res.json({ success: true, errors: newErrors });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

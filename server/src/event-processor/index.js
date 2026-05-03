@@ -78,10 +78,16 @@ class EventProcessor {
             const config = await this.getTenantConfig(tenantId);
             
             // Ignora status e LIDs isolados, forçando a ignorar as ecos de múltiplos aparelhos para IDs nativos
-            if (this.isBroadcast(jid) || this.isLid(jid)) continue;
+            if (this.isBroadcast(jid) || this.isLid(jid)) {
+                console.warn(`[Message Tracker] 🚨 Mensagem Descartada - Motivo: É um Broadcast ou LID isolado. JID: ${jid}`);
+                continue;
+            }
             
             // Ignora grupos dependendo da opção da empresa
-            if (config.ignore_groups && this.isGroup(jid)) continue;
+            if (config.ignore_groups && this.isGroup(jid)) {
+                console.warn(`[Message Tracker] 🚨 Mensagem Descartada - Motivo: Grupo (Configurado para ignorar). JID: ${jid}`);
+                continue;
+            }
 
             // [LID Sync / Ciphertext Error Override]
             // Ignora stubs de falha de descriptografia (ex: Message absent from node)
@@ -99,18 +105,22 @@ class EventProcessor {
                 }
                 const phone = jid.split('@')[0];
                 
-                // Evita que o proprio número da instância seja logado como um contato ou conversa
-                if (ownerPhone && phone === ownerPhone) {
-                     continue;
-                }
+                // Evita auto-respostas bot-loop, mas não deve bloquear a inserção da mensagem no BD
+                // para que a interface (CRM) possa mostrar conversas de 'self-chat' (testes do próprio usuário).
+                const isSelfChat = (ownerPhone && phone === ownerPhone);
 
                 const isHuman = EventProcessor.humanMessagesCache && EventProcessor.humanMessagesCache.has(msg.key.id);
+                // Se for isSelfChat (enviado para si mesmo), apenas processe o evento "fromMe: true" para evitar duplicar a mensagem recebida e enviada
+                if (isSelfChat && !msg.key.fromMe) {
+                     console.warn(`[Message Tracker] 🚨 Mensagem Descartada - Motivo: Auto-envio interceptado (Evitando duplicidade do fromMe: false). JID: ${jid}`);
+                     continue;
+                }
                 const senderType = msg.key.fromMe ? (isHuman ? 'human' : 'bot') : 'client';
                 const direction = msg.key.fromMe ? 'outbound' : 'inbound';
                 
                 // Se for outbound (fromMe), o msg.pushName é o nome do PRÓPRIO aparelho (ex: Burguer Plus).
                 // Não devemos atribuir ao nome do cliente (jid).
-                const pushName = msg.key.fromMe ? phone : (msg.pushName || phone);
+                const pushName = msg.key.fromMe && !isSelfChat ? phone : (msg.pushName || phone);
                 
                 // Trata data da mensagem
                 const timestampSecs = msg.messageTimestamp;
@@ -138,6 +148,7 @@ class EventProcessor {
                     direction,
                     msgType,
                     textMessage,
+                    isSelfChat,
                     isHistory: m.type === 'append'
                 });
 
@@ -490,7 +501,8 @@ class EventProcessor {
                          }
 
                          // Responde apenas se a conversa estiver sob os cuidados do bot ('bot' ou 'teste_robo')
-                         if (b.convStatus === 'bot' || b.convStatus === 'teste_robo') {
+                        // E não seja um self-chat (evita auto-loop em envios pro próprio numero)
+                        if (!b.isSelfChat && (b.convStatus === 'bot' || b.convStatus === 'teste_robo')) {
                              
                              supabase.from('companies').select('global_ai_enabled').eq('id', b.tenantId).single()
                                  .then(({ data: companyData }) => {
@@ -775,7 +787,10 @@ class EventProcessor {
                 .eq('tenant_id', tenantId)
                 .in('whatsapp_message_id', messageIds);
 
-            if (selectErr || !messages || messages.length === 0) return;
+            if (selectErr || !messages || messages.length === 0) {
+                console.warn(`[Message Tracker] 🚨 Atualização de Recibo Descartada - Motivo: Nenhuma mensagem (whatsapp_message_id) encontada no BD. IDs: ${messageIds.join(', ')}`);
+                return;
+            }
 
             for (const msg of messages) {
                 const pendingStatus = idToStatus.get(msg.whatsapp_message_id);
@@ -832,7 +847,10 @@ class EventProcessor {
                 .eq('tenant_id', tenantId)
                 .in('whatsapp_message_id', messageIds);
 
-            if (selectErr || !messages || messages.length === 0) return;
+            if (selectErr || !messages || messages.length === 0) {
+                console.warn(`[Message Tracker] 🚨 Status Update Descartado - Motivo: Nenhuma mensagem encontada no BD. IDs: ${messageIds.join(', ')}`);
+                return;
+            }
 
             for (const msg of messages) {
                 const pendingStatus = idToStatus.get(msg.whatsapp_message_id);

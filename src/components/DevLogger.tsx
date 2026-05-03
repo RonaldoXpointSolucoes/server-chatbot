@@ -204,10 +204,40 @@ export default function DevLogger() {
       }
     };
 
+    const fetchRecentErrors = async () => {
+      try {
+        const lastCheck = localStorage.getItem('devlogger_last_error_check') || '0';
+        const response = await fetch(`${engineUrl}/debug/recent-errors?since=${lastCheck}`);
+        if (response.ok) {
+           const data = await response.json();
+           if (data.success && data.errors && data.errors.length > 0) {
+              data.errors.forEach((err: any) => {
+                 addLog({
+                    type: err.level === 'warn' ? 'warn' : 'error',
+                    message: err.message || 'Erro/Aviso Interno no Servidor',
+                    source: `Server Node (${err.level || 'error'})`,
+                    details: err
+                 });
+              });
+              localStorage.setItem('devlogger_last_error_check', Date.now().toString());
+           } else if (data.success) {
+              localStorage.setItem('devlogger_last_error_check', Date.now().toString());
+           }
+        }
+      } catch (err) {
+         // ignora
+      }
+    };
+
     fetchTelemetry();
-    const interval = setInterval(fetchTelemetry, 5000);
-    return () => clearInterval(interval);
-  }, [isVisible, isEnabled, engineUrl]);
+    fetchRecentErrors();
+    const intervalTelemetry = setInterval(fetchTelemetry, 5000);
+    const intervalErrors = setInterval(fetchRecentErrors, 300000); // 5 minutos
+    return () => {
+       clearInterval(intervalTelemetry);
+       clearInterval(intervalErrors);
+    };
+  }, [isVisible, isEnabled, engineUrl, addLog]);
 
   const copyLogs = () => {
     const textStr = logs.map(l => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.type.toUpperCase()}] ${l.source}: ${l.message}\n${l.details ? JSON.stringify(l.details) : ''}`).join('\n\n');
