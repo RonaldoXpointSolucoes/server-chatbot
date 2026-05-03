@@ -363,8 +363,8 @@ class EventProcessor {
              // 3. Processa Mídias em Paralelo Segura (evitando Memory leaks)
              await Promise.all(activeBatch.map(async b => {
                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
-                 b.conversationId = finalConvIdMap.get(`${b.tenantId}_${b.instanceId}_${cid}`);
-                 b.convStatus = existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.status || 'bot';
+                 b.conversationId = finalConvIdMap.get(`${b.tenantId}_${b.instanceId}_${cid}`) || finalConvIdMap.get(`${b.tenantId}_null_instance_${cid}`);
+                 b.convStatus = existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.status || existingConvMap.get(`${b.tenantId}_null_instance_${cid}`)?.status || 'bot';
                  
                  if (!b.conversationId) return; // ignora falha bruta
                  
@@ -441,6 +441,7 @@ class EventProcessor {
              // 4. INSERE TODAS AS MENSAGENS NUM CHUTE SÓ (BULK INSERT)
              const messagesToInsert = activeBatch.map(b => ({
                  tenant_id: b.tenantId,
+                 instance_id: b.instanceId,
                  conversation_id: b.conversationId,
                  direction: b.direction,
                  message_type: b.msgType,

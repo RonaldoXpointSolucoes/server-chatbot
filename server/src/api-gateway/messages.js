@@ -45,6 +45,7 @@ router.post('/messages/send', requireTenant, async (req, res) => {
 
         const { data: savedMsg, error: dbError } = await supabase.from('messages').insert({
             tenant_id: tenantId,
+            instance_id: instanceId,
             conversation_id: conversationId,
             direction: 'outbound',
             message_type: 'text',
