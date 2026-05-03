@@ -3,7 +3,7 @@ const serviceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmF
 
 async function updateVersion() {
   const data = {
-    version: '2.1.17',
+    version: '2.1.18',
     deploy_date: new Date().toISOString()
   };
 

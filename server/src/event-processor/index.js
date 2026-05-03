@@ -333,18 +333,24 @@ class EventProcessor {
                  for(let i = 0; i < allMessageIds.length; i += 500) {
                      const chunk = allMessageIds.slice(i, i + 500);
                      const { data: existingMessages } = await supabase.from('messages')
-                         .select('whatsapp_message_id')
+                         .select('whatsapp_message_id, instance_id')
                          .in('whatsapp_message_id', chunk);
                      if (existingMessages) {
-                         for (const m of existingMessages) existingIdsSet.add(m.whatsapp_message_id);
+                         for (const m of existingMessages) {
+                             // Garantindo suporte para instance_id nulo de legado
+                             const safeInstanceId = m.instance_id || 'null_instance';
+                             existingIdsSet.add(`${safeInstanceId}_${m.whatsapp_message_id}`);
+                         }
                      }
                  }
              }
 
              const uniqueBatchMap = new Map();
              for (const b of batch) {
-                 if (!existingIdsSet.has(b.rawMsg.key.id)) {
-                     uniqueBatchMap.set(b.rawMsg.key.id, b);
+                 const safeInstanceId = b.instanceId || 'null_instance';
+                 const dedupKey = `${safeInstanceId}_${b.rawMsg.key.id}`;
+                 if (!existingIdsSet.has(dedupKey)) {
+                     uniqueBatchMap.set(dedupKey, b);
                  }
              }
              const activeBatch = Array.from(uniqueBatchMap.values());
@@ -785,6 +791,7 @@ class EventProcessor {
                 .from('messages')
                 .select('id, whatsapp_message_id, status')
                 .eq('tenant_id', tenantId)
+                .eq('instance_id', instanceId)
                 .in('whatsapp_message_id', messageIds);
 
             if (selectErr || !messages || messages.length === 0) {
@@ -794,6 +801,7 @@ class EventProcessor {
                     .from('messages')
                     .select('id, whatsapp_message_id, status')
                     .eq('tenant_id', tenantId)
+                    .eq('instance_id', instanceId)
                     .in('whatsapp_message_id', messageIds);
                 
                 selectErr = retryQuery.error;
@@ -858,6 +866,7 @@ class EventProcessor {
                 .from('messages')
                 .select('id, whatsapp_message_id, status')
                 .eq('tenant_id', tenantId)
+                .eq('instance_id', instanceId)
                 .in('whatsapp_message_id', messageIds);
 
             if (selectErr || !messages || messages.length === 0) {
@@ -867,6 +876,7 @@ class EventProcessor {
                     .from('messages')
                     .select('id, whatsapp_message_id, status')
                     .eq('tenant_id', tenantId)
+                    .eq('instance_id', instanceId)
                     .in('whatsapp_message_id', messageIds);
                 
                 selectErr = retryQuery.error;
