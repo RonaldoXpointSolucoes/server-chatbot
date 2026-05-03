@@ -781,15 +781,28 @@ class EventProcessor {
 
             if (messageIds.length === 0) return;
 
-            const { data: messages, error: selectErr } = await supabase
+            let { data: messages, error: selectErr } = await supabase
                 .from('messages')
                 .select('id, whatsapp_message_id, status')
                 .eq('tenant_id', tenantId)
                 .in('whatsapp_message_id', messageIds);
 
             if (selectErr || !messages || messages.length === 0) {
-                console.warn(`[Message Tracker] 🚨 Atualização de Recibo Descartada - Motivo: Nenhuma mensagem (whatsapp_message_id) encontada no BD. IDs: ${messageIds.join(', ')}`);
-                return;
+                // Race condition mitigation: wait 2500ms and retry (because flushQueue runs every 2s)
+                await new Promise(resolve => setTimeout(resolve, 2500));
+                const retryQuery = await supabase
+                    .from('messages')
+                    .select('id, whatsapp_message_id, status')
+                    .eq('tenant_id', tenantId)
+                    .in('whatsapp_message_id', messageIds);
+                
+                selectErr = retryQuery.error;
+                messages = retryQuery.data;
+
+                if (selectErr || !messages || messages.length === 0) {
+                    console.warn(`[Message Tracker] 🚨 Atualização de Recibo Descartada - Motivo: Nenhuma mensagem (whatsapp_message_id) encontada no BD após retry de 2.5s. IDs: ${messageIds.join(', ')}`);
+                    return;
+                }
             }
 
             for (const msg of messages) {
@@ -841,15 +854,28 @@ class EventProcessor {
 
             if (messageIds.length === 0) return;
 
-            const { data: messages, error: selectErr } = await supabase
+            let { data: messages, error: selectErr } = await supabase
                 .from('messages')
                 .select('id, whatsapp_message_id, status')
                 .eq('tenant_id', tenantId)
                 .in('whatsapp_message_id', messageIds);
 
             if (selectErr || !messages || messages.length === 0) {
-                console.warn(`[Message Tracker] 🚨 Status Update Descartado - Motivo: Nenhuma mensagem encontada no BD. IDs: ${messageIds.join(', ')}`);
-                return;
+                // Race condition mitigation: wait 2500ms and retry
+                await new Promise(resolve => setTimeout(resolve, 2500));
+                const retryQuery = await supabase
+                    .from('messages')
+                    .select('id, whatsapp_message_id, status')
+                    .eq('tenant_id', tenantId)
+                    .in('whatsapp_message_id', messageIds);
+                
+                selectErr = retryQuery.error;
+                messages = retryQuery.data;
+
+                if (selectErr || !messages || messages.length === 0) {
+                    console.warn(`[Message Tracker] 🚨 Status Update Descartado - Motivo: Nenhuma mensagem encontada no BD após retry de 2.5s. IDs: ${messageIds.join(', ')}`);
+                    return;
+                }
             }
 
             for (const msg of messages) {
