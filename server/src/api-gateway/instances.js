@@ -118,8 +118,8 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
             const result = await sock[method](...(args || []));
             if (method === 'sendMessage' && result?.key?.id) {
                 try {
-                    const { EventProcessor } = await import('../event-processor/index.js');
-                    if (EventProcessor) {
+                    const { EventProcessor, default: eventProcessorInst } = await import('../event-processor/index.js');
+                    if (EventProcessor && eventProcessorInst) {
                         // Protege contra duplicação de human messages cache
                         if (EventProcessor.humanMessagesCache) {
                             EventProcessor.humanMessagesCache.set(result.key.id, true);
@@ -132,7 +132,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                             type: 'append'
                         };
                         
-                        await EventProcessor.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
+                        await eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
                     }
                 } catch(e) {
                     console.error("Erro ao injetar a mensagem de saída no EventProcessor (invoke):", e);
@@ -189,8 +189,8 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
         // Resolvendo o Bug do F5: Força a persistência imediata da mensagem de saída no BD
         if (result?.key?.id) {
             try {
-                const { EventProcessor } = await import('../event-processor/index.js');
-                if (EventProcessor) {
+                const { EventProcessor, default: eventProcessorInst } = await import('../event-processor/index.js');
+                if (EventProcessor && eventProcessorInst) {
                     // Protege contra duplicação de human messages cache
                     if (EventProcessor.humanMessagesCache) {
                         EventProcessor.humanMessagesCache.set(result.key.id, true);
@@ -209,7 +209,7 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
                         type: 'append'
                     };
                     
-                    await EventProcessor.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
+                    await eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
                 }
             } catch (err) {
                 console.error("Erro ao injetar a mensagem de saída no EventProcessor (send-media-url):", err);
@@ -335,8 +335,8 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
         // Resolvendo o Bug do F5: Força a persistência imediata da mensagem de saída no BD
         if (result?.key?.id) {
             try {
-                const { EventProcessor } = await import('../event-processor/index.js');
-                if (EventProcessor) {
+                const { EventProcessor, default: eventProcessorInst } = await import('../event-processor/index.js');
+                if (EventProcessor && eventProcessorInst) {
                     // Protege contra duplicação de human messages cache
                     if (EventProcessor.humanMessagesCache) {
                         EventProcessor.humanMessagesCache.set(result.key.id, true);
@@ -355,7 +355,7 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                         type: 'append'
                     };
                     
-                    await EventProcessor.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
+                    await eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
                 }
             } catch (err) {
                 console.error("Erro ao injetar a mensagem de saída no EventProcessor:", err);
