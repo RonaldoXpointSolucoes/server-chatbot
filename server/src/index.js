@@ -96,6 +96,10 @@ app.get('/debug/metrics', async (req, res) => {
     }
 });
 
+app.get('/debug/recent-errors', async (req, res) => {
+    return res.json({ status: 'ok', errors: [] });
+});
+
 // Setup Swagger UI (/swagger/teste.html)
 setupSwagger(app);
 

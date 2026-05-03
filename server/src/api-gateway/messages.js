@@ -81,11 +81,11 @@ router.get('/conversations/:conversationId/messages', requireTenant, async (req,
             .from('messages')
             .select('*')
             .eq('conversation_id', conversationId)
-            .order('timestamp', { ascending: true })
+            .order('timestamp', { ascending: false })
             .limit(100);
             
         if(error) throw error;
-        res.json(data);
+        res.json(data.reverse());
     } catch(e) {
         res.status(500).json({ error: e.message });
     }
