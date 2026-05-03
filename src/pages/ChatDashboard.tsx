@@ -1528,21 +1528,56 @@ export default function ChatDashboard() {
                </div>
             )}
             
-            {activeChat.messages?.filter(m => m.text || m.mediaUrl).map((msg) => {
+            {activeChat.messages?.filter(m => m.text || m.mediaUrl).map((msg, index, arr) => {
                const isMe = msg.sender === 'human' || msg.sender === 'bot';
+               
+               let showDateSeparator = false;
+               let dateSeparatorText = '';
+               
+               if (index === 0) {
+                  showDateSeparator = true;
+               } else {
+                  const prevMsg = arr[index - 1];
+                  const currentDay = format(new Date(msg.timestamp), 'yyyy-MM-dd');
+                  const prevDay = format(new Date(prevMsg.timestamp), 'yyyy-MM-dd');
+                  if (currentDay !== prevDay) {
+                     showDateSeparator = true;
+                  }
+               }
+               
+               if (showDateSeparator) {
+                  const date = new Date(msg.timestamp);
+                  const daysOfWeek = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+                  if (isToday(date)) dateSeparatorText = 'HOJE';
+                  else if (isYesterday(date)) dateSeparatorText = 'ONTEM';
+                  else dateSeparatorText = `${daysOfWeek[date.getDay()]}, ${format(date, "dd/MM/yyyy")}`;
+               }
+               
+               const separatorNode = showDateSeparator ? (
+                  <div className="flex justify-center my-4 w-full">
+                     <span className="bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 text-[#54656f] dark:text-[#8696a0] text-[11px] px-3 py-1 rounded-lg border border-black/5 dark:border-white/5 font-medium shadow-sm uppercase tracking-wider">
+                       {dateSeparatorText}
+                     </span>
+                  </div>
+               ) : null;
                
                if (msg.sender === 'system') {
                  return (
-                  <div key={msg.id} className="flex justify-center my-4">
-                    <span className="bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 text-[#54656f] dark:text-[#8696a0] text-[11px] px-3 py-1 rounded-lg flex items-center gap-2 border border-yellow-500/20 shadow-sm">
-                      <Bot size={12} className="text-yellow-600" /> {msg.text}
-                    </span>
+                  <div key={msg.id} className="flex flex-col w-full">
+                    {separatorNode}
+                    <div className="flex justify-center my-4">
+                      <span className="bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 text-[#54656f] dark:text-[#8696a0] text-[11px] px-3 py-1 rounded-lg flex items-center gap-2 border border-yellow-500/20 shadow-sm">
+                        <Bot size={12} className="text-yellow-600" /> {msg.text}
+                      </span>
+                    </div>
                   </div>
                  )
                }
 
                return (
-                  <div key={msg.id} className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start")}>
+                  <div key={msg.id} className="flex flex-col w-full">
+                    {separatorNode}
+                    <div className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start")}>
                     <div className={cn(
                       "px-3 pb-2 pt-1.5 min-w-[120px] rounded-2xl shadow-sm max-w-[85%] md:max-w-[65%] relative group animate-in fade-in slide-in-from-bottom-2 backdrop-blur-md",
                       isMe ? "bg-[#d9fdd3]/90 dark:bg-[#005c4b]/95 text-[#111b21] dark:text-[#e9edef] rounded-tr-sm" 
@@ -1733,7 +1768,7 @@ export default function ChatDashboard() {
                       
                       {(!msg.mediaType || (msg.mediaType !== 'document' && msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
                          <span className="text-[14px] leading-[1.4] block whitespace-pre-wrap break-words overflow-hidden shadow-none mt-1">
-                            {renderMessageText(msg.text ? msg.text.replace(/^(?:🎥|🎬)\s*Vídeo\s*\n?/i, '') : msg.text)}
+                            {renderMessageText(msg.text ? msg.text.replace(/^(?:🎥|🎬)\s*Vídeo\s*\n?/i, '').replace('📎 Formato não suportado (templateMessage)', '📱 Mensagem Interativa (Abra no celular para ver)').replace('📎 Formato não suportado (highlyStructuredMessage)', '📱 Mensagem Estruturada (Abra no celular para ver)') : msg.text)}
                             {!msg.buttons && <span className="inline-block w-[110px] h-3 ml-2 shrink-0"></span>}
                          </span>
                       )}
@@ -1760,7 +1795,7 @@ export default function ChatDashboard() {
                       )}
                       
                       <div className="absolute right-2 bottom-1 flex items-center gap-1 text-[9px] text-[#54656f] dark:text-gray-400 bg-white/40 dark:bg-[#202c33]/40 px-1.5 py-0.5 rounded-full backdrop-blur-sm">
-                        {format(msg.timestamp, "HH:mm'h' dd/MM/yy")}
+                        {isToday(new Date(msg.timestamp)) ? format(new Date(msg.timestamp), "HH:mm'h'") : isYesterday(new Date(msg.timestamp)) ? `Ontem ${format(new Date(msg.timestamp), "HH:mm'h'")}` : format(new Date(msg.timestamp), "dd/MM HH:mm'h'")}
                         {isMe && (
                            msg.status === 'READ' || msg.status === 'read' ? <CheckCheck size={12} className="text-[#53bdeb] ml-0.5" /> : 
                            msg.status === 'DELIVERY_ACK' || msg.status === 'SERVER_ACK' || msg.status === 'delivered' ? <CheckCheck size={12} className="text-gray-400 ml-0.5" /> :
@@ -1768,6 +1803,7 @@ export default function ChatDashboard() {
                         )}
                       </div>
                     </div>
+                  </div>
                   </div>
                )
             })}

@@ -757,6 +757,31 @@ class EventProcessor {
                 }
             } catch(e) { text = 'Interação Selecionada'; }
         }
+        else if (content.templateMessage) {
+            try {
+                const tm = content.templateMessage;
+                const template = tm.hydratedTemplate || tm.hydratedFourRowTemplate || tm.fourRowTemplate || tm;
+                let parts = [];
+                if (template.hydratedTitleText) parts.push(`*${template.hydratedTitleText}*`);
+                if (template.hydratedContentText) parts.push(template.hydratedContentText);
+                else if (template.text) parts.push(template.text);
+                
+                if (template.hydratedFooterText) parts.push(`_${template.hydratedFooterText}_`);
+                
+                text = parts.length > 0 ? parts.join('\n\n') : '📱 Mensagem Interativa (Template)';
+            } catch (e) { text = '📱 Mensagem Interativa (Template)'; }
+        }
+        else if (content.highlyStructuredMessage) {
+            try {
+                const hsm = content.highlyStructuredMessage;
+                const template = hsm.hydratedHsm || hsm;
+                let parts = [];
+                if (template.hydratedTitleText) parts.push(`*${template.hydratedTitleText}*`);
+                if (template.hydratedContentText) parts.push(template.hydratedContentText);
+                if (template.hydratedFooterText) parts.push(`_${template.hydratedFooterText}_`);
+                text = parts.length > 0 ? parts.join('\n\n') : '📱 Mensagem Estruturada (HSM)';
+            } catch (e) { text = '📱 Mensagem Estruturada (HSM)'; }
+        }
         else text = '📎 Formato não suportado (' + Object.keys(content)[0] + ')';
         
         // Anti-Bug: Remove caracteres nulos (\x00) que quebram o cast de JSON do PostgreSQL no Supabase (Upsert)
