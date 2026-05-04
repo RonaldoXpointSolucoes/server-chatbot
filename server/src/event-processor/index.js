@@ -380,7 +380,7 @@ class EventProcessor {
                  
                  if (!b.mediaUrl && ['image', 'video', 'audio', 'document'].includes(b.msgType)) {
                      try {
-                         const mediaMeta = b.rawMsg.message[b.msgType + 'Message'] || {};
+                         const mediaMeta = this.extractMediaMeta(b.rawMsg, b.msgType) || {};
                          const stream = await downloadContentFromMessage(mediaMeta, b.msgType.replace('Message', ''));
                          
                          const mimeType = mediaMeta.mimetype || 'application/octet-stream';
@@ -788,6 +788,32 @@ class EventProcessor {
         return text ? String(text).replace(/\x00/g, '') : '';
     }
 
+    extractMediaMeta(rawMsg, msgType) {
+        if (!rawMsg || !rawMsg.message) return {};
+        
+        let content = rawMsg.message;
+        if (content.viewOnceMessage) content = content.viewOnceMessage.message;
+        if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
+        if (content.ephemeralMessage) content = content.ephemeralMessage.message;
+        if (content.documentWithCaptionMessage) content = content.documentWithCaptionMessage.message;
+
+        if (content[msgType + 'Message']) return content[msgType + 'Message'];
+        
+        if (content.templateMessage) {
+            const tm = content.templateMessage;
+            const template = tm.hydratedTemplate || tm.hydratedFourRowTemplate || tm.fourRowTemplate || tm;
+            if (template && template[msgType + 'Message']) return template[msgType + 'Message'];
+        }
+        
+        if (content.highlyStructuredMessage) {
+            const hsm = content.highlyStructuredMessage;
+            const template = hsm.hydratedHsm || hsm;
+            if (template && template[msgType + 'Message']) return template[msgType + 'Message'];
+        }
+        
+        return {};
+    }
+
     extractTypeFromMessage(msg) {
         let content = this.extractMessageContent(msg);
         if (!content) return 'text';
@@ -798,6 +824,25 @@ class EventProcessor {
         if (content.contactMessage || content.contactsArrayMessage) return 'contact';
         if (content.locationMessage) return 'location';
         if (content.stickerMessage) return 'sticker';
+        
+        if (content.templateMessage) {
+            const tm = content.templateMessage;
+            const template = tm.hydratedTemplate || tm.hydratedFourRowTemplate || tm.fourRowTemplate || tm;
+            if (template?.imageMessage) return 'image';
+            if (template?.documentMessage) return 'document';
+            if (template?.videoMessage) return 'video';
+            if (template?.locationMessage) return 'location';
+        }
+        
+        if (content.highlyStructuredMessage) {
+            const hsm = content.highlyStructuredMessage;
+            const template = hsm.hydratedHsm || hsm;
+            if (template?.imageMessage) return 'image';
+            if (template?.documentMessage) return 'document';
+            if (template?.videoMessage) return 'video';
+            if (template?.locationMessage) return 'location';
+        }
+
         return 'text';
     }
 
