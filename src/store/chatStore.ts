@@ -155,6 +155,7 @@ interface ChatState {
   logOperation: (action: 'INSERT' | 'UPDATE' | 'DELETE', tableName: string, recordId: string, beforeState: any, afterState: any) => Promise<void>;
   undoOperation: (logId: string, password: string) => Promise<{success: boolean; error?: string}>;
   toggleUnread: (contactId: string, currentUnread: number) => Promise<void>;
+  resolveConversation: (contactId: string) => Promise<void>;
 }
 
 export interface QuickReply {
@@ -345,10 +346,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isSearchingGlobally: false,
   quickReplies: [],
   userSettings: {},
-  filterType: 'all',
+  filterType: (localStorage.getItem('chat_filter_preference') as string) || 'all',
   theme: (localStorage.getItem('theme') as 'light' | 'dark') || 'light',
   
   setFilterType: async (filter) => {
+    localStorage.setItem('chat_filter_preference', filter);
     set({ filterType: filter });
     try {
       const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
@@ -1091,6 +1093,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       
       // Omit values that do not exist strictly in the Supabase Schema to prevent PGRST204 errors
       delete dbPayload.bot_status;
+      delete dbPayload.assigned_to;
+      delete dbPayload.conv_status;
 
       // Recupera o estado original puro do banco para o log
       let rawBeforeState = null;
@@ -1110,6 +1114,68 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (e) {
       console.error('Erro ao editar contato no DB (CRM):', e);
       throw e;
+    }
+  },
+
+  resolveConversation: async (contactId) => {
+    try {
+        const tenantInfo = get().tenantInfo;
+        if (!tenantInfo) return;
+        
+        const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+        let agentName = 'Agente';
+        if (currentUserEmail) {
+            const agent = get().agents.find(a => a.email === currentUserEmail);
+            if (agent && agent.full_name) agentName = agent.full_name;
+        }
+
+        // Descobre a Conversation vinculada para update do Status/Assigned_to e Insert de Message
+        const realContactId = getRealContactId(contactId);
+        const instId = getInstanceIdFromContact(contactId);
+        let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenantInfo.id);
+        if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+        const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
+
+        if (!conv) {
+            console.warn('Conversa não encontrada para resolver o ticket.');
+            return;
+        }
+
+        // 1. Inserir a mensagem interna System
+        const msgText = `✅ Resolvido por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
+        
+        const dbMsg = {
+           conversation_id: conv.id, // Correto Schema: conversation_id e não contact_id
+           tenant_id: tenantInfo.id,
+           text_content: msgText, // Correto Schema: text_content e não text
+           sender_type: 'system', // Correto Schema: sender_type e não sender
+           direction: 'outgoing', // Coluna NOT NULL obrigatória no schema
+           instance_id: get().contacts.find(c => c.id === contactId)?.instance_id
+        };
+
+        const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
+        
+        if (!error && insertedMsg) {
+            // Atualiza a interface da mensagem local
+            const msgTypeObj: MessageType = {
+               id: insertedMsg.id,
+               text: insertedMsg.text_content,
+               sender: 'system',
+               timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
+            };
+            get().addMessageLocally(contactId, msgTypeObj);
+        }
+
+        // 2. Remove o assignment direto na tabela certa (conversations)
+        await supabase.from('conversations').update({ assigned_to: null, status: 'bot' }).eq('id', conv.id);
+
+        // 3. Atualização local do estado para sumir da lista
+        set((state) => ({
+            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, assigned_to: null, conv_status: 'bot' } : c)
+        }));
+
+    } catch (e) {
+        console.error('Erro ao resolver conversa:', e);
     }
   },
 
@@ -2151,6 +2217,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const { error } = await supabase.from('conversations').update(payload).eq('id', conv.id);
       if (error) throw error;
+
+      if ('assigned_to' in payload && payload.assigned_to) {
+          let agentName = 'Agente';
+          const agent = get().agents.find(a => a.id === payload.assigned_to);
+          if (agent && agent.full_name) agentName = agent.full_name;
+          
+          const msgText = `🎫 Atribuído para ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
+          const dbMsg = {
+             conversation_id: conv.id,
+             tenant_id: tenant.id,
+             text_content: msgText,
+             sender_type: 'system',
+             direction: 'outgoing',
+             timestamp: new Date().toISOString(),
+             status: 'sent',
+             instance_id: instId && instId !== 'default' ? instId : null
+          };
+          
+          // Inserir silenciosamente (sem throw, erro de log não quebra update)
+          await supabase.from('messages').insert(dbMsg);
+          
+          // Refletir na UI
+          const pseudoId = 'system-assign-' + Date.now();
+          get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
+      }
     } catch (e) {
       console.error('Erro ao atualizar campo da conversa:', e);
       // Aqui no mundo real adicionariamos reversão otimista

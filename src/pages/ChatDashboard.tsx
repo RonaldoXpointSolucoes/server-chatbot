@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal } from '../components/ChatModals';
@@ -167,7 +167,8 @@ export default function ChatDashboard() {
     searchGlobalContacts,
     isSearchingGlobally,
     filterType,
-    setFilterType
+    setFilterType,
+    resolveConversation
   } = useChatStore();
 
   // Execucao Incial Reativa
@@ -757,7 +758,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.1.4'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '03/05/2026, 19:37')}`}
+            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.1.5'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '04/05/2026, 22:50')}`}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1227,6 +1228,22 @@ export default function ChatDashboard() {
                             
                             {/* Novos botões inseridos */}
                             <button 
+                              onClick={async (e) => { 
+                                e.stopPropagation(); 
+                                const email = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
+                                if (email) {
+                                  const me = agents.find(a => a.email === email);
+                                  if (me) {
+                                    await useChatStore.getState().updateConversationField(contact.id, { assigned_to: me.id });
+                                  }
+                                }
+                                setActiveDropdown(null); 
+                              }}
+                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                            >
+                              <UserCheck size={14} className="text-[#00a884]" /> Atribuir a mim
+                            </button>
+                            <button 
                               onClick={(e) => { e.stopPropagation(); toggleUnread(contact.id, contact.unread); setActiveDropdown(null); }}
                               className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
                             >
@@ -1451,6 +1468,17 @@ export default function ChatDashboard() {
             {/* Right Header Area */}
             <div className="flex items-center gap-2 sm:gap-4">
               
+              <button 
+                onClick={() => {
+                  resolveConversation(activeChat.id);
+                }}
+                className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-colors text-sm font-medium border border-emerald-200 dark:border-emerald-500/20 animate-in fade-in"
+                title="Resolver Conversa"
+              >
+                <CheckCircle2 size={16} />
+                <span className="hidden sm:inline">Resolver</span>
+              </button>
+
               <ChatOmniMenu contactId={activeChat.id} />
               
               {/* Chat Actions Dropdown Premium */}

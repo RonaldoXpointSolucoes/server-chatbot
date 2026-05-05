@@ -878,7 +878,7 @@ class EventProcessor {
             if (selectErr || !messages || messages.length === 0) {
                 // Race condition mitigation: wait 2500ms and retry (because flushQueue runs every 2s)
                 await new Promise(resolve => setTimeout(resolve, 2500));
-                const retryQuery = await supabase
+                let retryQuery = await supabase
                     .from('messages')
                     .select('id, whatsapp_message_id, status')
                     .eq('tenant_id', tenantId)
@@ -889,8 +889,22 @@ class EventProcessor {
                 messages = retryQuery.data;
 
                 if (selectErr || !messages || messages.length === 0) {
-                    console.warn(`[Message Tracker] 🚨 Atualização de Recibo Descartada - Motivo: Nenhuma mensagem (whatsapp_message_id) encontada no BD após retry de 2.5s. IDs: ${messageIds.join(', ')}`);
-                    return;
+                    // Double retry for heavy payloads / database high latency
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    retryQuery = await supabase
+                        .from('messages')
+                        .select('id, whatsapp_message_id, status')
+                        .eq('tenant_id', tenantId)
+                        .or(`instance_id.eq.${instanceId},instance_id.is.null`)
+                        .in('whatsapp_message_id', messageIds);
+                    
+                    selectErr = retryQuery.error;
+                    messages = retryQuery.data;
+
+                    if (selectErr || !messages || messages.length === 0) {
+                        console.warn(`[Message Tracker] 🚨 Atualização de Recibo Descartada - Motivo: Nenhuma mensagem (whatsapp_message_id) encontada no BD após double retry (5.5s). IDs: ${messageIds.join(', ')}`);
+                        return;
+                    }
                 }
             }
 
@@ -953,7 +967,7 @@ class EventProcessor {
             if (selectErr || !messages || messages.length === 0) {
                 // Race condition mitigation: wait 2500ms and retry
                 await new Promise(resolve => setTimeout(resolve, 2500));
-                const retryQuery = await supabase
+                let retryQuery = await supabase
                     .from('messages')
                     .select('id, whatsapp_message_id, status')
                     .eq('tenant_id', tenantId)
@@ -964,8 +978,22 @@ class EventProcessor {
                 messages = retryQuery.data;
 
                 if (selectErr || !messages || messages.length === 0) {
-                    console.warn(`[Message Tracker] 🚨 Status Update Descartado - Motivo: Nenhuma mensagem encontada no BD após retry de 2.5s. IDs: ${messageIds.join(', ')}`);
-                    return;
+                    // Double retry for heavy payloads / database high latency
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    retryQuery = await supabase
+                        .from('messages')
+                        .select('id, whatsapp_message_id, status')
+                        .eq('tenant_id', tenantId)
+                        .or(`instance_id.eq.${instanceId},instance_id.is.null`)
+                        .in('whatsapp_message_id', messageIds);
+                    
+                    selectErr = retryQuery.error;
+                    messages = retryQuery.data;
+
+                    if (selectErr || !messages || messages.length === 0) {
+                        console.warn(`[Message Tracker] 🚨 Status Update Descartado - Motivo: Nenhuma mensagem encontada no BD após double retry (5.5s). IDs: ${messageIds.join(', ')}`);
+                        return;
+                    }
                 }
             }
 

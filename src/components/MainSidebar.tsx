@@ -25,6 +25,7 @@ import {
   MessageSquareReply,
   Workflow,
   Zap,
+  User,
   UserSquare2,
   Code2,
   Repeat,
@@ -104,6 +105,12 @@ export function MainSidebar() {
   const activeChannelFilter = useChatStore(state => state.activeChannelFilter);
   const setActiveChannelFilter = useChatStore(state => state.setActiveChannelFilter);
   const connectedInstanceName = useChatStore(state => state.connectedInstanceName);
+  const filterType = useChatStore(state => state.filterType);
+  const setFilterType = useChatStore(state => state.setFilterType);
+  const contacts = useChatStore(state => state.contacts);
+  const agents = useChatStore(state => state.agents);
+  const currentAgent = agents.find(a => a.email === agentEmail);
+  const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to === currentAgent.id && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
   
   const [userCompanies, setUserCompanies] = useState<any[]>([]);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
@@ -459,9 +466,29 @@ export function MainSidebar() {
         <div className="px-2 space-y-0.5">
 
           <CollapsibleSection title="Conversas" icon={<MessageCircle size={16} />} isOpen={expandedSections.conversations} onToggle={() => toggleSection('conversations')}>
-            {instances.length !== 1 && (
-              <NavItem title="Todas as conversas" isActive={!activeChannelFilter} onClick={() => {
+            <NavItem 
+              title={
+                <div className="flex items-center gap-2">
+                  Minhas conversas
+                  {myConversationsCount > 0 && (
+                    <span className="bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                      {myConversationsCount}
+                    </span>
+                  )}
+                </div>
+              } 
+              icon={<User size={16} className={filterType === 'mine' ? "text-indigo-400" : ""} />} 
+              isActive={filterType === 'mine'} 
+              onClick={() => {
                 setActiveChannelFilter(null, null);
+                setFilterType('mine');
+                navigate('/chat');
+              }} 
+            />
+            {instances.length !== 1 && (
+              <NavItem title="Todas as conversas" isActive={filterType !== 'mine' && filterType !== 'blocked'} onClick={() => {
+                setActiveChannelFilter(null, null);
+                setFilterType('all');
                 useChatStore.getState().fetchInitialData();
                 navigate('/chat');
               }} />
