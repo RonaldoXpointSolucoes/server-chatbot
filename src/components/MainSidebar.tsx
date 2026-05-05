@@ -513,6 +513,7 @@ export function MainSidebar() {
                             useChatStore.getState().openQRModal(inst.id);
                           } else {
                             setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name);
+                            setFilterType('all');
                             navigate('/chat');
                           }
                         }}

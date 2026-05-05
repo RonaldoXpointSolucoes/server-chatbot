@@ -717,11 +717,69 @@ export default function ChatDashboard() {
         onClose={() => setIsNewChatOpen(false)}
         contacts={contacts}
         instances={availableInstancesList}
+        defaultInstanceId={activeChannelFilter}
         onStartChat={(contactId, instanceId) => {
           setActiveChat(contactId);
           const properInstance = instanceId || connectedInstanceName;
           if (properInstance) {
             useChatStore.getState().loadHistoricalMessages(contactId, properInstance);
+          }
+        }}
+        onStartNewNumber={async (phone, instanceId) => {
+          let cleanPhone = phone.replace(/\D/g, '');
+          if (cleanPhone && !cleanPhone.startsWith('55')) {
+            cleanPhone = '55' + cleanPhone;
+          }
+          
+          const jid = `${cleanPhone}@s.whatsapp.net`;
+          
+          let { data: existingContact } = await supabase
+            .from('contacts')
+            .select('*')
+            .eq('tenant_id', tenantInfo?.id)
+            .eq('phone', cleanPhone)
+            .single();
+            
+          // Se não existe, criamos um novo
+          if (!existingContact) {
+            const { data: newContact, error } = await supabase.from('contacts').insert({
+              tenant_id: tenantInfo?.id,
+              instance_id: instanceId,
+              name: cleanPhone,
+              phone: cleanPhone,
+              whatsapp_jid: jid,
+              bot_status: 'active'
+            }).select().single();
+            
+            if (newContact && !error) {
+              existingContact = newContact;
+            } else {
+              console.error('Erro ao criar novo contato na base:', error);
+              return;
+            }
+          }
+          
+          if (existingContact) {
+             // Injeta no estado local se não existir para o ChatDashboard conseguir renderizar
+             useChatStore.setState(state => {
+               const exists = state.contacts.find(c => c.id === existingContact.id);
+               if (exists) return state;
+               return { 
+                 contacts: [{
+                   ...existingContact,
+                   instance_id: instanceId,
+                   messages: [],
+                   unread: 0,
+                   custom_name: existingContact.custom_name || existingContact.name,
+                 }, ...state.contacts] 
+               };
+             });
+
+             setActiveChat(existingContact.id);
+             const properInstance = instanceId || connectedInstanceName;
+             if (properInstance) {
+               useChatStore.getState().loadHistoricalMessages(existingContact.id, properInstance);
+             }
           }
         }}
       />
@@ -758,7 +816,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.1.5'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '04/05/2026, 22:50')}`}
+            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.1.7'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '05/05/2026, 17:45')}`}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">

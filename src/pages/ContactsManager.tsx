@@ -18,41 +18,72 @@ export default function ContactsManager() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [sortOrder, setSortOrder] = useState('recent');
+  const pageSize = 50;
+  
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<ContactRow | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  const fetchContacts = async (search = '') => {
+  const totalPages = Math.ceil(totalCount / pageSize) || 1;
+
+  const fetchContacts = async (search = '', currentPage = 1, currentFilter = 'all', currentSort = 'recent') => {
     if (!tenantId) return;
     setLoading(true);
 
     let query = supabase
       .from('contacts')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
-      .limit(1000);
+      .select('*', { count: 'exact' })
+      .eq('tenant_id', tenantId);
 
     if (search) {
       query = query.or(`name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%,document_number.ilike.%${search}%,phone.ilike.%${search}%`);
     }
 
-    const { data, error } = await query;
+    if (currentFilter !== 'all') {
+      query = query.eq('bot_status', currentFilter);
+    }
+
+    // Apply sorting
+    if (currentSort === 'recent') {
+      query = query.order('created_at', { ascending: false });
+    } else if (currentSort === 'oldest') {
+      query = query.order('created_at', { ascending: true });
+    } else if (currentSort === 'alpha_asc') {
+      query = query.order('name', { ascending: true });
+    } else if (currentSort === 'alpha_desc') {
+      query = query.order('name', { ascending: false });
+    }
+
+    const start = (currentPage - 1) * pageSize;
+    const end = start + pageSize - 1;
+    query = query.range(start, end);
+
+    const { data, error, count } = await query;
 
     if (!error && data) {
       setContacts(data);
+      if (count !== null) setTotalCount(count);
     }
     setLoading(false);
   };
 
+  // Reset page to 1 when search, filter or sort changes
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filterStatus, sortOrder]);
+
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      fetchContacts(searchTerm);
+      fetchContacts(searchTerm, page, filterStatus, sortOrder);
     }, 400);
 
     return () => clearTimeout(delayDebounceFn);
-  }, [tenantId, searchTerm]);
+  }, [tenantId, searchTerm, filterStatus, sortOrder, page]);
 
   const handleOpenModal = (contact?: ContactRow) => {
     if (contact) {
@@ -72,7 +103,13 @@ export default function ContactsManager() {
     if (!tenantId) return;
 
     // Remove anything that isn't a digit for phone mapping
-    const cleanPhone = payload.phone?.replace(/\D/g, '') || '';
+    let cleanPhone = payload.phone?.replace(/\D/g, '') || '';
+    
+    // Regra: se existir telefone e não começar com 55, adiciona o 55
+    if (cleanPhone && !cleanPhone.startsWith('55')) {
+      cleanPhone = '55' + cleanPhone;
+    }
+    
     const defaultJid = cleanPhone ? `${cleanPhone}@s.whatsapp.net` : null;
 
     const dataToSave: any = {
@@ -98,12 +135,59 @@ export default function ContactsManager() {
     }
 
     if (editingContact) {
-       const { error } = await supabase.from('contacts').update(dataToSave).eq('id', editingContact.id);
-       if (!error) fetchContacts();
+       const { data, error } = await supabase.from('contacts').update(dataToSave).eq('id', editingContact.id).select().single();
+       if (!error && data) {
+         setContacts(prev => {
+           const filtered = prev.filter(c => c.id !== data.id);
+           return [data, ...filtered];
+         });
+       } else if (error) {
+         if (error.code === '23505') {
+            alert('Erro: Este número de celular já está cadastrado para outro contato em sua empresa.');
+            return;
+         } else {
+            alert('Erro ao salvar edição: ' + error.message);
+            return;
+         }
+       }
     } else {
-       const { error } = await supabase.from('contacts').insert([dataToSave]);
-       if (!error) fetchContacts();
+       const { data: existing } = await supabase.from('contacts')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .eq('phone', cleanPhone)
+          .limit(1)
+          .maybeSingle();
+
+       if (existing) {
+          const { data, error } = await supabase.from('contacts').update(dataToSave).eq('id', existing.id).select().single();
+          if (!error && data) {
+            setContacts(prev => {
+              const filtered = prev.filter(c => c.id !== data.id);
+              return [data, ...filtered];
+            });
+          } else {
+            alert('Erro ao atualizar contato existente: ' + error?.message);
+          }
+          handleCloseModal();
+          return;
+       }
+
+       const { data, error } = await supabase.from('contacts').insert([dataToSave]).select().single();
+       if (!error && data) {
+         setContacts(prev => [data, ...prev]);
+         setTotalCount(prev => prev + 1);
+       } else if (error) {
+         if (error.code === '23505') {
+            alert('Erro: Este número de celular já está cadastrado para outro contato em sua empresa.');
+            return;
+         } else {
+            alert('Erro ao criar contato: ' + error.message);
+            return;
+         }
+       }
     }
+    
+    handleCloseModal();
   };
 
   const handleDelete = async (id: string) => {
@@ -114,13 +198,7 @@ export default function ContactsManager() {
     setDeleteConfirmId(null);
   };
 
-  const filteredContacts = contacts.filter(c => 
-    c.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    c.custom_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.fantasy_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.phone?.includes(searchTerm) ||
-    c.document_number?.includes(searchTerm)
-  );
+  // O filtro local não é mais necessário porque usamos paginação remota.
 
   return (
     <div className="flex-1 flex flex-col h-screen bg-[#111b21] text-[#e9edef] overflow-hidden relative">
@@ -147,19 +225,40 @@ export default function ContactsManager() {
       </div>
 
       {/* Toolbox & Seach */}
-      <div className="px-6 py-5 flex items-center justify-between shrink-0">
-         <div className="relative w-full max-w-md">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8696a0]" />
-            <input 
-              type="text" 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar por nome ou número celular..."
-              className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-10 pr-4 py-2.5 text-sm text-[#e9edef] placeholder-[#8696a0] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all shadow-sm"
-            />
+      <div className="px-6 py-5 flex items-center justify-between shrink-0 flex-wrap gap-4">
+         <div className="flex items-center gap-3 w-full max-w-3xl">
+            <div className="relative flex-1">
+               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8696a0]" />
+               <input 
+                 type="text" 
+                 value={searchTerm}
+                 onChange={(e) => setSearchTerm(e.target.value)}
+                 placeholder="Buscar por nome, documento ou celular..."
+                 className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-10 pr-4 py-2.5 text-sm text-[#e9edef] placeholder-[#8696a0] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all shadow-sm"
+               />
+            </div>
+            <select 
+               value={sortOrder}
+               onChange={(e) => setSortOrder(e.target.value)}
+               className="bg-[#202c33] border border-[#2a3942] rounded-xl px-4 py-2.5 text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all shadow-sm appearance-none cursor-pointer min-w-[160px]"
+            >
+               <option value="recent">Mais Recentes</option>
+               <option value="oldest">Mais Antigos</option>
+               <option value="alpha_asc">Ordem Alfabética (A-Z)</option>
+               <option value="alpha_desc">Ordem Alfabética (Z-A)</option>
+            </select>
+            <select 
+               value={filterStatus}
+               onChange={(e) => setFilterStatus(e.target.value)}
+               className="bg-[#202c33] border border-[#2a3942] rounded-xl px-4 py-2.5 text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all shadow-sm appearance-none cursor-pointer min-w-[150px]"
+            >
+               <option value="all">Todos os Status</option>
+               <option value="active">Apenas Ativos</option>
+               <option value="paused">Apenas Pausados</option>
+            </select>
          </div>
          <div className="flex bg-[#202c33] border border-[#2a3942] rounded-lg p-1 text-xs font-semibold text-[#8696a0]">
-            <div className="px-3 py-1.5 bg-[#2a3942] text-[#e9edef] rounded shadow-sm">Todos ({contacts.length})</div>
+            <div className="px-3 py-1.5 bg-[#2a3942] text-[#e9edef] rounded shadow-sm">Total ({totalCount})</div>
          </div>
       </div>
 
@@ -185,14 +284,18 @@ export default function ContactsManager() {
                       Carregando base de contatos...
                     </td>
                   </tr>
-                ) : filteredContacts.length === 0 ? (
+                ) : contacts.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-20 text-center text-[#8696a0]">
                       Nenhum contato encontrado.
                     </td>
                   </tr>
                 ) : (
-                  filteredContacts.map(contact => (
+                  contacts.map(contact => {
+                    // Oculta o "55" inicial se existir
+                    const displayPhone = contact.phone?.startsWith('55') ? contact.phone.substring(2) : (contact.phone || 'N/A');
+                    
+                    return (
                     <tr key={contact.id} className="hover:bg-[#202c33]/40 transition-colors group">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-3">
@@ -238,7 +341,7 @@ export default function ContactsManager() {
                       <td className="px-6 py-4 whitespace-nowrap">
                          <div className="flex items-center gap-2 text-sm text-[#d1d7db]">
                             <Phone size={14} className="text-[#8696a0]" />
-                            <span className="font-mono">{contact.phone || 'N/A'}</span>
+                            <span className="font-mono">{displayPhone}</span>
                          </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -276,10 +379,36 @@ export default function ContactsManager() {
                          </div>
                       </td>
                     </tr>
-                  ))
+                  )})
                 )}
               </tbody>
            </table>
+           
+           {/* Pagination Controls */}
+           {totalPages > 1 && (
+             <div className="flex items-center justify-between px-6 py-4 bg-[#202c33]/80 border-t border-[#2a3942] shrink-0 backdrop-blur-md">
+                <span className="text-sm text-[#8696a0]">
+                   Página <span className="font-semibold text-[#e9edef]">{page}</span> de <span className="font-semibold text-[#e9edef]">{totalPages}</span>
+                </span>
+                <div className="flex items-center gap-2">
+                   <button 
+                     onClick={() => setPage(p => Math.max(1, p - 1))}
+                     disabled={page === 1}
+                     className="px-4 py-2 text-sm font-semibold rounded-lg bg-[#2a3942] text-[#e9edef] hover:bg-[#374b57] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                   >
+                      Anterior
+                   </button>
+                   <button 
+                     onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                     disabled={page === totalPages}
+                     className="px-4 py-2 text-sm font-semibold rounded-lg bg-[#2a3942] text-[#e9edef] hover:bg-[#374b57] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                   >
+                      Próximo
+                   </button>
+                </div>
+             </div>
+           )}
+           
         </div>
       </div>
 

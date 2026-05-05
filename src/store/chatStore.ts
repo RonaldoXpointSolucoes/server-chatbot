@@ -337,8 +337,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isSyncingHistory: {},
   pictureFetchLocks: {},
   appVersion: null,
-  activeChannelFilter: null,
-  activeChannelName: null,
+  activeChannelFilter: localStorage.getItem('activeChannelFilter') || null,
+  activeChannelName: localStorage.getItem('activeChannelName') || null,
   isQRModalOpen: false,
   qrModalTargetInstance: null,
   automations: [],
@@ -575,7 +575,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   openQRModal: (instanceId) => set({ isQRModalOpen: true, qrModalTargetInstance: instanceId || null }),
   closeQRModal: () => set({ isQRModalOpen: false, qrModalTargetInstance: null }),
 
-  setActiveChannelFilter: (id, name) => set({ activeChannelFilter: id, activeChannelName: name || null, activeChatId: null }),
+  setActiveChannelFilter: (id, name) => {
+    if (id) {
+        localStorage.setItem('activeChannelFilter', id);
+    } else {
+        localStorage.removeItem('activeChannelFilter');
+    }
+    if (name) {
+        localStorage.setItem('activeChannelName', name);
+    } else {
+        localStorage.removeItem('activeChannelName');
+    }
+    set({ activeChannelFilter: id, activeChannelName: name || null, activeChatId: null });
+  },
   setActiveChat: (id) => set({ activeChatId: id }),
 
   sendHumanMessage: async (contactId, text, instanceName) => {
@@ -1470,7 +1482,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         const { data: dbMessages } = await supabase
             .from('messages')
-            .select('conversation_id, text_content, media_type, timestamp, sender_type, status')
+            .select('conversation_id, text_content, message_type, timestamp, sender_type, status')
             .in('conversation_id', conversationIds)
             .order('timestamp', { ascending: false })
             .limit(100);
@@ -1502,7 +1514,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 text: m.text_content,
                 sender: m.sender_type,
                 timestamp: new Date(m.timestamp),
-                mediaType: m.media_type,
+                mediaType: m.message_type,
                 status: m.status
             })).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
@@ -1570,9 +1582,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
              
            if (userData && userData.settings) {
              set({ userSettings: userData.settings });
-             if (userData.settings.filterType) {
-                set({ filterType: userData.settings.filterType });
-             }
+             // Removida a restauracao forçada do filterType para evitar race condition
            }
          }
        } catch (err) {
@@ -1926,11 +1936,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
                  last_message_at: new Date().toISOString()
              }).select('id').single();
              if (insertErr) {
-                 console.error("[chatStore] ERRO AO INSERIR NOVA CONVERSA:", insertErr);
+                 if (insertErr.code === '23505') {
+                     const { data: retryConvs } = await supabase.from('conversations')
+                         .select('id, status')
+                         .eq('tenant_id', tenant.id)
+                         .eq('contact_id', getRealContactId(contactId))
+                         .eq('instance_id', instanceName)
+                         .limit(1);
+                     if (retryConvs && retryConvs.length > 0) {
+                         conv = retryConvs[0];
+                     } else {
+                         console.error("[chatStore] ERRO AO INSERIR NOVA CONVERSA (Não achou após 23505):", insertErr);
+                         return;
+                     }
+                 } else {
+                     console.error("[chatStore] ERRO AO INSERIR NOVA CONVERSA:", insertErr);
+                     return;
+                 }
+             } else if (newConv) {
+                 conv = newConv;
+             } else {
                  return;
              }
-             if (newConv) conv = newConv;
-             else return;
         }
 
         // Limpar unread 
@@ -2442,6 +2469,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
            let updatedContacts = [...s.contacts];
            // Tenta achar com fallback iterando as mensagens para bypassar conversa ausente no state.
            for (let i = 0; i < updatedContacts.length; i++) {
+              if (!updatedContacts[i].messages) continue;
               const msgIndex = updatedContacts[i].messages.findIndex(msg => msg.id === m.id || (m.whatsapp_message_id && msg.whatsapp_id === m.whatsapp_message_id));
               if (msgIndex !== -1) {
                   const newMessages = [...updatedContacts[i].messages];

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays } from 'lucide-react';
+import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 
 interface BaseModalProps {
@@ -415,18 +415,33 @@ export function DeleteModal({ isOpen, onClose, contactName, onConfirm }: DeleteM
 export interface NewChatModalProps extends BaseModalProps {
   contacts: any[];
   instances?: { id: string; display_name: string; color: string }[];
+  defaultInstanceId?: string | null;
   onStartChat: (contactId: string, instanceId: string) => void;
+  onStartNewNumber?: (phone: string, instanceId: string) => void;
 }
 
-export function NewChatModal({ isOpen, onClose, contacts, instances = [], onStartChat }: NewChatModalProps) {
+export function NewChatModal({ isOpen, onClose, contacts, instances = [], defaultInstanceId, onStartChat, onStartNewNumber }: NewChatModalProps) {
   const [search, setSearch] = useState('');
+  const [directNumber, setDirectNumber] = useState('');
   const [selectedInstance, setSelectedInstance] = useState<string>('');
 
   useEffect(() => {
-    if (isOpen && instances.length > 0 && !selectedInstance) {
-      setSelectedInstance(instances[0].id);
+    if (isOpen) {
+      if (defaultInstanceId && instances.find(i => i.id === defaultInstanceId)) {
+        setSelectedInstance(defaultInstanceId);
+      } else if (instances.length > 0 && !selectedInstance) {
+        setSelectedInstance(instances[0].id);
+      }
     }
-  }, [isOpen, instances, selectedInstance]);
+  }, [isOpen, instances, defaultInstanceId]);
+
+  // Limpa a busca ao fechar
+  useEffect(() => {
+     if (!isOpen) {
+       setSearch('');
+       setDirectNumber('');
+     }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -434,6 +449,19 @@ export function NewChatModal({ isOpen, onClose, contacts, instances = [], onStar
     c.name?.toLowerCase().includes(search.toLowerCase()) || 
     c.whatsapp_jid?.includes(search)
   );
+
+  const cleanSearchNum = search.replace(/\D/g, '');
+  const isSearchNumber = cleanSearchNum.length >= 8;
+
+  const handleDirectNumberSubmit = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      const cleanDirect = directNumber.replace(/\D/g, '');
+      if (cleanDirect.length >= 8 && selectedInstance && onStartNewNumber) {
+        onStartNewNumber(cleanDirect, selectedInstance);
+        onClose();
+      }
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
@@ -479,28 +507,65 @@ export function NewChatModal({ isOpen, onClose, contacts, instances = [], onStar
           autoFocus
         />
 
+        <div className="mb-4 bg-[#f0f2f5]/50 dark:bg-[#111b21]/50 p-4 rounded-xl border border-dashed border-[#00a884]/30">
+          <label className="block text-sm font-medium text-[#00a884] mb-2 flex items-center gap-2">
+            <MessageSquare size={16} />
+            Enviar Mensagem Direta
+          </label>
+          <input 
+            type="text" 
+            placeholder="Ex: 11999999999 + Enter" 
+            value={directNumber}
+            onChange={e => setDirectNumber(e.target.value)}
+            onKeyDown={handleDirectNumberSubmit}
+            className="w-full px-4 py-3 bg-white dark:bg-[#2a3942] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
+          />
+          <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-2">
+            Cole ou digite o número (com DDD) e pressione Enter para conversar.
+          </p>
+        </div>
+
         <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar flex flex-col gap-2">
-          {filtered.length === 0 ? (
-             <div className="text-center text-sm text-gray-500 py-8">Nenhum contato encontrado.</div>
-          ) : (
-             filtered.map(c => (
-               <div 
-                 key={c.id} 
-                 onClick={() => { 
-                    if (!selectedInstance) return;
-                    onStartChat(c.id, selectedInstance); 
-                    onClose(); 
-                 }}
-                 className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${!selectedInstance ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#f0f2f5] dark:hover:bg-[#111b21] cursor-pointer'}`}
-               >
-                 <img src={c.avatar} alt={c.name} className="w-12 h-12 rounded-full object-cover shadow-sm bg-gray-200" />
-                 <div className="flex flex-col flex-1 min-w-0">
-                    <span className="font-semibold text-[#111b21] dark:text-[#e9edef] truncate">{c.custom_name || c.name || c.push_name || c.phone}</span>
-                    <span className="text-sm text-gray-500 truncate">{c.whatsapp_jid}</span>
-                 </div>
+          {isSearchNumber && onStartNewNumber && (
+             <div 
+               onClick={() => { 
+                  if (!selectedInstance) return;
+                  onStartNewNumber(cleanSearchNum, selectedInstance); 
+                  onClose(); 
+               }}
+               className={`flex items-center gap-3 p-3 rounded-xl transition-colors border border-dashed border-emerald-500/50 ${!selectedInstance ? 'opacity-50 cursor-not-allowed' : 'hover:bg-emerald-50 dark:hover:bg-emerald-900/20 cursor-pointer'}`}
+             >
+               <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                  <MessageSquare size={20} />
                </div>
-             ))
+               <div className="flex flex-col flex-1 min-w-0">
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-400 truncate">Conversar com {search}</span>
+                  <span className="text-sm text-emerald-600/70 dark:text-emerald-400/70 truncate">Adicionar novo contato não salvo</span>
+               </div>
+             </div>
           )}
+          
+          {filtered.length === 0 && !isSearchNumber && (
+             <div className="text-center text-sm text-gray-500 py-8">Nenhum contato encontrado.</div>
+          )}
+          
+          {filtered.map(c => (
+             <div 
+               key={c.id} 
+               onClick={() => { 
+                  if (!selectedInstance) return;
+                  onStartChat(c.id, selectedInstance); 
+                  onClose(); 
+               }}
+               className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${!selectedInstance ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#f0f2f5] dark:hover:bg-[#111b21] cursor-pointer'}`}
+             >
+               <img src={c.avatar} alt={c.name} className="w-12 h-12 rounded-full object-cover shadow-sm bg-gray-200" />
+               <div className="flex flex-col flex-1 min-w-0">
+                  <span className="font-semibold text-[#111b21] dark:text-[#e9edef] truncate">{c.custom_name || c.name || c.push_name || c.phone}</span>
+                  <span className="text-sm text-gray-500 truncate">{c.whatsapp_jid}</span>
+               </div>
+             </div>
+          ))}
         </div>
       </div>
     </div>

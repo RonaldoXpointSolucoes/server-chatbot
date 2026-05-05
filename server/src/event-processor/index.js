@@ -80,13 +80,15 @@ class EventProcessor {
             
             // Ignora status e LIDs isolados, forçando a ignorar as ecos de múltiplos aparelhos para IDs nativos
             if (this.isBroadcast(jid) || this.isLid(jid)) {
-                console.warn(`[Message Tracker] 🚨 Mensagem Descartada - Motivo: É um Broadcast ou LID isolado. JID: ${jid}`);
+                // Silenciado ou reduzido para não floodar os logs
+                console.log(`[EventProcessor] Mensagem Descartada - Motivo: É um Broadcast ou LID isolado. JID: ${jid}`);
                 continue;
             }
             
             // Ignora grupos dependendo da opção da empresa
             if (config.ignore_groups && this.isGroup(jid)) {
-                console.warn(`[Message Tracker] 🚨 Mensagem Descartada - Motivo: Grupo (Configurado para ignorar). JID: ${jid}`);
+                // Silenciado ou reduzido para não floodar os logs
+                console.log(`[EventProcessor] Mensagem Descartada - Motivo: Grupo (Configurado para ignorar). JID: ${jid}`);
                 continue;
             }
 
@@ -850,12 +852,20 @@ class EventProcessor {
         if (!updates || updates.length === 0) return;
 
         try {
+            const config = await this.getTenantConfig(tenantId);
             const messageIds = [];
             const idToStatus = new Map();
 
             for (const update of updates) {
                 if (!update.key || !update.key.id) continue;
                 
+                const jid = update.key.remoteJid;
+                
+                // Evita disparar alertas de missing DB (double retry) para mensagens que foram configuradas para serem ignoradas
+                if (jid && (this.isBroadcast(jid) || this.isLid(jid) || (config.ignore_groups && this.isGroup(jid)))) {
+                    continue;
+                }
+
                 // Type mapeia para read, se não for, consideramos delivered.
                 let newStatus = 'delivered';
                 if (update.receipt?.type === 'read' || update.receipt?.type === 'read-self') {
