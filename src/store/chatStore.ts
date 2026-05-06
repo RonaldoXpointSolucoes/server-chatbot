@@ -708,7 +708,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Update Database
       const { error: dbError } = await supabase
         .from('messages')
-        .update({ text: newText })
+        .update({ text_content: newText })
         .eq('id', messageId);
         
       if (dbError) throw dbError;

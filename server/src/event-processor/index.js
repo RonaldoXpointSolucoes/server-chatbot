@@ -156,7 +156,7 @@ class EventProcessor {
                         if (p.key && p.key.id && p.editedMessage) {
                             const newText = this.extractTextFromMessage({ message: p.editedMessage });
                             supabase.from('messages')
-                                .update({ text_content: newText, updated_at: new Date().toISOString() })
+                                .update({ text_content: newText })
                                 .eq('whatsapp_message_id', p.key.id)
                                 .then(({ error }) => {
                                     if (error) console.error('[EventProcessor] Erro ao atualizar mensagem editada:', error);
@@ -177,7 +177,7 @@ class EventProcessor {
                     else if (p.type === 0 || p.type === 'REVOKE') {
                         if (p.key && p.key.id) {
                             supabase.from('messages')
-                                .update({ status: 'deleted', text_content: '🚫 Mensagem apagada', updated_at: new Date().toISOString() })
+                                .update({ status: 'deleted', text_content: '🚫 Mensagem apagada' })
                                 .eq('whatsapp_message_id', p.key.id)
                                 .then(({ error }) => {
                                     if (error) console.error('[EventProcessor] Erro ao deletar mensagem:', error);
