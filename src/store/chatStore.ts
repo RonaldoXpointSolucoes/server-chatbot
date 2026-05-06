@@ -2200,7 +2200,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         
         // Sempre deve remapear o que tem em banco seja do forceSync atualizado ou se cair apenas no fallback
-        if (!forceSync && msgs && msgs.length > 0) {
+        if (!forceSync && msgs) {
            handleMapping(msgs);
         }
     } catch(err) {
