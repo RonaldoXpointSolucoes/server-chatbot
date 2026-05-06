@@ -501,31 +501,20 @@ export function MainSidebar() {
                     <div key={inst.id} className="relative group/channel">
                       <NavItem 
                         icon={
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 relative">
                             {inst.color && <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: inst.color }}></div>}
                             <Brands.WhatsApp size={12} />
+                            {inst.status !== 'connected' && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
                           </div>
                         } 
                         title={inst.display_name || 'Sem nome'} 
                         isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
                         onClick={() => {
-                          if (inst.status !== 'connected') {
-                            useChatStore.getState().openQRModal(inst.id);
-                          } else {
-                            setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name);
-                            setFilterType('all');
-                            navigate('/chat');
-                          }
+                          setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name);
+                          setFilterType('all');
+                          navigate('/chat');
                         }}
                       />
-                      <button 
-                         className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-black/10 dark:hover:bg-white/10 opacity-0 group-hover/channel:opacity-100 transition-all z-10"
-                         onClick={(e) => { e.stopPropagation(); useChatStore.getState().openQRModal(inst.id); }}
-                         title={inst.status === 'connected' ? 'Instância Conectada' : 'Visualizar QRC / Conectar'}
-                      >
-                         <Smartphone size={12} className={cn("transition-colors", inst.status === 'connected' ? 'text-[#00a884]' : 'text-slate-400')} />
-                         {inst.status !== 'connected' && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
-                      </button>
                     </div>
                  ))}
                </div>

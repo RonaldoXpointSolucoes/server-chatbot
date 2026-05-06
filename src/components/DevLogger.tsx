@@ -240,10 +240,36 @@ export default function DevLogger() {
   }, [isVisible, isEnabled, engineUrl, addLog]);
 
   const copyLogs = () => {
-    const textStr = logs.map(l => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.type.toUpperCase()}] ${l.source}: ${l.message}\n${l.details ? JSON.stringify(l.details) : ''}`).join('\n\n');
-    navigator.clipboard.writeText(textStr || 'Nenhum log para copiar.');
+    if (logs.length === 0) {
+      navigator.clipboard.writeText('Nenhum log para copiar.');
+      setCopyFeedback('Nenhum log para copiar');
+      setTimeout(() => setCopyFeedback(null), 3000);
+      return;
+    }
+
+    const grouped: Record<string, any> = {};
+    logs.forEach(l => {
+      const key = `[${l.type.toUpperCase()}] ${l.source}: ${l.message}`;
+      if (!grouped[key]) {
+        grouped[key] = { count: 0, firstTime: l.timestamp, lastTime: l.timestamp, details: l.details, type: l.type };
+      }
+      grouped[key].count++;
+      if (l.timestamp < grouped[key].firstTime) grouped[key].firstTime = l.timestamp;
+      if (l.timestamp > grouped[key].lastTime) grouped[key].lastTime = l.timestamp;
+    });
+
+    const textStr = Object.entries(grouped).map(([key, data]) => {
+       const first = new Date(data.firstTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+       const last = new Date(data.lastTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+       const timeRange = data.count > 1 && first !== last ? `das ${first} às ${last}` : `às ${first}`;
+       const word = data.type === 'error' ? 'erro(s)' : 'ocorrência(s)';
+       const detailsStr = data.details ? `\nDetalhes: ${typeof data.details === 'object' ? JSON.stringify(data.details).substring(0, 200) : String(data.details).substring(0, 200)}` : '';
+       return `${key}\n-> teve ${data.count} ${word} = ${timeRange}${detailsStr}`;
+    }).join('\n\n');
+
+    navigator.clipboard.writeText(textStr);
     const errorCount = logs.filter(l => l.type === 'error').length;
-    setCopyFeedback(`Copiado ${errorCount} erro(s) e ${logs.length - errorCount} logs gerais`);
+    setCopyFeedback(`Copiado logs agrupados (${errorCount} erros)`);
     setTimeout(() => setCopyFeedback(null), 3000);
   };
 

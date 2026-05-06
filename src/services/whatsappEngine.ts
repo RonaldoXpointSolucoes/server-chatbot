@@ -43,6 +43,54 @@ export const sendNativeMessage = async (tenantId: string, instanceId: string, nu
 
 export const sendTextMessage = sendNativeMessage;
 
+export const editNativeMessage = async (tenantId: string, instanceId: string, number: string, newText: string, messageKey: any, apiKey: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'x-tenant-id': tenantId,
+      'apikey': apiKey
+    },
+    body: JSON.stringify({ method: 'sendMessage', args: [number, { text: newText, edit: messageKey }] })
+  });
+  
+  if (!res.ok) {
+     let errorDetail = 'Falha desconhecida';
+     try {
+       const errJson = await res.json();
+       errorDetail = errJson.error || JSON.stringify(errJson);
+     } catch (e) {
+       errorDetail = await res.text();
+     }
+     throw new Error(`Falha ao editar mensagem nativa: ${res.status} - ${errorDetail}`);
+  }
+  return res.json();
+};
+
+export const deleteNativeMessage = async (tenantId: string, instanceId: string, number: string, messageKey: any, apiKey: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'x-tenant-id': tenantId,
+      'apikey': apiKey
+    },
+    body: JSON.stringify({ method: 'sendMessage', args: [number, { delete: messageKey }] })
+  });
+  
+  if (!res.ok) {
+     let errorDetail = 'Falha desconhecida';
+     try {
+       const errJson = await res.json();
+       errorDetail = errJson.error || JSON.stringify(errJson);
+     } catch (e) {
+       errorDetail = await res.text();
+     }
+     throw new Error(`Falha ao apagar mensagem nativa: ${res.status} - ${errorDetail}`);
+  }
+  return res.json();
+};
+
 export const logoutEngine = async (tenantId: string, instanceId: string, apiKey: string) => {
   const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/disconnect`, { 
     method: 'POST',

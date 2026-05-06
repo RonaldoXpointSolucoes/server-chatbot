@@ -66,6 +66,8 @@ interface ChatState {
   contacts: ContactType[];
   activeChatId: string | null;
   evolutionConnected: boolean;
+  instancesStatus: Record<string, string>;
+  setInstanceStatus: (id: string, status: string) => void;
   connectedInstanceName: string | null;
   tenantInfo: TenantInfo | null;
   agents: AgentType[];
@@ -106,6 +108,8 @@ interface ChatState {
   addMessageLocally: (contactId: string, msg: MessageType) => void;
   upsertContactLocally: (contact: ContactRow) => void;
   sendHumanMessage: (contactId: string, text: string, instanceName: string) => Promise<void>;
+  editHumanMessage: (contactId: string, messageId: string, newText: string, instanceName: string) => Promise<void>;
+  deleteHumanMessage: (contactId: string, messageId: string, instanceName: string) => Promise<void>;
   forwardMessage: (contactId: string, message: MessageType, instanceName: string) => Promise<void>;
   sendMediaFromUrl: (contactId: string, mediaUrl: string, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, caption?: string) => Promise<void>;
   uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean, caption?: string) => Promise<void>;
@@ -329,6 +333,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   contacts: [],
   activeChatId: null,
   evolutionConnected: false,
+  instancesStatus: {},
+  setInstanceStatus: (id, status) => set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } })),
   connectedInstanceName: null,
   tenantInfo: null,
   agents: [],
@@ -591,9 +597,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveChat: (id) => set({ activeChatId: id }),
 
   sendHumanMessage: async (contactId, text, instanceName) => {
+    console.log("[sendHumanMessage] Called with:", { contactId, text, instanceName });
     const state = get();
     const contact = state.contacts.find(c => c.id === contactId);
-    if (!contact) return;
+    if (!contact) {
+       console.warn("[sendHumanMessage] Contact not found in store!", contactId);
+       return;
+    }
+    
+    // Verifica a conexão da instância específica da conversa
+    const targetInstance = instanceName || contact.instance_id || state.connectedInstanceName;
+    if (targetInstance && state.instancesStatus[targetInstance] && state.instancesStatus[targetInstance] !== 'connected') {
+       set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar mensagens.' });
+       return;
+    }
     
     // Injeção Mágica de Assinatura (Signature)
     let finalMessageText = text;
@@ -658,8 +675,128 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  editHumanMessage: async (contactId, messageId, newText, instanceName) => {
+    const state = get();
+    if (!instanceName || !state.instancesStatus[instanceName] || state.instancesStatus[instanceName] !== 'connected') {
+       set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para editar mensagens.' });
+       return;
+    }
+    
+    const contact = state.contacts.find(c => c.id === contactId);
+    if (!contact || !state.tenantInfo) return;
+    
+    const msgToEdit = contact.messages.find(m => m.id === messageId);
+    if (!msgToEdit || !msgToEdit.whatsapp_id) {
+       alert('Não é possível editar esta mensagem pois a chave nativa não foi encontrada.');
+       return;
+    }
+
+    try {
+      const { editNativeMessage } = await import('../services/whatsappEngine');
+      
+      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+      const apiKey = instDataDB?.api_key || '';
+
+      const messageKey = {
+         remoteJid: contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'),
+         fromMe: true,
+         id: msgToEdit.whatsapp_id
+      };
+
+      await editNativeMessage(state.tenantInfo.id, instanceName, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), newText, messageKey, apiKey);
+      
+      // Update Database
+      const { error: dbError } = await supabase
+        .from('messages')
+        .update({ text: newText })
+        .eq('id', messageId);
+        
+      if (dbError) throw dbError;
+
+      // Update Local State Optimistically
+      set((s) => ({
+        contacts: s.contacts.map(c => {
+          if (c.id === contactId) {
+            return {
+               ...c, 
+               messages: c.messages.map(m => m.id === messageId ? { ...m, text: newText } : m)
+            };
+          }
+          return c;
+        })
+      }));
+
+    } catch(err: any) {
+      console.error('Erro ao editar mensagem:', err);
+      alert(`Falha ao editar a mensagem: ${err.message}`);
+    }
+  },
+
+  deleteHumanMessage: async (contactId, messageId, instanceName) => {
+    const state = get();
+    if (!instanceName || !state.instancesStatus[instanceName] || state.instancesStatus[instanceName] !== 'connected') {
+       set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para apagar mensagens.' });
+       return;
+    }
+    
+    const contact = state.contacts.find(c => c.id === contactId);
+    if (!contact || !state.tenantInfo) return;
+    
+    const msgToDelete = contact.messages.find(m => m.id === messageId);
+    if (!msgToDelete || !msgToDelete.whatsapp_id) {
+       alert('Não é possível apagar remotamente esta mensagem (chave ausente). Ela será apagada apenas localmente.');
+       // Still proceed to delete locally/DB if desired, but user expectation is remote delete.
+    }
+
+    try {
+      if (msgToDelete && msgToDelete.whatsapp_id) {
+         const { deleteNativeMessage } = await import('../services/whatsappEngine');
+         
+         const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+         const apiKey = instDataDB?.api_key || '';
+
+         const messageKey = {
+            remoteJid: contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'),
+            fromMe: true,
+            id: msgToDelete.whatsapp_id
+         };
+
+         await deleteNativeMessage(state.tenantInfo.id, instanceName, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), messageKey, apiKey);
+      }
+      
+      // Update Database
+      const { error: dbError } = await supabase
+        .from('messages')
+        .delete()
+        .eq('id', messageId);
+        
+      if (dbError) throw dbError;
+
+      // Update Local State Optimistically
+      set((s) => ({
+        contacts: s.contacts.map(c => {
+          if (c.id === contactId) {
+            return {
+               ...c, 
+               messages: c.messages.filter(m => m.id !== messageId)
+            };
+          }
+          return c;
+        })
+      }));
+
+    } catch(err: any) {
+      console.error('Erro ao apagar mensagem:', err);
+      alert(`Falha ao apagar a mensagem: ${err.message}`);
+    }
+  },
+
   uploadAndSendMedia: async (contactId, file, mediaType, instanceName, isPtt, caption) => {
     const state = get();
+    if (!instanceName || !state.instancesStatus[instanceName] || state.instancesStatus[instanceName] !== 'connected') {
+       set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar arquivos.' });
+       return;
+    }
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
 
@@ -888,7 +1025,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
        return;
     }
 
-    if (!state.evolutionConnected) {
+    if (!instanceName || !state.instancesStatus[instanceName] || state.instancesStatus[instanceName] !== 'connected') {
        return; // Previne requisições 400 previsiveis caso o socket esteja offline
     }
     
@@ -1654,6 +1791,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
                
                const effectiveInstanceId = conv.instance_id || dbC.instance_id;
                
+               // --- FILTRO DE CONVERSAS FANTASMAS ---
+               // Ignorar conversas vazias (sem mensagens) caso não sejam a instância principal do contato,
+               // evitando poluição no painel quando clicam num contato por engano.
+               const isPrimary = conv.instance_id === dbC.instance_id;
+               const isEmpty = !conv.last_message_preview && conv.unread_count === 0;
+               if (isEmpty && !isPrimary) {
+                   return false;
+               }
+               
                if (effectiveInstanceId && !isGlobalAdmin) {
                    if (allowedStr) {
                        if (allowedInstances.length === 0) return false; // Agente sem instâncias -> nada
@@ -1833,15 +1979,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
            const apiKey = instDataDB?.api_key || '';
            
            if (instDataDB?.status === 'connected') {
-             set({ evolutionConnected: true, modalReason: null });
+             set({ evolutionConnected: true });
              get().fetchInitialData();
            } else if (instDataDB?.status === 'connecting') {
-             set({ evolutionConnected: false, modalReason: 'O sistema está conectando ao WhatsApp...' });
+             set({ evolutionConnected: false });
            } else {
-             set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp foi encerrada. Por favor, conecte novamente lendo o QR Code.' });
+             set({ evolutionConnected: false });
            }
         } else {
-           set({ evolutionConnected: false, modalReason: 'Seja bem-vindo a sua plataforma! Crie a primeira conexão do seu número de WhatsApp comercial agora mesmo.' });
+           set({ evolutionConnected: false });
         }
       }
     } catch (e) {
@@ -1927,37 +2073,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         if (!conv) {
-             const { data: newConv, error: insertErr } = await supabase.from('conversations').insert({
-                 tenant_id: tenant.id,
-                 contact_id: getRealContactId(contactId),
-                 instance_id: instanceName,
-                 unread_count: 0,
-                 status: 'open',
-                 last_message_at: new Date().toISOString()
-             }).select('id').single();
-             if (insertErr) {
-                 if (insertErr.code === '23505') {
-                     const { data: retryConvs } = await supabase.from('conversations')
-                         .select('id, status')
-                         .eq('tenant_id', tenant.id)
-                         .eq('contact_id', getRealContactId(contactId))
-                         .eq('instance_id', instanceName)
-                         .limit(1);
-                     if (retryConvs && retryConvs.length > 0) {
-                         conv = retryConvs[0];
-                     } else {
-                         console.error("[chatStore] ERRO AO INSERIR NOVA CONVERSA (Não achou após 23505):", insertErr);
-                         return;
+             // Em vez de inserir uma conversa vazia no banco e poluir o DB,
+             // inicializamos a UI com array vazio.
+             // A conversa será criada organicamente pelo Webhook no 1º envio/recebimento.
+             const handleMapping = (messagesArray: any[]) => {
+                 set((s) => {
+                     const updated = [...s.contacts];
+                     const idx = updated.findIndex(c => c.id === contactId);
+                     if (idx !== -1) {
+                         updated[idx] = {
+                             ...updated[idx],
+                             messages: messagesArray,
+                             instance_id: instanceName,
+                             conv_id: undefined
+                         };
                      }
-                 } else {
-                     console.error("[chatStore] ERRO AO INSERIR NOVA CONVERSA:", insertErr);
-                     return;
-                 }
-             } else if (newConv) {
-                 conv = newConv;
-             } else {
-                 return;
-             }
+                     return { contacts: updated };
+                 });
+             };
+             handleMapping([]);
+             return;
         }
 
         // Limpar unread 
@@ -2306,20 +2441,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (m.sender_type === 'system') return; // Ignore echoes that don't need realtime sync
 
         let targetContactId = m.conversation_id ? null : m.contact_id;
-        let convInstanceId = null;
+        let convInstanceId = m.instance_id || null;
         
+        const currentState = get();
+        let targetContactLocally = null;
+
+        // OTIMIZAÇÃO: Evita 2 requests HTTP REST síncronos na hora do render
         if (m.conversation_id) {
-             const { data: conv } = await supabase.from('conversations').select('contact_id, instance_id').eq('id', m.conversation_id).single();
-             if (conv) {
-                 targetContactId = conv.contact_id;
-                 convInstanceId = conv.instance_id;
+             targetContactLocally = currentState.contacts.find((c: any) => c.conv_id === m.conversation_id);
+             if (targetContactLocally) {
+                 targetContactId = targetContactLocally.id.split('_')[0]; // real id
+                 convInstanceId = targetContactLocally.instance_id;
+             } else {
+                 const { data: conv } = await supabase.from('conversations').select('contact_id, instance_id').eq('id', m.conversation_id).single();
+                 if (conv) {
+                     targetContactId = conv.contact_id;
+                     convInstanceId = conv.instance_id;
+                 }
              }
         }
 
+        if (!targetContactId && m.contact_id) targetContactId = m.contact_id;
         if (!targetContactId) return;
 
-        const { data: cData } = await supabase.from('contacts').select('*').eq('id', targetContactId).single();
-        if (!cData) return;
+        let cData = null;
+        if (!targetContactLocally) {
+             const { data } = await supabase.from('contacts').select('*').eq('id', targetContactId).single();
+             cData = data;
+             if (!cData) return;
+        } else {
+             cData = { ...targetContactLocally };
+             cData.id = targetContactId;
+        }
 
         // CRITICAL FIX: O contato local deve assumir a instância da conversa ativa para não sumir da caixa correta
         const effectiveInstanceId = convInstanceId || cData.instance_id;
@@ -2344,17 +2497,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
         }
 
-        const currentState = get();
         const expectedCompositeId = targetContactId + '_' + (effectiveInstanceId || 'default');
 
-        const targetContactLocally = currentState.contacts.find((c: any) => 
-            c.id === expectedCompositeId ||
-            c.id === targetContactId || 
-            (
-                ((c.whatsapp_jid && c.whatsapp_jid === cData.whatsapp_jid) || (c.phone && c.phone === cData.phone)) &&
-                c.instance_id === cData.instance_id
-            )
-        );
+        if (!targetContactLocally) {
+             targetContactLocally = currentState.contacts.find((c: any) => 
+                 c.id === expectedCompositeId ||
+                 c.id === targetContactId || 
+                 (
+                     ((c.whatsapp_jid && c.whatsapp_jid === cData.whatsapp_jid) || (c.phone && c.phone === cData.phone)) &&
+                     c.instance_id === cData.instance_id
+                 )
+             );
+        }
         
         if (!targetContactLocally) {
            get().upsertContactLocally(cData as any);
@@ -2473,7 +2627,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
               const msgIndex = updatedContacts[i].messages.findIndex(msg => msg.id === m.id || (m.whatsapp_message_id && msg.whatsapp_id === m.whatsapp_message_id));
               if (msgIndex !== -1) {
                   const newMessages = [...updatedContacts[i].messages];
-                  newMessages[msgIndex] = { ...newMessages[msgIndex], status: m.status };
+                  newMessages[msgIndex] = { 
+                    ...newMessages[msgIndex], 
+                    status: m.status,
+                    ...(m.text_content !== undefined && { text_content: m.text_content })
+                  };
                   updatedContacts[i] = { ...updatedContacts[i], messages: newMessages };
                   break;
               }
@@ -2491,6 +2649,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
          if (!t || !t.evolution_api_instance) return;
          const inst = payload.new as any;
          
+         get().setInstanceStatus(inst.id, inst.status);
+
          // Sincroniza estado de conexao com o banco via Realtime
          if (inst.id === t.evolution_api_instance) {
             console.log('[Realtime] Instance Status Changed:', inst.status);

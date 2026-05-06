@@ -9,6 +9,13 @@ export const NOTIFICATION_SOUNDS = [
   { id: 'success', name: 'Sucesso' },
   { id: 'marimba', name: 'Marimba' },
   { id: 'pluck', name: 'Pluck' },
+  { id: 'crystal', name: 'Cristal' },
+  { id: 'woodblock', name: 'Madeira' },
+  { id: 'sonar', name: 'Sonar' },
+  { id: 'synth', name: 'Sintetizador' },
+  { id: 'harp', name: 'Harpa' },
+  { id: 'arcade', name: 'Retro Arcade' },
+  { id: 'magic', name: 'Mágica' }
 ];
 
 let audioCtx: AudioContext | null = null;
@@ -84,6 +91,38 @@ export const playNotificationSound = (soundId: string = 'default') => {
         break;
       case 'pluck':
         playTone(900, 'triangle', t, 0.1, 0.5);
+        break;
+      case 'crystal':
+        playTone(2000, 'sine', t, 0.3, 0.3);
+        playTone(3000, 'sine', t + 0.1, 0.4, 0.2);
+        playTone(4000, 'sine', t + 0.2, 0.5, 0.1);
+        break;
+      case 'woodblock':
+        playTone(800, 'square', t, 0.05, 0.4);
+        break;
+      case 'sonar':
+        playTone(1500, 'sine', t, 0.8, 0.6);
+        break;
+      case 'synth':
+        playTone(400, 'sawtooth', t, 0.2, 0.3);
+        playTone(405, 'sawtooth', t, 0.2, 0.3);
+        break;
+      case 'harp':
+        playTone(523.25, 'triangle', t, 0.2, 0.3); // C5
+        playTone(659.25, 'triangle', t + 0.05, 0.2, 0.3); // E5
+        playTone(783.99, 'triangle', t + 0.1, 0.2, 0.3); // G5
+        playTone(1046.50, 'triangle', t + 0.15, 0.4, 0.3); // C6
+        break;
+      case 'arcade':
+        playTone(800, 'square', t, 0.1, 0.2);
+        playTone(1200, 'square', t + 0.1, 0.1, 0.2);
+        playTone(1600, 'square', t + 0.2, 0.1, 0.2);
+        break;
+      case 'magic':
+        playTone(800, 'sine', t, 0.1, 0.3);
+        playTone(1200, 'sine', t + 0.08, 0.1, 0.3);
+        playTone(1600, 'sine', t + 0.16, 0.1, 0.3);
+        playTone(2000, 'sine', t + 0.24, 0.4, 0.3);
         break;
       case 'default':
       default:
