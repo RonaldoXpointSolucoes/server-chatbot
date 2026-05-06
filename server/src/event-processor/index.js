@@ -146,6 +146,58 @@ class EventProcessor {
                 const textMessage = this.extractTextFromMessage(msg);
                 const msgType = this.extractTypeFromMessage(msg);
 
+                let content = this.extractMessageContent(msg);
+                if (content && content.protocolMessage) {
+                    const p = content.protocolMessage;
+                    
+                    // Verifica se é uma edição de mensagem (MESSAGE_EDIT = 14)
+                    // Ou se possui explicitamente a propriedade "editedMessage"
+                    if (p.type === 14 || p.type === 'MESSAGE_EDIT' || p.editedMessage) {
+                        if (p.key && p.key.id && p.editedMessage) {
+                            const newText = this.extractTextFromMessage({ message: p.editedMessage });
+                            supabase.from('messages')
+                                .update({ text_content: newText, updated_at: new Date().toISOString() })
+                                .eq('whatsapp_message_id', p.key.id)
+                                .then(({ error }) => {
+                                    if (error) console.error('[EventProcessor] Erro ao atualizar mensagem editada:', error);
+                                    else console.log('[EventProcessor] Mensagem editada processada no banco:', p.key.id);
+                                });
+                            
+                            // Tenta publicar no realtime (não bloqueia o fluxo)
+                            realtime.publishInboxEvent(tenantId, 'message.update', {
+                                whatsapp_message_id: p.key.id,
+                                text_content: newText
+                            }).catch(() => {});
+                        }
+                        // Sempre pula o enfileiramento de protocolMessage de edição
+                        continue; 
+                    } 
+                    
+                    // Verifica se é uma mensagem apagada (REVOKE = 0)
+                    else if (p.type === 0 || p.type === 'REVOKE') {
+                        if (p.key && p.key.id) {
+                            supabase.from('messages')
+                                .update({ status: 'deleted', text_content: '🚫 Mensagem apagada', updated_at: new Date().toISOString() })
+                                .eq('whatsapp_message_id', p.key.id)
+                                .then(({ error }) => {
+                                    if (error) console.error('[EventProcessor] Erro ao deletar mensagem:', error);
+                                    else console.log('[EventProcessor] Mensagem apagada processada no banco:', p.key.id);
+                                });
+
+                            realtime.publishInboxEvent(tenantId, 'message.update', {
+                                whatsapp_message_id: p.key.id,
+                                status: 'deleted',
+                                text_content: '🚫 Mensagem apagada'
+                            }).catch(() => {});
+                        }
+                        // Sempre pula o enfileiramento de protocolMessage de revoke
+                        continue; 
+                    }
+                    
+                    // Ignora silenciosamente outros protocolMessages (HISTORY_SYNC_NOTIFICATION, APP_STATE_SYNC_KEY_SHARE, etc)
+                    continue; 
+                }
+
                 // Em memória: empurra pra fila invés de dar AWAIT no BD cru.
                 this.messageQueue.push({
                     tenantId,

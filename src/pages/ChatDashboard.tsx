@@ -11,7 +11,7 @@ import { GeminiEditorModal } from '../components/GeminiEditorModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Flag, Clock, Mail, MailOpen, CircleDollarSign } from 'lucide-react'; // Adicionado lucide pro flag
+import { Flag, Clock, Mail, MailOpen, CircleDollarSign, Edit2 } from 'lucide-react'; // Adicionado lucide pro flag
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { supabase } from '../services/supabase';
@@ -168,8 +168,15 @@ export default function ChatDashboard() {
     isSearchingGlobally,
     filterType,
     setFilterType,
-    resolveConversation
+    resolveConversation,
+    editHumanMessage,
+    deleteHumanMessage,
+    instancesStatus,
+    setInstanceStatus
   } = useChatStore();
+
+  const [editingMessage, setEditingMessage] = useState<{ id: string, text: string } | null>(null);
+  const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
 
   // Execucao Incial Reativa
   // Efect removido (duplicado com o useEffect consolidado mais abaixo)
@@ -358,7 +365,7 @@ export default function ChatDashboard() {
       subscribeToNewMessages();
     })();
 
-    supabase.from('whatsapp_instances').select('id, display_name, color').then(({data}) => {
+    supabase.from('whatsapp_instances').select('id, display_name, color, status').then(({data}) => {
       if (data) {
         const nameMap: Record<string, string> = {};
         const colorMap: Record<string, string> = {};
@@ -377,6 +384,7 @@ export default function ChatDashboard() {
         data.forEach(d => { 
            nameMap[d.id] = d.display_name; 
            if(d.color) colorMap[d.id] = d.color;
+           setInstanceStatus(d.id, d.status);
         });
         
         setInstanceNamesMap(nameMap);
@@ -448,7 +456,24 @@ export default function ChatDashboard() {
   const handleSendHuman = (e: React.FormEvent) => {
     e.preventDefault();
     const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
-    if (!inputText.trim() || !activeChatId || !properTargetInstance) return;
+    console.log("[handleSendHuman] Attempting to send. Values:", { inputText, activeChatId, activeChatInstance: activeChat?.instance_id, connectedInstanceName, properTargetInstance });
+    
+    if (!inputText.trim() || !activeChatId || !properTargetInstance) {
+       console.warn("[handleSendHuman] Blocked! One of the required values is missing.");
+       return;
+    }
+    
+    // Se a instância estiver offline, alerta e não envia
+    if (instancesStatus[properTargetInstance] && instancesStatus[properTargetInstance] !== 'connected') {
+       useChatStore.getState().openQRModal(properTargetInstance);
+       return;
+    }
+    
+    // Se a instância estiver offline, alerta e não envia
+    if (instancesStatus[properTargetInstance] && instancesStatus[properTargetInstance] !== 'connected') {
+       useChatStore.getState().openQRModal(properTargetInstance);
+       return;
+    }
     
     let finalMessageText = inputText;
     if (replyMessage) {
@@ -816,7 +841,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.1.7'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '05/05/2026, 17:45')}`}
+            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.1.15'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '06/05/2026, 13:12')}`}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1710,6 +1735,30 @@ export default function ChatDashboard() {
                               >
                                 Encaminhar
                               </button>
+                              
+                              {isMe && msg.whatsapp_id && (
+                                <>
+                                  <div className="w-full h-px bg-black/5 dark:bg-white/5 my-1"></div>
+                                  <button 
+                                    onClick={() => {
+                                      setEditingMessage({ id: msg.id, text: msg.text || '' });
+                                      setActiveMsgDropdown(null);
+                                    }}
+                                    className="w-full text-left px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors text-[14px] text-blue-600 dark:text-blue-400 font-medium"
+                                  >
+                                    <Edit2 size={16} /> Editar
+                                  </button>
+                                  <button 
+                                    onClick={() => {
+                                      setMessageToDelete(msg.id);
+                                      setActiveMsgDropdown(null);
+                                    }}
+                                    className="w-full text-left px-4 py-2 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-3 transition-colors text-[14px] text-red-600 dark:text-red-400 font-medium"
+                                  >
+                                    <Trash2 size={16} /> Apagar
+                                  </button>
+                                </>
+                              )}
                             </div>
                          )}
                        </div>
@@ -1912,7 +1961,7 @@ export default function ChatDashboard() {
           )}
 
           {/* Input Area */}
-          <div className="flex flex-col shrink-0 z-10 w-full bg-[#f0f2f5] dark:bg-[#202c33] shadow-sm border-t border-[#d1d7db] dark:border-[#222d34]">
+          <div className="flex flex-col shrink-0 z-10 w-full bg-[#f0f2f5] dark:bg-[#202c33] shadow-sm border-t border-[#d1d7db] dark:border-[#222d34] relative">
             {/* Reply Preview Box */}
             {replyMessage && (
               <div className="flex items-start bg-black/5 dark:bg-black/20 p-3 relative animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-t-xl mx-2 mt-2 group/replybox border border-black/5 dark:border-white/5">
@@ -1930,8 +1979,27 @@ export default function ChatDashboard() {
                 </button>
               </div>
             )}
+            {/* Offline Banner Above Input */}
+            {activeChat && activeChat.instance_id && instancesStatus[activeChat.instance_id] && instancesStatus[activeChat.instance_id] !== 'connected' && (
+              <div className="bg-red-50/90 dark:bg-[#2a1314]/90 backdrop-blur-md border-t border-red-200 dark:border-red-900/50 p-2.5 flex items-center justify-between z-20 shadow-inner">
+                <div className="flex items-center gap-2.5 text-red-600 dark:text-[#f48686]">
+                  <div className="bg-red-500/10 p-1.5 rounded-lg border border-red-500/20">
+                    <ShieldAlert size={16} className="animate-pulse" />
+                  </div>
+                  <span className="text-[12px] font-medium tracking-wide">Instância offline. Conecte-a para enviar mensagens.</span>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => useChatStore.getState().openQRModal(activeChat.instance_id)}
+                  className="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-[11px] font-bold uppercase shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5"
+                >
+                  <Power size={14} />
+                  Reconectar
+                </button>
+              </div>
+            )}
             
-            <form onSubmit={handleSendHuman} className="min-h-16 flex items-end px-4 py-3 gap-3">
+            <form onSubmit={handleSendHuman} className="min-h-[70px] flex items-end px-4 py-3 gap-3 relative">
               <button 
                 type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -2163,6 +2231,90 @@ export default function ChatDashboard() {
             onClick={(e) => e.stopPropagation()}
             onContextMenu={(e) => e.stopPropagation()}
           />
+        </div>
+      )}
+
+      {/* Modal de Edição de Mensagem (Visual Premium) */}
+      {editingMessage && (
+        <div className="fixed inset-0 z-[99999] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#111b21] w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden border border-white/20 dark:border-white/10 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
+            <div className="p-6 border-b border-gray-100 dark:border-[#202c33] bg-gradient-to-r from-blue-50 to-transparent dark:from-blue-900/10">
+              <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-3">
+                <Edit2 size={24} className="text-blue-500" /> Editar Mensagem
+              </h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Apenas o texto pode ser editado. Essa alteração refletirá no aparelho do cliente.</p>
+            </div>
+            <div className="p-6 bg-[#f0f2f5]/30 dark:bg-[#0b141a]/30">
+              <textarea
+                autoFocus
+                className="w-full h-32 p-4 bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#304046] rounded-2xl resize-none outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-[#111b21] dark:text-[#e9edef] text-[15px] shadow-sm transition-all"
+                value={editingMessage.text}
+                onChange={(e) => setEditingMessage({ ...editingMessage, text: e.target.value })}
+                placeholder="Digite a nova mensagem..."
+              />
+            </div>
+            <div className="p-4 bg-gray-50 dark:bg-[#202c33]/50 border-t border-gray-100 dark:border-[#202c33] flex justify-end gap-3">
+              <button
+                onClick={() => setEditingMessage(null)}
+                className="px-5 py-2.5 rounded-xl font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  if (!activeChatId) return;
+                  const instanceToUse = activeChat?.instance_id || activeChat?.whatsapp_instance;
+                  if (!instanceToUse) return;
+                  
+                  await editHumanMessage(activeChatId, editingMessage.id, editingMessage.text, instanceToUse);
+                  setEditingMessage(null);
+                }}
+                disabled={!editingMessage.text.trim()}
+                className="px-6 py-2.5 rounded-xl font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center gap-2"
+              >
+                <Edit2 size={18} /> Salvar Edição
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Exclusão de Mensagem (Visual Premium) */}
+      {messageToDelete && (
+        <div className="fixed inset-0 z-[99999] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#111b21] w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden border border-white/20 dark:border-white/10 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
+            <div className="p-6 bg-gradient-to-br from-red-50 to-white dark:from-red-900/10 dark:to-[#111b21] flex flex-col items-center text-center">
+              <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-4 border-4 border-white dark:border-[#111b21] shadow-inner">
+                <Trash2 size={32} className="text-red-500 dark:text-red-400" />
+              </div>
+              <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-2">Apagar Mensagem?</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                Esta ação é irreversível e apagará a mensagem para todos na conversa.
+              </p>
+              
+              <div className="flex w-full gap-3">
+                <button
+                  onClick={() => setMessageToDelete(null)}
+                  className="flex-1 py-3 rounded-xl font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-[#202c33] hover:bg-gray-200 dark:hover:bg-[#304046] transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!activeChatId) return;
+                    const instanceToUse = activeChat?.instance_id || activeChat?.whatsapp_instance;
+                    if (!instanceToUse) return;
+                    
+                    await deleteHumanMessage(activeChatId, messageToDelete, instanceToUse);
+                    setMessageToDelete(null);
+                  }}
+                  className="flex-1 py-3 rounded-xl font-medium text-white bg-red-600 hover:bg-red-700 shadow-md hover:shadow-lg transition-all active:scale-95"
+                >
+                  Apagar
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
