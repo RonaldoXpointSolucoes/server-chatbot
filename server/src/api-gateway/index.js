@@ -2,12 +2,7 @@ import express from 'express';
 import instanceRoutes from './instances.js';
 import messageRoutes from './messages.js';
 import knowledgeRoutes from './knowledge.js';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseAdmin = createClient(
-    process.env.VITE_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
-);
+import { supabase } from '../supabase.js';
 
 const router = express.Router();
 
@@ -21,7 +16,7 @@ router.get('/v1/companies/:id', async (req, res) => {
         const { id } = req.params;
         if (!id) return res.status(400).json({ error: 'Missing company ID' });
         
-        const { data, error } = await supabaseAdmin
+        const { data, error } = await supabase
             .from('companies')
             .select('*')
             .eq('id', id)
