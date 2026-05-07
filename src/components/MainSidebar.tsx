@@ -165,13 +165,28 @@ export function MainSidebar() {
 
     const fetchCompanies = async () => {
       try {
-        const { data: currentCompany, error: currentError } = await supabase
+        let currentCompany = null;
+        const { data: dbCompany, error: currentError } = await supabase
           .from('companies')
           .select('*')
           .eq('id', tenantId)
           .single();
           
-        if (currentError || !currentCompany) return;
+        if (currentError && currentError.code === 'PGRST116') {
+             try {
+                 const apiUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL || 'http://localhost:3000';
+                 const res = await fetch(`${apiUrl}/api/v1/companies/${tenantId}`);
+                 if (res.ok) {
+                     currentCompany = await res.json();
+                 }
+             } catch (err) {
+                 console.error("Erro no fallback do fetchCompanies:", err);
+             }
+        } else {
+            currentCompany = dbCompany;
+        }
+
+        if (!currentCompany) return;
         
         setCurrentCompanyContext(currentCompany);
         setGlobalAiEnabled(currentCompany.global_ai_enabled ?? true);

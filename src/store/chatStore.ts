@@ -1963,7 +1963,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       if (!currentTenantId) return;
 
-      const { data: tenantData } = await supabase.from('companies').select('*').eq('id', currentTenantId).single();
+      let tenantData = null;
+      const { data: dbData, error } = await supabase.from('companies').select('*').eq('id', currentTenantId).single();
+      
+      if (error && error.code === 'PGRST116') {
+         try {
+             const apiUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL || 'http://localhost:3000';
+             const res = await fetch(`${apiUrl}/api/v1/companies/${currentTenantId}`);
+             if (res.ok) {
+                 tenantData = await res.json();
+             }
+         } catch (err) {
+             console.error("Erro no fallback do fetchTenantConfig:", err);
+         }
+      } else {
+         tenantData = dbData;
+      }
       
       if (tenantData) {
         set({
