@@ -3,7 +3,7 @@ import { supabase, ContactRow } from '../services/supabase';
 import { useChatStore } from '../store/chatStore';
 import { 
   Search, Plus, Edit2, Trash2, X, Phone, Mail, FileText,
-  User, CheckCircle2, AlertCircle, Building2, UserCircle2, ArrowLeft
+  User, CheckCircle2, AlertCircle, Building2, UserCircle2, ArrowLeft, MessageSquare
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
@@ -362,6 +362,17 @@ export default function ContactsManager() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                              onClick={() => {
+                                useChatStore.getState().setActiveChat(contact.id);
+                                navigate('/');
+                              }} 
+                              className="p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-colors" 
+                              title="Enviar Mensagem"
+                            >
+                               <MessageSquare size={16} />
+                            </button>
+
                             <button onClick={() => handleOpenModal(contact)} className="p-2 hover:bg-emerald-500/20 text-emerald-500 rounded-lg transition-colors" title="Editar">
                                <Edit2 size={16} />
                             </button>

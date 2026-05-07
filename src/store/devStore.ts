@@ -50,6 +50,8 @@ export const useDevStore = create<DevStore>()(
                if (error && log.source !== 'Fetch API: undefined') {
                    // Ignore to prevent loop
                }
+            }).catch(() => {
+                // Ignore silent network errors
             });
         }
         

@@ -100,7 +100,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
         const { instanceId } = req.params;
         const { method, args } = req.body;
         
-        const sock = sessionManager.getSocket(instanceId);
+        const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
         if(!sock) return res.status(400).json({ error: 'Socket offline' });
 
         // Intercept custom macros that don't exist directly on sock
@@ -153,7 +153,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
 router.post('/instances/:instanceId/send-media-url', requireTenant, express.json(), async (req, res) => {
     try {
         const { instanceId } = req.params;
-        const sock = sessionManager.getSocket(instanceId);
+        const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
         if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
         const { mediaUrl, mimetype, fileName, jid, caption, messageType, ptt } = req.body;
@@ -227,7 +227,7 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
 router.post('/instances/:instanceId/send-media', requireTenant, upload.single('media'), async (req, res) => {
     try {
         const { instanceId } = req.params;
-        const sock = sessionManager.getSocket(instanceId);
+        const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
         if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
         const tenantId = req.tenantId;

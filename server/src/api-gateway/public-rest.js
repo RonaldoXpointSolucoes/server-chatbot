@@ -238,7 +238,7 @@ router.get('/instance/:name/status', requireApiKey, async (req, res) => {
  */
 router.delete('/instance/:name', requireApiKey, async (req, res) => {
     try {
-        const { id } = req.instanceData;
+        const { id, tenant_id } = req.instanceData;
         const sock = sessionManager.getSocket(id);
         if (sock) {
             try { await sock.logout(); } catch(e){}
@@ -301,7 +301,7 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
         
         if (!number || !text) return res.status(400).json({ error: 'number and text are required in body' });
 
-        const sock = sessionManager.getSocket(id);
+        const sock = await sessionManager.getSocketOrWake(tenant_id, id);
         if (!sock) return res.status(400).json({ error: 'WhatsApp socket offline for this instance.' });
         
         const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
@@ -381,7 +381,7 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
             return res.status(400).json({ error: 'Missing file, number, mediatype or instance' });
         }
 
-        const sock = sessionManager.getSocket(id);
+        const sock = await sessionManager.getSocketOrWake(tenant_id, id);
         if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
         const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
@@ -500,10 +500,10 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
 router.post('/message/sendLocation', requireApiKey, async (req, res) => {
     try {
         const { number, instance, latitude, longitude, name, address } = req.body;
-        const { id } = req.instanceData;
+        const { id, tenant_id } = req.instanceData;
         if (!number || !latitude || !longitude) return res.status(400).json({ error: 'number, latitude and longitude required' });
 
-        const sock = sessionManager.getSocket(id);
+        const sock = await sessionManager.getSocketOrWake(tenant_id, id);
         if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
         const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
@@ -551,10 +551,10 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
 router.post('/message/sendContact', requireApiKey, async (req, res) => {
     try {
         const { number, instance, contactName, contactNumber } = req.body;
-        const { id } = req.instanceData;
+        const { id, tenant_id } = req.instanceData;
         if (!number || !contactName || !contactNumber) return res.status(400).json({ error: 'number, contactName and contactNumber required' });
 
-        const sock = sessionManager.getSocket(id);
+        const sock = await sessionManager.getSocketOrWake(tenant_id, id);
         if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
         const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
@@ -616,10 +616,10 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
 router.post('/message/sendReaction', requireApiKey, async (req, res) => {
     try {
         const { number, instance, messageId, reaction, fromMe = false } = req.body;
-        const { id } = req.instanceData;
+        const { id, tenant_id } = req.instanceData;
         if (!number || !messageId || !reaction) return res.status(400).json({ error: 'number, messageId and reaction required' });
 
-        const sock = sessionManager.getSocket(id);
+        const sock = await sessionManager.getSocketOrWake(tenant_id, id);
         if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
         const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
@@ -662,7 +662,7 @@ router.post('/message/sendReaction', requireApiKey, async (req, res) => {
 router.put('/instance/:name/restart', requireApiKey, async (req, res) => {
     try {
         const { id, tenant_id } = req.instanceData;
-        const sock = sessionManager.getSocket(id);
+        const sock = await sessionManager.getSocketOrWake(tenant_id, id);
         
         if (sock) {
             sock.ws.close();

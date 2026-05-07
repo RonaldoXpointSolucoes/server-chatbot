@@ -127,7 +127,7 @@ export default function DevLogger() {
         const method = (args[1] as RequestInit)?.method || 'GET';
         const urlStr = typeof urlObj === 'string' ? urlObj : 'unknown';
         
-        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/realtime/');
+        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/realtime/') || urlStr.includes('system_logs');
         
         if (!isSpammyUrl) {
           addLog({

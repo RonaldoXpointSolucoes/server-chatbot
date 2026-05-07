@@ -195,6 +195,20 @@ class SessionManager {
         return this.sessions.get(instanceId)?.sock;
     }
 
+    async getSocketOrWake(tenantId, instanceId) {
+        let sock = this.getSocket(instanceId);
+        if (sock) return sock;
+
+        // Fallback para acordar a instância (Lazy Load) se o Node foi reiniciado
+        const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', instanceId).single();
+        if (data && ['connected', 'connecting', 'qr_ready'].includes(data.status)) {
+            console.log(`[SessionManager] Lazy loading instance ${instanceId} (DB status: ${data.status})...`);
+            return await this.createSession(tenantId, instanceId);
+        }
+        
+        return null;
+    }
+
     async closeSession(instanceId) {
         const data = this.sessions.get(instanceId);
         if (data && data.sock) {

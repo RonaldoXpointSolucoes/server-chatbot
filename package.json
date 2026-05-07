@@ -1,7 +1,7 @@
 {
-  "name": "chat-boot-xpoint",
+  "name": "chatboot",
   "private": true,
-  "version": "2.2.6",
+  "version": "2.2.9",
   "type": "module",
   "scripts": {
     "dev": "vite",

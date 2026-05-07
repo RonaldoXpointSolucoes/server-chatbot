@@ -849,7 +849,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.2.6'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '06/05/2026, 22:05')}`}
+            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.2.9'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '07/05/2026, 14:20')}`}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1720,7 +1720,7 @@ export default function ChatDashboard() {
                          
                          {activeMsgDropdown === msg.id && (
                             <div className={cn(
-                              "absolute right-0 w-44 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/10 dark:border-white/10 rounded-2xl md:rounded-[24px] shadow-2xl py-2 z-[99999] animate-in fade-in zoom-in-95 duration-200",
+                              "absolute right-0 w-44 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/10 dark:border-white/10 rounded-2xl md:rounded-[24px] shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-2 z-[99999] animate-in fade-in zoom-in-95 duration-200",
                               isLastMessages ? "bottom-8 origin-bottom-right" : "top-8 origin-top-right"
                             )} onClick={e => e.stopPropagation()}>
                               <button 
@@ -1849,7 +1849,7 @@ export default function ChatDashboard() {
                                   onClick={() => handleTranscribeAudio(msg.id, msg.mediaUrl!)}
                                   disabled={transcribingIds[msg.id]}
                                   className="mr-2 p-1.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all border border-indigo-100 dark:border-indigo-800 disabled:opacity-50 group/btn"
-                                  title="Transcrever Ç「dio com IA"
+                                  title="Transcrever Áudio com IA"
                                 >
                                   {transcribingIds[msg.id] ? <RefreshCw size={15} className="animate-spin" /> : <Sparkles size={15} className="group-hover/btn:scale-110 transition-transform" />}
                                 </button>
@@ -1919,7 +1919,7 @@ export default function ChatDashboard() {
                       
                       {(!msg.mediaType || (msg.mediaType !== 'document' && msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
                          <span className="text-[14px] leading-[1.4] block whitespace-pre-wrap break-words overflow-hidden shadow-none mt-1">
-                            {renderMessageText(msg.text ? msg.text.replace(/^(?:�磁|�汐)\s*Vídeo\s*\n?/i, '').replace('�梼 Formato não suportado (templateMessage)', '�導 Mensagem Interativa (Abra no celular para ver)').replace('�梼 Formato não suportado (highlyStructuredMessage)', '�導 Mensagem Estruturada (Abra no celular para ver)') : msg.text)}
+                            {renderMessageText(msg.text ? msg.text.replace(/^(?:磁|汐)\s*Vídeo\s*\n?/i, '').replace('梼 Formato não suportado (templateMessage)', '導 Mensagem Interativa (Abra no celular para ver)').replace('梼 Formato não suportado (highlyStructuredMessage)', '導 Mensagem Estruturada (Abra no celular para ver)') : msg.text)}
                             {!msg.buttons && <span className="inline-block w-[110px] h-3 ml-2 shrink-0"></span>}
                          </span>
                       )}
@@ -1966,7 +1966,7 @@ export default function ChatDashboard() {
             <button
                onClick={() => scrollToBottom('smooth')}
                className="absolute right-6 bottom-[85px] z-50 w-11 h-11 bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-md rounded-full flex items-center justify-center text-[#54656f] dark:text-[#aebac1] shadow-[0_4px_12px_rgba(0,0,0,0.15)] dark:shadow-[0_4px_12px_rgba(0,0,0,0.4)] border border-white/50 dark:border-white/5 hover:bg-white dark:hover:bg-[#202c33] hover:text-[#00a884] dark:hover:text-[#00a884] transition-all hover:scale-105 active:scale-95 animate-in fade-in slide-in-from-bottom-5 duration-300"
-               title="Ir para o fim d conversa"
+               title="Ir para o fim da conversa"
                aria-label="Ir para o fim da conversa"
             >
                <ChevronDown size={24} />
@@ -1982,7 +1982,7 @@ export default function ChatDashboard() {
             {replyMessage && (
               <div className="flex items-start bg-black/5 dark:bg-black/20 p-3 relative animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-t-xl mx-2 mt-2 group/replybox border border-black/5 dark:border-white/5">
                 <div className="w-1.5 h-full absolute left-0 top-0 bottom-0 bg-[#00a884] rounded-l-xl"></div>
-                <div className="flex flex-col flex-1 pl-3 pr-8">
+                <div className="flex flex-col ml-3 flex-1 pr-8">
                   <span className="text-[12px] font-bold text-[#00a884] mb-0.5">{replyMessage.sender === 'human' || replyMessage.sender === 'me' ? 'Você' : getContactDisplayName(activeChat?.custom_name || activeChat?.name, activeChat?.push_name, activeChat?.phone)}</span>
                   <span className="text-[13px] text-[#54656f] dark:text-[#aebac1] line-clamp-2 leading-relaxed">{replyMessage.text}</span>
                 </div>
