@@ -706,9 +706,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       await editNativeMessage(state.tenantInfo.id, instanceName, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), newText, messageKey, apiKey);
       
       // Update Database
+      const finalNewText = newText.endsWith(' *(Editado)*') ? newText : newText + ' *(Editado)*';
       const { error: dbError } = await supabase
         .from('messages')
-        .update({ text_content: newText })
+        .update({ text_content: finalNewText })
         .eq('id', messageId);
         
       if (dbError) throw dbError;
@@ -719,7 +720,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (c.id === contactId) {
             return {
                ...c, 
-               messages: c.messages.map(m => m.id === messageId ? { ...m, text: newText } : m)
+               messages: c.messages.map(m => m.id === messageId ? { ...m, text: finalNewText } : m)
             };
           }
           return c;
@@ -765,9 +766,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       
       // Update Database
+      const deletedPlaceholder = '🚫 _Esta mensagem foi apagada._';
       const { error: dbError } = await supabase
         .from('messages')
-        .delete()
+        .update({ 
+           text_content: deletedPlaceholder,
+           media_url: null, 
+           media_metadata: null,
+           message_type: 'text',
+           status: 'deleted'
+        })
         .eq('id', messageId);
         
       if (dbError) throw dbError;
@@ -778,7 +786,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (c.id === contactId) {
             return {
                ...c, 
-               messages: c.messages.filter(m => m.id !== messageId)
+               messages: c.messages.map(m => m.id === messageId ? {
+                  ...m, 
+                  text: deletedPlaceholder,
+                  status: 'deleted',
+                  mediaUrl: undefined,
+                  mediaType: 'text'
+               } : m)
             };
           }
           return c;
@@ -1153,6 +1167,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // VALIDAÇÃO INTELIGENTE APPWEB (Realtime Barreira)
     if (contact.whatsapp_jid && contact.whatsapp_jid.includes('@lid')) return;
     if (contact.phone && contact.phone.length > 15 && !contact.phone.includes('+')) return;
+
+    // BARREIRA DE INSTÂNCIA: Impede contatos vazando entre caixas via realtime
+    const currentActiveFilter = get().activeChannelFilter;
+    if (currentActiveFilter && currentActiveFilter !== 'default' && currentActiveFilter !== 'all') {
+        if (contact.instance_id && contact.instance_id !== currentActiveFilter) {
+            console.log(`[Realtime Barreira] Ignorando contato da instância ${contact.instance_id} na visualização ativa ${currentActiveFilter}`);
+            return;
+        }
+    }
 
     set((state) => {
       // 1. Resolvemos os dois principais identificadores unicos independentes (JID ou Telefone Formatado/Puro)
@@ -2443,6 +2466,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         let targetContactId = m.conversation_id ? null : m.contact_id;
         let convInstanceId = m.instance_id || null;
         
+        // BARREIRA DE INSTÂNCIA: Bloqueia injeção de mensagens de outras caixas na UI atual
+        const currentActiveFilter = get().activeChannelFilter;
+        if (currentActiveFilter && currentActiveFilter !== 'default' && currentActiveFilter !== 'all') {
+            if (convInstanceId && convInstanceId !== currentActiveFilter) {
+                 console.log(`[Realtime Barreira] Ignorando msg INSERT da instância ${convInstanceId} na visualização ativa ${currentActiveFilter}`);
+                 return;
+            }
+        }
+        
         const currentState = get();
         let targetContactLocally = null;
 
@@ -2618,6 +2650,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
         const m = payload.new as any;
+
+        // BARREIRA DE INSTÂNCIA: Bloqueia UPDATEs irrelevantes
+        const currentActiveFilter = get().activeChannelFilter;
+        if (currentActiveFilter && currentActiveFilter !== 'default' && currentActiveFilter !== 'all') {
+            if (m.instance_id && m.instance_id !== currentActiveFilter) {
+                 return;
+            }
+        }
+
         console.log('[Realtime] Message UPDATE:', m);
         set((s) => {
            let updatedContacts = [...s.contacts];

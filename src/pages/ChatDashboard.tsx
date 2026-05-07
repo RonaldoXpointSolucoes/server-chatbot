@@ -59,7 +59,7 @@ export function formatPhoneNumber(phone: string | undefined | null): string {
 export function renderMessageText(text: string) {
   if (!text) return null;
   
-  // Detecﾃｧﾃ｣o de mensagem citada na string (padrﾃ｣o de envio)
+  // Detecção de mensagem citada na string (padrão de envio)
   const quoteMatch = text.match(/^> \*Mensagem Citada:\* "(.*?)"\n\n([\s\S]*)$/);
   
   if (quoteMatch) {
@@ -99,7 +99,7 @@ export function renderMessageText(text: string) {
       );
     }
     
-    // Tratamento para quebras de linha e formataﾃｧﾃ｣o WhatsApp (apenas negrito bﾃ｡sico para strings limpas)
+    // Tratamento para quebras de linha e formatação WhatsApp (apenas negrito básico para strings limpas)
     const lines = part.split('\n');
     return (
       <React.Fragment key={i}>
@@ -194,7 +194,7 @@ export default function ChatDashboard() {
   const [pastedImageCaption, setPastedImageCaption] = useState('');
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
 
-  // Lﾃｳgica de rascunhos por chat
+  // Lógica de rascunhos por chat
   const draftsRef = useRef<Record<string, string>>({});
   const prevActiveChatId = useRef<string | null>(null);
   const currentInputText = useRef(inputText);
@@ -209,7 +209,15 @@ export default function ChatDashboard() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // Estados dos novos menus fluﾃｭdos
+  // Auto-resize do textarea sincronizado com o state inputText
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(Math.max(textareaRef.current.scrollHeight, 20), 250)}px`;
+    }
+  }, [inputText]);
+
+  // Estados dos novos menus fluídos
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [contactToEdit, setContactToEdit] = useState<any | null>(null);
   const [contactToDelete, setContactToDelete] = useState<{id: string; name: string} | null>(null);
@@ -248,7 +256,7 @@ export default function ChatDashboard() {
   const [instanceColorsMap, setInstanceColorsMap] = useState<Record<string, string>>({});
   const [availableInstancesList, setAvailableInstancesList] = useState<{id: string, display_name: string, color: string}[]>([]);
 
-  // Estados de Paginaﾃｧﾃ｣o Local Virtual
+  // Estados de Paginação Local Virtual
   const [contactPageLimit, setContactPageLimit] = useState(20);
   const contactListRef = useRef<HTMLDivElement>(null);
 
@@ -301,13 +309,13 @@ export default function ChatDashboard() {
   // Scroll inicial e quando muda de chat
   useEffect(() => {
     if (activeChatId) {
-      scrollToBottom('auto'); // Vai pro fim instantﾃ｢neo
+      scrollToBottom('auto'); // Vai pro fim instantÇ｢neo
       setShowScrollButton(false);
       prevMessagesLength.current = activeChat?.messages?.length || 0;
       
-      // Fallback para imagens/mﾃｭdias carregando
+      // Fallback para imagens/mídias carregando
       const timeout = setTimeout(() => {
-        // Usa 'auto' para evitar a animaﾃｧﾃ｣o indesejada de rolar visualmente atﾃｩ o fim da pﾃ｡gina ao abrir nova conversa
+        // Usa 'auto' para evitar a animação indesejada de rolar visualmente até o fim da página ao abrir nova conversa
         scrollToBottom('auto');
       }, 150);
       return () => clearTimeout(timeout);
@@ -339,12 +347,12 @@ export default function ChatDashboard() {
       const isMe = lastMsg && (lastMsg.sender === 'human' || lastMsg.sender === 'bot');
       
       if (!showScrollButton || isMe) {
-        // Usa rolagem instantﾃ｢nea ('auto') se vierem mﾃｺltiplas mensagens de uma vez (ex: carregamento do histﾃｳrico)
+        // Usa rolagem instantÇ｢nea ('auto') se vierem múltiplas mensagens de uma vez (ex: carregamento do histórico)
         // Usa 'smooth' apenas para novas mensagens recebidas 1 a 1
         const behavior = diff > 1 ? 'auto' : 'smooth';
         scrollToBottom(behavior);
         
-        // Fallbacks para garantir que caia na ﾃｺltima linha mesmo que as imagens demorem a renderizar
+        // Fallbacks para garantir que caia na última linha mesmo que as imagens demorem a renderizar
         if (diff > 1) {
            setTimeout(() => scrollToBottom('auto'), 150);
            setTimeout(() => scrollToBottom('auto'), 500);
@@ -394,7 +402,7 @@ export default function ChatDashboard() {
     });
   }, []);
 
-  // Soluﾃｧﾃ｣o PWA: Atualiza os dados (contatos e mensagens) e forﾃｧa reconexﾃ｣o Realtime quando o app volta de background
+  // Solução PWA: Atualiza os dados (contatos e mensagens) e força reconexão Realtime quando o app volta de background
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -425,7 +433,7 @@ export default function ChatDashboard() {
 
   const handleOpenVCardContact = (vcardWaid: string | undefined, contactName: string) => {
     if (!vcardWaid) {
-      alert('Nﾃｺmero de telefone nﾃ｣o encontrado no vCard.');
+      alert('Número de telefone não encontrado no vCard.');
       return;
     }
     const cleanWaid = vcardWaid.replace(/[^0-9]/g, '');
@@ -463,13 +471,13 @@ export default function ChatDashboard() {
        return;
     }
     
-    // Se a instﾃ｢ncia estiver offline, alerta e nﾃ｣o envia
+    // Se a instÇ｢ncia estiver offline, alerta e não envia
     if (instancesStatus[properTargetInstance] && instancesStatus[properTargetInstance] !== 'connected') {
        alert('Inst穗cia offline. Conecte-a para enviar mensagens.');
        return;
     }
     
-    // Se a instﾃ｢ncia estiver offline, alerta e nﾃ｣o envia
+    // Se a instÇ｢ncia estiver offline, alerta e não envia
     if (instancesStatus[properTargetInstance] && instancesStatus[properTargetInstance] !== 'connected') {
        alert('Inst穗cia offline. Conecte-a para enviar mensagens.');
        return;
@@ -481,7 +489,7 @@ export default function ChatDashboard() {
         finalMessageText = `> *Mensagem Citada:* "${shortQuote}"\n\n${inputText}`;
     }
 
-    // ATENﾃ�グ: Numa versﾃ｣o final multi-tenant o instanceName deve vir do Login.
+    // ATENÇ�グ: Numa versão final multi-tenant o instanceName deve vir do Login.
     sendHumanMessage(activeChatId, finalMessageText, properTargetInstance as string);
     setInputText('');
     setReplyMessage(null);
@@ -536,7 +544,7 @@ export default function ChatDashboard() {
          mediaRecorder.start();
          setIsRecording(true);
        } catch (e) {
-         alert("Permissﾃ｣o de microfone negada ou nﾃ｣o suportada no seu navegador.");
+         alert("Permissão de microfone negada ou não suportada no seu navegador.");
        }
     }
   };
@@ -558,7 +566,7 @@ export default function ChatDashboard() {
       
       setGeminiModalState({
         isOpen: true,
-        originalText: type === 'analyze' ? 'Anﾃ｡lise interna da conversa atual. Esta mensagem nﾃ｣o serﾃ｡ enviada.' : inputText,
+        originalText: type === 'analyze' ? 'Análise interna da conversa atual. Esta mensagem não será enviada.' : inputText,
         suggestedText: suggestion,
         intent: type
       });
@@ -584,11 +592,11 @@ export default function ChatDashboard() {
         
       const suggestion = await geminiService.suggestReplyWithContext(msg.text || '', history);
       
-      setReplyMessage({ id: msg.id, text: msg.text || 'Mﾃｭdia enviada', sender: msg.sender });
+      setReplyMessage({ id: msg.id, text: msg.text || 'Mídia enviada', sender: msg.sender });
       setInputText(suggestion);
       setTimeout(() => textareaRef.current?.focus(), 100);
     } catch (error: any) {
-      alert(error.message || 'Erro ao gerar sugestﾃ｣o de resposta com IA.');
+      alert(error.message || 'Erro ao gerar sugestão de resposta com IA.');
     } finally {
       setIsGeminiProcessing(false);
     }
@@ -600,7 +608,7 @@ export default function ChatDashboard() {
     try {
       await useChatStore.getState().requestTranscription(msgId, mediaUrl);
     } catch (e: any) {
-      alert(e.message || "Erro ao transcrever ﾃ｡udio.");
+      alert(e.message || "Erro ao transcrever áudio.");
     } finally {
       setTranscribingIds(s => ({ ...s, [msgId]: false }));
     }
@@ -639,7 +647,7 @@ export default function ChatDashboard() {
         onClose={() => setMessageToForward(null)}
         contacts={contacts}
         onForward={(contactId) => forwardMessage(contactId, messageToForward, activeChat?.instance_id || connectedInstanceName || '')}
-        messagePreview={messageToForward?.text ? messageToForward.text.substring(0, 40) + '...' : (messageToForward?.mediaType ? `Mﾃｭdia: ${messageToForward.mediaType}` : undefined)}
+        messagePreview={messageToForward?.text ? messageToForward.text.substring(0, 40) + '...' : (messageToForward?.mediaType ? `Mídia: ${messageToForward.mediaType}` : undefined)}
       />
 
       <SnoozeModal 
@@ -690,12 +698,12 @@ export default function ChatDashboard() {
                     const imageToSend = pastedImage;
                     const captionToSend = pastedImageCaption;
                     
-                    // Fechar imediatamente para percepﾃｧﾃ｣o instantﾃ｢nea
+                    // Fechar imediatamente para percepção instantÇ｢nea
                     setPastedImage(null);
                     setPastedImagePreview(null);
                     setPastedImageCaption('');
                     
-                    // Fazer o envio async por trﾃ｡s dos panos com o novo suporte a caption
+                    // Fazer o envio async por trás dos panos com o novo suporte a caption
                     useChatStore.getState().uploadAndSendMedia(
                       activeChatId, 
                       imageToSend, 
@@ -765,7 +773,7 @@ export default function ChatDashboard() {
             .eq('phone', cleanPhone)
             .single();
             
-          // Se nﾃ｣o existe, criamos um novo
+          // Se não existe, criamos um novo
           if (!existingContact) {
             const { data: newContact, error } = await supabase.from('contacts').insert({
               tenant_id: tenantInfo?.id,
@@ -785,7 +793,7 @@ export default function ChatDashboard() {
           }
           
           if (existingContact) {
-             // Injeta no estado local se nﾃ｣o existir para o ChatDashboard conseguir renderizar
+             // Injeta no estado local se não existir para o ChatDashboard conseguir renderizar
              useChatStore.setState(state => {
                const exists = state.contacts.find(c => c.id === existingContact.id);
                if (exists) return state;
@@ -839,9 +847,9 @@ export default function ChatDashboard() {
         
         {/* Header Premium da Sidebar */}
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
-          {/* Versﾃ｣o e badge no header top-left */}
+          {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.2.1'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '06/05/2026, 13:12')}`}
+            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.2.6'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '06/05/2026, 22:05')}`}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -869,7 +877,7 @@ export default function ChatDashboard() {
               
               <ThemeToggle />
               
-              {/* Menu de Opﾃｧﾃｵes Avanﾃｧadas */}
+              {/* Menu de Opções Avançadas */}
               <div className="relative">
                 <button 
                   className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
@@ -906,7 +914,7 @@ export default function ChatDashboard() {
                     </button>
                     <button onClick={() => { setIsSettingsOpen(true); setActiveDropdown(null); }} className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3">
                       <Settings size={18} />
-                      <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Configuraﾃｧﾃｵes</span>
+                      <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Configurações</span>
                     </button>
                   </div>
                 )}
@@ -970,7 +978,7 @@ export default function ChatDashboard() {
                   onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'unread', x: e.clientX, y: e.clientY }); }}
                   onClick={() => setFilterType('unread')} 
                   className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'unread' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-                 Nﾃ｣o Lidas
+                 Não Lidas
                </button>
                <button 
                   onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'mine', x: e.clientX, y: e.clientY }); }}
@@ -1050,11 +1058,11 @@ export default function ChatDashboard() {
                   }}
                   className="w-full text-left px-4 py-3 border-b border-black/5 dark:border-white/5 text-sm font-medium text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-3"
                 >
-                  <CheckCheck size={16} className="text-[#00a884]" /> Limpar crachﾃ｡s nﾃ｣o lidos
+                  <CheckCheck size={16} className="text-[#00a884]" /> Limpar crachás não lidos
                 </button>
               )}
               {filterContextMenu.type === 'labels' && (
-                 <div className="px-4 py-3 text-xs text-center text-gray-500 dark:text-gray-400">Sem aﾃｧﾃｵes globais para etiquetas ativas.</div>
+                 <div className="px-4 py-3 text-xs text-center text-gray-500 dark:text-gray-400">Sem ações globais para etiquetas ativas.</div>
               )}
             </div>
           )}
@@ -1063,11 +1071,11 @@ export default function ChatDashboard() {
         {/* Chat List Realtime */}
         <div className="flex-1 overflow-y-auto" ref={contactListRef} onScroll={handleContactScroll}>
           {contacts.length === 0 && (
-             <p className="text-xs text-center p-6 text-gray-400">Nenhuma conversa encontrada ou aguardando conexﾃ｣o web-socket...</p>
+             <p className="text-xs text-center p-6 text-gray-400">Nenhuma conversa encontrada ou aguardando conexão web-socket...</p>
           )}
 
           {contacts.filter(c => {
-             // 1) RBAC ENFORCEMENT - A REGRA DE OURO (Nunca mostrar conversas que nﾃ｣o tenho acesso)
+             // 1) RBAC ENFORCEMENT - A REGRA DE OURO (Nunca mostrar conversas que não tenho acesso)
              const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
              const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
              
@@ -1078,26 +1086,26 @@ export default function ChatDashboard() {
                      try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
                  }
                  
-                 // Agente sem array de permissﾃｵes nﾃ｣o vﾃｪ nada.
+                 // Agente sem array de permissões não vê nada.
                  if (allowedStr) {
-                     if (allowedInstances.length === 0) return false; // Sem instﾃ｢ncias -> Sem acesso
+                     if (allowedInstances.length === 0) return false; // Sem instÇ｢ncias -> Sem acesso
 
-                     const effectiveInstId = c.instance_id || connectedInstanceName; // fallback pra ﾃｳrfﾃ｣os
+                     const effectiveInstId = c.instance_id || connectedInstanceName; // fallback pra órfãos
                      if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) {
                          return false; // BLOQUEADO!
                      }
                  } else {
-                     return false; // BLOQUEADO! Agente logado precisa de permissﾃ｣o clara
+                     return false; // BLOQUEADO! Agente logado precisa de permissão clara
                  }
              }
 
-             // 2) FILTRO POR CAIXA ESPECﾃ孝ICA (Menu esquerdo)
+             // 2) FILTRO POR CAIXA ESPECÇ孝ICA (Menu esquerdo)
              if (activeChannelFilter) {
                  const dbInstId = c.instance_id;
                  const effectiveId = connectedInstanceName;
 
                  if (!dbInstId) {
-                     // Fallback conversas antigas ﾃｳrfﾃ｣s
+                     // Fallback conversas antigas órfãs
                      if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
                  } else {
                      // Conversas nativas
@@ -1109,7 +1117,7 @@ export default function ChatDashboard() {
              if (searchTerm && !c.name?.toLowerCase().includes(searchTerm.toLowerCase()) && !c.whatsapp_jid?.includes(searchTerm)) {
                return false;
              }
-             // Lﾃｳgica de Contatos Bloqueados
+             // Lógica de Contatos Bloqueados
              if (filterType === 'blocked') {
                  if (!c.is_blocked) return false;
              } else {
@@ -1130,7 +1138,7 @@ export default function ChatDashboard() {
              if (c.conv_status === 'snoozed' && c.snoozed_until) {
                 const untilTimestamp = new Date(c.snoozed_until).getTime();
                 if (untilTimestamp > Date.now()) {
-                   // Esconde se ainda nﾃ｣o expirou, a menos que o usuﾃ｡rio esteja forﾃｧando a pesquisa ativamente
+                   // Esconde se ainda não expirou, a menos que o usuário esteja forçando a pesquisa ativamente
                    if (!searchTerm) return false;
                 }
              }
@@ -1260,7 +1268,7 @@ export default function ChatDashboard() {
                         {timeDisplay}
                       </span>
                       
-                      {/* Menu de Aﾃｧﾃｵes (Dropdown) */}
+                      {/* Menu de Ações (Dropdown) */}
                       <div className="relative isolate" onClick={e => e.stopPropagation()}>
                         <button 
                           onClick={(e) => {
@@ -1306,10 +1314,10 @@ export default function ChatDashboard() {
                               className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
                             >
                               <History size={14} className={cn(isSyncingHistory[contact.id] ? "animate-spin text-[#00a884]" : "")} />
-                              {isSyncingHistory[contact.id] ? "Buscando..." : "Buscar Histﾃｳrico"}
+                              {isSyncingHistory[contact.id] ? "Buscando..." : "Buscar Histórico"}
                             </button>
                             
-                            {/* Novos botﾃｵes inseridos */}
+                            {/* Novos botões inseridos */}
                             <button 
                               onClick={async (e) => { 
                                 e.stopPropagation(); 
@@ -1333,7 +1341,7 @@ export default function ChatDashboard() {
                               {contact.unread > 0 ? (
                                 <><MailOpen size={14} className="text-gray-500" /> Marcar como lida</>
                               ) : (
-                                <><Mail size={14} className="text-[#00a884]" /> Marcar como nﾃ｣o lida</>
+                                <><Mail size={14} className="text-[#00a884]" /> Marcar como não lida</>
                               )}
                             </button>
                             <button 
@@ -1613,7 +1621,7 @@ export default function ChatDashboard() {
                     >
                       <History size={16} className={cn("text-[#00a884]", isSyncingHistory[activeChat.id] && "animate-spin")} />
                       <span className="text-[14px] text-[#3b4a54] dark:text-[#d1d7db]">
-                         {isSyncingHistory[activeChat.id] ? "Buscando..." : "Buscar Histﾃｳrico"}
+                         {isSyncingHistory[activeChat.id] ? "Buscando..." : "Buscar Histórico"}
                       </span>
                     </button>
                   </div>
@@ -1622,7 +1630,7 @@ export default function ChatDashboard() {
             </div>
           </div>
 
-          {/* Badge flutuante de novas mensagens foi movido para o cabeﾃｧalho */}
+          {/* Badge flutuante de novas mensagens foi movido para o cabeçalho */}
 
           {/* Chat Messages */}
           <div 
@@ -1634,7 +1642,7 @@ export default function ChatDashboard() {
                <div className="flex justify-center my-4 animate-in fade-in duration-300">
                   <span className="bg-white dark:bg-[#202c33] text-[#54656f] dark:text-[#8696a0] text-xs px-4 py-2 rounded-full flex items-center gap-2 shadow-sm border border-black/5 dark:border-white/5">
                      <span className="w-4 h-4 border-2 border-t-transparent border-[#00a884] rounded-full animate-spin"></span>
-                     Sincronizando histﾃｳrico anterior...
+                     Sincronizando histórico anterior...
                   </span>
                </div>
             )}
@@ -1658,7 +1666,7 @@ export default function ChatDashboard() {
                
                if (showDateSeparator) {
                   const date = new Date(msg.timestamp);
-                  const daysOfWeek = ['Domingo', 'Segunda-feira', 'Terﾃｧa-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sﾃ｡bado'];
+                  const daysOfWeek = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
                   if (isToday(date)) dateSeparatorText = 'HOJE';
                   else if (isYesterday(date)) dateSeparatorText = 'ONTEM';
                   else dateSeparatorText = `${daysOfWeek[date.getDay()]}, ${format(date, "dd/MM/yyyy")}`;
@@ -1685,17 +1693,22 @@ export default function ChatDashboard() {
                  )
                }
 
+               const isLastMessages = index >= arr.length - 2;
+
                return (
                   <div key={msg.id} className="flex flex-col w-full">
                     {separatorNode}
-                    <div className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start")}>
+                    <div 
+                      className={`relative flex items-center mb-1 group w-full ${isMe ? 'justify-end' : 'justify-start'} ${
+                        activeMsgDropdown === msg.id ? "z-[99999] relative" : "z-10 relative"
+                      }`}
+                    >
                     <div className={cn(
                       "px-3 pb-2 pt-1.5 min-w-[120px] rounded-2xl shadow-sm max-w-[85%] md:max-w-[65%] relative group animate-in fade-in slide-in-from-bottom-2 backdrop-blur-md",
                       isMe ? "bg-[#d9fdd3]/90 dark:bg-[#005c4b]/95 text-[#111b21] dark:text-[#e9edef] rounded-tr-sm" 
-                           : "bg-white/95 dark:bg-[#202c33]/90 text-[#111b21] dark:text-[#e9edef] rounded-tl-sm border border-black/5 dark:border-white/5 border-l-4 border-l-[#00a884]",
-                      activeMsgDropdown === msg.id ? "z-[50] relative" : "z-10 relative"
+                           : "bg-white/95 dark:bg-[#202c33]/90 text-[#111b21] dark:text-[#e9edef] rounded-tl-sm border border-black/5 dark:border-white/5 border-l-4 border-l-[#00a884]"
                     )}>
-                       {/* Menu de Trﾃｪs Pontinhos para Responder/Encaminhar */}
+                       {/* Menu de Três Pontinhos para Responder/Encaminhar */}
                        <div 
                          className="absolute top-1.5 right-1 flex items-center justify-center w-7 h-7 cursor-pointer text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] dark:hover:text-[#00a884] bg-transparent hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-all duration-200 z-10"
                          onClick={(e) => {
@@ -1706,10 +1719,13 @@ export default function ChatDashboard() {
                          <MoreVertical size={16} className="opacity-40 hover:opacity-100" />
                          
                          {activeMsgDropdown === msg.id && (
-                            <div className="absolute right-0 top-8 w-40 bg-white/90 dark:bg-[#233138]/95 backdrop-blur-xl border border-black/5 dark:border-[#304046] rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.15)] py-2 z-[999] animate-in fade-in zoom-in-95 duration-100" onClick={e => e.stopPropagation()}>
+                            <div className={cn(
+                              "absolute right-0 w-44 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/10 dark:border-white/10 rounded-2xl md:rounded-[24px] shadow-2xl py-2 z-[99999] animate-in fade-in zoom-in-95 duration-200",
+                              isLastMessages ? "bottom-8 origin-bottom-right" : "top-8 origin-top-right"
+                            )} onClick={e => e.stopPropagation()}>
                               <button 
                                 onClick={() => {
-                                  setReplyMessage({ id: msg.id, text: msg.text || 'Mﾃｭdia enviada', sender: msg.sender });
+                                  setReplyMessage({ id: msg.id, text: msg.text || 'Mídia enviada', sender: msg.sender });
                                   textareaRef.current?.focus();
                                   setActiveMsgDropdown(null);
                                 }}
@@ -1741,7 +1757,7 @@ export default function ChatDashboard() {
                                   <div className="w-full h-px bg-black/5 dark:bg-white/5 my-1"></div>
                                   <button 
                                     onClick={() => {
-                                      setEditingMessage({ id: msg.id, text: msg.text || '' });
+                                      setEditingMessage({ id: msg.id, text: (msg.text || '').replace(' *(Editado)*', '') });
                                       setActiveMsgDropdown(null);
                                     }}
                                     className="w-full text-left px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors text-[14px] text-blue-600 dark:text-blue-400 font-medium"
@@ -1770,7 +1786,7 @@ export default function ChatDashboard() {
                       )}
                       {msg.sender === 'human' && (
                         <div className="flex items-center gap-1 mb-1 text-[10px] text-[#005c4b] dark:text-[#1d9782] opacity-80 font-bold uppercase tracking-wider">
-                           <User size={10} /> Vocﾃｪ (Atendente)
+                           <User size={10} /> Você (Atendente)
                         </div>
                       )}
 
@@ -1781,7 +1797,7 @@ export default function ChatDashboard() {
                            <span className="text-[11px] font-bold text-[#00a884] opacity-90 truncate">
                              {msg.quoted.sender && activeChat.phone && msg.quoted.sender.includes(activeChat.phone.replace(/\D/g, '')) 
                                ? getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)
-                               : 'Vocﾃｪ'
+                               : 'Você'
                              }
                            </span>
                            <span className="text-[13px] text-[#54656f] dark:text-[#aebac1] leading-snug line-clamp-3">
@@ -1818,8 +1834,8 @@ export default function ChatDashboard() {
                               <VideoOff size={20} />
                             </div>
                             <div className="flex flex-col flex-1 overflow-hidden">
-                               <span className="text-[14px] font-medium text-gray-700 dark:text-gray-200">Vﾃｭdeo Recebido</span>
-                               <span className="text-[11px] text-red-500 font-medium">Download indisponﾃｭvel (limite de 50MB excedido)</span>
+                               <span className="text-[14px] font-medium text-gray-700 dark:text-gray-200">Vídeo Recebido</span>
+                               <span className="text-[11px] text-red-500 font-medium">Download indisponível (limite de 50MB excedido)</span>
                             </div>
                          </div>
                       )}
@@ -1833,7 +1849,7 @@ export default function ChatDashboard() {
                                   onClick={() => handleTranscribeAudio(msg.id, msg.mediaUrl!)}
                                   disabled={transcribingIds[msg.id]}
                                   className="mr-2 p-1.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all border border-indigo-100 dark:border-indigo-800 disabled:opacity-50 group/btn"
-                                  title="Transcrever ﾃ「dio com IA"
+                                  title="Transcrever Ç「dio com IA"
                                 >
                                   {transcribingIds[msg.id] ? <RefreshCw size={15} className="animate-spin" /> : <Sparkles size={15} className="group-hover/btn:scale-110 transition-transform" />}
                                 </button>
@@ -1871,9 +1887,9 @@ export default function ChatDashboard() {
                          <div className="flex flex-col gap-1 bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-gray-200 dark:border-gray-700/50 min-w-[200px]">
                             <div className="flex items-center gap-2 text-[#00a884] mb-1">
                                <MapPin size={18} />
-                               <span className="font-semibold text-[13px]">Localizaﾃｧﾃ｣o</span>
+                               <span className="font-semibold text-[13px]">Localização</span>
                             </div>
-                            <span className="text-[13px] text-gray-700 dark:text-gray-300 leading-snug">{msg.text || 'Localizaﾃｧﾃ｣o enviada'}</span>
+                            <span className="text-[13px] text-gray-700 dark:text-gray-300 leading-snug">{msg.text || 'Localização enviada'}</span>
                             <div className="mt-2 text-xs text-brand-primary font-medium flex items-center justify-center w-full bg-[#00a884]/10 p-2 rounded-lg cursor-pointer hover:bg-[#00a884]/20 transition-colors" onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${msg.text?.replace(/[^0-9.,-]/g, '')}`, '_blank')}>
                                Abrir no Maps
                             </div>
@@ -1888,7 +1904,7 @@ export default function ChatDashboard() {
                                </div>
                                <div className="flex flex-col overflow-hidden">
                                   <span className="text-[14px] font-semibold text-gray-800 dark:text-gray-100 truncate">{msg.text || 'Contato'}</span>
-                                  <span className="text-[11px] text-gray-500 font-medium tracking-wide uppercase mt-0.5">Cartﾃ｣o VCard</span>
+                                  <span className="text-[11px] text-gray-500 font-medium tracking-wide uppercase mt-0.5">Cartão VCard</span>
                                </div>
                             </div>
                             <div className="border-t border-gray-100 dark:border-gray-700/50 mt-1 p-2">
@@ -1903,7 +1919,7 @@ export default function ChatDashboard() {
                       
                       {(!msg.mediaType || (msg.mediaType !== 'document' && msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
                          <span className="text-[14px] leading-[1.4] block whitespace-pre-wrap break-words overflow-hidden shadow-none mt-1">
-                            {renderMessageText(msg.text ? msg.text.replace(/^(?:�磁|�汐)\s*Vﾃｭdeo\s*\n?/i, '').replace('�梼 Formato nﾃ｣o suportado (templateMessage)', '�導 Mensagem Interativa (Abra no celular para ver)').replace('�梼 Formato nﾃ｣o suportado (highlyStructuredMessage)', '�導 Mensagem Estruturada (Abra no celular para ver)') : msg.text)}
+                            {renderMessageText(msg.text ? msg.text.replace(/^(?:�磁|�汐)\s*Vídeo\s*\n?/i, '').replace('�梼 Formato não suportado (templateMessage)', '�導 Mensagem Interativa (Abra no celular para ver)').replace('�梼 Formato não suportado (highlyStructuredMessage)', '�導 Mensagem Estruturada (Abra no celular para ver)') : msg.text)}
                             {!msg.buttons && <span className="inline-block w-[110px] h-3 ml-2 shrink-0"></span>}
                          </span>
                       )}
@@ -1918,9 +1934,9 @@ export default function ChatDashboard() {
                                   onClick={(e) => {
                                       e.stopPropagation();
                                       if (btn.url) window.open(btn.url, '_blank');
-                                      else alert(`O cliente visualiza e clica neste botﾃ｣o: "${btn.text}" no celular dele.`);
+                                      else alert(`O cliente visualiza e clica neste botão: "${btn.text}" no celular dele.`);
                                   }}
-                                  title="Este botﾃ｣o foi exibido para o cliente"
+                                  title="Este botão foi exibido para o cliente"
                                >
                                   {btn.url ? <span className="p-0.5 bg-[#00a884]/20 rounded-md"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></span> : <span className="p-0.5 bg-[#00a884]/20 rounded-md"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg></span>}
                                   <span className="truncate">{btn.text}</span>
@@ -1945,7 +1961,7 @@ export default function ChatDashboard() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Botﾃ｣o de Rolar para Baixo Premium */}
+          {/* Botão de Rolar para Baixo Premium */}
           {showScrollButton && (
             <button
                onClick={() => scrollToBottom('smooth')}
@@ -1967,7 +1983,7 @@ export default function ChatDashboard() {
               <div className="flex items-start bg-black/5 dark:bg-black/20 p-3 relative animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-t-xl mx-2 mt-2 group/replybox border border-black/5 dark:border-white/5">
                 <div className="w-1.5 h-full absolute left-0 top-0 bottom-0 bg-[#00a884] rounded-l-xl"></div>
                 <div className="flex flex-col flex-1 pl-3 pr-8">
-                  <span className="text-[12px] font-bold text-[#00a884] mb-0.5">{replyMessage.sender === 'human' || replyMessage.sender === 'me' ? 'Vocﾃｪ' : getContactDisplayName(activeChat?.custom_name || activeChat?.name, activeChat?.push_name, activeChat?.phone)}</span>
+                  <span className="text-[12px] font-bold text-[#00a884] mb-0.5">{replyMessage.sender === 'human' || replyMessage.sender === 'me' ? 'Você' : getContactDisplayName(activeChat?.custom_name || activeChat?.name, activeChat?.push_name, activeChat?.phone)}</span>
                   <span className="text-[13px] text-[#54656f] dark:text-[#aebac1] line-clamp-2 leading-relaxed">{replyMessage.text}</span>
                 </div>
                 <button 
@@ -1986,7 +2002,7 @@ export default function ChatDashboard() {
                   <div className="bg-red-500/10 p-1.5 rounded-lg border border-red-500/20">
                     <ShieldAlert size={16} className="animate-pulse" />
                   </div>
-                  <span className="text-[12px] font-medium tracking-wide">Instﾃ｢ncia offline. Conecte-a para enviar mensagens.</span>
+                  <span className="text-[12px] font-medium tracking-wide">InstÇ｢ncia offline. Conecte-a para enviar mensagens.</span>
                 </div>
                 <button 
                   type="button"
@@ -2045,8 +2061,8 @@ export default function ChatDashboard() {
                               setInputText('');
                               setTimeout(() => textareaRef.current?.focus(), 10);
                             } catch (e) {
-                              console.error('Erro ao enviar mﾃｭdia da resposta rﾃ｡pida:', e);
-                              alert('Falha ao enviar mﾃｭdia da resposta pronta.');
+                              console.error('Erro ao enviar mídia da resposta rápida:', e);
+                              alert('Falha ao enviar mídia da resposta pronta.');
                               setInputText(qr.content);
                               setTimeout(() => textareaRef.current?.focus(), 10);
                             }
@@ -2061,7 +2077,7 @@ export default function ChatDashboard() {
                           {qr.media_url && (
                              <span className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded-md">
                                 {qr.media_type === 'video' ? <Video className="w-3 h-3" /> : qr.media_type === 'audio' ? <Mic className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
-                                Mﾃｭdia
+                                Mídia
                              </span>
                           )}
                         </div>
@@ -2117,18 +2133,8 @@ export default function ChatDashboard() {
                   }
                 }}
                 rows={1}
-                placeholder="Responda como humano e a IA serﾃ｡ pausada automaticamente..."
-                className="bg-transparent border-none outline-none w-full text-sm text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none pb-0.5 overflow-hidden max-h-[120px] scrollbar-thin"
-                style={{
-                   // A simple inline trick to handle height locally without an extra useEffect
-                   height: "auto",
-                   minHeight: "20px"
-                }}
-                onInput={(e) => {
-                   const target = e.target as HTMLTextAreaElement;
-                   target.style.height = 'auto';
-                   target.style.height = `${target.scrollHeight}px`;
-                }}
+                placeholder="Responda como humano e a IA sera pausada automaticamente..."
+                className="bg-transparent border-none outline-none w-full text-sm text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin"
               />
               <button 
                 type="button" 
@@ -2153,12 +2159,12 @@ export default function ChatDashboard() {
                   {isGeminiProcessing ? (
                     <div className="flex flex-col items-center justify-center py-6 gap-3">
                         <RefreshCw size={24} className="text-[#00a884] animate-spin" />
-                        <span className="text-xs text-[#54656f] dark:text-[#aebac1] animate-pulse">A IA estﾃ｡ processando...</span>
+                        <span className="text-xs text-[#54656f] dark:text-[#aebac1] animate-pulse">A IA está processando...</span>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-1">
                       <button onClick={() => handleGeminiAction('grammar')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
-                        <CheckCircle2 size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Corrigir Gramﾃ｡tica & Ortografia
+                        <CheckCircle2 size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Corrigir Gramática & Ortografia
                       </button>
                       <button onClick={() => handleGeminiAction('sales')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
                         <ShoppingBag size={16} className="text-emerald-500 group-hover:scale-110 transition-transform" /> Focar em Vendas
@@ -2167,7 +2173,7 @@ export default function ChatDashboard() {
                         <HeartHandshake size={16} className="text-pink-500 group-hover:scale-110 transition-transform" /> Encantar Cliente
                       </button>
                       <button onClick={() => handleGeminiAction('support')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
-                        <LifeBuoy size={16} className="text-orange-500 group-hover:scale-110 transition-transform" /> Melhorar Suporte/Dﾃｺvida
+                        <LifeBuoy size={16} className="text-orange-500 group-hover:scale-110 transition-transform" /> Melhorar Suporte/Dúvida
                       </button>
                       
                       <div className="my-1 border-t border-black/5 dark:border-white/5"></div>
@@ -2206,7 +2212,7 @@ export default function ChatDashboard() {
       ) : (
         <div className="hidden sm:flex flex-1 flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#222d34] border-l border-white/5 relative z-10">
           <Bot size={80} className="text-gray-300 dark:text-[#2a3942] mb-6" />
-          <h1 className="text-3xl font-light text-[#54656f] dark:text-[#8696a0]">SaaS Multi-Agente Hﾃｭbrido</h1>
+          <h1 className="text-3xl font-light text-[#54656f] dark:text-[#8696a0]">SaaS Multi-Agente Híbrido</h1>
           <div className="text-sm text-[#54656f] dark:text-[#8696a0] mt-2 flex items-center gap-2"><div className="w-2 h-2 bg-[#00a884] rounded-full animate-pulse"></div> Conectado com banco de dados</div>
         </div>
       )}
@@ -2234,7 +2240,7 @@ export default function ChatDashboard() {
         </div>
       )}
 
-      {/* Modal de Ediﾃｧﾃ｣o de Mensagem (Visual Premium) */}
+      {/* Modal de Edição de Mensagem (Visual Premium) */}
       {editingMessage && (
         <div className="fixed inset-0 z-[99999] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-[#111b21] w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden border border-white/20 dark:border-white/10 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
@@ -2242,7 +2248,7 @@ export default function ChatDashboard() {
               <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-3">
                 <Edit2 size={24} className="text-blue-500" /> Editar Mensagem
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Apenas o texto pode ser editado. Essa alteraﾃｧﾃ｣o refletirﾃ｡ no aparelho do cliente.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Apenas o texto pode ser editado. Essa alteração refletirá no aparelho do cliente.</p>
             </div>
             <div className="p-6 bg-[#f0f2f5]/30 dark:bg-[#0b141a]/30">
               <textarea
@@ -2272,14 +2278,14 @@ export default function ChatDashboard() {
                 disabled={!editingMessage.text.trim()}
                 className="px-6 py-2.5 rounded-xl font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center gap-2"
               >
-                <Edit2 size={18} /> Salvar Ediﾃｧﾃ｣o
+                <Edit2 size={18} /> Salvar Edição
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal de Exclusﾃ｣o de Mensagem (Visual Premium) */}
+      {/* Modal de Exclusão de Mensagem (Visual Premium) */}
       {messageToDelete && (
         <div className="fixed inset-0 z-[99999] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-[#111b21] w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden border border-white/20 dark:border-white/10 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
@@ -2289,7 +2295,7 @@ export default function ChatDashboard() {
               </div>
               <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-2">Apagar Mensagem?</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-                Esta aﾃｧﾃ｣o ﾃｩ irreversﾃｭvel e apagarﾃ｡ a mensagem para todos na conversa.
+                Esta ação é irreversível e apagará a mensagem para todos na conversa.
               </p>
               
               <div className="flex w-full gap-3">
