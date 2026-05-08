@@ -30,13 +30,23 @@ export default function AdminDashboard() {
     fetchData();
   }, [activeTab]);
 
+  const apiUrl = import.meta.env.VITE_API_URL || 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
+
   const fetchData = async () => {
     setLoading(true);
-    const { data: companiesData } = await supabase.from('companies').select('*, plans(name)');
-    const { data: plansData } = await supabase.from('plans').select('*');
-    
-    if (companiesData) setCompanies(companiesData);
-    if (plansData) setPlans(plansData);
+    try {
+      const [compRes, plansRes] = await Promise.all([
+        fetch(`${apiUrl}/api/v1/admin/companies`),
+        fetch(`${apiUrl}/api/v1/admin/plans`)
+      ]);
+      const companiesData = await compRes.json();
+      const plansData = await plansRes.json();
+      
+      if (companiesData && !companiesData.error) setCompanies(companiesData);
+      if (plansData && !plansData.error) setPlans(plansData);
+    } catch (e) {
+      console.error('Error fetching admin data:', e);
+    }
     setLoading(false);
   };
 
@@ -44,14 +54,18 @@ export default function AdminDashboard() {
     e.preventDefault();
     setLoading(true);
     
-    await supabase.from('companies').insert({
-      name: newCompany.name,
-      plan_id: newCompany.plan_id,
-      evolution_api_instance: newCompany.instance,
-      email: newCompany.email,
-      password: newCompany.password,
-      status: 'active',
-      current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // +30 dias
+    await fetch(`${apiUrl}/api/v1/admin/companies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newCompany.name,
+        plan_id: newCompany.plan_id,
+        evolution_api_instance: newCompany.instance,
+        email: newCompany.email,
+        password: newCompany.password,
+        status: 'active',
+        current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      })
     });
     
     setShowNewCompany(false);
@@ -61,21 +75,27 @@ export default function AdminDashboard() {
 
   const handleLogout = () => {
     sessionStorage.removeItem('saas_admin');
+    sessionStorage.removeItem('admin_token');
     navigate('/admin/login');
   };
 
   const handleUpdateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await supabase.from('companies').update({
-      name: showEditCompany.name,
-      plan_id: showEditCompany.plan_id,
-      evolution_api_instance: showEditCompany.evolution_api_instance,
-      email: showEditCompany.email,
-      password: showEditCompany.password,
-      status: showEditCompany.status,
-      current_period_end: new Date(showEditCompany.current_period_end)
-    }).eq('id', showEditCompany.id);
+    
+    await fetch(`${apiUrl}/api/v1/admin/companies/${showEditCompany.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: showEditCompany.name,
+        plan_id: showEditCompany.plan_id,
+        evolution_api_instance: showEditCompany.evolution_api_instance,
+        email: showEditCompany.email,
+        password: showEditCompany.password,
+        status: showEditCompany.status,
+        current_period_end: new Date(showEditCompany.current_period_end)
+      })
+    });
 
     setShowEditCompany(null);
     fetchData();
@@ -84,13 +104,18 @@ export default function AdminDashboard() {
   const handleCreatePlan = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await supabase.from('plans').insert({
-      name: newPlan.name,
-      price: newPlan.price,
-      features: {
-        max_users: newPlan.max_users,
-        max_connections: newPlan.max_connections
-      }
+    
+    await fetch(`${apiUrl}/api/v1/admin/plans`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newPlan.name,
+        price: newPlan.price,
+        features: {
+          max_users: newPlan.max_users,
+          max_connections: newPlan.max_connections
+        }
+      })
     });
 
     setShowNewPlan(false);

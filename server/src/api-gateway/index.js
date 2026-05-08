@@ -30,4 +30,45 @@ router.get('/v1/companies/:id', async (req, res) => {
     }
 });
 
+// Admin Master Routes (Bypass RLS)
+router.get('/v1/admin/companies', async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('companies').select('*, plans(name)');
+        if (error) throw error;
+        res.json(data);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/v1/admin/companies', async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('companies').insert(req.body).select();
+        if (error) throw error;
+        res.json(data);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/v1/admin/companies/:id', async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('companies').update(req.body).eq('id', req.params.id).select();
+        if (error) throw error;
+        res.json(data);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/v1/admin/plans', async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('plans').select('*');
+        if (error) throw error;
+        res.json(data);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/v1/admin/plans', async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('plans').insert(req.body).select();
+        if (error) throw error;
+        res.json(data);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
