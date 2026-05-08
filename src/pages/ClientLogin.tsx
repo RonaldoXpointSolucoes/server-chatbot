@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { Building2, ArrowRight, Loader2, AlertCircle, Terminal, X, ChevronRight, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import ThemeToggle from '../components/ThemeToggle';
 
@@ -10,13 +10,33 @@ export default function ClientLogin() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [keepLogged, setKeepLogged] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  
+  // Antigravity Dev Logger State
+  const [devLogs, setDevLogs] = useState<{timestamp: string, step: string, details: any, type: 'info' | 'error' | 'success'}[]>([]);
+
+  const addDevLog = (step: string, details: any, type: 'info' | 'error' | 'success' = 'info') => {
+    setDevLogs(prev => [...prev, {
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 }),
+      step,
+      details,
+      type
+    }]);
+  };
+
   const navigate = useNavigate();
 
-  // Redireciona automaticamente se já estiver logado
+  // Redireciona automaticamente se já estiver logado (e com todos os dados essenciais)
   useEffect(() => {
     const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
-    if (tenantId && tenantId !== 'undefined') {
+    const tenantName = localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name');
+    
+    if (tenantId && tenantId !== 'undefined' && tenantName && tenantName !== 'undefined') {
       navigate('/chat', { replace: true });
+    } else if (tenantId) {
+      // Limpa dados parciais para evitar loop de redirecionamento com ProtectedRoute
+      localStorage.removeItem('current_tenant_id');
+      sessionStorage.removeItem('current_tenant_id');
     }
   }, [navigate]);
 
@@ -26,67 +46,105 @@ export default function ClientLogin() {
 
     setIsLoading(true);
     setErrorMsg('');
+    setDevLogs([]); // Limpa logs anteriores
 
     try {
+      addDevLog('INIT', `Iniciando login flow para: ${email.trim()}`, 'info');
+
       let tenantData = null;
       let userRole = 'admin';
       let allowedInstances = null;
       let allowedCompanies = null;
       let userName = '';
 
-      // Tenta login como Empresa (Admin)
+      // 1. Tenta carregar dados como Empresa (Admin)
+      addDevLog('FETCH_COMPANIES_START', 'Pesquisando usuário na tabela companies (Admin)...', 'info');
       const { data: companyData, error: companyError } = await supabase
         .from('companies')
-        .select('id, name, status')
+        .select('id, name, status, password')
         .eq('email', email.trim().toLowerCase())
-        .eq('password', password)
         .order('created_at', { ascending: true })
         .limit(1)
         .maybeSingle();
 
-      if (companyData) {
+      if (companyError) {
+         addDevLog('FETCH_COMPANIES_ERROR', companyError, 'error');
+      }
+
+      if (companyData && companyData.password === password.trim()) {
+        addDevLog('FETCH_COMPANIES_SUCCESS', `Empresa Admin autenticada: ${companyData.name} (Status: ${companyData.status})`, 'success');
         tenantData = companyData;
         userName = companyData.name;
         userRole = 'admin';
+      } else if (companyData && companyData.password !== password.trim()) {
+        addDevLog('AUTH_ERROR', 'Senha inválida para Empresa (Admin).', 'error');
+        setErrorMsg('E-mail ou senha inválidos.');
+        setIsLoading(false);
+        return;
       } else {
-        // Tenta login como Agente / Membro do time
+        addDevLog('FETCH_COMPANIES_NOT_FOUND', 'Não encontrado em companies. Pesquisando em tenant_users (Agente)...', 'info');
+        // Tenta carregar dados como Agente / Membro do time
         const { data: agentData, error: agentError } = await supabase
           .from('tenant_users')
-          .select('id, tenant_id, role, full_name, allowed_instances, allowed_companies')
+          .select('id, tenant_id, role, full_name, allowed_instances, allowed_companies, password')
           .eq('email', email.trim().toLowerCase())
-          .eq('password', password)
           .limit(1)
           .maybeSingle();
 
-        if (agentData) {
+        if (agentError) {
+           addDevLog('FETCH_TENANT_USERS_ERROR', agentError, 'error');
+        }
+
+        if (agentData && agentData.password === password.trim()) {
+           addDevLog('FETCH_TENANT_USERS_SUCCESS', `Agente autenticado: ${agentData.full_name}. Buscando matriz ID: ${agentData.tenant_id}...`, 'success');
            // Busca os dados da empresa matriz desse agente
-           const { data: parentCompany } = await supabase
+           const { data: parentCompany, error: parentError } = await supabase
              .from('companies')
              .select('id, name, status')
              .eq('id', agentData.tenant_id)
              .maybeSingle();
              
+           if (parentError) {
+              addDevLog('FETCH_PARENT_COMPANY_ERROR', parentError, 'error');
+           }
+             
            if (parentCompany) {
+             addDevLog('FETCH_PARENT_COMPANY_SUCCESS', `Matriz encontrada: ${parentCompany.name}`, 'success');
              tenantData = parentCompany;
              userName = agentData.full_name;
              userRole = agentData.role;
              allowedInstances = agentData.allowed_instances || [];
              allowedCompanies = agentData.allowed_companies || [];
+           } else {
+             addDevLog('FETCH_PARENT_COMPANY_NOT_FOUND', 'Empresa matriz não encontrada no banco.', 'error');
            }
+        } else if (agentData && agentData.password !== password.trim()) {
+           addDevLog('AUTH_ERROR', 'Senha inválida para Agente.', 'error');
+           setErrorMsg('E-mail ou senha inválidos.');
+           setIsLoading(false);
+           return;
+        } else {
+           addDevLog('FETCH_TENANT_USERS_NOT_FOUND', 'Nenhum Agente encontrado com este e-mail.', 'info');
         }
       }
 
       if (!tenantData) {
+        // Usuário não encontrado em lugar nenhum com a senha correta
+        addDevLog('LOGIN_VALIDATION_FAILED', 'Credenciais inválidas ou usuário inexistente.', 'error');
         setErrorMsg('E-mail ou senha inválidos.');
         setIsLoading(false);
         return;
       }
 
       if (tenantData.status === 'suspended') {
+        addDevLog('LOGIN_VALIDATION_FAILED', 'Acesso bloqueado: Status da empresa é suspended.', 'error');
         setErrorMsg('Acesso bloqueado. Contate o administrador.');
         setIsLoading(false);
         return;
       }
+      
+      addDevLog('LOGIN_SUCCESS', 'Processo de login concluído com sucesso. Redirecionando para o painel...', 'success');
+
 
       // Limpa dados antigos para evitar conflitos entre local e session storage
       localStorage.removeItem('current_tenant_id');
@@ -114,8 +172,9 @@ export default function ClientLogin() {
       storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
       storage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
 
-      window.location.href = '/chat';
+      navigate('/chat', { replace: true });
     } catch (err) {
+      addDevLog('UNHANDLED_EXCEPTION', err, 'error');
       console.error(err);
       setErrorMsg('Erro de conexão com o banco de dados.');
     } finally {
@@ -124,7 +183,7 @@ export default function ClientLogin() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-[100dvh] bg-[#f0f2f5] dark:bg-[#111b21] font-sans relative">
+    <div className="flex flex-col items-center justify-center min-h-[100dvh] bg-[#f0f2f5] dark:bg-[#111b21] font-sans relative p-4 lg:p-8">
       <div className="absolute top-6 right-6">
          <ThemeToggle />
       </div>
@@ -151,14 +210,23 @@ export default function ClientLogin() {
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider ml-1">Senha de Acesso</label>
-            <input 
-              type="password" 
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className="w-full bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent rounded-xl px-4 py-3 text-[#111b21] dark:text-white placeholder:text-[#8696a0] outline-none focus:border-blue-500 focus:bg-white dark:focus:bg-[#202c33] transition-all"
-              placeholder="••••••••"
-              required
-            />
+            <div className="relative">
+              <input 
+                type={showPassword ? "text" : "password"} 
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className="w-full bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent rounded-xl px-4 py-3 pr-12 text-[#111b21] dark:text-white placeholder:text-[#8696a0] outline-none focus:border-blue-500 focus:bg-white dark:focus:bg-[#202c33] transition-all"
+                placeholder="••••••••"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-[#8696a0] hover:text-[#54656f] dark:hover:text-[#e9edef] transition-colors rounded-lg focus:outline-none"
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center gap-2 mt-2">
@@ -190,6 +258,51 @@ export default function ClientLogin() {
           )}
         </form>
       </div>
+
+      {/* Antigravity Dev Logger UI (Premium Glassmorphism) */}
+      {devLogs.length > 0 && (
+        <div className="w-full max-w-4xl mt-8 bg-black/80 backdrop-blur-2xl border border-white/10 rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-8 fade-in duration-700 z-10 flex flex-col">
+          <div className="bg-white/5 border-b border-white/10 px-5 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-1.5 bg-blue-500/20 rounded-lg">
+                <Terminal size={18} className="text-blue-400" />
+              </div>
+              <span className="text-sm font-semibold text-white tracking-wide">Antigravity Dev Logger</span>
+            </div>
+            <button 
+              type="button" 
+              onClick={() => setDevLogs([])} 
+              className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+              title="Fechar Logger"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          
+          <div className="p-5 max-h-[40vh] overflow-y-auto font-mono text-[12px] leading-relaxed space-y-4">
+            {devLogs.map((log, idx) => (
+              <div key={idx} className="flex flex-col border-l-2 pl-3 pb-2" style={{
+                borderColor: log.type === 'error' ? '#ef4444' : log.type === 'success' ? '#22c55e' : '#3b82f6'
+              }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-white/40 text-[10px]">{log.timestamp}</span>
+                  <ChevronRight size={12} className="text-white/30" />
+                  <span className={`px-2 py-0.5 rounded-md font-bold uppercase tracking-wider text-[10px] ${
+                    log.type === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                    log.type === 'success' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                    'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                  }`}>
+                    {log.step}
+                  </span>
+                </div>
+                <div className="text-[#c9d1d9] whitespace-pre-wrap break-words bg-black/40 p-3 rounded-xl border border-white/5">
+                  {typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

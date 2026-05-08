@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Loader2, Check } from 'lucide-react';
+import { X, Loader2, Check, Eye, EyeOff } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import { supabase } from '../../services/supabase';
 
@@ -17,6 +17,7 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
   const [loading, setLoading] = useState(false);
   const [signature, setSignature] = useState('');
   const [useSignature, setUseSignature] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // States for RBAC
   const [allowedInstances, setAllowedInstances] = useState<string[]>([]);
@@ -174,14 +175,23 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
 
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-white/80">Senha de Acesso</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Senha de login"
-                  className="w-full px-4 py-3 bg-black/20 border border-white/10 rounded-xl text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 transition-all"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Senha de login"
+                    className="w-full px-4 py-3 pr-12 bg-black/20 border border-white/10 rounded-xl text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 transition-all"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-white/40 hover:text-white/80 transition-colors rounded-lg focus:outline-none"
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
               
               <div className="space-y-2 col-span-1 md:col-span-2">

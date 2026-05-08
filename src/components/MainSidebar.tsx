@@ -171,7 +171,19 @@ export function MainSidebar() {
           .eq('id', tenantId)
           .maybeSingle();
           
-        if (currentError || !currentCompany) return;
+        if (currentError || !currentCompany) {
+           console.error("[DEBUG] MainSidebar fetchCompanies falhou!", {
+             tenantId,
+             currentError,
+             currentCompany
+           });
+           console.warn("Empresa não encontrada ou RLS bloqueou o acesso. Deslogando...");
+           localStorage.removeItem('current_tenant_id');
+           sessionStorage.removeItem('current_tenant_id');
+           await supabase.auth.signOut();
+           window.location.href = '/';
+           return;
+        }
         
         setCurrentCompanyContext(currentCompany);
         setGlobalAiEnabled(currentCompany.global_ai_enabled ?? true);

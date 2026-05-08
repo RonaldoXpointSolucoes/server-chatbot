@@ -7,13 +7,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Credenciais do Supabase ausentes no .env");
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-    detectSessionInUrl: false
-  }
-});
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export type MessageRow = {
   id: string;

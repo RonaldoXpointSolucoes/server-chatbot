@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2, Smartphone } from 'lucide-react';
 import { cn } from './ChatDashboard';
@@ -30,13 +30,23 @@ export default function AdminDashboard() {
     fetchData();
   }, [activeTab]);
 
+  const apiUrl = import.meta.env.VITE_API_URL || 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
+
   const fetchData = async () => {
     setLoading(true);
-    const { data: companiesData } = await supabase.from('companies').select('*, plans(name)');
-    const { data: plansData } = await supabase.from('plans').select('*');
-    
-    if (companiesData) setCompanies(companiesData);
-    if (plansData) setPlans(plansData);
+    try {
+      const [compRes, plansRes] = await Promise.all([
+        fetch(`${apiUrl}/api/v1/admin/companies`),
+        fetch(`${apiUrl}/api/v1/admin/plans`)
+      ]);
+      const companiesData = await compRes.json();
+      const plansData = await plansRes.json();
+      
+      if (companiesData && !companiesData.error) setCompanies(companiesData);
+      if (plansData && !plansData.error) setPlans(plansData);
+    } catch (e) {
+      console.error('Error fetching admin data:', e);
+    }
     setLoading(false);
   };
 
@@ -44,14 +54,18 @@ export default function AdminDashboard() {
     e.preventDefault();
     setLoading(true);
     
-    await supabase.from('companies').insert({
-      name: newCompany.name,
-      plan_id: newCompany.plan_id,
-      evolution_api_instance: newCompany.instance,
-      email: newCompany.email,
-      password: newCompany.password,
-      status: 'active',
-      current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // +30 dias
+    await fetch(`${apiUrl}/api/v1/admin/companies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newCompany.name,
+        plan_id: newCompany.plan_id,
+        evolution_api_instance: newCompany.instance,
+        email: newCompany.email,
+        password: newCompany.password,
+        status: 'active',
+        current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      })
     });
     
     setShowNewCompany(false);
@@ -61,21 +75,27 @@ export default function AdminDashboard() {
 
   const handleLogout = () => {
     sessionStorage.removeItem('saas_admin');
+    sessionStorage.removeItem('admin_token');
     navigate('/admin/login');
   };
 
   const handleUpdateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await supabase.from('companies').update({
-      name: showEditCompany.name,
-      plan_id: showEditCompany.plan_id,
-      evolution_api_instance: showEditCompany.evolution_api_instance,
-      email: showEditCompany.email,
-      password: showEditCompany.password,
-      status: showEditCompany.status,
-      current_period_end: new Date(showEditCompany.current_period_end)
-    }).eq('id', showEditCompany.id);
+    
+    await fetch(`${apiUrl}/api/v1/admin/companies/${showEditCompany.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: showEditCompany.name,
+        plan_id: showEditCompany.plan_id,
+        evolution_api_instance: showEditCompany.evolution_api_instance,
+        email: showEditCompany.email,
+        password: showEditCompany.password,
+        status: showEditCompany.status,
+        current_period_end: new Date(showEditCompany.current_period_end)
+      })
+    });
 
     setShowEditCompany(null);
     fetchData();
@@ -84,13 +104,18 @@ export default function AdminDashboard() {
   const handleCreatePlan = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await supabase.from('plans').insert({
-      name: newPlan.name,
-      price: newPlan.price,
-      features: {
-        max_users: newPlan.max_users,
-        max_connections: newPlan.max_connections
-      }
+    
+    await fetch(`${apiUrl}/api/v1/admin/plans`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newPlan.name,
+        price: newPlan.price,
+        features: {
+          max_users: newPlan.max_users,
+          max_connections: newPlan.max_connections
+        }
+      })
     });
 
     setShowNewPlan(false);
@@ -110,7 +135,7 @@ export default function AdminDashboard() {
     <div className="flex h-[100dvh] w-full bg-[#f0f2f5] dark:bg-[#111b21] font-sans text-[#111b21] dark:text-[#e9edef]">
       {/* Sidebar Admin */}
       <aside className="w-64 flex flex-col bg-white dark:bg-[#202c33] border-r border-black/5 dark:border-white/5 z-10 shadow-lg relative">
-        <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.2.9'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '07/05/2026, 14:20'}`}</span>
+        <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.2.1'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '06/05/2026, 13:12'}`}</span>
         <div className="h-16 flex items-center px-6 border-b border-black/5 dark:border-white/5 gap-3 mt-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00a884] to-[#018b6e] flex items-center justify-center text-white shadow-md">
             <Shield size={18} />
@@ -120,10 +145,10 @@ export default function AdminDashboard() {
 
         <nav className="flex-1 py-4 px-3 space-y-1">
           {[
-            { id: 'overview', icon: LayoutDashboard, label: 'Visão Geral', path: null },
+            { id: 'overview', icon: LayoutDashboard, label: 'Vis├úo Geral', path: null },
             { id: 'companies', icon: Building, label: 'Empresas', path: null },
             { id: 'plans', icon: ScrollText, label: 'Planos de Uso', path: null },
-            { id: 'instances', icon: Smartphone, label: 'Gerenciador de Instâncias', path: '/instances' },
+            { id: 'instances', icon: Smartphone, label: 'Gerenciador de Inst├óncias', path: '/instances' },
             { id: 'billing', icon: CreditCard, label: 'Faturamento', path: null },
           ].map((item) => {
             const Icon = item.icon;
@@ -168,7 +193,7 @@ export default function AdminDashboard() {
          <header className="mb-8 flex justify-between items-center">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Dashboard Administrativo</h1>
-              <p className="text-[#54656f] dark:text-[#aebac1] text-sm mt-1">Gerencie licenças, inquilinos e assinaturas.</p>
+              <p className="text-[#54656f] dark:text-[#aebac1] text-sm mt-1">Gerencie licen├ºas, inquilinos e assinaturas.</p>
             </div>
             
             <div className="flex items-center gap-3">
@@ -222,8 +247,8 @@ export default function AdminDashboard() {
                      <th className="font-semibold p-3">Nome Fantasia</th>
                      <th className="font-semibold p-3">Plano</th>
                      <th className="font-semibold p-3">Vencimento</th>
-                     <th className="font-semibold p-3">Instância Evolution</th>
-                     <th className="font-semibold p-3 text-right">Ações</th>
+                     <th className="font-semibold p-3">Inst├óncia Evolution</th>
+                     <th className="font-semibold p-3 text-right">A├º├Áes</th>
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-black/5 dark:divide-white/5">
@@ -260,7 +285,7 @@ export default function AdminDashboard() {
            <div className="bg-white dark:bg-[#202c33] border border-black/5 dark:border-white/5 rounded-2xl p-6 shadow-sm">
              <div className="flex justify-between items-center mb-6">
                <div>
-                  <h3 className="text-lg font-bold">Gerenciador de Licenças</h3>
+                  <h3 className="text-lg font-bold">Gerenciador de Licen├ºas</h3>
                   <p className="text-sm text-[#54656f]">Regras ativas no banco de dados.</p>
                </div>
                <button 
@@ -278,7 +303,7 @@ export default function AdminDashboard() {
                        <h4 className="font-bold text-lg">{plan.name}</h4>
                        <p className="text-sm text-[#54656f] mt-1 mb-4">R$ {plan.price}</p>
                        <ul className="text-sm space-y-2 font-medium mb-6">
-                          <li className="flex gap-2"><CheckCircle2 size={16} className="text-[#00a884]"/> Usuários: {plan.features.max_users || 1}</li>
+                          <li className="flex gap-2"><CheckCircle2 size={16} className="text-[#00a884]"/> Usu├írios: {plan.features.max_users || 1}</li>
                           <li className="flex gap-2"><CheckCircle2 size={16} className="text-[#00a884]"/> Aparelhos WS: {plan.features.max_connections || 1}</li>
                        </ul>
                      </div>
@@ -292,41 +317,37 @@ export default function AdminDashboard() {
       {/* Modal Criar Empresa */}
       {showNewCompany && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#202c33] rounded-[2rem] w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col overflow-hidden" style={{ maxHeight: 'calc(100vh - 2rem)' }}>
-             <div className="flex justify-between items-center p-6 border-b border-black/5 dark:border-white/5 shrink-0">
+          <div className="bg-white dark:bg-[#202c33] rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+             <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-bold flex items-center gap-2">Nova Empresa</h3>
                 <button onClick={() => setShowNewCompany(false)} className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full"><X size={20} /></button>
              </div>
-             <div className="overflow-y-auto p-6 styled-scrollbar-none">
-               <form id="form-nova-empresa" onSubmit={handleCreateCompany} className="space-y-4">
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Nome da Empresa</label>
-                     <input type="text" required value={newCompany.name} onChange={e => setNewCompany({...newCompany, name: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="XPTO Ltda"/>
-                  </div>
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">E-mail de Acesso</label>
-                     <input type="email" required value={newCompany.email} onChange={e => setNewCompany({...newCompany, email: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="contato@empresa.com"/>
-                  </div>
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Senha Provisória</label>
-                     <input type="text" required value={newCompany.password} onChange={e => setNewCompany({...newCompany, password: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="SenhaSegura123"/>
-                  </div>
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Plano</label>
-                     <select required value={newCompany.plan_id} onChange={e => setNewCompany({...newCompany, plan_id: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]">
-                        <option value="">Selecione o plano</option>
-                        {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                     </select>
-                  </div>
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Nome da Instância Base (Evolution)</label>
-                     <input type="text" required value={newCompany.instance} onChange={e => setNewCompany({...newCompany, instance: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="InstanciaXpto"/>
-                  </div>
-               </form>
-             </div>
-             <div className="p-6 border-t border-black/5 dark:border-white/5 shrink-0 bg-white/50 dark:bg-[#202c33]/50">
-               <button type="submit" form="form-nova-empresa" disabled={loading} className="w-full bg-[#00a884] hover:bg-[#018b6e] text-white font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center">{loading ? <Loader2 className="animate-spin" /> : 'Cadastrar Franquia'}</button>
-             </div>
+             <form onSubmit={handleCreateCompany} className="space-y-4">
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Nome da Empresa</label>
+                   <input type="text" required value={newCompany.name} onChange={e => setNewCompany({...newCompany, name: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="XPTO Ltda"/>
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">E-mail de Acesso</label>
+                   <input type="email" required value={newCompany.email} onChange={e => setNewCompany({...newCompany, email: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="contato@empresa.com"/>
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Senha Provis├│ria</label>
+                   <input type="text" required value={newCompany.password} onChange={e => setNewCompany({...newCompany, password: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="SenhaSegura123"/>
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Plano</label>
+                   <select required value={newCompany.plan_id} onChange={e => setNewCompany({...newCompany, plan_id: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]">
+                      <option value="">Selecione o plano</option>
+                      {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                   </select>
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Nome da Inst├óncia Base (Evolution)</label>
+                   <input type="text" required value={newCompany.instance} onChange={e => setNewCompany({...newCompany, instance: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="InstanciaXpto"/>
+                </div>
+                <button type="submit" disabled={loading} className="w-full mt-4 bg-[#00a884] hover:bg-[#018b6e] text-white font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center">{loading ? <Loader2 className="animate-spin" /> : 'Cadastrar Franquia'}</button>
+             </form>
           </div>
         </div>
       )}
@@ -334,58 +355,54 @@ export default function AdminDashboard() {
       {/* Modal Editar Empresa */}
       {showEditCompany && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#202c33] rounded-[2rem] w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col overflow-hidden" style={{ maxHeight: 'calc(100vh - 2rem)' }}>
-             <div className="flex justify-between items-center p-6 border-b border-black/5 dark:border-white/5 shrink-0">
+          <div className="bg-white dark:bg-[#202c33] rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+             <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-bold flex items-center gap-2">Editar Empresa</h3>
                 <button onClick={() => setShowEditCompany(null)} className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full text-slate-500 dark:text-slate-300"><X size={20} /></button>
              </div>
-             <div className="overflow-y-auto p-6 styled-scrollbar-none">
-               <form id="form-editar-empresa" onSubmit={handleUpdateCompany} className="space-y-4">
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Nome da Empresa</label>
-                     <input type="text" required value={showEditCompany.name} onChange={e => setShowEditCompany({...showEditCompany, name: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
-                  </div>
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">E-mail de Acesso</label>
-                     <input type="email" required value={showEditCompany.email || ''} onChange={e => setShowEditCompany({...showEditCompany, email: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="contato@empresa.com"/>
-                  </div>
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Senha de Acesso</label>
-                     <input type="text" required value={showEditCompany.password || ''} onChange={e => setShowEditCompany({...showEditCompany, password: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="Nova Senha"/>
-                  </div>
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Status</label>
-                     <select required value={showEditCompany.status} onChange={e => setShowEditCompany({...showEditCompany, status: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]">
-                        <option value="active">Ativo</option>
-                        <option value="trial">Trial</option>
-                        <option value="suspended">Suspenso (Bloqueado)</option>
-                     </select>
-                  </div>
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Plano</label>
-                     <select required value={showEditCompany.plan_id} onChange={e => setShowEditCompany({...showEditCompany, plan_id: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]">
-                        {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                     </select>
-                  </div>
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Data de Vencimento</label>
-                     <input 
-                        type="date" 
-                        required 
-                        value={showEditCompany.current_period_end ? new Date(showEditCompany.current_period_end).toISOString().split('T')[0] : ''} 
-                        onChange={e => setShowEditCompany({...showEditCompany, current_period_end: e.target.value})} 
-                        className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884] text-slate-700 dark:[color-scheme:dark]"
-                      />
-                  </div>
-                  <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Instância Base (Evolution)</label>
-                     <input type="text" value={showEditCompany.evolution_api_instance || ''} onChange={e => setShowEditCompany({...showEditCompany, evolution_api_instance: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
-                  </div>
-               </form>
-             </div>
-             <div className="p-6 border-t border-black/5 dark:border-white/5 shrink-0 bg-white/50 dark:bg-[#202c33]/50">
-               <button type="submit" form="form-editar-empresa" disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center">{loading ? <Loader2 className="animate-spin" /> : 'Salvar Alterações'}</button>
-             </div>
+             <form onSubmit={handleUpdateCompany} className="space-y-4">
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Nome da Empresa</label>
+                   <input type="text" required value={showEditCompany.name} onChange={e => setShowEditCompany({...showEditCompany, name: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">E-mail de Acesso</label>
+                   <input type="email" required value={showEditCompany.email || ''} onChange={e => setShowEditCompany({...showEditCompany, email: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="contato@empresa.com"/>
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Senha de Acesso</label>
+                   <input type="text" required value={showEditCompany.password || ''} onChange={e => setShowEditCompany({...showEditCompany, password: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="Nova Senha"/>
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Status</label>
+                   <select required value={showEditCompany.status} onChange={e => setShowEditCompany({...showEditCompany, status: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]">
+                      <option value="active">Ativo</option>
+                      <option value="trial">Trial</option>
+                      <option value="suspended">Suspenso (Bloqueado)</option>
+                   </select>
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Plano</label>
+                   <select required value={showEditCompany.plan_id} onChange={e => setShowEditCompany({...showEditCompany, plan_id: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]">
+                      {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                   </select>
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Data de Vencimento</label>
+                   <input 
+                      type="date" 
+                      required 
+                      value={showEditCompany.current_period_end ? new Date(showEditCompany.current_period_end).toISOString().split('T')[0] : ''} 
+                      onChange={e => setShowEditCompany({...showEditCompany, current_period_end: e.target.value})} 
+                      className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884] text-slate-700 dark:[color-scheme:dark]"
+                    />
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Inst├óncia Base (Evolution)</label>
+                   <input type="text" value={showEditCompany.evolution_api_instance || ''} onChange={e => setShowEditCompany({...showEditCompany, evolution_api_instance: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
+                </div>
+                <button type="submit" disabled={loading} className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center">{loading ? <Loader2 className="animate-spin" /> : 'Salvar Altera├º├Áes'}</button>
+             </form>
           </div>
         </div>
       )}
@@ -393,36 +410,32 @@ export default function AdminDashboard() {
       {/* Modal Criar Plano */}
       {showNewPlan && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#202c33] rounded-[2rem] w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col overflow-hidden" style={{ maxHeight: 'calc(100vh - 2rem)' }}>
-             <div className="flex justify-between items-center p-6 border-b border-black/5 dark:border-white/5 shrink-0">
+          <div className="bg-white dark:bg-[#202c33] rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+             <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-bold flex items-center gap-2">Criar Novo Plano</h3>
                 <button onClick={() => setShowNewPlan(false)} className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full text-slate-500 dark:text-slate-300"><X size={20} /></button>
              </div>
-             <div className="overflow-y-auto p-6 styled-scrollbar-none">
-               <form id="form-novo-plano" onSubmit={handleCreatePlan} className="space-y-4">
+             <form onSubmit={handleCreatePlan} className="space-y-4">
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Nome do Plano</label>
+                   <input type="text" required value={newPlan.name} onChange={e => setNewPlan({...newPlan, name: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="Ex: Plano Master"/>
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Mensalidade (R$)</label>
+                   <input type="number" step="0.01" required value={newPlan.price} onChange={e => setNewPlan({...newPlan, price: Number(e.target.value)})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Nome do Plano</label>
-                     <input type="text" required value={newPlan.name} onChange={e => setNewPlan({...newPlan, name: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="Ex: Plano Master"/>
+                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Qtd. Usu├írios</label>
+                     <input type="number" min="1" required value={newPlan.max_users} onChange={e => setNewPlan({...newPlan, max_users: Number(e.target.value)})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
                   </div>
                   <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Mensalidade (R$)</label>
-                     <input type="number" step="0.01" required value={newPlan.price} onChange={e => setNewPlan({...newPlan, price: Number(e.target.value)})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
+                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Aparelhos WS</label>
+                     <input type="number" min="1" required value={newPlan.max_connections} onChange={e => setNewPlan({...newPlan, max_connections: Number(e.target.value)})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                       <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Qtd. Usuários</label>
-                       <input type="number" min="1" required value={newPlan.max_users} onChange={e => setNewPlan({...newPlan, max_users: Number(e.target.value)})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
-                    </div>
-                    <div>
-                       <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Aparelhos WS</label>
-                       <input type="number" min="1" required value={newPlan.max_connections} onChange={e => setNewPlan({...newPlan, max_connections: Number(e.target.value)})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
-                    </div>
-                  </div>
-               </form>
-             </div>
-             <div className="p-6 border-t border-black/5 dark:border-white/5 shrink-0 bg-white/50 dark:bg-[#202c33]/50">
-               <button type="submit" form="form-novo-plano" disabled={loading} className="w-full bg-[#00a884] hover:bg-[#018b6e] text-white font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center">{loading ? <Loader2 className="animate-spin" /> : 'Salvar Novo Plano'}</button>
-             </div>
+                </div>
+                <button type="submit" disabled={loading} className="w-full mt-4 bg-[#00a884] hover:bg-[#018b6e] text-white font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center">{loading ? <Loader2 className="animate-spin" /> : 'Salvar Novo Plano'}</button>
+             </form>
           </div>
         </div>
       )}
