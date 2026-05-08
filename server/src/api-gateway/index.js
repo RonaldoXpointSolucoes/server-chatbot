@@ -71,4 +71,44 @@ router.post('/v1/admin/plans', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.delete('/v1/admin/companies/:id', async (req, res) => {
+    try {
+        const { error } = await supabase.from('companies').delete().eq('id', req.params.id);
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/v1/admin/economic-groups', async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('economic_groups').select('*');
+        if (error) throw error;
+        res.json(data);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/v1/admin/economic-groups', async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('economic_groups').insert(req.body).select();
+        if (error) throw error;
+        res.json(data);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/v1/admin/economic-groups/:id', async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('economic_groups').update(req.body).eq('id', req.params.id).select();
+        if (error) throw error;
+        res.json(data);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/v1/admin/economic-groups/:id', async (req, res) => {
+    try {
+        const { error } = await supabase.from('economic_groups').delete().eq('id', req.params.id);
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
