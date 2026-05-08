@@ -57,83 +57,45 @@ export default function ClientLogin() {
       let allowedCompanies = null;
       let userName = '';
 
-      // 1. Tenta carregar dados como Empresa (Admin)
-      addDevLog('FETCH_COMPANIES_START', 'Pesquisando usuário na tabela companies (Admin)...', 'info');
-      const { data: companyData, error: companyError } = await supabase
-        .from('companies')
-        .select('id, name, status, password')
-        .eq('email', email.trim().toLowerCase())
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
+      // Tenta fazer o login usando a procedure segura (bypassa o RLS de companies)
+      addDevLog('AUTH_RPC_START', 'Invocando procedure segura de login (check_login)...', 'info');
+      const { data: authResult, error: authError } = await supabase.rpc('check_login', {
+        p_email: email.trim().toLowerCase(),
+        p_password: password.trim()
+      });
 
-      if (companyError) {
-         addDevLog('FETCH_COMPANIES_ERROR', companyError, 'error');
+      if (authError) {
+         addDevLog('AUTH_RPC_ERROR', authError.message || JSON.stringify(authError), 'error');
+         setErrorMsg('Erro interno no servidor ao validar credenciais.');
+         setIsLoading(false);
+         return;
       }
 
-      if (companyData && companyData.password === password.trim()) {
-        addDevLog('FETCH_COMPANIES_SUCCESS', `Empresa Admin autenticada: ${companyData.name} (Status: ${companyData.status})`, 'success');
-        tenantData = companyData;
-        userName = companyData.name;
-        userRole = 'admin';
-      } else if (companyData && companyData.password !== password.trim()) {
-        addDevLog('AUTH_ERROR', 'Senha inválida para Empresa (Admin).', 'error');
-        setErrorMsg('E-mail ou senha inválidos.');
-        setIsLoading(false);
-        return;
-      } else {
-        addDevLog('FETCH_COMPANIES_NOT_FOUND', 'Não encontrado em companies. Pesquisando em tenant_users (Agente)...', 'info');
-        // Tenta carregar dados como Agente / Membro do time
-        const { data: agentData, error: agentError } = await supabase
-          .from('tenant_users')
-          .select('id, tenant_id, role, full_name, allowed_instances, allowed_companies, password')
-          .eq('email', email.trim().toLowerCase())
-          .limit(1)
-          .maybeSingle();
-
-        if (agentError) {
-           addDevLog('FETCH_TENANT_USERS_ERROR', agentError, 'error');
-        }
-
-        if (agentData && agentData.password === password.trim()) {
-           addDevLog('FETCH_TENANT_USERS_SUCCESS', `Agente autenticado: ${agentData.full_name}. Buscando matriz ID: ${agentData.tenant_id}...`, 'success');
-           // Busca os dados da empresa matriz desse agente
-           const { data: parentCompany, error: parentError } = await supabase
-             .from('companies')
-             .select('id, name, status')
-             .eq('id', agentData.tenant_id)
-             .maybeSingle();
-             
-           if (parentError) {
-              addDevLog('FETCH_PARENT_COMPANY_ERROR', parentError, 'error');
-           }
-             
-           if (parentCompany) {
-             addDevLog('FETCH_PARENT_COMPANY_SUCCESS', `Matriz encontrada: ${parentCompany.name}`, 'success');
-             tenantData = parentCompany;
-             userName = agentData.full_name;
-             userRole = agentData.role;
-             allowedInstances = agentData.allowed_instances || [];
-             allowedCompanies = agentData.allowed_companies || [];
-           } else {
-             addDevLog('FETCH_PARENT_COMPANY_NOT_FOUND', 'Empresa matriz não encontrada no banco.', 'error');
-           }
-        } else if (agentData && agentData.password !== password.trim()) {
-           addDevLog('AUTH_ERROR', 'Senha inválida para Agente.', 'error');
-           setErrorMsg('E-mail ou senha inválidos.');
-           setIsLoading(false);
-           return;
-        } else {
-           addDevLog('FETCH_TENANT_USERS_NOT_FOUND', 'Nenhum Agente encontrado com este e-mail.', 'info');
-        }
+      if (!authResult) {
+         addDevLog('AUTH_RPC_NOT_FOUND', 'Nenhuma credencial válida encontrada no banco.', 'error');
+         setErrorMsg('E-mail ou senha inválidos.');
+         setIsLoading(false);
+         return;
       }
 
-      if (!tenantData) {
-        // Usuário não encontrado em lugar nenhum com a senha correta
-        addDevLog('LOGIN_VALIDATION_FAILED', 'Credenciais inválidas ou usuário inexistente.', 'error');
-        setErrorMsg('E-mail ou senha inválidos.');
-        setIsLoading(false);
-        return;
+      addDevLog('AUTH_RPC_SUCCESS', `Login bem-sucedido via RPC. Tipo: ${authResult.type}`, 'success');
+
+      if (authResult.type === 'admin') {
+         tenantData = authResult.user;
+         userName = authResult.user.name;
+         userRole = 'admin';
+      } else if (authResult.type === 'agent') {
+         if (!authResult.parent) {
+            addDevLog('FETCH_PARENT_COMPANY_NOT_FOUND', 'Empresa matriz não encontrada para o agente.', 'error');
+            setErrorMsg('Configuração inválida. A empresa matriz foi excluída ou desativada.');
+            setIsLoading(false);
+            return;
+         }
+         tenantData = authResult.parent;
+         userName = authResult.user.full_name;
+         userRole = authResult.user.role;
+         allowedInstances = authResult.user.allowed_instances || [];
+         allowedCompanies = authResult.user.allowed_companies || [];
       }
 
       if (tenantData.status === 'suspended') {
