@@ -534,7 +534,6 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
-    </div>
       {/* Modal Confirmar Exclusão */}
       {showDeleteModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
@@ -582,5 +581,6 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+    </div>
   );
 }
