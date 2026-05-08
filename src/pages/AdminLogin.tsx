@@ -10,8 +10,8 @@ export default function AdminLogin() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (email === 'ronaldo.xpointsolucoes@gmail.com' && password === 'Xx@gh03360102') {
-      sessionStorage.setItem('saas_admin', 'true');
+    if (email.trim().toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com' && password.trim() === '27081978') {
+      sessionStorage.setItem('admin_token', 'true');
       navigate('/admin');
     } else {
       setError(true);

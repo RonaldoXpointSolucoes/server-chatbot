@@ -1,20 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2, Smartphone } from 'lucide-react';
+import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2, Smartphone, Trash2, FolderTree, AlertTriangle } from 'lucide-react';
 import { cn } from './ChatDashboard';
 import { Navigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import ThemeToggle from '../components/ThemeToggle';
 
-type TabType = 'overview' | 'companies' | 'plans' | 'billing';
+type TabType = 'overview' | 'companies' | 'economic_groups' | 'plans' | 'billing' | 'instances';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [companies, setCompanies] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
+  const [economicGroups, setEconomicGroups] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewCompany, setShowNewCompany] = useState(false);
-  const [newCompany, setNewCompany] = useState({ name: '', plan_id: '', instance: '', email: '', password: '' });
+  const [newCompany, setNewCompany] = useState({ name: '', plan_id: '', instance: '', email: '', password: '', economic_group_id: '' });
+  
+  const [showNewGroup, setShowNewGroup] = useState(false);
+  const [newGroup, setNewGroup] = useState({ name: '', owner_email: '' });
+  
+  const [showDeleteModal, setShowDeleteModal] = useState<{type: 'company'|'group', id: string, name: string} | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
   
   const [showEditCompany, setShowEditCompany] = useState<any>(null);
   const [showNewPlan, setShowNewPlan] = useState(false);
@@ -22,7 +29,7 @@ export default function AdminDashboard() {
   
   const navigate = useNavigate();
 
-  if (!sessionStorage.getItem('saas_admin')) {
+  if (!sessionStorage.getItem('admin_token')) {
     return <Navigate to="/admin/login" replace />;
   }
 
@@ -30,52 +37,105 @@ export default function AdminDashboard() {
     fetchData();
   }, [activeTab]);
 
+  const apiUrl = import.meta.env.VITE_API_URL || 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
+
   const fetchData = async () => {
     setLoading(true);
-    const { data: companiesData } = await supabase.from('companies').select('*, plans(name)');
-    const { data: plansData } = await supabase.from('plans').select('*');
-    
-    if (companiesData) setCompanies(companiesData);
-    if (plansData) setPlans(plansData);
+    try {
+      const [compRes, plansRes, groupsRes] = await Promise.all([
+        fetch(`${apiUrl}/api/v1/admin/companies`),
+        fetch(`${apiUrl}/api/v1/admin/plans`),
+        fetch(`${apiUrl}/api/v1/admin/economic-groups`)
+      ]);
+      const companiesData = await compRes.json();
+      const plansData = await plansRes.json();
+      const groupsData = await groupsRes.json();
+      
+      if (companiesData && !companiesData.error) setCompanies(companiesData);
+      if (plansData && !plansData.error) setPlans(plansData);
+      if (groupsData && !groupsData.error) setEconomicGroups(groupsData);
+    } catch (e) {
+      console.error('Error fetching admin data:', e);
+    }
     setLoading(false);
+  };
+
+  const handleCreateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    await fetch(`${apiUrl}/api/v1/admin/economic-groups`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newGroup)
+    });
+    setShowNewGroup(false);
+    setNewGroup({ name: '', owner_email: '' });
+    fetchData();
+  };
+
+  const handleDelete = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!showDeleteModal || deleteConfirmText !== showDeleteModal.name) return;
+    setLoading(true);
+    const endpoint = showDeleteModal.type === 'company' ? 'companies' : 'economic-groups';
+    
+    await fetch(`${apiUrl}/api/v1/admin/${endpoint}/${showDeleteModal.id}`, {
+      method: 'DELETE',
+    });
+    
+    setShowDeleteModal(null);
+    setDeleteConfirmText('');
+    fetchData();
   };
 
   const handleCreateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     
-    await supabase.from('companies').insert({
-      name: newCompany.name,
-      plan_id: newCompany.plan_id,
-      evolution_api_instance: newCompany.instance,
-      email: newCompany.email,
-      password: newCompany.password,
-      status: 'active',
-      current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // +30 dias
+    await fetch(`${apiUrl}/api/v1/admin/companies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newCompany.name,
+        plan_id: newCompany.plan_id,
+        evolution_api_instance: newCompany.instance,
+        email: newCompany.email,
+        password: newCompany.password,
+        economic_group_id: newCompany.economic_group_id || null,
+        status: 'active',
+        current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      })
     });
     
     setShowNewCompany(false);
-    setNewCompany({ name: '', plan_id: '', instance: '', email: '', password: '' });
+    setNewCompany({ name: '', plan_id: '', instance: '', email: '', password: '', economic_group_id: '' });
     fetchData();
   };
 
   const handleLogout = () => {
     sessionStorage.removeItem('saas_admin');
+    sessionStorage.removeItem('admin_token');
     navigate('/admin/login');
   };
 
   const handleUpdateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await supabase.from('companies').update({
-      name: showEditCompany.name,
-      plan_id: showEditCompany.plan_id,
-      evolution_api_instance: showEditCompany.evolution_api_instance,
-      email: showEditCompany.email,
-      password: showEditCompany.password,
-      status: showEditCompany.status,
-      current_period_end: new Date(showEditCompany.current_period_end)
-    }).eq('id', showEditCompany.id);
+    
+    await fetch(`${apiUrl}/api/v1/admin/companies/${showEditCompany.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: showEditCompany.name,
+        plan_id: showEditCompany.plan_id,
+        evolution_api_instance: showEditCompany.evolution_api_instance,
+        email: showEditCompany.email,
+        password: showEditCompany.password,
+        status: showEditCompany.status,
+        economic_group_id: showEditCompany.economic_group_id || null,
+        current_period_end: new Date(showEditCompany.current_period_end)
+      })
+    });
 
     setShowEditCompany(null);
     fetchData();
@@ -84,13 +144,18 @@ export default function AdminDashboard() {
   const handleCreatePlan = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await supabase.from('plans').insert({
-      name: newPlan.name,
-      price: newPlan.price,
-      features: {
-        max_users: newPlan.max_users,
-        max_connections: newPlan.max_connections
-      }
+    
+    await fetch(`${apiUrl}/api/v1/admin/plans`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newPlan.name,
+        price: newPlan.price,
+        features: {
+          max_users: newPlan.max_users,
+          max_connections: newPlan.max_connections
+        }
+      })
     });
 
     setShowNewPlan(false);
@@ -122,6 +187,7 @@ export default function AdminDashboard() {
           {[
             { id: 'overview', icon: LayoutDashboard, label: 'Visão Geral', path: null },
             { id: 'companies', icon: Building, label: 'Empresas', path: null },
+            { id: 'economic_groups', icon: FolderTree, label: 'Grupos Econômicos', path: null },
             { id: 'plans', icon: ScrollText, label: 'Planos de Uso', path: null },
             { id: 'instances', icon: Smartphone, label: 'Gerenciador de Instâncias', path: '/instances' },
             { id: 'billing', icon: CreditCard, label: 'Faturamento', path: null },
@@ -199,7 +265,8 @@ export default function AdminDashboard() {
          )}
 
          {activeTab === 'companies' && (
-           <div className="bg-white dark:bg-[#202c33] border border-black/5 dark:border-white/5 rounded-2xl p-6 shadow-sm">
+           <div className="bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-xl border border-black/5 dark:border-white/5 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+             <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-[#00a884]/20 to-transparent rounded-full blur-3xl -z-10 pointer-events-none" />
              <div className="flex justify-between items-center mb-6">
                 <h3 className="text-lg font-bold">Empresas Gerenciadas</h3>
                 <button 
@@ -242,9 +309,12 @@ export default function AdminDashboard() {
                        <td className="p-3">
                          <span className="text-xs bg-black/5 dark:bg-white/10 px-2 py-1 rounded font-mono text-[#54656f] dark:text-[#aebac1]">{comp.evolution_api_instance || 'N/A'}</span>
                        </td>
-                       <td className="p-3 text-right">
-                         <button onClick={() => setShowEditCompany(comp)} className="text-blue-500 hover:text-blue-600 font-semibold text-xs px-3 py-1.5 rounded bg-blue-500/10 hover:bg-blue-500/20 transition-colors">
+                       <td className="p-3 text-right flex justify-end gap-2">
+                         <button onClick={() => setShowEditCompany(comp)} className="text-blue-500 hover:text-blue-600 font-semibold text-xs px-3 py-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 transition-colors">
                            Editar
+                         </button>
+                         <button onClick={() => setShowDeleteModal({type: 'company', id: comp.id, name: comp.name})} className="text-red-500 hover:text-red-600 font-semibold text-xs px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 transition-colors">
+                           <Trash2 size={16}/>
                          </button>
                        </td>
                      </tr>
@@ -256,6 +326,41 @@ export default function AdminDashboard() {
            </div>
          )}
          
+         {activeTab === 'economic_groups' && (
+           <div className="bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-xl border border-black/5 dark:border-white/5 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+             <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-[#00a884]/20 to-transparent rounded-full blur-3xl -z-10 pointer-events-none" />
+             <div className="flex justify-between items-center mb-6">
+                <div>
+                   <h3 className="text-lg font-bold">Grupos Econômicos (Holdings)</h3>
+                   <p className="text-sm text-[#54656f]">Agrupe empresas de um mesmo conglomerado.</p>
+                </div>
+                <button 
+                  onClick={() => setShowNewGroup(true)}
+                  className="bg-[#00a884] hover:bg-[#018b6e] text-white px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 shadow-lg shadow-[#00a884]/30 transition-all hover:shadow-[#00a884]/40 hover:-translate-y-0.5"
+                >
+                  <Plus size={16} /> Novo Grupo
+                </button>
+             </div>
+             
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {economicGroups.map(group => (
+                  <div key={group.id} className="bg-white/60 dark:bg-[#111b21]/60 backdrop-blur-md border border-black/10 dark:border-white/10 rounded-2xl p-6 flex flex-col justify-between group hover:border-[#00a884]/50 transition-all relative">
+                     <button onClick={() => setShowDeleteModal({type: 'group', id: group.id, name: group.name})} className="absolute top-4 right-4 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={18}/></button>
+                     <div>
+                       <div className="w-10 h-10 rounded-xl bg-[#00a884]/10 text-[#00a884] flex items-center justify-center mb-4"><FolderTree size={20}/></div>
+                       <h4 className="font-bold text-lg">{group.name}</h4>
+                       <p className="text-sm text-[#54656f] mt-1">{group.owner_email || 'Sem e-mail cadastrado'}</p>
+                       <p className="text-xs font-medium text-slate-500 mt-4 pt-4 border-t border-black/5 dark:border-white/5">Criado em: {new Date(group.created_at).toLocaleDateString()}</p>
+                     </div>
+                  </div>
+                ))}
+                {economicGroups.length === 0 && (
+                  <div className="col-span-full py-10 text-center text-[#54656f]">Nenhum grupo econômico encontrado.</div>
+                )}
+             </div>
+           </div>
+         )}
+
          {activeTab === 'plans' && (
            <div className="bg-white dark:bg-[#202c33] border border-black/5 dark:border-white/5 rounded-2xl p-6 shadow-sm">
              <div className="flex justify-between items-center mb-6">
@@ -423,6 +528,53 @@ export default function AdminDashboard() {
              <div className="p-6 border-t border-black/5 dark:border-white/5 shrink-0 bg-white/50 dark:bg-[#202c33]/50">
                <button type="submit" form="form-novo-plano" disabled={loading} className="w-full bg-[#00a884] hover:bg-[#018b6e] text-white font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center">{loading ? <Loader2 className="animate-spin" /> : 'Salvar Novo Plano'}</button>
              </div>
+          </div>
+        </div>
+      )}
+      {/* Modal Confirmar Exclusão */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#202c33] rounded-3xl w-full max-w-md p-8 shadow-2xl animate-in zoom-in-95 duration-200 border border-red-500/20">
+             <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-6 text-red-500">
+               <AlertTriangle size={32} />
+             </div>
+             <h3 className="text-2xl font-bold text-center mb-2">Excluir {showDeleteModal.type === 'company' ? 'Empresa' : 'Grupo Econômico'}</h3>
+             <p className="text-center text-[#54656f] dark:text-[#aebac1] mb-6 text-sm leading-relaxed">
+               Esta ação é <b className="text-red-500">irreversível</b>. Ao confirmar, todos os dados associados a <b>{showDeleteModal.name}</b> serão permanentemente removidos.
+             </p>
+             <form onSubmit={handleDelete} className="space-y-4">
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Digite "{showDeleteModal.name}" para confirmar</label>
+                   <input type="text" required value={deleteConfirmText} onChange={e => setDeleteConfirmText(e.target.value)} className="w-full mt-2 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border-2 border-transparent rounded-xl px-4 py-3 outline-none focus:border-red-500 transition-colors text-center font-bold" placeholder={showDeleteModal.name}/>
+                </div>
+                <div className="flex gap-3 pt-2">
+                   <button type="button" onClick={() => {setShowDeleteModal(null); setDeleteConfirmText('');}} className="flex-1 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 font-bold py-3 rounded-xl transition-colors">Cancelar</button>
+                   <button type="submit" disabled={loading || deleteConfirmText !== showDeleteModal.name} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center items-center gap-2 transition-colors">{loading ? <Loader2 className="animate-spin" /> : <><Trash2 size={18}/> Excluir Agora</>}</button>
+                </div>
+             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Criar Grupo */}
+      {showNewGroup && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#202c33] rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+             <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-bold flex items-center gap-2"><FolderTree className="text-[#00a884]"/> Novo Grupo Econômico</h3>
+                <button onClick={() => setShowNewGroup(false)} className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full"><X size={20} /></button>
+             </div>
+             <form onSubmit={handleCreateGroup} className="space-y-4">
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Nome da Holding / Grupo</label>
+                   <input type="text" required value={newGroup.name} onChange={e => setNewGroup({...newGroup, name: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="Ex: Grupo Master S/A"/>
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">E-mail de Contato (Proprietário)</label>
+                   <input type="email" required value={newGroup.owner_email} onChange={e => setNewGroup({...newGroup, owner_email: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="ceo@grupomaster.com"/>
+                </div>
+                <button type="submit" disabled={loading} className="w-full mt-4 bg-[#00a884] hover:bg-[#018b6e] text-white font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center">{loading ? <Loader2 className="animate-spin" /> : 'Criar Grupo'}</button>
+             </form>
           </div>
         </div>
       )}

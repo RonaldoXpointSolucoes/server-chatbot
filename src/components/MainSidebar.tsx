@@ -165,7 +165,8 @@ export function MainSidebar() {
 
     const fetchCompanies = async () => {
       try {
-        const { data: currentCompany, error: currentError } = await supabase
+        let currentCompany = null;
+        const { data: dbCompany, error: currentError } = await supabase
           .from('companies')
           .select('*')
           .eq('id', tenantId)
