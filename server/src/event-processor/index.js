@@ -177,7 +177,7 @@ class EventProcessor {
                     else if (p.type === 0 || p.type === 'REVOKE') {
                         if (p.key && p.key.id) {
                             supabase.from('messages')
-                                .update({ status: 'deleted', text_content: '🚫 Mensagem apagada' })
+                                .update({ status: 'deleted' })
                                 .eq('whatsapp_message_id', p.key.id)
                                 .then(({ error }) => {
                                     if (error) console.error('[EventProcessor] Erro ao deletar mensagem:', error);
@@ -186,8 +186,7 @@ class EventProcessor {
 
                             realtime.publishInboxEvent(tenantId, 'message.update', {
                                 whatsapp_message_id: p.key.id,
-                                status: 'deleted',
-                                text_content: '🚫 Mensagem apagada'
+                                status: 'deleted'
                             }).catch(() => {});
                         }
                         // Sempre pula o enfileiramento de protocolMessage de revoke

@@ -68,7 +68,23 @@ export function renderMessageText(text: string) {
     
     return (
       <div className="flex flex-col gap-1.5 w-full">
-        <div className="relative pl-3 pr-2 py-2 mb-0.5 bg-black/5 dark:bg-black/20 border-l-4 border-emerald-500 rounded-lg text-[0.85rem] text-[#54656f] dark:text-[#8696a0] whitespace-normal overflow-hidden max-w-full">
+        <div 
+          className="relative pl-3 pr-2 py-2 mb-0.5 bg-black/5 dark:bg-black/20 border-l-4 border-emerald-500 rounded-lg text-[0.85rem] text-[#54656f] dark:text-[#8696a0] whitespace-normal overflow-hidden max-w-full cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (quotedText) {
+              const messageElements = document.querySelectorAll('.message-item-container');
+              const targetElement = Array.from(messageElements).find(el => el.textContent?.includes(quotedText)) as HTMLElement;
+              if (targetElement) {
+                targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                targetElement.classList.add('bg-black/5', 'dark:bg-white/5', 'transition-colors', 'duration-500', 'rounded-xl');
+                setTimeout(() => {
+                  targetElement.classList.remove('bg-black/5', 'dark:bg-white/5');
+                }, 1500);
+              }
+            }
+          }}
+        >
            <div className="font-bold text-emerald-600 dark:text-emerald-400 text-xs mb-1 opacity-90 drop-shadow-sm flex items-center gap-1">Mensagem Citada</div>
            <div className="line-clamp-3 italic opacity-90">{quotedText}</div>
         </div>
@@ -231,6 +247,43 @@ export default function ChatDashboard() {
   const [messageToForward, setMessageToForward] = useState<any | null>(null);
   const { showMainSidebar, setShowMainSidebar } = (useOutletContext() as { showMainSidebar: boolean, setShowMainSidebar: (v: boolean) => void }) || { showMainSidebar: true, setShowMainSidebar: () => {} };
   
+  // Estados para Resizer da Sidebar
+  const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [isDragging, setIsDragging] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
+      const sidebarLeft = sidebarRef.current?.getBoundingClientRect().left || 0;
+      const newWidth = Math.max(280, Math.min(e.clientX - sidebarLeft, window.innerWidth * 0.5, 600));
+      setSidebarWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      if (isDragging) setIsDragging(false);
+    };
+
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isDragging]);
+
   // Gemini AI States
   const [isGeminiPopoverOpen, setIsGeminiPopoverOpen] = useState(false);
   const [isGeminiProcessing, setIsGeminiProcessing] = useState(false);
@@ -838,10 +891,14 @@ export default function ChatDashboard() {
       {/* MainSidebar movido para o MainLayout global */}
 
       {/* Middle Sidebar (Contacts List) */}
-      <div className={cn(
-        "w-full md:w-[30%] md:min-w-[320px] lg:w-[320px] lg:max-w-[340px] border-r border-[#d1d7db] dark:border-[#222d34] flex flex-col bg-white dark:bg-[#111b21] transition-all",
-        activeChatId ? "hidden md:flex" : "flex"
-      )}
+      <div 
+        ref={sidebarRef}
+        className={cn(
+          "w-full border-r border-[#d1d7db] dark:border-[#222d34] flex flex-col bg-white dark:bg-[#111b21] shrink-0",
+          !isDragging && "transition-all",
+          activeChatId ? "hidden md:flex" : "flex"
+        )}
+        style={{ width: window.innerWidth >= 768 ? sidebarWidth : '100%', maxWidth: window.innerWidth >= 768 ? sidebarWidth : '100%' }}
         onClick={() => setActiveDropdown(null)} // fecha qq dropdown ao clicar fora
       >
         
@@ -849,7 +906,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.2.8'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '08/05/2026, 09:40')}`}
+            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.2.9'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '08/05/2026, 11:21')}`}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1442,6 +1499,18 @@ export default function ChatDashboard() {
         </div>
       </div>
 
+      {/* Resizer Handle */}
+      <div 
+        className={cn(
+          "hidden md:flex w-1 cursor-col-resize hover:bg-[#00a884] active:bg-[#00a884] z-50 shrink-0 transition-colors relative",
+          isDragging ? "bg-[#00a884]" : "bg-transparent"
+        )}
+        onMouseDown={(e) => { e.preventDefault(); setIsDragging(true); }}
+      >
+        {/* Hitbox expandida para facilitar o clique */}
+        <div className="absolute -left-1 -right-1 top-0 bottom-0 cursor-col-resize" />
+      </div>
+
       {/* Main Chat Area */}
       {activeChat ? (
         <div 
@@ -1696,7 +1765,7 @@ export default function ChatDashboard() {
                const isLastMessages = index >= arr.length - 2;
 
                return (
-                  <div key={msg.id} className="flex flex-col w-full">
+                  <div key={msg.id} id={`msg-${(msg as any).whatsapp_id || msg.id}`} className="flex flex-col w-full message-item-container">
                     {separatorNode}
                     <div 
                       className={`relative flex items-center mb-1 group w-full ${isMe ? 'justify-end' : 'justify-start'} ${
@@ -1791,8 +1860,34 @@ export default function ChatDashboard() {
                       )}
 
                       {/* Quoted Message Render */}
+                      {msg.status === 'deleted' && (
+                         <div className="flex items-center gap-1.5 mb-1.5 bg-red-500/10 dark:bg-red-900/20 px-2 py-1 rounded-md text-red-600 dark:text-red-400 font-medium text-[11px] w-fit italic">
+                           <Ban size={12} /> Apagada {msg.sender === 'bot' || msg.sender === 'human' ? 'por você' : 'pelo cliente'}
+                         </div>
+                      )}
+                      
                       {msg.quoted && (
-                         <div className="bg-black/5 dark:bg-black/20 border-l-4 border-[#00a884] rounded-lg p-2 mb-2 w-full flex flex-col gap-0.5 relative overflow-hidden group/quote">
+                         <div 
+                           className="bg-black/5 dark:bg-black/20 border-l-4 border-[#00a884] rounded-lg p-2 mb-2 w-full flex flex-col gap-0.5 relative overflow-hidden group/quote cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             const targetId = `msg-${msg.quoted!.id}`;
+                             let targetElement = document.getElementById(targetId);
+                             
+                             if (!targetElement && msg.quoted?.text) {
+                               const messageElements = document.querySelectorAll('.message-item-container');
+                               targetElement = Array.from(messageElements).find(el => el.textContent?.includes(msg.quoted!.text)) as HTMLElement;
+                             }
+
+                             if (targetElement) {
+                               targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                               targetElement.classList.add('bg-black/5', 'dark:bg-white/5', 'transition-colors', 'duration-500', 'rounded-xl');
+                               setTimeout(() => {
+                                 targetElement!.classList.remove('bg-black/5', 'dark:bg-white/5');
+                               }, 1500);
+                             }
+                           }}
+                         >
                            <div className="absolute inset-0 bg-white/40 dark:bg-white/5 opacity-0 group-hover/quote:opacity-100 transition-opacity pointer-events-none"></div>
                            <span className="text-[11px] font-bold text-[#00a884] opacity-90 truncate">
                              {msg.quoted.sender && activeChat.phone && msg.quoted.sender.includes(activeChat.phone.replace(/\D/g, '')) 
