@@ -766,14 +766,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       
       // Update Database
-      const deletedPlaceholder = '🚫 _Esta mensagem foi apagada._';
       const { error: dbError } = await supabase
         .from('messages')
         .update({ 
-           text_content: deletedPlaceholder,
-           media_url: null, 
-           media_metadata: null,
-           message_type: 'text',
            status: 'deleted'
         })
         .eq('id', messageId);
@@ -788,10 +783,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                ...c, 
                messages: c.messages.map(m => m.id === messageId ? {
                   ...m, 
-                  text: deletedPlaceholder,
-                  status: 'deleted',
-                  mediaUrl: undefined,
-                  mediaType: 'text'
+                  status: 'deleted'
                } : m)
             };
           }
