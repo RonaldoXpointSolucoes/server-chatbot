@@ -64,7 +64,7 @@ export default function ClientLogin() {
              .from('companies')
              .select('id, name, status')
              .eq('id', agentData.tenant_id)
-             .single();
+             .maybeSingle();
              
            if (parentCompany) {
              tenantData = parentCompany;

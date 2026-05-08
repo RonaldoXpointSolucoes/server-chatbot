@@ -60,7 +60,7 @@ export default function InstancesDashboard() {
   const fetchActiveInstance = async () => {
     try {
       const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-      const { data } = await supabase.from('companies').select('evolution_api_instance, name').eq('id', tenantId).single();
+      const { data } = await supabase.from('companies').select('evolution_api_instance, name').eq('id', tenantId).maybeSingle();
       if (data) {
         setActiveInstanceId(data.evolution_api_instance);
         setUserName(data.name || 'Admin');

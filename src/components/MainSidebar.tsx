@@ -169,7 +169,7 @@ export function MainSidebar() {
           .from('companies')
           .select('*')
           .eq('id', tenantId)
-          .single();
+          .maybeSingle();
           
         if (currentError || !currentCompany) return;
         

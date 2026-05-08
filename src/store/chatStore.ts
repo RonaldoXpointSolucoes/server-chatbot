@@ -1986,7 +1986,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       if (!currentTenantId) return;
 
-      const { data: tenantData } = await supabase.from('companies').select('*').eq('id', currentTenantId).single();
+      const { data: tenantData } = await supabase.from('companies').select('*').eq('id', currentTenantId).maybeSingle();
       
       if (tenantData) {
         set({

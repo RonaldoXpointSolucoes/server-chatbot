@@ -20,7 +20,7 @@ export default function SettingsPreferences() {
 
   const loadCompanySettings = async () => {
      try {
-       const { data, error } = await supabase.from('companies').select('ignore_groups').eq('tenant_id', tenantId).single();
+       const { data, error } = await supabase.from('companies').select('ignore_groups').eq('tenant_id', tenantId).maybeSingle();
        if (!error && data) {
           setIgnoreGroups(data.ignore_groups !== false); // default is true
        }
