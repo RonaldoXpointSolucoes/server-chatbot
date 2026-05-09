@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare } from 'lucide-react';
+import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 
 interface BaseModalProps {
@@ -424,6 +424,7 @@ export function NewChatModal({ isOpen, onClose, contacts, instances = [], defaul
   const [search, setSearch] = useState('');
   const [directNumber, setDirectNumber] = useState('');
   const [selectedInstance, setSelectedInstance] = useState<string>('');
+  const [showDirectMessage, setShowDirectMessage] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -440,6 +441,7 @@ export function NewChatModal({ isOpen, onClose, contacts, instances = [], defaul
      if (!isOpen) {
        setSearch('');
        setDirectNumber('');
+       setShowDirectMessage(false);
      }
   }, [isOpen]);
 
@@ -464,7 +466,7 @@ export function NewChatModal({ isOpen, onClose, contacts, instances = [], defaul
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
       <div 
         className="bg-white dark:bg-[#202c33] border border-white/20 dark:border-white/5 rounded-3xl p-6 w-[90%] max-w-md shadow-2xl flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200"
         onClick={e => e.stopPropagation()}
@@ -498,32 +500,46 @@ export function NewChatModal({ isOpen, onClose, contacts, instances = [], defaul
           </div>
         )}
 
-        <input 
-          type="text" 
-          placeholder="Pesquisar contatos..." 
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="w-full px-4 py-3 mb-4 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-          autoFocus
-        />
-
-        <div className="mb-4 bg-[#f0f2f5]/50 dark:bg-[#111b21]/50 p-4 rounded-xl border border-dashed border-[#00a884]/30">
-          <label className="block text-sm font-medium text-[#00a884] mb-2 flex items-center gap-2">
-            <MessageSquare size={16} />
-            Enviar Mensagem Direta
-          </label>
-          <input 
-            type="text" 
-            placeholder="Ex: 11999999999 + Enter" 
-            value={directNumber}
-            onChange={e => setDirectNumber(e.target.value)}
-            onKeyDown={handleDirectNumberSubmit}
-            className="w-full px-4 py-3 bg-white dark:bg-[#2a3942] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
-          />
-          <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-2">
-            Cole ou digite o número (com DDD) e pressione Enter para conversar.
-          </p>
+        <div className="flex gap-2 mb-4">
+          <div className="relative flex-1">
+            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input 
+              type="text" 
+              placeholder="Pesquisar contatos..." 
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-11 pr-4 py-3 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+              autoFocus
+            />
+          </div>
+          <button
+            onClick={() => setShowDirectMessage(!showDirectMessage)}
+            className={`px-4 rounded-xl flex items-center justify-center transition-all ${showDirectMessage ? 'bg-[#00a884] text-white shadow-md' : 'bg-[#f0f2f5] dark:bg-[#111b21] text-gray-500 hover:text-[#00a884] hover:bg-[#00a884]/10 border border-transparent'}`}
+            title="Enviar Mensagem Direta"
+          >
+            <MessageSquarePlus size={20} />
+          </button>
         </div>
+
+        {showDirectMessage && (
+          <div className="mb-4 bg-[#f0f2f5]/50 dark:bg-[#111b21]/50 p-4 rounded-xl border border-dashed border-[#00a884]/30 animate-in fade-in slide-in-from-top-2 duration-200">
+            <label className="block text-sm font-medium text-[#00a884] mb-2 flex items-center gap-2">
+              <MessageSquare size={16} />
+              Enviar Mensagem Direta
+            </label>
+            <input 
+              type="text" 
+              placeholder="Ex: 11999999999 + Enter" 
+              value={directNumber}
+              onChange={e => setDirectNumber(e.target.value)}
+              onKeyDown={handleDirectNumberSubmit}
+              className="w-full px-4 py-3 bg-white dark:bg-[#2a3942] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
+            />
+            <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-2">
+              Cole ou digite o número (com DDD) e pressione Enter para conversar.
+            </p>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar flex flex-col gap-2">
           {isSearchNumber && onStartNewNumber && (

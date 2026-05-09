@@ -36,7 +36,8 @@ import {
   Plus,
   CheckCircle2,
   LogOut,
-  Store
+  Store,
+  X
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
@@ -56,6 +57,17 @@ export function MainSidebar() {
     appsDelivery: true
   });
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const isSearch = searchQuery.trim().length > 0;
+  const q = searchQuery.toLowerCase();
+  const m = (text: string | null | undefined) => {
+    if (!isSearch) return true;
+    if (!text) return false;
+    return text.toLowerCase().includes(q);
+  };
+
+
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -165,8 +177,7 @@ export function MainSidebar() {
 
     const fetchCompanies = async () => {
       try {
-        let currentCompany = null;
-        const { data: dbCompany, error: currentError } = await supabase
+        const { data: currentCompany, error: currentError } = await supabase
           .from('companies')
           .select('*')
           .eq('id', tenantId)
@@ -428,16 +439,28 @@ export function MainSidebar() {
             <Search size={14} className="absolute left-2.5 text-[#8696a0] shrink-0" />
             <input 
               type="text" 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Pesquisar..." 
               className={cn(
                 "w-full h-full bg-transparent border-none focus:outline-none focus:ring-0 text-[#d1d7db] text-[13px] pl-8 pr-8 placeholder-[#8696a0] transition-opacity duration-200",
                 "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100"
               )}
             />
-            <div className={cn(
-              "absolute right-2 px-1.5 py-0.5 rounded bg-black/20 font-mono text-[9px] text-[#8696a0] tracking-tighter transition-opacity duration-200",
-              "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100"
-            )}>/</div>
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 text-[#8696a0] hover:text-[#d1d7db]"
+              >
+                <X size={14} />
+              </button>
+            )}
+            {!searchQuery && (
+              <div className={cn(
+                "absolute right-2 px-1.5 py-0.5 rounded bg-black/20 font-mono text-[9px] text-[#8696a0] tracking-tighter transition-opacity duration-200",
+                "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100"
+              )}>/</div>
+            )}
           </div>
         </div>
 
@@ -535,6 +558,12 @@ export function MainSidebar() {
 
             <NavItem title="Não atendidas" />
             <NavItem icon={<Contact size={16} />} title="Contatos" onClick={() => navigate('/contacts')} />
+            <NavItem 
+              title="Agenda Interna" 
+              icon={<CalendarDays size={16} />} 
+              onClick={() => navigate('/apps/agenda')}
+              isActive={window.location.pathname === '/apps/agenda'}
+            />
             <NavItem icon={<LayoutDashboard size={16} />} title="Kanban" />
           </CollapsibleSection>
 
@@ -580,13 +609,6 @@ export function MainSidebar() {
             <NavItem title="App Etiquetas" isSub />
             <NavItem title="Treinamento ERP" isSub />
             
-            <NavItem 
-              title="Agenda Interna" 
-              icon={<CalendarDays size={18} className="text-[#8696a0]" />} 
-              onClick={() => navigate('/apps/agenda')}
-              isActive={window.location.pathname === '/apps/agenda'}
-              isSub 
-            />
           </CollapsibleSection>
 
           <CollapsibleSection title="Times" icon={<Users size={16} />} isOpen={expandedSections.teams} onToggle={() => toggleSection('teams')}>

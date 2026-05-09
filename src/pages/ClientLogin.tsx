@@ -105,6 +105,19 @@ export default function ClientLogin() {
         return;
       }
       
+      addDevLog('SUPABASE_AUTH_START', 'Iniciando sessão real no Supabase Auth...', 'info');
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+         email: email.trim().toLowerCase(),
+         password: password.trim()
+      });
+
+      if (signInError) {
+         addDevLog('SUPABASE_AUTH_ERROR', signInError.message, 'error');
+         setErrorMsg('Erro de sincronia de sessão. Senha pode estar incorreta no Auth. Contate o suporte.');
+         setIsLoading(false);
+         return;
+      }
+
       addDevLog('LOGIN_SUCCESS', 'Processo de login concluído com sucesso. Redirecionando para o painel...', 'success');
 
 

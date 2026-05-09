@@ -2526,10 +2526,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!targetContactLocally) {
              targetContactLocally = currentState.contacts.find((c: any) => 
                  c.id === expectedCompositeId ||
-                 c.id === targetContactId || 
                  (
                      ((c.whatsapp_jid && c.whatsapp_jid === cData.whatsapp_jid) || (c.phone && c.phone === cData.phone)) &&
-                     c.instance_id === cData.instance_id
+                     (c.instance_id === effectiveInstanceId || (!c.instance_id && effectiveInstanceId === 'default'))
                  )
              );
         }

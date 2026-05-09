@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal } from '../components/ChatModals';
@@ -243,6 +243,7 @@ export default function ChatDashboard() {
   const [showSnoozeModal, setShowSnoozeModal] = useState<string | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [activeChatDropdown, setActiveChatDropdown] = useState(false);
+  const [mobileHeaderMenuOpen, setMobileHeaderMenuOpen] = useState(false);
   const [activeMsgDropdown, setActiveMsgDropdown] = useState<string | null>(null);
   const [messageToForward, setMessageToForward] = useState<any | null>(null);
   const { showMainSidebar, setShowMainSidebar } = (useOutletContext() as { showMainSidebar: boolean, setShowMainSidebar: (v: boolean) => void }) || { showMainSidebar: true, setShowMainSidebar: () => {} };
@@ -906,7 +907,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.2.9'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '08/05/2026, 11:21')}`}
+            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.2.12'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '08/05/2026, 22:22')}`}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1502,13 +1503,18 @@ export default function ChatDashboard() {
       {/* Resizer Handle */}
       <div 
         className={cn(
-          "hidden md:flex w-1 cursor-col-resize hover:bg-[#00a884] active:bg-[#00a884] z-50 shrink-0 transition-colors relative",
-          isDragging ? "bg-[#00a884]" : "bg-transparent"
+          "hidden md:flex w-1.5 cursor-col-resize z-50 shrink-0 transition-colors relative group border-l border-r border-[#d1d7db] dark:border-[#222d34] bg-[#f0f2f5] dark:bg-[#202c33]",
+          isDragging ? "bg-[#00a884]/30 border-[#00a884]" : "hover:bg-[#00a884]/20 hover:border-[#00a884]/50"
         )}
         onMouseDown={(e) => { e.preventDefault(); setIsDragging(true); }}
+        title="Arraste para redimensionar"
       >
         {/* Hitbox expandida para facilitar o clique */}
-        <div className="absolute -left-1 -right-1 top-0 bottom-0 cursor-col-resize" />
+        <div className="absolute -left-2 -right-2 top-0 bottom-0 cursor-col-resize" />
+        {/* Ícone sutil no meio */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-gray-400 group-hover:text-[#00a884] transition-colors pointer-events-none">
+          <MoreVertical size={12} className="opacity-50" />
+        </div>
       </div>
 
       {/* Main Chat Area */}
@@ -1628,18 +1634,56 @@ export default function ChatDashboard() {
             {/* Right Header Area */}
             <div className="flex items-center gap-2 sm:gap-4">
               
-              <button 
-                onClick={() => {
-                  resolveConversation(activeChat.id);
-                }}
-                className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-colors text-sm font-medium border border-emerald-200 dark:border-emerald-500/20 animate-in fade-in"
-                title="Resolver Conversa"
-              >
-                <CheckCircle2 size={16} />
-                <span className="hidden sm:inline">Resolver</span>
-              </button>
+              <div className="hidden lg:flex items-center gap-2">
+                <button 
+                  onClick={() => {
+                    resolveConversation(activeChat.id);
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-colors text-sm font-medium border border-emerald-200 dark:border-emerald-500/20 animate-in fade-in"
+                  title="Resolver Conversa"
+                >
+                  <CheckCircle2 size={16} />
+                  <span>Resolver</span>
+                </button>
 
-              <ChatOmniMenu contactId={activeChat.id} />
+                <ChatOmniMenu contactId={activeChat.id} />
+              </div>
+
+              {/* Mobile Actions Menu (Responsive Menu) */}
+              <div className="lg:hidden relative">
+                <button 
+                  className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all text-[#54656f] dark:text-[#aebac1]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMobileHeaderMenuOpen(!mobileHeaderMenuOpen);
+                    setActiveChatDropdown(false);
+                  }}
+                  title="Menu de Ações Mobile"
+                >
+                  <Menu size={20} />
+                </button>
+                {mobileHeaderMenuOpen && (
+                   <div className="absolute right-0 top-12 w-[260px] bg-white dark:bg-[#233138] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 dark:border-[#304046] p-3 z-[100] animate-in fade-in zoom-in-95 duration-200 flex flex-col gap-3">
+                      <button 
+                        onClick={() => {
+                          resolveConversation(activeChat.id);
+                          setMobileHeaderMenuOpen(false);
+                        }}
+                        className="flex items-center justify-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-lg transition-colors text-sm font-medium border border-emerald-200 dark:border-emerald-500/20 w-full"
+                      >
+                        <CheckCircle2 size={16} />
+                        <span>Resolver Conversa</span>
+                      </button>
+                      
+                      <div className="flex flex-col gap-2 bg-gray-50 dark:bg-[#111b21] p-2 rounded-lg border border-black/5 dark:border-white/5">
+                        <span className="text-[11px] text-gray-500 text-center font-bold uppercase tracking-wider">Status & Atribuição</span>
+                        <div className="flex justify-center w-full">
+                           <ChatOmniMenu contactId={activeChat.id} />
+                        </div>
+                      </div>
+                   </div>
+                )}
+              </div>
               
               {/* Chat Actions Dropdown Premium */}
               <div className="relative">
@@ -1881,21 +1925,30 @@ export default function ChatDashboard() {
 
                              if (targetElement) {
                                targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                               targetElement.classList.add('bg-black/5', 'dark:bg-white/5', 'transition-colors', 'duration-500', 'rounded-xl');
+                               targetElement.classList.add('bg-[#00a884]/20', 'dark:bg-[#00a884]/20', 'transition-colors', 'duration-500', 'rounded-xl', 'ring-2', 'ring-[#00a884]', 'ring-offset-2', 'dark:ring-offset-[#0b141a]');
                                setTimeout(() => {
-                                 targetElement!.classList.remove('bg-black/5', 'dark:bg-white/5');
-                               }, 1500);
+                                 targetElement!.classList.remove('bg-[#00a884]/20', 'dark:bg-[#00a884]/20', 'ring-2', 'ring-[#00a884]', 'ring-offset-2', 'dark:ring-offset-[#0b141a]');
+                               }, 2000);
+                             } else {
+                               alert('Mensagem original não encontrada na tela atual.');
                              }
                            }}
+                           title="Clique para ir até a mensagem original"
                          >
                            <div className="absolute inset-0 bg-white/40 dark:bg-white/5 opacity-0 group-hover/quote:opacity-100 transition-opacity pointer-events-none"></div>
-                           <span className="text-[11px] font-bold text-[#00a884] opacity-90 truncate">
+                           
+                           {/* Ícone indicador de clique para ir para mensagem */}
+                           <div className="absolute top-2 right-2 text-[#00a884] opacity-0 group-hover/quote:opacity-100 transition-opacity">
+                             <MessageSquareReply size={14} className="scale-x-[-1]" />
+                           </div>
+
+                           <span className="text-[11px] font-bold text-[#00a884] opacity-90 truncate pr-6">
                              {msg.quoted.sender && activeChat.phone && msg.quoted.sender.includes(activeChat.phone.replace(/\D/g, '')) 
                                ? getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)
                                : 'Você'
                              }
                            </span>
-                           <span className="text-[13px] text-[#54656f] dark:text-[#aebac1] leading-snug line-clamp-3">
+                           <span className="text-[13px] text-[#54656f] dark:text-[#aebac1] leading-snug line-clamp-3 pr-2">
                              {msg.quoted.text}
                            </span>
                          </div>

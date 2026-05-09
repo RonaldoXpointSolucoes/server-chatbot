@@ -34,6 +34,7 @@ import KdsApp from './pages/KdsApp';
 import CardapioApp from './pages/CardapioApp';
 import FinanceiroApp from './pages/FinanceiroApp';
 import AccountSettings from './pages/settings/AccountSettings';
+import { ScheduleManager } from './pages/ScheduleManager';
 
 // Inicializa o tema globalmente no boot
 const savedTheme = localStorage.getItem('theme') || 'light';
@@ -92,6 +93,7 @@ export default function App() {
             <Route path="/apps/kds" element={<KdsApp />} />
             <Route path="/apps/cardapio" element={<CardapioApp />} />
             <Route path="/apps/financeiro" element={<FinanceiroApp />} />
+            <Route path="/apps/agenda" element={<ScheduleManager />} />
           </Route>
 
           {/* Settings do Modulo Flow (Typebot UI) */}
