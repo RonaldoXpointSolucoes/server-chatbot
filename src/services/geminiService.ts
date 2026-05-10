@@ -153,7 +153,7 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
         contents: [
           {
             parts: [
-              { text: "Transcreva exatamente o que está sendo dito neste áudio. Se não houver voz ou ninguém falar, responda com: '[Áudio sem fala detectável]'. Retorne APENAS o texto da transcrição, sem introduções ou explicações adicionais." },
+              { text: "Transcreva o que está sendo dito neste áudio aplicando as seguintes regras:\n1. Melhore a transcrição dividindo-a em parágrafos e adicionando espaçamentos por assunto para facilitar a leitura.\n2. Faça ajustes contextuais: se alguma palavra falada não fizer sentido no contexto da frase, altere para a palavra que faz mais sentido (correção semântica).\n3. Mantenha o sentido e a intenção original da fala.\n4. Se não houver voz ou ninguém falar, responda apenas com: '[Áudio sem fala detectável]'.\n5. Retorne APENAS o texto final da transcrição, sem introduções, aspas ou explicações." },
               {
                 inlineData: {
                   mimeType,

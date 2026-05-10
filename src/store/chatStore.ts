@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { supabase, ContactRow } from '../services/supabase';
 import { playNotificationSound } from '../utils/AudioEngine';
+import { useDevStore } from './devStore';
 
 export type MessageType = {
   id: string;
@@ -160,6 +161,7 @@ interface ChatState {
   undoOperation: (logId: string, password: string) => Promise<{success: boolean; error?: string}>;
   toggleUnread: (contactId: string, currentUnread: number) => Promise<void>;
   resolveConversation: (contactId: string) => Promise<void>;
+  clearStore: () => void;
 }
 
 export interface QuickReply {
@@ -354,6 +356,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
   userSettings: {},
   filterType: (localStorage.getItem('chat_filter_preference') as string) || 'all',
   theme: (localStorage.getItem('theme') as 'light' | 'dark') || 'light',
+
+  clearStore: () => {
+    if (get().isSubscribed) {
+       supabase.removeAllChannels();
+    }
+    set({
+      contacts: [],
+      activeChatId: null,
+      evolutionConnected: false,
+      instancesStatus: {},
+      connectedInstanceName: null,
+      tenantInfo: null,
+      agents: [],
+      modalReason: null,
+      isSubscribed: false,
+      isSyncingHistory: {},
+      pictureFetchLocks: {},
+      activeChannelFilter: null,
+      activeChannelName: null,
+      isQRModalOpen: false,
+      qrModalTargetInstance: null,
+      automations: [],
+      tenantLabels: [],
+      isSearchingGlobally: false,
+      quickReplies: [],
+      appVersion: null,
+      userSettings: {},
+      filterType: 'all'
+    });
+  },
   
   setFilterType: async (filter) => {
     localStorage.setItem('chat_filter_preference', filter);
@@ -592,7 +624,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } else {
         localStorage.removeItem('activeChannelName');
     }
-    set({ activeChannelFilter: id, activeChannelName: name || null, activeChatId: null });
+    
+    // Limpa os contatos momentaneamente para forçar o loading state da UI e evitar misturas
+    set({ contacts: [], activeChannelFilter: id, activeChannelName: name || null, activeChatId: null });
+    
+    // Recarrega os contatos baseados no novo filtro de canal
+    setTimeout(() => {
+        get().fetchInitialData();
+    }, 50);
   },
   setActiveChat: (id) => set({ activeChatId: id }),
 
@@ -1751,9 +1790,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
        await get().fetchTenantLabels();
 
        // 1. Puxa as conversas recentes, garantindo a mesma ordem do WhatsApp Web
-       const { data: dbConvs } = await supabase.from('conversations')
-          .select('*, conversation_labels(labels(*))')
-          .eq('tenant_id', tenant.id)
+       let convQuery = supabase.from('conversations')
+          .select('*, conversation_labels(tenant_labels(*))')
+          .eq('tenant_id', tenant.id);
+          
+       const activeChannel = get().activeChannelFilter;
+       if (activeChannel) {
+          convQuery = convQuery.eq('instance_id', activeChannel);
+       }
+
+       const { data: dbConvs } = await convQuery
           .order('is_pinned', { ascending: false })
           .order('last_message_at', { ascending: false, nullsFirst: false })
           .limit(800);
@@ -1879,7 +1925,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         snoozed_until: conv.snoozed_until,
                         priority: conv.priority,
                         assigned_to: conv.assigned_to,
-                        conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.labels) : [],
+                        conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.tenant_labels).filter(Boolean) : [],
                         instance_id: conv.instance_id || dbC.instance_id || null,
                         conv_id: conv.id
                      };
@@ -2121,15 +2167,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
                .limit(100);
                
         const handleMapping = (messagesArray: any[]) => {
-           const orderedMsgs = messagesArray.reverse();
+           // 2. Ordenar cronologicamente ASCENDENTE e extrair timestamp real
+           // O array bruto pode vir fora de ordem. Convertendo para ms caso haja epoch.
+           const mappedMsgs = messagesArray.map(m => {
+               const advanced = parseAdvancedMsgMetadata(m);
+               let realTimestamp = new Date(m.timestamp);
+
+               return {
+                   id: m.id,
+                   whatsapp_id: m.whatsapp_message_id,
+                   text: advanced.text || m.text_content,
+                   sender: m.sender_type,
+                   mediaUrl: m.media_url,
+                   mediaType: advanced.mediaType,
+                   status: m.status,
+                   timestamp: realTimestamp,
+                   quoted: advanced.quoted,
+                   buttons: advanced.buttons,
+                   transcription: m.transcription,
+                   vcardWaid: advanced.vcardWaid
+               };
+           });
+
+           // Garante a ordenação temporal estrita (a mais antiga primeiro, a mais nova por último)
+           mappedMsgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
            
-           // Deduplicate messages on initial load to resolve any historical/db corruptions
+           // 3. Deduplicar baseando-se no whatsapp_message_id e limpar msgs com problemas temporais
            const uniqueMsgs: any[] = [];
            const seenWaIds = new Set();
-           for (const m of orderedMsgs) {
-               if (m.whatsapp_message_id) {
-                   if (seenWaIds.has(m.whatsapp_message_id)) continue;
-                   seenWaIds.add(m.whatsapp_message_id);
+           for (const m of mappedMsgs) {
+               if (m.whatsapp_id) {
+                   if (seenWaIds.has(m.whatsapp_id)) continue;
+                   seenWaIds.add(m.whatsapp_id);
                }
                uniqueMsgs.push(m);
            }
@@ -2141,23 +2210,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   updated[idx] = {
                       ...updated[idx],
                       unread: 0,
-                      messages: uniqueMsgs.map(m => {
-                          const advanced = parseAdvancedMsgMetadata(m);
-                          return {
-                              id: m.id,
-                              whatsapp_id: m.whatsapp_message_id,
-                              text: advanced.text || m.text_content,
-                              sender: m.sender_type,
-                              mediaUrl: m.media_url,
-                              mediaType: advanced.mediaType,
-                              status: m.status,
-                              timestamp: new Date(m.timestamp),
-                              quoted: advanced.quoted,
-                              buttons: advanced.buttons,
-                              transcription: m.transcription,
-                              vcardWaid: advanced.vcardWaid
-                          };
-                      })
+                      messages: uniqueMsgs
                   };
               }
               return { contacts: updated };
@@ -2165,53 +2218,87 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
 
         if (forceSync) {
-            if (msgs && msgs.length === 0) {
-                // Impede tentativa inútil e avisa o cliente. A API do Baileys precisa de uma mensagem âncora.
-                alert('A conversa no sistema (CRM) está completamente vazia no momento. Para iniciar uma busca profunda de histórico, o WhatsApp exige uma "mensagem âncora".\\n\\n💡 Dica: Envie agora mesmo uma mensagem (pode ser "Olá!") para estabelecer o vínculo local, e só depois clique em Buscar Histórico novamente.');
-            } else {
-                // Conversa tem base, prossegue com o sync on demand
-                if (!get().isSyncingHistory[contactId]) {
-                    set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: true } }));
-                    try {
-                        const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-                        const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
-                        const res = await fetch(`${API_URL}/api/v1/conversations/${conv.id}/sync-history`, {
-                            method: 'POST',
-                            headers: { 
-                               'Content-Type': 'application/json',
-                               'x-tenant-id': tenant.id,
-                               'apikey': instDataDB?.api_key || ''
-                            },
-                            body: JSON.stringify({ instanceId: instanceName })
+            // Conversa tem base, prossegue com o sync on demand
+            if (!get().isSyncingHistory[contactId]) {
+                set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: true } }));
+                try {
+                    const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+                    const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+                    const res = await fetch(`${API_URL}/api/v1/conversations/${conv.id}/sync-history`, {
+                        method: 'POST',
+                        headers: { 
+                           'Content-Type': 'application/json',
+                           'x-tenant-id': tenant.id,
+                           'apikey': instDataDB?.api_key || ''
+                        },
+                        body: JSON.stringify({ instanceId: instanceName, count: 100, limit: 100 })
+                    });
+                    
+                    const result = await res.json();
+                    if (!res.ok) {
+                        useDevStore.getState().addLog({
+                            type: 'error',
+                            message: `[History Sync] Erro no gateway ao solicitar histórico da API (Status ${res.status}).`,
+                            source: 'ChatStore',
+                            details: result
                         });
+                        alert('Falha técnica ao solicitar histórico. Uma notificação detalhada foi salva no Antigravity Dev Logger.');
+                    } else {
+                        // O gateway do Node despacha a History Sync que entra numa fila assíncrona.
+                        // Vamos aguardar 5 segundos para que as mensagens cheguem e sejam atualizadas pelo Realtime (no on('postgres_changes')).
+
+                        // Mostramos um alert informativo (mas como é bloqueante, vamos só confiar no spinner).
+                        await new Promise(r => setTimeout(r, 6000));
                         
-                        const result = await res.json();
-                        if (!res.ok) {
-                            alert(result.error || 'Falha ao solicitar histórico.');
-                        } else {
-                            // O gateway do Node despacha a History Sync (Baileys) que entra numa fila assíncrona.
-                            // Vamos aguardar 5 segundos para que as mensagens cheguem e sejam atualizadas pelo Realtime (no on('postgres_changes')).
-                            // Mostramos um alert informativo (mas como é bloqueante, vamos só confiar no spinner).
-                            await new Promise(r => setTimeout(r, 6000));
-                        }
-                        
+                        const currentMsgsLength = (msgs && msgs.length) || 0;
+                        const newLimit = currentMsgsLength + 100;
+
                         // Atualiza a vista atual caso algo não tenha vindo pelo realtime ou pra forçar atualização
-                        const { data: fetchNewMsgs } = await supabase.from('messages')
+                        const { data: fetchNewMsgs, error: fetchErr } = await supabase.from('messages')
                            .select('*')
                            .eq('tenant_id', tenant.id)
                            .eq('conversation_id', conv.id)
                            .order('timestamp', { ascending: false })
-                           .limit(100);
+                           .limit(newLimit);
+                           
+                        const newMsgsLength = fetchNewMsgs ? fetchNewMsgs.length : 0;
+                        
+                        if (!fetchNewMsgs || newMsgsLength === 0 || newMsgsLength <= currentMsgsLength) {
+                            alert("Não encontramos nenhuma nova mensagem no histórico neste momento. Isso geralmente ocorre se o WhatsApp já liberou tudo que estava disponível ou a API aguarda sincronização de rede.");
+                            useDevStore.getState().addLog({
+                                type: 'warn',
+                                message: `[History Sync] Operação concluída mas não há dados novos. A API pode não conter histórico local ou o endpoint respondeu vazio.`,
+                                source: 'ChatStore',
+                                details: { 
+                                    erroSupabase: fetchErr, 
+                                    mensagensRetornadas: newMsgsLength, 
+                                    mensagensAtuais: currentMsgsLength,
+                                    instancia: instanceName
+                                }
+                            });
+                        } else {
+                            useDevStore.getState().addLog({
+                                type: 'success',
+                                message: `[History Sync] Busca finalizada e novas mensagens renderizadas!`,
+                                source: 'ChatStore',
+                                details: { fetchCount: newMsgsLength }
+                            });
+                        }
                            
                         if (fetchNewMsgs) handleMapping(fetchNewMsgs);
-
-                    } catch (err) {
+                    }
+                } catch (err: any) {
+                    useDevStore.getState().addLog({
+                            type: 'error',
+                            message: `[History Sync] Exceção crítica ao tentar carregar histórico. Possível falha de rede/proxy no VITE_WHATSAPP_ENGINE_URL.`,
+                            source: 'ChatStore',
+                            details: err?.message || String(err)
+                        });
                         console.error("Falha ao sincronizar histórico da Baileys (on demand):", err);
                     } finally {
                         set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: false } }));
                     }
                 }
-            }
         }
         
         // Sempre deve remapear o que tem em banco seja do forceSync atualizado ou se cair apenas no fallback

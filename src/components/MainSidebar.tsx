@@ -90,6 +90,7 @@ export function MainSidebar() {
         }
       }
 
+      useChatStore.getState().clearStore();
       await supabase.auth.signOut();
       localStorage.clear();
       sessionStorage.clear();
@@ -121,6 +122,7 @@ export function MainSidebar() {
   const setFilterType = useChatStore(state => state.setFilterType);
   const contacts = useChatStore(state => state.contacts);
   const agents = useChatStore(state => state.agents);
+  const tenantLabels = useChatStore(state => state.tenantLabels);
   const currentAgent = agents.find(a => a.email === agentEmail);
   const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to === currentAgent.id && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
   
@@ -192,6 +194,7 @@ export function MainSidebar() {
            console.warn("Empresa não encontrada ou RLS bloqueou o acesso. Deslogando...");
            localStorage.removeItem('current_tenant_id');
            sessionStorage.removeItem('current_tenant_id');
+           useChatStore.getState().clearStore();
            await supabase.auth.signOut();
            window.location.href = '/';
            return;
@@ -546,8 +549,9 @@ export function MainSidebar() {
                         title={inst.display_name || 'Sem nome'} 
                         isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
                         onClick={() => {
-                          setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name);
-                          setFilterType('all');
+                          useChatStore.getState().setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name);
+                          useChatStore.getState().setFilterType('all');
+                          useChatStore.getState().fetchInitialData();
                           navigate('/chat');
                         }}
                       />
@@ -616,18 +620,11 @@ export function MainSidebar() {
           </CollapsibleSection>
 
           <CollapsibleSection title="Etiquetas" icon={<Tag size={16} />} isOpen={expandedSections.labels} onToggle={() => toggleSection('labels')}>
-            {[
-               { title: "agente-off", color: "bg-red-500" },
-               { title: "bloqueado", color: "bg-red-600" },
-               { title: "em-treinamento", color: "bg-[#111111]" },
-               { title: "financeiro", color: "bg-blue-600" },
-               { title: "gestor", color: "bg-slate-600" },
-               { title: "plano-básico", color: "bg-green-600" }
-            ].map(label => (
+            {tenantLabels && tenantLabels.length > 0 ? tenantLabels.map((label: any) => (
                 <NavItem 
-                  key={label.title}
+                  key={label.id || label.name}
                   icon={<LabelDot color={label.color} />} 
-                  title={label.title} 
+                  title={label.name} 
                   isSub 
                   actionNode={
                      <button 
@@ -639,7 +636,9 @@ export function MainSidebar() {
                      </button>
                   }
                 />
-            ))}
+            )) : (
+               <div className="px-5 py-2 text-[11px] text-[#8696a0]/60 italic">Nenhuma etiqueta</div>
+            )}
             
             <div className="mt-1 pt-1.5 mx-3 border-t border-[#2a3942]/60 flex gap-1">
                <button 
@@ -651,7 +650,7 @@ export function MainSidebar() {
                  <span>Gerenciar</span>
                </button>
                <button 
-                  onClick={() => navigate('/settings/labels')}
+                  onClick={() => navigate('/settings/labels?new=true')}
                   className="flex items-center justify-center py-1.5 px-3 bg-[#00a884]/10 hover:bg-[#00a884]/20 border border-[#00a884]/20 hover:border-[#00a884]/40 rounded-md text-[#00a884] transition-colors"
                   title="Adicionar Nova Etiqueta"
                >
@@ -871,5 +870,6 @@ const Brands = {
 }
 
 function LabelDot({ color }: { color: string }) {
-  return <div className={cn("w-2 h-2 rounded-full shadow-sm", color)} />;
+  const isHex = color?.startsWith('#');
+  return <div className={cn("w-2 h-2 rounded-full shadow-sm", !isHex && color)} style={isHex ? { backgroundColor: color } : undefined} />;
 }

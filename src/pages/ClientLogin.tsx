@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Building2, ArrowRight, Loader2, AlertCircle, Terminal, X, ChevronRight, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import ThemeToggle from '../components/ThemeToggle';
+import { useChatStore } from '../store/chatStore';
 
 export default function ClientLogin() {
   const [email, setEmail] = useState('');
@@ -47,6 +48,7 @@ export default function ClientLogin() {
     setIsLoading(true);
     setErrorMsg('');
     setDevLogs([]); // Limpa logs anteriores
+    useChatStore.getState().clearStore(); // Limpa store global antes do login
 
     try {
       addDevLog('INIT', `Iniciando login flow para: ${email.trim()}`, 'info');

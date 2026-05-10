@@ -175,7 +175,7 @@ export default function AdminDashboard() {
     <div className="flex h-[100dvh] w-full bg-[#f0f2f5] dark:bg-[#111b21] font-sans text-[#111b21] dark:text-[#e9edef]">
       {/* Sidebar Admin */}
       <aside className="w-64 flex flex-col bg-white dark:bg-[#202c33] border-r border-black/5 dark:border-white/5 z-10 shadow-lg relative">
-        <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.2.12'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '08/05/2026, 22:22'}`}</span>
+        <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.3.2'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '09/05/2026, 22:55'}`}</span>
         <div className="h-16 flex items-center px-6 border-b border-black/5 dark:border-white/5 gap-3 mt-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00a884] to-[#018b6e] flex items-center justify-center text-white shadow-md">
             <Shield size={18} />

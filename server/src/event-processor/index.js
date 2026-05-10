@@ -21,6 +21,28 @@ class EventProcessor {
         
         this.tenantConfigs = new Map();
         this.lastGlobalMessageTimestamp = 0;
+        
+        this.pendingStatuses = new Map();
+        
+        // Cleanup loop para evitar memory leaks nos status pendentes
+        setInterval(() => {
+            const now = Date.now();
+            for (const [key, value] of this.pendingStatuses.entries()) {
+                if (now - value.timestamp > 300000) { // 5 minutos de TTL
+                    this.pendingStatuses.delete(key);
+                }
+            }
+        }, 60000);
+    }
+    
+    updatePendingStatus(msgId, newStatus) {
+        if (!this.pendingStatuses) return;
+        const existing = this.pendingStatuses.get(msgId);
+        if (existing) {
+            if (existing.status === 'read') return; // Cannot downgrade from read
+            if (existing.status === 'delivered' && newStatus === 'SERVER_ACK') return; // Cannot downgrade from delivered
+        }
+        this.pendingStatuses.set(msgId, { status: newStatus, timestamp: Date.now() });
     }
     
     async getTenantConfig(tenantId) {
@@ -502,21 +524,26 @@ class EventProcessor {
              }));
              
              // 4. INSERE TODAS AS MENSAGENS NUM CHUTE SÓ (BULK INSERT)
-             const messagesToInsert = activeBatch.map(b => ({
-                 tenant_id: b.tenantId,
-                 instance_id: b.instanceId,
-                 conversation_id: b.conversationId,
-                 direction: b.direction,
-                 message_type: b.msgType,
-                 status: 'delivered',
-                 text_content: b.textMessage,
-                 whatsapp_message_id: b.rawMsg.key.id,
-                 sender_type: b.senderType,
-                 timestamp: b.timestamp.toISOString(),
-                 raw_payload: b.rawMsg,
-                 media_url: b.mediaUrl || null,
-                 media_metadata: b.mediaMetadata || null
-             })).filter(m => m.conversation_id); // Filtra as que milagrosamente não pegaram conv ID
+             const messagesToInsert = activeBatch.map(b => {
+                 const pendingStatus = this.pendingStatuses?.get(b.rawMsg.key.id)?.status;
+                 const defaultStatus = b.direction === 'inbound' ? 'received' : 'delivered';
+                 
+                 return {
+                     tenant_id: b.tenantId,
+                     instance_id: b.instanceId,
+                     conversation_id: b.conversationId,
+                     direction: b.direction,
+                     message_type: b.msgType,
+                     status: pendingStatus || defaultStatus,
+                     text_content: b.textMessage,
+                     whatsapp_message_id: b.rawMsg.key.id,
+                     sender_type: b.senderType,
+                     timestamp: b.timestamp.toISOString(),
+                     raw_payload: b.rawMsg,
+                     media_url: b.mediaUrl || null,
+                     media_metadata: b.mediaMetadata || null
+                 };
+             }).filter(m => m.conversation_id); // Filtra as que milagrosamente não pegaram conv ID
              
              let realInserted = [];
              
@@ -925,6 +952,7 @@ class EventProcessor {
 
                 messageIds.push(update.key.id);
                 idToStatus.set(update.key.id, newStatus);
+                this.updatePendingStatus(update.key.id, newStatus);
             }
 
             if (messageIds.length === 0) return;
@@ -1009,6 +1037,7 @@ class EventProcessor {
                 if (newStatus) {
                     messageIds.push(key.id);
                     idToStatus.set(key.id, newStatus);
+                    this.updatePendingStatus(key.id, newStatus);
                 }
             }
 

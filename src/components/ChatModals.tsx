@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
+import { cn } from '../lib/utils';
 
 interface BaseModalProps {
   isOpen: boolean;
@@ -748,9 +749,10 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
             ) : (
               tenantLabels.map(label => {
                 const isActive = activeLabels.includes(label.id);
+                const isHex = label.color?.startsWith('#');
                 return (
                   <label key={label.id} className="flex items-center gap-3 p-3 rounded-2xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors border border-transparent hover:border-black/5 dark:hover:border-white/5">
-                     <div className="relative flex items-center justify-center w-5 h-5 rounded border border-[#54656f] dark:border-[#8696a0] bg-transparent overflow-hidden">
+                     <div className="relative flex items-center justify-center w-5 h-5 rounded border border-[#54656f] dark:border-[#8696a0] bg-transparent overflow-hidden shrink-0">
                        <input 
                          type="checkbox" 
                          checked={isActive} 
@@ -760,7 +762,7 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
                        {isActive && <div className="absolute inset-0 bg-[#00a884] flex items-center justify-center"><Check size={12} className="text-white" /></div>}
                      </div>
                      <div className="flex-1 flex items-center gap-2">
-                       <span className="w-2.5 h-2.5 rounded-full shadow-inner" style={{ backgroundColor: label.color }}></span>
+                       <span className={cn("w-2.5 h-2.5 rounded-full shadow-inner shrink-0", !isHex && label.color)} style={isHex ? { backgroundColor: label.color } : undefined}></span>
                        <span className="text-sm font-medium text-[#3b4a54] dark:text-[#d1d7db] leading-none">{label.name}</span>
                      </div>
                   </label>

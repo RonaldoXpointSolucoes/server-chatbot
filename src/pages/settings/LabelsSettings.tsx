@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Tag, Plus, MoreVertical, Edit2, Trash2, ShieldAlert, Palette, CheckCircle2, RotateCcw } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Tag, Plus, MoreVertical, Edit2, Trash2, ShieldAlert, Palette, CheckCircle2, RotateCcw, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../services/supabase';
+import { useChatStore } from '../../store/chatStore';
 
 // Paleta premium de cores de Etiqueta com Gradientes ou cores vibrantes
 const LABEL_COLORS = [
@@ -21,61 +23,72 @@ interface Label {
   color: string;
   count_usage?: number; // mock representation
   created_at?: string;
+  tenant_id?: string;
 }
 
-// Fallback inicial
-const MOCK_LABELS: Label[] = [
-  { id: '1', name: 'agente-off', color: 'bg-rose-500', count_usage: 12 },
-  { id: '2', name: 'bloqueado', color: 'bg-rose-600', count_usage: 5 },
-  { id: '3', name: 'em-treinamento', color: 'bg-[#182229]', count_usage: 42 },
-  { id: '4', name: 'financeiro', color: 'bg-indigo-500', count_usage: 8 },
-  { id: '5', name: 'gestor', color: 'bg-slate-600', count_usage: 2 },
-  { id: '6', name: 'plano-básico', color: 'bg-emerald-500', count_usage: 145 },
-];
-
 export default function LabelsSettings() {
-  const [labels, setLabels] = useState<Label[]>(MOCK_LABELS);
+  const { tenantInfo } = useChatStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [labels, setLabels] = useState<Label[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
   // States Modal Criar/Editar
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [editingLabel, setEditingLabel] = useState<Label | null>(null);
   const [formData, setFormData] = useState({ name: '', color: 'bg-indigo-500' });
 
   // State Context Actions
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
-  // Undo (Snackbar)
-  const [undoAction, setUndoAction] = useState<{ id: string, label: Label, text: string } | null>(null);
+  // Notification (Snackbar)
+  const [notification, setNotification] = useState<{ text: string, type: 'success' | 'info' | 'error' } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
-    // Tenta carregar do Supabase se existir a tabela, senão, mantém MOCK.
      const loadLabels = async () => {
+       if (!tenantInfo?.id) {
+           setIsLoading(false);
+           return;
+       }
+       setIsLoading(true);
        try {
-         const { data, error } = await supabase.from('tenant_labels').select('*');
-         if (data && data.length > 0) {
-           // setLabels(data); 
-           // Descomente e adeque conforme a schema real
+         // Consulta no Supabase a tabela labels correta usando o tenant atual
+         const { data, error } = await supabase
+            .from('tenant_labels')
+            .select('*')
+            .eq('tenant_id', tenantInfo.id)
+            .order('created_at', { ascending: false });
+            
+         if (data && !error) {
+           setLabels(data.map(d => ({ ...d, count_usage: 0 })));
          }
        } catch (err) {
-         console.log("No table yet, fallback loading");
+         console.log("No table yet or error loading", err);
        } finally {
          setTimeout(() => setIsLoading(false), 400); // Simulando loading premium
        }
      };
      loadLabels();
-  }, []);
+  }, [tenantInfo?.id]);
 
   useEffect(() => {
      let timer: ReturnType<typeof setTimeout>;
-     if (undoAction) {
+     if (notification) {
         timer = setTimeout(() => {
-           setUndoAction(null);
-        }, 5000);
+           setNotification(null);
+        }, 3000);
      }
      return () => clearTimeout(timer);
-  }, [undoAction]);
+  }, [notification]);
+
+  useEffect(() => {
+    if (searchParams.get('new') === 'true') {
+      handleOpenModal();
+      searchParams.delete('new');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const handleOpenModal = (label?: Label) => {
     setActiveMenu(null);
@@ -89,20 +102,50 @@ export default function LabelsSettings() {
     setIsModalOpen(true);
   };
 
-  const handleSave = () => {
-    if (!formData.name.trim()) return;
+  const handleSave = async () => {
+    if (!formData.name.trim() || !tenantInfo?.id || isSaving) return;
+
+    setIsSaving(true);
+    let success = false;
 
     if (editingLabel) {
-      setLabels(labels.map(l => l.id === editingLabel.id ? { ...l, ...formData } : l));
+      // Atualizar no banco
+      const { error } = await supabase
+         .from('tenant_labels')
+         .update({ name: formData.name, color: formData.color })
+         .eq('id', editingLabel.id);
+         
+      if (!error) {
+        setLabels(labels.map(l => l.id === editingLabel.id ? { ...l, ...formData } : l));
+        success = true;
+      }
     } else {
-      const newLabel: Label = {
-        id: Math.random().toString(36).substr(2, 9),
-        name: formData.name,
-        color: formData.color,
-        count_usage: 0
-      };
-      setLabels([newLabel, ...labels]);
+      // Criar nova
+      const { data, error } = await supabase
+         .from('tenant_labels')
+         .insert({
+            tenant_id: tenantInfo.id,
+            name: formData.name,
+            color: formData.color
+         })
+         .select()
+         .single();
+         
+      if (data && !error) {
+        setLabels([data, ...labels]);
+        success = true;
+      }
     }
+
+    if (success) {
+      // Atualiza estado global
+      useChatStore.getState().fetchTenantLabels();
+      setNotification({ text: `Etiqueta salva com sucesso.`, type: 'success' });
+    } else {
+      setNotification({ text: `Erro ao salvar etiqueta. Tente novamente.`, type: 'error' });
+    }
+
+    setIsSaving(false);
     setIsModalOpen(false);
   };
 
@@ -111,20 +154,22 @@ export default function LabelsSettings() {
     setDeleteConfirm(id);
   };
 
-  const confirmDelete = (id: string) => {
+  const confirmDelete = async (id: string) => {
     const labelToDelete = labels.find(l => l.id === id);
     if (labelToDelete) {
-       setLabels(labels.filter(l => l.id !== id));
-       setUndoAction({ id: Math.random().toString(), label: labelToDelete, text: `Etiqueta "${labelToDelete.name}" removida.` });
+       const { error } = await supabase.from('tenant_labels').delete().eq('id', id);
+       if (!error) {
+          setLabels(labels.filter(l => l.id !== id));
+          useChatStore.getState().fetchTenantLabels();
+          // Remoção do banco é permanente, avisamos apenas
+          setNotification({ text: `Etiqueta "${labelToDelete.name}" removida com sucesso.`, type: 'success' });
+       }
     }
     setDeleteConfirm(null);
   };
 
   const handleUndo = () => {
-    if (undoAction) {
-       setLabels([undoAction.label, ...labels]);
-       setUndoAction(null);
-    }
+    setNotification(null);
   };
 
   return (
@@ -180,7 +225,7 @@ export default function LabelsSettings() {
                   >
                      <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center gap-3">
-                           <div className={cn("w-4 h-4 rounded-full shadow-inner", label.color)} />
+                           <div className={cn("w-4 h-4 rounded-full shadow-inner", !label.color?.startsWith('#') && label.color)} style={label.color?.startsWith('#') ? { backgroundColor: label.color } : undefined} />
                            <span className="font-semibold text-[#e9edef] tracking-tight">{label.name}</span>
                         </div>
                         <div className="relative">
@@ -240,7 +285,7 @@ export default function LabelsSettings() {
                         <label className="block text-sm font-medium text-[#8696a0] mb-2 pointer-events-none">Visualização Prévia</label>
                         <div className="flex items-center justify-center p-6 bg-[#111b21] rounded-2xl border border-dashed border-[#2a3942]">
                            <div className="flex items-center gap-2 bg-[#202c33] px-4 py-2 rounded-2xl shadow-sm border border-white/5">
-                              <div className={cn("w-4 h-4 rounded-full shadow-inner", formData.color)} />
+                              <div className={cn("w-4 h-4 rounded-full shadow-inner", !formData.color?.startsWith('#') && formData.color)} style={formData.color?.startsWith('#') ? { backgroundColor: formData.color } : undefined} />
                               <span className="text-sm font-medium text-[#e9edef] tracking-tight">{formData.name || 'Nome da etiqueta'}</span>
                            </div>
                         </div>
@@ -284,26 +329,31 @@ export default function LabelsSettings() {
                      </button>
                      <button 
                         onClick={handleSave}
-                        disabled={!formData.name.trim()}
-                        className="px-6 py-2.5 rounded-full text-sm font-semibold bg-[#00a884] hover:bg-emerald-600 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_4px_14px_0_rgba(0,168,132,0.39)]"
+                        disabled={!formData.name.trim() || isSaving}
+                        className="px-6 py-2.5 rounded-full text-sm font-semibold bg-[#00a884] hover:bg-emerald-600 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_4px_14px_0_rgba(0,168,132,0.39)] flex items-center justify-center min-w-[150px]"
                      >
-                        Salvar Alterações
+                        {isSaving ? (
+                           <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                        ) : (
+                           'Salvar Alterações'
+                        )}
                      </button>
                   </div>
                </div>
             </div>
          )}
          
-         {/* Undo Action Snackbar (Premium Floating BottomCenter) */}
-         {undoAction && (
-            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-4 bg-[#202c33] border border-[#3b4a54] rounded-2xl px-5 py-3 shadow-2xl animate-in slide-in-from-bottom-5 fade-in duration-300">
-               <span className="text-sm font-medium text-[#d1d7db]">{undoAction.text}</span>
-               <div className="w-px h-4 bg-[#3b4a54]" />
-               <button 
-                  onClick={handleUndo}
-                  className="flex items-center gap-1.5 text-sm font-semibold text-[#00a884] hover:text-emerald-400 transition-colors"
-               >
-                  <RotateCcw className="w-4 h-4" /> Desfazer
+         {/* Notification Snackbar (Premium Floating BottomCenter) */}
+         {notification && (
+            <div className={cn(
+               "fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 bg-[#202c33] border rounded-2xl px-5 py-3 shadow-2xl animate-in slide-in-from-bottom-5 fade-in duration-300",
+               notification.type === 'error' ? 'border-red-500/50' : 'border-[#3b4a54]'
+            )}>
+               {notification.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
+               {notification.type === 'error' && <ShieldAlert className="w-5 h-5 text-red-500" />}
+               <span className="text-sm font-medium text-[#d1d7db]">{notification.text}</span>
+               <button onClick={() => setNotification(null)} className="ml-2 text-[#8696a0] hover:text-white transition-colors">
+                  <X className="w-4 h-4" />
                </button>
             </div>
          )}
