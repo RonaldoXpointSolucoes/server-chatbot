@@ -23,6 +23,7 @@ import { UpdatePrompt } from './components/UpdatePrompt';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import FlowManager from './pages/FlowManager';
 import FlowBuilder from './pages/FlowBuilder';
+import RagAgentsHub from './pages/RagAgentsHub';
 import { MainLayout } from './components/MainLayout';
 import SettingsLayout from './pages/settings/SettingsLayout';
 import SettingsPreferences from './pages/settings/SettingsPreferences';
@@ -72,6 +73,7 @@ export default function App() {
             <Route path="/contacts" element={<ErrorBoundary><ContactsManager /></ErrorBoundary>} />
             <Route path="/instances" element={<InstancesDashboard />} />
             <Route path="/knowledge" element={<ErrorBoundary><KnowledgeBase /></ErrorBoundary>} />
+            <Route path="/agents-hub" element={<ErrorBoundary><RagAgentsHub /></ErrorBoundary>} />
             <Route path="/flows" element={<ErrorBoundary><FlowManager /></ErrorBoundary>} />
             <Route path="/flows/:id/edit" element={<ErrorBoundary><FlowBuilder /></ErrorBoundary>} />
 

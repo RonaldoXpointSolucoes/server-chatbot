@@ -72,7 +72,7 @@ export default function SettingsLayout() {
 
         {/* Footer Version */}
         <div className="p-5 border-t border-[#2a2a2f]/60">
-            <span className="text-xs text-slate-500 font-mono tracking-tight">Versão: 2.3.1</span>
+            <span className="text-xs text-slate-500 font-mono tracking-tight">Versão: 2.3.3</span>
         </div>
       </aside>
 

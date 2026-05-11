@@ -137,7 +137,7 @@ class EventProcessor {
                 const isHuman = EventProcessor.humanMessagesCache && EventProcessor.humanMessagesCache.has(msg.key.id);
                 // Se for isSelfChat (enviado para si mesmo), apenas processe o evento "fromMe: true" para evitar duplicar a mensagem recebida e enviada
                 if (isSelfChat && !msg.key.fromMe) {
-                     console.warn(`[Message Tracker] 🚨 Mensagem Descartada - Motivo: Auto-envio interceptado (Evitando duplicidade do fromMe: false). JID: ${jid}`);
+                     console.info(`[Message Tracker] ℹ️ Ignorando evento fromMe:false em self-chat (evita duplicidade). JID: ${jid}`);
                      continue;
                 }
                 const senderType = msg.key.fromMe ? (isHuman ? 'human' : 'bot') : 'client';

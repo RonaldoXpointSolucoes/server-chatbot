@@ -21,6 +21,7 @@ import {
   History,
   Mails,
   Bot,
+  Network,
   ScrollText,
   MessageSquareReply,
   Workflow,
@@ -562,6 +563,12 @@ export function MainSidebar() {
 
             <NavItem title="Não atendidas" />
             <NavItem icon={<Contact size={16} />} title="Contatos" onClick={() => navigate('/contacts')} />
+            <NavItem 
+              icon={<Network size={16} className="text-emerald-500" />} 
+              title="Central de Agentes RAG" 
+              onClick={() => navigate('/agents-hub')}
+              isActive={window.location.pathname === '/agents-hub'}
+            />
             <NavItem 
               title="Agenda Interna" 
               icon={<CalendarDays size={16} />} 
