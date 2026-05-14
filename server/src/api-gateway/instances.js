@@ -406,6 +406,32 @@ router.delete('/instances/:instanceId', requireTenant, async (req, res) => {
     }
 });
 
+router.get('/instances/:instanceId/groups', requireTenant, async (req, res) => {
+    try {
+        const { instanceId } = req.params;
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const groups = await sock.groupFetchAllParticipating();
+        res.json({ ok: true, groups });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+router.get('/instances/:instanceId/groups/:groupId', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, groupId } = req.params;
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const metadata = await sock.groupMetadata(groupId);
+        res.json({ ok: true, metadata });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
     try {
         const { instanceId } = req.params;

@@ -146,3 +146,21 @@ export const forceEnginePresence = async (tenantId: string, instanceId: string, 
   if (!res.ok) throw new Error('Falha na presenca');
   return res.json();
 };
+
+export const fetchEngineGroups = async (tenantId: string, instanceId: string, apiKey: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups`, { 
+    method: 'GET',
+    headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
+  });
+  if (!res.ok) throw new Error('Falha ao buscar grupos');
+  return res.json();
+};
+
+export const fetchEngineGroupMetadata = async (tenantId: string, instanceId: string, apiKey: string, groupId: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}`, { 
+    method: 'GET',
+    headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
+  });
+  if (!res.ok) throw new Error('Falha ao buscar metadados do grupo');
+  return res.json();
+};
