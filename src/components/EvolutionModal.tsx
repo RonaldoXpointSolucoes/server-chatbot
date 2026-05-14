@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
-import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link, PlusCircle, LogOut, RefreshCcw, UserCircle2, Trash2, QrCode } from 'lucide-react';
-import { createInstance, fetchEngineStatus, logoutEngine, reconnectEngine, clearEngineStore, syncEngineContacts, forceEnginePresence, fetchEngineGroups, fetchEngineGroupMetadata } from '../services/whatsappEngine';
+import { Smartphone, CheckCircle, Loader2, AlertCircle, Signal, Link as LinkIcon, PlusCircle, LogOut, RefreshCcw, UserCircle2, Trash2, QrCode, UserPlus, UserMinus, ShieldAlert, ShieldCheck, PenSquare, Share2, Settings } from 'lucide-react';
+import { createInstance, fetchEngineStatus, logoutEngine, reconnectEngine, clearEngineStore, syncEngineContacts, forceEnginePresence, fetchEngineGroups, fetchEngineGroupMetadata, createEngineGroup, updateEngineGroupSubject, updateEngineGroupDescription, updateEngineGroupSettings, updateEngineGroupParticipants, leaveEngineGroup, getEngineGroupInviteCode, revokeEngineGroupInvite, acceptEngineGroupInvite } from '../services/whatsappEngine';
 import { supabase } from '../services/supabase';
 import { NOTIFICATION_SOUNDS, playNotificationSound } from '../utils/AudioEngine';
 
@@ -36,6 +36,11 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
   const [groupSearch, setGroupSearch] = useState('');
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [loadingMetadata, setLoadingMetadata] = useState(false);
+
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [newGroupSubject, setNewGroupSubject] = useState('');
+  const [newGroupParticipants, setNewGroupParticipants] = useState('');
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
 
   const INSTANCE_COLORS = [
     { value: '#10b981', label: 'Esmeralda' },
@@ -555,31 +560,78 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
                                  <h4 className="text-sm font-bold text-gray-800 dark:text-white flex items-center gap-2">
                                    Grupos Participantes
                                  </h4>
-                                 <button 
-                                    onClick={async () => {
-                                       const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
-                                       if(!cId) return;
-                                       const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
-                                       if(!tInstanceId) return;
-                                       setLoadingGroups(true);
-                                       try {
-                                           const currInst = existingInstances.find(i => i.id === tInstanceId);
-                                           const res = await fetchEngineGroups(cId, tInstanceId, currInst?.api_key || '');
-                                           if(res.groups) {
-                                               setEngineGroups(Object.values(res.groups));
-                                           }
-                                       } catch(e: any) {
-                                           alert("Erro ao buscar grupos: " + e.message);
-                                       } finally {
-                                           setLoadingGroups(false);
-                                       }
-                                    }}
-                                    className="text-[10px] bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-full transition-colors flex items-center gap-1 font-bold uppercase tracking-wider"
-                                 >
-                                    {loadingGroups ? <Loader2 size={12} className="animate-spin" /> : <RefreshCcw size={12} />}
-                                    Carregar Grupos
-                                 </button>
+                                 <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => setShowCreateGroup(!showCreateGroup)}
+                                      className="text-[10px] bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 px-3 py-1.5 rounded-full transition-colors flex items-center gap-1 font-bold uppercase tracking-wider"
+                                    >
+                                       <PlusCircle size={12} /> Novo Grupo
+                                    </button>
+                                    <button 
+                                       onClick={async () => {
+                                          const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                                          if(!cId) return;
+                                          const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                                          if(!tInstanceId) return;
+                                          setLoadingGroups(true);
+                                          try {
+                                              const currInst = existingInstances.find(i => i.id === tInstanceId);
+                                              const res = await fetchEngineGroups(cId, tInstanceId, currInst?.api_key || '');
+                                              if(res.groups) {
+                                                  setEngineGroups(Object.values(res.groups));
+                                              }
+                                          } catch(e: any) {
+                                              alert("Erro ao buscar grupos: " + e.message);
+                                          } finally {
+                                              setLoadingGroups(false);
+                                          }
+                                       }}
+                                       className="text-[10px] bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-full transition-colors flex items-center gap-1 font-bold uppercase tracking-wider"
+                                    >
+                                       {loadingGroups ? <Loader2 size={12} className="animate-spin" /> : <RefreshCcw size={12} />}
+                                       Carregar Grupos
+                                    </button>
+                                 </div>
                                </div>
+
+                               {showCreateGroup && (
+                                 <div className="bg-emerald-500/5 p-3 rounded-xl border border-emerald-500/20 mt-2 mb-2 animate-in slide-in-from-top-2">
+                                   <h5 className="text-xs font-bold text-gray-800 dark:text-emerald-400 mb-2">Criar Novo Grupo</h5>
+                                   <input 
+                                     type="text" placeholder="Nome do Grupo" 
+                                     value={newGroupSubject} onChange={e => setNewGroupSubject(e.target.value)}
+                                     className="w-full text-xs p-2 rounded bg-white/50 dark:bg-black/40 border border-gray-200 dark:border-white/10 mb-2 focus:outline-none focus:border-emerald-500"
+                                   />
+                                   <input 
+                                     type="text" placeholder="Participantes (números sep por vírgula)" 
+                                     value={newGroupParticipants} onChange={e => setNewGroupParticipants(e.target.value)}
+                                     className="w-full text-xs p-2 rounded bg-white/50 dark:bg-black/40 border border-gray-200 dark:border-white/10 mb-2 focus:outline-none focus:border-emerald-500"
+                                   />
+                                   <button 
+                                     onClick={async () => {
+                                        if(!newGroupSubject || !newGroupParticipants) { alert("Preencha todos os campos"); return; }
+                                        const parts = newGroupParticipants.split(',').map(p => p.trim() + '@s.whatsapp.net');
+                                        try {
+                                           setLoadingGroups(true);
+                                           const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                                           const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                                           const currInst = existingInstances.find(i => i.id === tInstanceId);
+                                           await createEngineGroup(cId!, tInstanceId!, currInst?.api_key || '', newGroupSubject, parts);
+                                           alert("Grupo criado com sucesso!");
+                                           setShowCreateGroup(false);
+                                           setNewGroupSubject('');
+                                           setNewGroupParticipants('');
+                                           // refresh
+                                           const res = await fetchEngineGroups(cId!, tInstanceId!, currInst?.api_key || '');
+                                           if(res.groups) setEngineGroups(Object.values(res.groups));
+                                        } catch(e:any) { alert("Erro: " + e.message); } finally { setLoadingGroups(false); }
+                                     }}
+                                     className="w-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold py-2 rounded transition-colors"
+                                   >
+                                     Confirmar Criação
+                                   </button>
+                                 </div>
+                               )}
 
                                {engineGroups && engineGroups.length === 0 && (
                                   <p className="text-xs text-center text-gray-500 py-4">Nenhum grupo encontrado.</p>
@@ -631,14 +683,100 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
                                  ← Voltar
                                </button>
                                
-                               <h5 className="text-sm font-bold text-gray-800 dark:text-white break-words">{selectedGroup.subject}</h5>
-                               
-                               {loadingMetadata ? (
-                                  <div className="flex justify-center py-6">
-                                     <Loader2 size={24} className="animate-spin text-emerald-500" />
-                                  </div>
-                               ) : groupMetadata ? (
-                                  <>
+                                <h5 className="text-sm font-bold text-gray-800 dark:text-white break-words flex justify-between items-center">
+                                  <span>{selectedGroup.subject}</span>
+                                  <button onClick={async () => {
+                                     const novoNome = prompt("Digite o novo nome do grupo:", selectedGroup.subject);
+                                     if(novoNome) {
+                                        const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                                        const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                                        const currInst = existingInstances.find(i => i.id === tInstanceId);
+                                        try {
+                                           await updateEngineGroupSubject(cId!, tInstanceId!, currInst?.api_key || '', selectedGroup.id, novoNome);
+                                           setSelectedGroup({...selectedGroup, subject: novoNome});
+                                        } catch(e:any) { alert("Erro ao atualizar nome: " + e.message); }
+                                     }
+                                  }} className="text-gray-400 hover:text-emerald-500 transition-colors"><PenSquare size={14}/></button>
+                                </h5>
+                                
+                                {loadingMetadata ? (
+                                   <div className="flex justify-center py-6">
+                                      <Loader2 size={24} className="animate-spin text-emerald-500" />
+                                   </div>
+                                ) : groupMetadata ? (
+                                   <>
+                                      <div className="flex flex-wrap gap-2 mt-1 mb-2">
+                                        <button onClick={async () => {
+                                            const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                                            const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                                            const currInst = existingInstances.find(i => i.id === tInstanceId);
+                                            try {
+                                               const res = await getEngineGroupInviteCode(cId!, tInstanceId!, currInst?.api_key || '', selectedGroup.id);
+                                               if (res.code) {
+                                                  setInviteCode(`https://chat.whatsapp.com/${res.code}`);
+                                               }
+                                            } catch(e:any) { alert("Erro ao obter convite: " + e.message); }
+                                        }} className="text-[10px] bg-blue-500/10 text-blue-500 px-2 py-1 rounded flex items-center gap-1 hover:bg-blue-500/20"><Share2 size={12}/> Obter Convite</button>
+                                        
+                                        <button onClick={async () => {
+                                            const novoDesc = prompt("Digite a nova descrição do grupo:", groupMetadata.desc || '');
+                                            if(novoDesc !== null) {
+                                               const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                                               const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                                               const currInst = existingInstances.find(i => i.id === tInstanceId);
+                                               try {
+                                                  await updateEngineGroupDescription(cId!, tInstanceId!, currInst?.api_key || '', selectedGroup.id, novoDesc);
+                                                  setGroupMetadata({...groupMetadata, desc: novoDesc});
+                                               } catch(e:any) { alert("Erro ao atualizar descrição: " + e.message); }
+                                            }
+                                        }} className="text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-1 rounded flex items-center gap-1 hover:bg-emerald-500/20"><PenSquare size={12}/> Editar Descrição</button>
+
+                                        <button onClick={async () => {
+                                            const num = prompt("Digite os números (com DDI, sem +) separados por vírgula:");
+                                            if(num) {
+                                               const parts = num.split(',').map(p => p.trim() + '@s.whatsapp.net');
+                                               const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                                               const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                                               const currInst = existingInstances.find(i => i.id === tInstanceId);
+                                               try {
+                                                  await updateEngineGroupParticipants(cId!, tInstanceId!, currInst?.api_key || '', selectedGroup.id, parts, 'add');
+                                                  alert("Participantes adicionados");
+                                               } catch(e:any) { alert("Erro ao adicionar: " + e.message); }
+                                            }
+                                        }} className="text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-1 rounded flex items-center gap-1 hover:bg-emerald-500/20"><UserPlus size={12}/> Add Membros</button>
+
+                                        <button onClick={async () => {
+                                            const settingStr = prompt("Mudar configuração (announcement, not_announcement, unlocked, locked):");
+                                            if(settingStr) {
+                                               const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                                               const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                                               const currInst = existingInstances.find(i => i.id === tInstanceId);
+                                               try {
+                                                  await updateEngineGroupSettings(cId!, tInstanceId!, currInst?.api_key || '', selectedGroup.id, settingStr as any);
+                                                  alert("Configuração alterada com sucesso.");
+                                               } catch(e:any) { alert("Erro ao alterar: " + e.message); }
+                                            }
+                                        }} className="text-[10px] bg-purple-500/10 text-purple-500 px-2 py-1 rounded flex items-center gap-1 hover:bg-purple-500/20"><Settings size={12}/> Configurações</button>
+
+                                        <button onClick={async () => {
+                                            if(!confirm("Deseja sair deste grupo?")) return;
+                                            const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                                            const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                                            const currInst = existingInstances.find(i => i.id === tInstanceId);
+                                            try {
+                                               await leaveEngineGroup(cId!, tInstanceId!, currInst?.api_key || '', selectedGroup.id);
+                                               alert("Você saiu do grupo.");
+                                               setSelectedGroup(null);
+                                            } catch(e:any) { alert("Erro ao sair: " + e.message); }
+                                        }} className="text-[10px] bg-red-500/10 text-red-500 px-2 py-1 rounded flex items-center gap-1 hover:bg-red-500/20"><LogOut size={12}/> Sair do Grupo</button>
+                                      </div>
+                                      
+                                      {inviteCode && (
+                                        <div className="text-[10px] p-2 bg-blue-500/10 text-blue-400 rounded flex justify-between items-center break-all mb-2">
+                                          <span>{inviteCode}</span>
+                                          <button onClick={() => {navigator.clipboard.writeText(inviteCode); alert("Copiado!");}} className="shrink-0 ml-2 text-blue-500 underline">Copiar</button>
+                                        </div>
+                                      )}
                                      <div className="w-full">
                                         <input 
                                           type="text" 
@@ -658,10 +796,44 @@ export default function EvolutionModal({ isOpen, onClose, targetInstanceName }: 
                                         }).map((p: any) => {
                                            const num = p.id.split('@')[0];
                                            return (
-                                              <div key={p.id} className="flex flex-col bg-black/5 dark:bg-white/5 p-2 rounded-lg border border-white/5">
+                                              <div key={p.id} className="flex flex-col bg-black/5 dark:bg-white/5 p-2 rounded-lg border border-white/5 group/part relative overflow-hidden">
                                                  <span className="text-xs font-bold text-gray-800 dark:text-gray-200">
                                                     +{num} {p.admin ? <span className="text-[9px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded ml-1">Admin</span> : null}
                                                  </span>
+                                                 {/* Action overlay */}
+                                                 <div className="absolute right-0 top-0 bottom-0 bg-white/90 dark:bg-gray-800/90 backdrop-blur flex items-center gap-1 px-2 translate-x-full group-hover/part:translate-x-0 transition-transform">
+                                                    {!p.admin ? (
+                                                      <button title="Promover a Admin" onClick={async () => {
+                                                         try {
+                                                            const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                                                            const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                                                            const currInst = existingInstances.find(i => i.id === tInstanceId);
+                                                            await updateEngineGroupParticipants(cId!, tInstanceId!, currInst?.api_key || '', selectedGroup.id, [p.id], 'promote');
+                                                            alert("Promovido a admin");
+                                                         } catch(e:any){ alert(e.message); }
+                                                      }} className="p-1.5 bg-emerald-500/10 text-emerald-500 rounded hover:bg-emerald-500 hover:text-white transition-colors"><ShieldCheck size={12}/></button>
+                                                    ) : (
+                                                      <button title="Rebaixar Admin" onClick={async () => {
+                                                         try {
+                                                            const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                                                            const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                                                            const currInst = existingInstances.find(i => i.id === tInstanceId);
+                                                            await updateEngineGroupParticipants(cId!, tInstanceId!, currInst?.api_key || '', selectedGroup.id, [p.id], 'demote');
+                                                            alert("Rebaixado");
+                                                         } catch(e:any){ alert(e.message); }
+                                                      }} className="p-1.5 bg-orange-500/10 text-orange-500 rounded hover:bg-orange-500 hover:text-white transition-colors"><ShieldAlert size={12}/></button>
+                                                    )}
+                                                    <button title="Remover" onClick={async () => {
+                                                         if(!confirm("Remover participante?")) return;
+                                                         try {
+                                                            const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+                                                            const tInstanceId = targetInstObj ? targetInstObj.id : useChatStore.getState().connectedInstanceName;
+                                                            const currInst = existingInstances.find(i => i.id === tInstanceId);
+                                                            await updateEngineGroupParticipants(cId!, tInstanceId!, currInst?.api_key || '', selectedGroup.id, [p.id], 'remove');
+                                                            alert("Removido");
+                                                         } catch(e:any){ alert(e.message); }
+                                                    }} className="p-1.5 bg-red-500/10 text-red-500 rounded hover:bg-red-500 hover:text-white transition-colors"><UserMinus size={12}/></button>
+                                                 </div>
                                               </div>
                                            );
                                         })}

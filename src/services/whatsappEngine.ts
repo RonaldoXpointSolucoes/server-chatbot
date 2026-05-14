@@ -164,3 +164,89 @@ export const fetchEngineGroupMetadata = async (tenantId: string, instanceId: str
   if (!res.ok) throw new Error('Falha ao buscar metadados do grupo');
   return res.json();
 };
+
+export const createEngineGroup = async (tenantId: string, instanceId: string, apiKey: string, subject: string, participants: string[]) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
+    body: JSON.stringify({ subject, participants })
+  });
+  if (!res.ok) throw new Error('Falha ao criar grupo');
+  return res.json();
+};
+
+export const updateEngineGroupSubject = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, subject: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/subject`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
+    body: JSON.stringify({ subject })
+  });
+  if (!res.ok) throw new Error('Falha ao atualizar nome do grupo');
+  return res.json();
+};
+
+export const updateEngineGroupDescription = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, description: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/description`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
+    body: JSON.stringify({ description })
+  });
+  if (!res.ok) throw new Error('Falha ao atualizar descrição do grupo');
+  return res.json();
+};
+
+export const updateEngineGroupSettings = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, setting: 'announcement' | 'not_announcement' | 'locked' | 'unlocked') => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
+    body: JSON.stringify({ setting })
+  });
+  if (!res.ok) throw new Error('Falha ao atualizar configurações do grupo');
+  return res.json();
+};
+
+export const updateEngineGroupParticipants = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, participants: string[], action: 'add' | 'remove' | 'promote' | 'demote') => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/participants`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
+    body: JSON.stringify({ participants, action })
+  });
+  if (!res.ok) throw new Error(`Falha na ação ${action} para os participantes do grupo`);
+  return res.json();
+};
+
+export const leaveEngineGroup = async (tenantId: string, instanceId: string, apiKey: string, groupId: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/leave`, {
+    method: 'DELETE',
+    headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
+  });
+  if (!res.ok) throw new Error('Falha ao sair do grupo');
+  return res.json();
+};
+
+export const getEngineGroupInviteCode = async (tenantId: string, instanceId: string, apiKey: string, groupId: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/invite-code`, {
+    method: 'GET',
+    headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
+  });
+  if (!res.ok) throw new Error('Falha ao obter código de convite do grupo');
+  return res.json();
+};
+
+export const revokeEngineGroupInvite = async (tenantId: string, instanceId: string, apiKey: string, groupId: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/revoke-invite`, {
+    method: 'POST',
+    headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
+  });
+  if (!res.ok) throw new Error('Falha ao revogar código de convite do grupo');
+  return res.json();
+};
+
+export const acceptEngineGroupInvite = async (tenantId: string, instanceId: string, apiKey: string, code: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/accept-invite/${code}`, {
+    method: 'POST',
+    headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
+  });
+  if (!res.ok) throw new Error('Falha ao aceitar convite do grupo');
+  return res.json();
+};

@@ -432,6 +432,145 @@ router.get('/instances/:instanceId/groups/:groupId', requireTenant, async (req, 
     }
 });
 
+// Criar novo grupo
+router.post('/instances/:instanceId/groups', requireTenant, async (req, res) => {
+    try {
+        const { instanceId } = req.params;
+        const { subject, participants } = req.body; // participants: array of JIDs
+        if (!subject || !participants || !Array.isArray(participants)) {
+            return res.status(400).json({ error: 'Faltam subject ou participants array' });
+        }
+        
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const group = await sock.groupCreate(subject, participants);
+        res.json({ ok: true, group });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Atualizar nome do grupo
+router.put('/instances/:instanceId/groups/:groupId/subject', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, groupId } = req.params;
+        const { subject } = req.body;
+        
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        await sock.groupUpdateSubject(groupId, subject);
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Atualizar descrição do grupo
+router.put('/instances/:instanceId/groups/:groupId/description', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, groupId } = req.params;
+        const { description } = req.body;
+        
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        await sock.groupUpdateDescription(groupId, description);
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Atualizar configurações (announcement, not_announcement, locked, unlocked)
+router.put('/instances/:instanceId/groups/:groupId/settings', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, groupId } = req.params;
+        const { setting } = req.body;
+        
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        await sock.groupSettingUpdate(groupId, setting);
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Gerenciar participantes (add, remove, promote, demote)
+router.post('/instances/:instanceId/groups/:groupId/participants', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, groupId } = req.params;
+        const { participants, action } = req.body; // action = 'add', 'remove', 'promote', 'demote'
+        
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const result = await sock.groupParticipantsUpdate(groupId, participants, action);
+        res.json({ ok: true, result });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Sair do grupo
+router.delete('/instances/:instanceId/groups/:groupId/leave', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, groupId } = req.params;
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        await sock.groupLeave(groupId);
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Obter código de convite
+router.get('/instances/:instanceId/groups/:groupId/invite-code', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, groupId } = req.params;
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const code = await sock.groupInviteCode(groupId);
+        res.json({ ok: true, code });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Revogar código de convite
+router.post('/instances/:instanceId/groups/:groupId/revoke-invite', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, groupId } = req.params;
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const code = await sock.groupRevokeInvite(groupId);
+        res.json({ ok: true, code });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Aceitar convite
+router.post('/instances/:instanceId/groups/accept-invite/:code', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, code } = req.params;
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const groupId = await sock.groupAcceptInvite(code);
+        res.json({ ok: true, groupId });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
     try {
         const { instanceId } = req.params;
