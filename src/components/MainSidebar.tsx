@@ -38,7 +38,8 @@ import {
   CheckCircle2,
   LogOut,
   Store,
-  X
+  X,
+  QrCode
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
@@ -125,13 +126,14 @@ export function MainSidebar() {
   const agents = useChatStore(state => state.agents);
   const tenantLabels = useChatStore(state => state.tenantLabels);
   const currentAgent = agents.find(a => a.email === agentEmail);
-  const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to === currentAgent.id && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
+  const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to === currentAgent.id && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
   
   const [userCompanies, setUserCompanies] = useState<any[]>([]);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [currentCompanyContext, setCurrentCompanyContext] = useState<any>(null);
   const [globalAiEnabled, setGlobalAiEnabled] = useState(true);
+  const [instanceContextMenu, setInstanceContextMenu] = useState<{ id: string, name: string, x: number, y: number } | null>(null);
 
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
   const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
@@ -204,29 +206,47 @@ export function MainSidebar() {
         setCurrentCompanyContext(currentCompany);
         setGlobalAiEnabled(currentCompany.global_ai_enabled ?? true);
 
-        if (currentCompany.email) {
-            const { data: companies, error: companiesError } = await supabase
-              .from('companies')
-              .select('id, name, status, plan_id')
-              .eq('email', currentCompany.email)
-              .order('created_at', { ascending: false });
-
-            if (!companiesError && companies) {
-               let finalCompanies = companies;
-               const allowedCompsStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_companies') || localStorage.getItem('allowed_companies')) : null;
-               if (allowedCompsStr) {
-                 try {
-                   const allowedCompanies = JSON.parse(allowedCompsStr);
-                   if (Array.isArray(allowedCompanies) && allowedCompanies.length > 0) {
-                     finalCompanies = companies.filter((c: any) => allowedCompanies.includes(c.id));
-                   } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
-                     finalCompanies = [];
-                   }
-                 } catch(e) {}
-               }
-               setUserCompanies(finalCompanies);
-            }
+        const allowedCompsStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_companies') || localStorage.getItem('allowed_companies')) : null;
+        let allowedCompanies: string[] = [];
+        if (allowedCompsStr) {
+          try {
+             allowedCompanies = JSON.parse(allowedCompsStr);
+          } catch(e) {}
         }
+
+        if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
+           if (allowedCompanies.length > 0 && !allowedCompanies.includes(tenantId)) {
+               // Security enforcement: Se a matriz não é permitida ou ficou sujeira no localstorage
+               const newTenantId = allowedCompanies[0];
+               localStorage.setItem('current_tenant_id', newTenantId);
+               sessionStorage.setItem('current_tenant_id', newTenantId);
+               window.location.reload();
+               return;
+           }
+        }
+
+        let companiesData: any[] = [];
+        
+        if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
+           if (allowedCompanies.length > 0) {
+               const { data, error } = await supabase
+                 .from('companies')
+                 .select('id, name, status, plan_id')
+                 .in('id', allowedCompanies)
+                 .order('created_at', { ascending: false });
+               if (!error && data) companiesData = data;
+           }
+        } else if (currentCompany.email) {
+           const { data, error } = await supabase
+             .from('companies')
+             .select('id, name, status, plan_id')
+             .eq('email', currentCompany.email)
+             .order('created_at', { ascending: false });
+           if (!error && data) companiesData = data;
+        }
+
+        setUserCompanies(companiesData);
+
       } catch (err) {
         console.error('Erro ao buscar empresas multi-tenant:', err);
       }
@@ -537,27 +557,50 @@ export function MainSidebar() {
             {/* Lista de Canais (Inboxes) inserida abaixo de Todas as conversas */}
             {instances.length > 0 && (
                <div className="pl-1 border-l-2 border-[#2a3942]/50 ml-5 my-1 py-0.5 space-y-0.5">
-                 {instances.map(inst => (
-                    <div key={inst.id} className="relative group/channel">
-                      <NavItem 
-                        icon={
-                          <div className="flex items-center gap-2 relative">
-                            {inst.color && <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: inst.color }}></div>}
-                            <Brands.WhatsApp size={12} />
-                            {inst.status !== 'connected' && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
-                          </div>
-                        } 
-                        title={inst.display_name || 'Sem nome'} 
-                        isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
-                        onClick={() => {
-                          useChatStore.getState().setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name);
-                          useChatStore.getState().setFilterType('all');
-                          useChatStore.getState().fetchInitialData();
-                          navigate('/chat');
+                 {instances.map(inst => {
+                    const unreadCount = contacts.filter(c => c.instance_id === inst.id && c.unread > 0 && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length;
+                    return (
+                      <div 
+                        key={inst.id} 
+                        className="relative group/channel"
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setInstanceContextMenu({ id: inst.id, name: inst.display_name, x: e.clientX, y: e.clientY });
                         }}
-                      />
-                    </div>
-                 ))}
+                      >
+                        <NavItem 
+                          icon={
+                            <div className="flex items-center gap-2 relative">
+                              {inst.color && <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: inst.color }}></div>}
+                              <Brands.WhatsApp size={12} />
+                              {inst.status !== 'connected' && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
+                            </div>
+                          } 
+                          title={inst.display_name || 'Sem nome'} 
+                          isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
+                          onClick={() => {
+                            useChatStore.getState().setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name);
+                            useChatStore.getState().setFilterType('all');
+                            useChatStore.getState().fetchInitialData();
+                            navigate('/chat');
+                          }}
+                        />
+                        {unreadCount > 0 && (
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none animate-in zoom-in duration-300">
+                            <span 
+                              className="text-white text-[9px] font-bold min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full shadow-sm border border-white/20"
+                              style={{ 
+                                background: inst.color ? `linear-gradient(135deg, ${inst.color}ee 0%, ${inst.color} 100%)` : 'linear-gradient(135deg, #00a884ee 0%, #00a884 100%)',
+                                textShadow: '0 1px 2px rgba(0,0,0,0.4)'
+                              }}
+                            >
+                              {unreadCount > 99 ? '99+' : unreadCount}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                 })}
                </div>
             )}
 
@@ -732,6 +775,40 @@ export function MainSidebar() {
         </button>
       </div>
       </div>
+
+      {/* Context Menu das Caixas de Entrada */}
+      {instanceContextMenu && (
+        <div 
+          className="fixed inset-0 z-[100]" 
+          onClick={(e) => { e.stopPropagation(); setInstanceContextMenu(null); }}
+          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setInstanceContextMenu(null); }}
+        >
+          <div 
+            className="absolute bg-[#202c33] border border-[#2a3942] rounded-lg shadow-xl py-1 min-w-[180px] animate-in fade-in zoom-in-95 duration-100"
+            style={{ 
+              top: Math.min(instanceContextMenu.y, window.innerHeight - 100), 
+              left: Math.min(instanceContextMenu.x, window.innerWidth - 180)
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-2 border-b border-[#2a3942] mb-1">
+              <span className="text-xs font-semibold text-[#8696a0] truncate block">{instanceContextMenu.name}</span>
+            </div>
+            <button 
+              className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2"
+              onClick={(e) => {
+                 e.stopPropagation();
+                 useChatStore.getState().openQRModal(instanceContextMenu.id);
+                 setInstanceContextMenu(null);
+              }}
+            >
+              <QrCode size={14} />
+              Gerenciar Conexão
+            </button>
+          </div>
+        </div>
+      )}
+
 {/* 
       // Tailwind custom utility pra rolagem discreta que usaremos globalmente em index.css futuramente.
 */}

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
-import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal } from '../components/ChatModals';
+import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal } from '../components/ChatModals';
+import ImageEditorModal from '../components/ImageEditorModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { AgentSettingsModal } from '../components/AgentSettingsModal';
 import { ChatOmniMenu } from '../components/ChatOmniMenu';
@@ -148,6 +149,22 @@ export default function ChatDashboard() {
   // Monitor de agendamentos
   useScheduleMonitor();
   const [copiedDoc, setCopiedDoc] = useState(false);
+  const [copiedPhone, setCopiedPhone] = useState(false);
+  const [associatedCompaniesOpen, setAssociatedCompaniesOpen] = useState(false);
+  const [allCompanies, setAllCompanies] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchCompanies = async () => {
+      const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (!tenantId) return;
+      try {
+        const { supabase } = await import('../services/supabase');
+        const { data } = await supabase.from('contacts').select('id, name, fantasy_name, document_number').eq('tenant_id', tenantId).eq('document_type', 'cnpj');
+        if (data) setAllCompanies(data);
+      } catch (e) {}
+    };
+    fetchCompanies();
+  }, []);
 
   const {  
     contacts, 
@@ -401,22 +418,31 @@ export default function ChatDashboard() {
   };
 
   const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
-    messagesEndRef.current?.scrollIntoView({ behavior });
+    if (!messagesContainerRef.current) return;
+    if (behavior === 'auto') {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    } else {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
   };
 
   // Scroll inicial e quando muda de chat
   useEffect(() => {
     if (activeChatId) {
-      scrollToBottom('auto'); // Vai pro fim instantÇ｢neo
       setShowScrollButton(false);
       prevMessagesLength.current = activeChat?.messages?.length || 0;
       
-      // Fallback para imagens/mídias carregando
-      const timeout = setTimeout(() => {
-        // Usa 'auto' para evitar a animação indesejada de rolar visualmente até o fim da página ao abrir nova conversa
-        scrollToBottom('auto');
-      }, 150);
-      return () => clearTimeout(timeout);
+      const doScroll = () => scrollToBottom('auto');
+      
+      // Cascata de tentativas para empurrar pro final caso o DOM e imagens atrasem
+      doScroll();
+      requestAnimationFrame(doScroll);
+      const timeouts = [50, 150, 300, 600].map(ms => setTimeout(doScroll, ms));
+      
+      return () => timeouts.forEach(clearTimeout);
     }
   }, [activeChatId]);
 
@@ -754,71 +780,46 @@ export default function ChatDashboard() {
         contactId={showSnoozeModal || ''}
       />
 
-      {/* Modal de Preview de Imagem Colada */}
-      {pastedImagePreview && (
-        <div className="fixed inset-0 z-[9999] bg-black/80 flex flex-col items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#111b21] rounded-[24px] w-full max-w-md overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 mt-4">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
-              <h3 className="font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2"><ImageIcon size={18}/> Enviar Imagem</h3>
-              <button 
-                onClick={() => {
-                  setPastedImage(null);
-                  setPastedImagePreview(null);
-                }} 
-                className="p-2 text-gray-500 hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="bg-gray-100/50 dark:bg-black/40 flex-1 flex items-center justify-center p-4 min-h-[300px] relative">
-              <img src={pastedImagePreview} alt="Preview" className="max-h-[300px] object-contain rounded-xl shadow-sm" />
-            </div>
-            <div className="p-4 flex gap-2 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-[#111b21]">
-              <input 
-                type="text" 
-                placeholder="Adicionar legenda (opcional)..." 
-                value={pastedImageCaption}
-                onChange={(e) => setPastedImageCaption(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    document.getElementById('btn-send-paste')?.click();
-                  }
-                }}
-                className="flex-1 bg-[#f0f2f5] dark:bg-[#202c33] border-none rounded-2xl px-4 py-2 text-sm text-[#111b21] dark:text-[#d1d7db] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] focus:outline-none focus:ring-1 focus:ring-[#00a884]/50"
-              />
-              <button 
-                id="btn-send-paste"
-                onClick={() => {
-                  if (pastedImage && activeChatId) {
-                    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
-                    
-                    const imageToSend = pastedImage;
-                    const captionToSend = pastedImageCaption;
-                    
-                    // Fechar imediatamente para percepção instantÇ｢nea
-                    setPastedImage(null);
-                    setPastedImagePreview(null);
-                    setPastedImageCaption('');
-                    
-                    // Fazer o envio async por trás dos panos com o novo suporte a caption
-                    useChatStore.getState().uploadAndSendMedia(
-                      activeChatId, 
-                      imageToSend, 
-                      'image', 
-                      properTargetInstance as string,
-                      false,
-                      captionToSend
-                    ).catch(console.error);
-                  }
-                }}
-                className="bg-[#00a884] hover:bg-[#008f6f] text-white p-3 rounded-xl transition-colors shadow-md flex items-center justify-center"
-              >
-                <Send size={18} />
-              </button>
-            </div>
-          </div>
-        </div>
+      {activeChat?.company_ids && (
+        <AssociatedCompaniesModal
+          isOpen={associatedCompaniesOpen}
+          onClose={() => setAssociatedCompaniesOpen(false)}
+          companies={activeChat.company_ids
+            .map((id: string) => allCompanies.find((c: any) => c.id === id))
+            .filter(Boolean)}
+        />
+      )}
+
+      {/* Modal de Preview de Imagem Colada (Agora com Editor de Imagem) */}
+      {pastedImage && (
+        <ImageEditorModal 
+          file={pastedImage}
+          onClose={() => {
+            setPastedImage(null);
+            setPastedImagePreview(null);
+            setPastedImageCaption('');
+          }}
+          onSend={(editedFile, caption) => {
+            if (activeChatId) {
+              const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+              
+              // Fechar imediatamente para percepção instantânea
+              setPastedImage(null);
+              setPastedImagePreview(null);
+              setPastedImageCaption('');
+              
+              // Fazer o envio async por trás dos panos com o novo suporte a caption
+              useChatStore.getState().uploadAndSendMedia(
+                activeChatId, 
+                editedFile, 
+                'image', 
+                properTargetInstance as string,
+                false,
+                caption
+              ).catch(console.error);
+            }
+          }}
+        />
       )}
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
@@ -951,7 +952,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.3.3'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '10/05/2026, 11:55')}`}
+            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.4.1'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '12/05/2026, 15:41')}`}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1629,6 +1630,29 @@ export default function ChatDashboard() {
                 <div className="flex flex-col justify-center">
                   <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
                     <span className="truncate max-w-[200px] sm:max-w-md">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
+                    
+                    {activeChat.phone && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (activeChat.phone) {
+                            navigator.clipboard.writeText(activeChat.phone);
+                            setCopiedPhone(true);
+                            setTimeout(() => setCopiedPhone(false), 2000);
+                          }
+                        }}
+                        className={cn(
+                          "transition-all p-1 rounded cursor-pointer duration-300 flex items-center justify-center border border-black/5 dark:border-white/5",
+                          copiedPhone 
+                            ? "text-[#00a884] bg-[#00a884]/10 opacity-100 scale-105" 
+                            : "text-[#54656f] dark:text-[#aebac1] opacity-60 hover:opacity-100 hover:text-[#00a884] bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10"
+                        )}
+                        title="Copiar Número"
+                      >
+                        {copiedPhone ? <CheckCircle2 size={13} className="animate-in zoom-in" /> : <Copy size={13} />}
+                      </button>
+                    )}
+
                     {activeChat.phone && getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone) !== formatPhoneNumber(activeChat.phone) && (
                       <span className="text-[12px] text-[#54656f] dark:text-[#8696a0] font-mono inline-block mt-0.5 border border-black/5 dark:border-white/10 px-1.5 rounded-md bg-black/5 dark:bg-white/5 hidden sm:inline-block">
                         {formatPhoneNumber(activeChat.phone)}
@@ -1654,7 +1678,7 @@ export default function ChatDashboard() {
                               e.stopPropagation();
                               if (activeChat.document_number) {
                                 const rawCnpj = activeChat.document_number.replace(/\D/g, '');
-                                window.open(`https://service.xpointsolucoes.com.br/notafiscalx/mensalidade/?e=${rawCnpj}`, '_blank');
+                                window.open(`https://mensalidadedatadivas.vercel.app/?e=${rawCnpj}`, '_blank');
                               }
                             }}
                             className="transition-all p-0.5 rounded cursor-pointer duration-300 flex items-center justify-center text-[#54656f] dark:text-[#aebac1] opacity-40 group-hover/doc:opacity-100 hover:text-emerald-500 hover:bg-black/5 dark:hover:bg-white/10"

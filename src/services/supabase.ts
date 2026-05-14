@@ -43,6 +43,11 @@ export type ContactRow = {
   evolution_remote_jid?: string; // Mantido como optional para retrocompatibilidade
   whatsapp_jid?: string;
   bot_status: 'active' | 'paused';
+  open_date?: string;
+  company_size?: string;
+  legal_nature?: string;
+  main_activity?: string;
+  secondary_activities?: string;
   created_at: string;
   is_pinned?: boolean;
   pinned_instances?: string[];

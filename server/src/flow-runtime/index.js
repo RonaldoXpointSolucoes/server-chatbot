@@ -6,7 +6,7 @@ class FlowEngine {
     /**
      * Ponto de entrada: Recebe todas as mensagens "inbound" processadas
      */
-    async processIncomingMessage({ tenantId, instanceId, jid, textMessage, rawPayload, sock }) {
+    async processIncomingMessage({ tenantId, instanceId, conversationId, jid, textMessage, rawPayload, sock }) {
         if (!textMessage) return; // Ignora se não houver texto
         
         try {
@@ -26,10 +26,10 @@ class FlowEngine {
 
             if (convState) {
                 // Tem uma conversa ativa, vamos processar o nó atual e a entrada do usuário
-                await this.resumeFlow(tenantId, instanceId, jid, convState, textMessage, sock);
+                await this.resumeFlow(tenantId, instanceId, conversationId, jid, convState, textMessage, sock);
             } else {
                 // Não tem estado ativo, verificar gatilhos (Triggers)
-                await this.matchTriggers(tenantId, instanceId, jid, textMessage, sock);
+                await this.matchTriggers(tenantId, instanceId, conversationId, jid, textMessage, sock);
             }
 
         } catch (error) {
@@ -40,7 +40,7 @@ class FlowEngine {
     /**
      * Verifica as regras de disparo (Triggers) dos Fluxos Públicos
      */
-    async matchTriggers(tenantId, instanceId, jid, textMessage, sock) {
+    async matchTriggers(tenantId, instanceId, conversationId, jid, textMessage, sock) {
         // Encontrar os fluxos ativos desse Tenant
         // Como podemos ter múltiplos fluxos, precisamos varrer qual tem trigger matching
         const { data: flows, error } = await supabase
@@ -91,7 +91,7 @@ class FlowEngine {
                 }
 
                 // Iniciar execução a partir das edges conectadas ao Start Node
-                await this.executeNextNodes(newState, flow.flow_versions.nodes, flow.flow_versions.edges, sock);
+                await this.executeNextNodes(tenantId, instanceId, conversationId, newState, flow.flow_versions.nodes, flow.flow_versions.edges, sock);
                 break; // Apenas inicia um fluxo por vez
             }
         }
@@ -121,7 +121,7 @@ class FlowEngine {
     /**
      * Resumir execução a partir do nó que estava pausado esperando resposta (Ask)
      */
-    async resumeFlow(tenantId, instanceId, jid, convState, textMessage, sock) {
+    async resumeFlow(tenantId, instanceId, conversationId, jid, convState, textMessage, sock) {
         // Obter Versão e JSON
         const { data: fVersion } = await supabase
             .from('flow_versions')
@@ -154,20 +154,20 @@ class FlowEngine {
             }
             
             // Pular pro próximo nó através da edge padrao
-            await this.executeNextNodes(convState, nodes, edges, sock);
+            await this.executeNextNodes(tenantId, instanceId, conversationId, convState, nodes, edges, sock);
         } else if (currentNode.type === 'handoff') {
             // Não deve tentar processar. O BD deve estar 'HANDOFF_HUMAN' (já tratado pela query). 
             // Porém se por acaso chegou aqui, ignoramos.
         } else {
              // Retomada desconhecida, tentar ir pro prox.
-             await this.executeNextNodes(convState, nodes, edges, sock);
+             await this.executeNextNodes(tenantId, instanceId, conversationId, convState, nodes, edges, sock);
         }
     }
 
     /**
      * Loop Ticking de Execução dos Nós
      */
-    async executeNextNodes(convState, nodes, edges, sock) {
+    async executeNextNodes(tenantId, instanceId, conversationId, convState, nodes, edges, sock) {
         let isPaused = false;
         let currentNodeId = convState.current_node_id;
 
@@ -209,13 +209,15 @@ class FlowEngine {
                     const text = this.parseVariables(targetNode.data?.text || '', convState.variables);
                     // Dispara a mensagem (Baileys)
                     if (sock && text) {
-                         await sock.sendMessage(convState.remote_jid, { text });
+                         const msgResult = await sock.sendMessage(convState.remote_jid, { text });
+                         await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, text, msgResult);
                     }
                 } 
                 else if (targetNode.type === 'ask') {
                     const text = this.parseVariables(targetNode.data?.text || '', convState.variables);
                     if (sock && text) {
-                         await sock.sendMessage(convState.remote_jid, { text });
+                         const msgResult = await sock.sendMessage(convState.remote_jid, { text });
+                         await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, text, msgResult);
                     }
                     // Nó ask deve *parar* o loop esperando a proxima msg.
                     isPaused = true;
@@ -249,7 +251,45 @@ class FlowEngine {
 
     async finishState(stateId) {
         await supabase.from('conversation_states').update({ status: 'FINISHED' }).eq('id', stateId);
-        await this.logExecution(stateId, 'END', 'Fluxo Finalizado');
+        await this.logExecution(stateId, null, `Fluxo finalizado`);
+    }
+
+    async persistOutboundMessage(tenantId, instanceId, conversationId, jid, textContent, msgResult) {
+        if (!msgResult || !msgResult.key) return;
+        
+        try {
+            const { data: savedMsg } = await supabase.from('messages').insert({
+                tenant_id: tenantId,
+                instance_id: instanceId,
+                conversation_id: conversationId,
+                direction: 'outbound',
+                message_type: 'text',
+                status: 'sent',
+                text_content: textContent,
+                whatsapp_message_id: msgResult.key.id,
+                sender_type: 'bot',
+                raw_payload: msgResult
+            }).select('*').single();
+
+            if (conversationId) {
+                await supabase.from('conversations').update({
+                    updated_at: new Date().toISOString(),
+                    last_message_at: new Date().toISOString(),
+                    last_message_preview: textContent.substring(0, 50)
+                }).eq('id', conversationId);
+            }
+
+            if (savedMsg) {
+                const { default: realtime } = await import('../realtime-publisher/index.js');
+                await realtime.publishInboxEvent(tenantId, 'message.new', {
+                    message: savedMsg,
+                    contact_phone: jid.split('@')[0],
+                    conversation_id: conversationId
+                });
+            }
+        } catch(err) {
+            console.error('[FlowEngine] Falha ao registrar envio no BD:', err);
+        }
     }
 
     async logExecution(stateId, nodeId, action, errorLine = null) {

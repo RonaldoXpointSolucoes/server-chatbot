@@ -9,14 +9,17 @@ export interface AgentSpecialist {
   isActive: boolean;
   icon: string;
   personality: string;
+  initialMessage?: string;
 }
 
 export interface RagKnowledgeBase {
   businessName: string;
+  botName: string;
   businessAddress: string;
   openingHours: string;
   contactPhone: string;
   contactEmail: string;
+  digitalMenuLink: string;
   acceptsPix: boolean;
   paymentMethods: string;
   
@@ -50,12 +53,13 @@ export interface RagKnowledgeBase {
 export interface RagState {
   isOnboarded: boolean;
   selectedCategory: string;
-  businessType: string;
+  businessTypes: string[];
   agents: AgentSpecialist[];
   knowledgeBase: RagKnowledgeBase;
   
   setSelectedCategory: (cat: string) => void;
-  setBusinessType: (type: string) => void;
+  toggleBusinessType: (type: string) => void;
+  setBusinessTypes: (types: string[]) => void;
   toggleAgent: (id: string) => void;
   addAgent: (agent: AgentSpecialist) => void;
   updateAgent: (id: string, updates: Partial<AgentSpecialist>) => void;
@@ -63,6 +67,7 @@ export interface RagState {
   setKnowledgeBase: (data: Partial<RagKnowledgeBase>) => void;
   completeOnboarding: () => void;
   resetOnboarding: () => void;
+  editOnboarding: () => void;
   applyCategoryTemplate: (category: string) => void;
 }
 
@@ -104,10 +109,12 @@ const categoryTemplates: Record<string, { agents: AgentSpecialist[], kbFields: P
 
 const defaultKB: RagKnowledgeBase = {
   businessName: '',
+  botName: '',
   businessAddress: '',
   openingHours: '',
   contactPhone: '',
   contactEmail: '',
+  digitalMenuLink: '',
   acceptsPix: true,
   paymentMethods: '',
   averagePrepTime: '',
@@ -134,12 +141,17 @@ export const useRagStore = create<RagState>()(
     (set) => ({
       isOnboarded: false,
       selectedCategory: 'gastronomia',
-      businessType: '',
+      businessTypes: [],
       agents: categoryTemplates['gastronomia'].agents,
       knowledgeBase: { ...defaultKB, ...categoryTemplates['gastronomia'].kbFields },
 
       setSelectedCategory: (cat) => set({ selectedCategory: cat }),
-      setBusinessType: (type) => set({ businessType: type }),
+      toggleBusinessType: (type) => set((state) => ({ 
+        businessTypes: state.businessTypes.includes(type) 
+          ? state.businessTypes.filter(t => t !== type) 
+          : [...state.businessTypes, type] 
+      })),
+      setBusinessTypes: (types) => set({ businessTypes: types }),
       
       toggleAgent: (id) => set((state) => ({
         agents: state.agents.map(a => {
@@ -179,10 +191,12 @@ export const useRagStore = create<RagState>()(
       resetOnboarding: () => set({ 
         isOnboarded: false, 
         selectedCategory: 'gastronomia',
-        businessType: '', 
+        businessTypes: [], 
         agents: categoryTemplates['gastronomia'].agents,
         knowledgeBase: { ...defaultKB, ...categoryTemplates['gastronomia'].kbFields }
-      })
+      }),
+      
+      editOnboarding: () => set({ isOnboarded: false })
     }),
     {
       name: 'rag-agents-storage', // salva no localStorage

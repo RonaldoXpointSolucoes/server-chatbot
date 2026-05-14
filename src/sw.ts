@@ -95,10 +95,12 @@ self.addEventListener('push', (event) => {
     }
 
     const role = userConfig?.role?.toLowerCase() || '';
-    if (userConfig && (role === 'agent' || role === 'agente') && instanceId) {
+    const isGlobalAdmin = role === 'owner' || role === 'admin';
+
+    if (userConfig && !isGlobalAdmin) {
         const allowed = userConfig.allowedInstances || [];
-        if (!allowed.includes(instanceId)) {
-            console.log(`[SW] Push abortado (Background): agente não tem permissão para a caixa (instância: ${instanceId}).`);
+        if (!instanceId || !allowed.includes(instanceId)) {
+            console.log(`[SW] Push abortado (Background): validação estrita de segurança de caixa. Acesso negado para instância: ${instanceId}`);
             return; // Cancela a exibição da notificação
         }
     }

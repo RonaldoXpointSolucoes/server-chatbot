@@ -23,6 +23,13 @@ class EventProcessor {
         this.lastGlobalMessageTimestamp = 0;
         
         this.pendingStatuses = new Map();
+        this.statusUpdateQueue = new Map(); // Fila assíncrona para status atrasados
+        this.isFlushingStatus = false;
+        
+        // Loop de processamento em lote a cada 2 segundos.
+        setInterval(() => this.flushQueue(), 2000);
+        // Loop de reconciliation assíncrono para status (a cada 4s)
+        setInterval(() => this.flushStatusQueue(), 4000);
         
         // Cleanup loop para evitar memory leaks nos status pendentes
         setInterval(() => {
@@ -43,6 +50,87 @@ class EventProcessor {
             if (existing.status === 'delivered' && newStatus === 'SERVER_ACK') return; // Cannot downgrade from delivered
         }
         this.pendingStatuses.set(msgId, { status: newStatus, timestamp: Date.now() });
+    }
+
+    queueStatusUpdate(tenantId, instanceId, messageId, status) {
+        // Enfileira para reconciliation assíncrono caso o banco sofra delay (Race Condition Mitigation)
+        this.statusUpdateQueue.set(messageId, {
+            tenantId,
+            instanceId,
+            status,
+            timestamp: Date.now()
+        });
+    }
+
+    async flushStatusQueue() {
+        if (this.isFlushingStatus || this.statusUpdateQueue.size === 0) return;
+        this.isFlushingStatus = true;
+
+        try {
+            const now = Date.now();
+            const toProcess = [];
+            
+            for (const [msgId, data] of this.statusUpdateQueue.entries()) {
+                 // Espera pelo menos 1.5s antes de bater no banco para dar tempo da flushQueue salvar a msg
+                 if (now - data.timestamp > 1500) { 
+                     toProcess.push({ msgId, ...data });
+                 }
+                 // Expira após 45 segundos (Não gera logs de aviso, apenas descarta pacificamente)
+                 if (now - data.timestamp > 45000) {
+                     this.statusUpdateQueue.delete(msgId);
+                 }
+            }
+
+            if (toProcess.length === 0) return;
+
+            // Agrupa as atualizações pendentes por status para fazer bulk update
+            const statusGroups = {
+                'SERVER_ACK': [],
+                'delivered': [],
+                'read': []
+            };
+
+            for (const item of toProcess) {
+                if (statusGroups[item.status]) {
+                    statusGroups[item.status].push(item.msgId);
+                }
+            }
+
+            for (const [status, ids] of Object.entries(statusGroups)) {
+                if (ids.length > 0) {
+                     // Quebra em lotes de 200 IDs para evitar queries gigantes
+                     for (let i = 0; i < ids.length; i += 200) {
+                         const chunk = ids.slice(i, i + 200);
+                         
+                         const { data: existing } = await supabase.from('messages')
+                             .select('id, whatsapp_message_id, status')
+                             .in('whatsapp_message_id', chunk);
+
+                         if (existing && existing.length > 0) {
+                             const idsToUpdate = existing.filter(e => {
+                                 // Evita regressão
+                                 if (e.status === 'read' && status !== 'read') return false;
+                                 if (e.status === 'delivered' && status === 'SERVER_ACK') return false;
+                                 return true;
+                             }).map(e => e.id);
+
+                             if (idsToUpdate.length > 0) {
+                                 await supabase.from('messages').update({ status }).in('id', idsToUpdate);
+                             }
+
+                             // Remove da fila as mensagens que foram encontradas no banco
+                             for (const e of existing) {
+                                 this.statusUpdateQueue.delete(e.whatsapp_message_id);
+                             }
+                         }
+                     }
+                }
+            }
+        } catch (e) {
+            console.error('[EventProcessor] Erro no flushStatusQueue:', e);
+        } finally {
+            this.isFlushingStatus = false;
+        }
     }
     
     async getTenantConfig(tenantId) {
@@ -639,6 +727,7 @@ class EventProcessor {
                                          FlowEngine.processIncomingMessage({
                                              tenantId: b.tenantId,
                                              instanceId: b.instanceId,
+                                             conversationId: b.conversationId,
                                              jid: b.jid,
                                              textMessage: b.textMessage,
                                              rawPayload: b.rawMsg,
@@ -804,6 +893,7 @@ class EventProcessor {
         if (!content) return null;
         if (content.viewOnceMessage) content = content.viewOnceMessage.message;
         if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
+        if (content.viewOnceMessageV2Extension) content = content.viewOnceMessageV2Extension.message;
         if (content.ephemeralMessage) content = content.ephemeralMessage.message;
         if (content.documentWithCaptionMessage) content = content.documentWithCaptionMessage.message;
         return content;
@@ -862,8 +952,10 @@ class EventProcessor {
                 text = parts.length > 0 ? parts.join('\n\n') : '📱 Mensagem Estruturada (HSM)';
             } catch (e) { text = '📱 Mensagem Estruturada (HSM)'; }
         }
-        else text = '📎 Formato não suportado (' + Object.keys(content)[0] + ')';
-        
+        else if (content.albumMessage) text = '📸 Álbum de Fotos';
+        else if (content.secretEncryptedMessage) text = '✏️ Mensagem Editada';
+        else if (content.buttonsMessage || content.listMessage) text = '📱 Mensagem Interativa';
+        else text = '📎 Mensagem não suportada';
         // Anti-Bug: Remove caracteres nulos (\x00) que quebram o cast de JSON do PostgreSQL no Supabase (Upsert)
         return text ? String(text).replace(/\x00/g, '') : '';
     }
@@ -931,15 +1023,13 @@ class EventProcessor {
 
         try {
             const config = await this.getTenantConfig(tenantId);
-            const messageIds = [];
-            const idToStatus = new Map();
 
             for (const update of updates) {
                 if (!update.key || !update.key.id) continue;
                 
                 const jid = update.key.remoteJid;
                 
-                // Evita disparar alertas de missing DB (double retry) para mensagens que foram configuradas para serem ignoradas
+                // Evita processar status para grupos/broadcast se configurado
                 if (jid && (this.isBroadcast(jid) || this.isLid(jid) || (config.ignore_groups && this.isGroup(jid)))) {
                     continue;
                 }
@@ -950,64 +1040,10 @@ class EventProcessor {
                     newStatus = 'read';
                 }
 
-                messageIds.push(update.key.id);
-                idToStatus.set(update.key.id, newStatus);
+                // Salva na memória p/ flushQueue (novas mensagens)
                 this.updatePendingStatus(update.key.id, newStatus);
-            }
-
-            if (messageIds.length === 0) return;
-
-            let { data: messages, error: selectErr } = await supabase
-                .from('messages')
-                .select('id, whatsapp_message_id, status')
-                .eq('tenant_id', tenantId)
-                .or(`instance_id.eq.${instanceId},instance_id.is.null`)
-                .in('whatsapp_message_id', messageIds);
-
-            if (selectErr || !messages || messages.length === 0) {
-                // Race condition mitigation: Retries
-                const retryDelays = [2500, 4000, 6000]; // Total 12.5s waiting
-                let found = false;
-
-                for (const delay of retryDelays) {
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    let retryQuery = await supabase
-                        .from('messages')
-                        .select('id, whatsapp_message_id, status')
-                        .eq('tenant_id', tenantId)
-                        .or(`instance_id.eq.${instanceId},instance_id.is.null`)
-                        .in('whatsapp_message_id', messageIds);
-                    
-                    selectErr = retryQuery.error;
-                    messages = retryQuery.data;
-
-                    if (!selectErr && messages && messages.length > 0) {
-                        found = true;
-                        break;
-                    }
-                }
-
-                if (!found) {
-                    console.warn(`[Message Tracker] 🚨 Atualização de Recibo Descartada - Motivo: Nenhuma mensagem (whatsapp_message_id) encontada no BD após retries estendidos (12.5s). IDs: ${messageIds.join(', ')}`);
-                    return;
-                }
-            }
-
-            for (const msg of messages) {
-                const pendingStatus = idToStatus.get(msg.whatsapp_message_id);
-                
-                // Evita regressão (ex: de read voltar para delivered)
-                if (msg.status === 'read' && pendingStatus !== 'read') continue;
-                
-                if (msg.status !== pendingStatus) {
-                    // Fire-and-forget update
-                    supabase.from('messages')
-                        .update({ status: pendingStatus })
-                        .eq('id', msg.id)
-                        .then(({error}) => {
-                            if (error) console.error(`[EventProcessor] Erro atualizando status (recibo):`, error);
-                        });
-                }
+                // Enfileira p/ reconciliation (mensagens já existentes)
+                this.queueStatusUpdate(tenantId, instanceId, update.key.id, newStatus);
             }
 
         } catch (e) {
@@ -1019,11 +1055,7 @@ class EventProcessor {
         if (!updates || updates.length === 0) return;
 
         try {
-            const messageIds = [];
-            const idToStatus = new Map();
-
             for (const item of updates) {
-                // updates de mensagem vêm com a key e um objeto update
                 const { key, update } = item;
                 if (!key || !key.id || update.status === undefined || update.status === null) continue;
 
@@ -1035,65 +1067,10 @@ class EventProcessor {
                 if (update.status === 4 || update.status === 5) newStatus = 'read';
 
                 if (newStatus) {
-                    messageIds.push(key.id);
-                    idToStatus.set(key.id, newStatus);
+                    // Salva na memória p/ flushQueue
                     this.updatePendingStatus(key.id, newStatus);
-                }
-            }
-
-            if (messageIds.length === 0) return;
-
-            let { data: messages, error: selectErr } = await supabase
-                .from('messages')
-                .select('id, whatsapp_message_id, status')
-                .eq('tenant_id', tenantId)
-                .or(`instance_id.eq.${instanceId},instance_id.is.null`)
-                .in('whatsapp_message_id', messageIds);
-
-            if (selectErr || !messages || messages.length === 0) {
-                // Race condition mitigation: Retries
-                const retryDelays = [2500, 4000, 6000]; // Total 12.5s waiting
-                let found = false;
-
-                for (const delay of retryDelays) {
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    let retryQuery = await supabase
-                        .from('messages')
-                        .select('id, whatsapp_message_id, status')
-                        .eq('tenant_id', tenantId)
-                        .or(`instance_id.eq.${instanceId},instance_id.is.null`)
-                        .in('whatsapp_message_id', messageIds);
-                    
-                    selectErr = retryQuery.error;
-                    messages = retryQuery.data;
-
-                    if (!selectErr && messages && messages.length > 0) {
-                        found = true;
-                        break;
-                    }
-                }
-
-                if (!found) {
-                    console.warn(`[Message Tracker] 🚨 Status Update Descartado - Motivo: Nenhuma mensagem encontada no BD após retries estendidos (12.5s). IDs: ${messageIds.join(', ')}`);
-                    return;
-                }
-            }
-
-            for (const msg of messages) {
-                const pendingStatus = idToStatus.get(msg.whatsapp_message_id);
-                
-                // Evita regressão
-                if (msg.status === 'read' && pendingStatus !== 'read') continue;
-                if (msg.status === 'delivered' && pendingStatus === 'SERVER_ACK') continue;
-                
-                if (msg.status !== pendingStatus) {
-                    // Fire-and-forget update
-                    supabase.from('messages')
-                        .update({ status: pendingStatus })
-                        .eq('id', msg.id)
-                        .then(({error}) => {
-                            if (error) console.error(`[EventProcessor] Erro atualizando status (messages.update):`, error);
-                        });
+                    // Enfileira p/ reconciliation assíncrona
+                    this.queueStatusUpdate(tenantId, instanceId, key.id, newStatus);
                 }
             }
         } catch (e) {

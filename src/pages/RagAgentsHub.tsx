@@ -152,6 +152,17 @@ function AgentModal({ isOpen, onClose, agent, onSave }: { isOpen: boolean, onClo
           </div>
           
           <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Mensagem Inicial (Sugestão)</label>
+            <textarea 
+              value={formData.initialMessage || ''}
+              onChange={e => setFormData({ ...formData, initialMessage: e.target.value })}
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
+              rows={2}
+              placeholder="Ex: Olá! Sou o especialista em vinhos. Como posso ajudar a escolher seu rótulo hoje?"
+            />
+          </div>
+          
+          <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Ícone</label>
             <div className="flex gap-3 flex-wrap">
               {availableIcons.map(iconObj => {
@@ -207,8 +218,9 @@ function RenderAgentIcon({ iconName, className }: { iconName: string, className?
 export default function RagAgentsHub() {
   const { 
     isOnboarded, 
-    businessType, 
-    setBusinessType, 
+    businessTypes, 
+    toggleBusinessType, 
+    setBusinessTypes,
     agents, 
     toggleAgent, 
     addAgent,
@@ -217,6 +229,7 @@ export default function RagAgentsHub() {
     setKnowledgeBase,
     completeOnboarding,
     resetOnboarding,
+    editOnboarding,
     selectedCategory,
     applyCategoryTemplate
   } = useRagStore();
@@ -226,14 +239,14 @@ export default function RagAgentsHub() {
   const [editingAgent, setEditingAgent] = useState<AgentSpecialist | null>(null);
 
   if (isOnboarded) {
-    return <DashboardView resetOnboarding={resetOnboarding} />;
+    return <DashboardView editOnboarding={editOnboarding} />;
   }
 
   const handleNext = () => setStep(s => Math.min(3, s + 1));
   const handlePrev = () => setStep(s => Math.max(1, s - 1));
 
   const isStepValid = () => {
-    if (step === 1) return !!businessType;
+    if (step === 1) return businessTypes.length > 0;
     if (step === 2) return agents.some(a => a.isActive);
     if (step === 3) return !!knowledgeBase.businessName && !!knowledgeBase.openingHours;
     return true;
@@ -256,13 +269,14 @@ export default function RagAgentsHub() {
       description: '',
       isActive: true,
       icon: 'Bot',
-      personality: ''
+      personality: '',
+      initialMessage: ''
     });
     setIsModalOpen(true);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-start pt-12 pb-24 px-4 sm:px-8 overflow-y-auto">
+    <div className="h-full bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-start pt-12 pb-24 px-4 sm:px-8 overflow-y-auto">
       
       {/* Progress Bar */}
       <div className="w-full max-w-3xl mb-8">
@@ -311,9 +325,11 @@ export default function RagAgentsHub() {
                       <button
                         key={cat.id}
                         onClick={() => {
-                          useRagStore.getState().setSelectedCategory(cat.id);
-                          setBusinessType(''); // Reseta a seleção ao mudar de categoria
-                          applyCategoryTemplate(cat.id); // Aplica template de agentes e campos
+                          if (selectedCategory !== cat.id) {
+                            useRagStore.getState().setSelectedCategory(cat.id);
+                            setBusinessTypes([]); // Reseta a seleção ao mudar de categoria
+                            applyCategoryTemplate(cat.id); // Aplica template de agentes e campos
+                          }
                         }}
                         className={cn(
                           "snap-start shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-2xl font-medium transition-all duration-300 border",
@@ -340,11 +356,11 @@ export default function RagAgentsHub() {
               >
                 {businessCategories.find(c => c.id === selectedCategory)?.types.map(type => {
                   const Icon = type.icon;
-                  const isSelected = businessType === type.id;
+                  const isSelected = businessTypes.includes(type.id);
                   return (
                     <button
                       key={type.id}
-                      onClick={() => setBusinessType(type.id)}
+                      onClick={() => toggleBusinessType(type.id)}
                       className={cn(
                         "flex flex-col items-center justify-center p-6 rounded-2xl border-2 transition-all duration-200 hover:scale-105",
                         isSelected 
@@ -402,7 +418,9 @@ export default function RagAgentsHub() {
                         </div>
                         <div className="flex-1">
                           <div className="flex items-center justify-between mb-1 pr-6">
-                            <h3 className="font-semibold text-slate-900 dark:text-white truncate">{agent.name}</h3>
+                            <h3 className="font-semibold text-slate-900 dark:text-white truncate">
+                              {agent.id === 'maestro' && knowledgeBase.botName ? `${knowledgeBase.botName} (Recepcionista)` : agent.name}
+                            </h3>
                             {agent.isActive && (
                               <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
                             )}
@@ -465,6 +483,16 @@ export default function RagAgentsHub() {
                   </h3>
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div>
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Nome do Robô / Assistente *</label>
+                      <input 
+                        type="text" 
+                        value={knowledgeBase.botName || ''}
+                        onChange={e => setKnowledgeBase({ botName: e.target.value })}
+                        placeholder="Ex: Miguel"
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                      />
+                    </div>
+                    <div>
                       <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Nome do Estabelecimento *</label>
                       <input 
                         type="text" 
@@ -497,6 +525,16 @@ export default function RagAgentsHub() {
                         type="text" 
                         value={knowledgeBase.businessAddress}
                         onChange={e => setKnowledgeBase({ businessAddress: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Link do Cardápio Digital</label>
+                      <input 
+                        type="url" 
+                        value={knowledgeBase.digitalMenuLink || ''}
+                        onChange={e => setKnowledgeBase({ digitalMenuLink: e.target.value })}
+                        placeholder="Ex: meucardapio.com/loja"
                         className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                     </div>
@@ -732,9 +770,10 @@ interface SimulatedMessage {
   content: React.ReactNode;
 }
 
-function DashboardView({ resetOnboarding }: { resetOnboarding: () => void }) {
-  const { agents, addAgent, updateAgent } = useRagStore();
+function DashboardView({ editOnboarding }: { editOnboarding: () => void }) {
+  const { agents, addAgent, updateAgent, knowledgeBase } = useRagStore();
   const activeAgents = agents.filter(a => a.isActive);
+  const botName = knowledgeBase.botName || 'Maestro';
 
   const [chatMessages, setChatMessages] = useState<SimulatedMessage[]>([
     {
@@ -746,8 +785,8 @@ function DashboardView({ resetOnboarding }: { resetOnboarding: () => void }) {
             <Bot className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white p-4 rounded-2xl rounded-tl-none">
-            <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400 mb-1">Maestro (Recepcionista)</p>
-            Olá! Sou o assistente virtual. Como posso ajudar você hoje? Teste enviando "ver cardápio", "fazer pedido", "reclamar" ou "falar com humano".
+            <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400 mb-1">{botName} (Recepcionista)</p>
+            Olá! Aqui é {knowledgeBase.botName ? botName : 'o assistente'}. Como posso ajudar você hoje? Teste enviando "ver cardápio", "fazer pedido", "reclamar" ou "falar com humano".
           </div>
         </div>
       )
@@ -791,7 +830,7 @@ function DashboardView({ resetOnboarding }: { resetOnboarding: () => void }) {
     const lowerText = userText.toLowerCase();
     
     let intent = 'duvida_geral';
-    let agentDestino = 'Maestro (Recepcionista)';
+    let agentDestino = `${botName} (Recepcionista)`;
     let agentRole = 'Orquestrador';
     let extracted: string[] = [];
     let agentReply: React.ReactNode = (
@@ -806,8 +845,7 @@ function DashboardView({ resetOnboarding }: { resetOnboarding: () => void }) {
       intent = 'saudacao';
       agentReply = (
         <div className="space-y-2">
-          <p>Olá! Seja muito bem-vindo! Sou o assistente virtual da casa. 👋</p>
-          <p>Você pode me pedir para <strong>ver o cardápio</strong>, <strong>fazer um pedido</strong>, saber nosso <strong>endereço</strong>, ou até mesmo <strong>falar com um atendente</strong>.</p>
+          <p>Olá! Seja muito bem-vindo! Aqui é {knowledgeBase.botName ? botName : 'o assistente'}. 👋</p>
           <p>Como posso ajudar hoje?</p>
         </div>
       );
@@ -949,13 +987,14 @@ function DashboardView({ resetOnboarding }: { resetOnboarding: () => void }) {
       description: '',
       isActive: true,
       icon: 'Bot',
-      personality: ''
+      personality: '',
+      initialMessage: ''
     });
     setIsModalOpen(true);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-4 sm:p-8">
+    <div className="h-full overflow-y-auto bg-slate-50 dark:bg-slate-900 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         
         {/* Header */}
@@ -968,7 +1007,7 @@ function DashboardView({ resetOnboarding }: { resetOnboarding: () => void }) {
             <p className="text-slate-500 dark:text-slate-400 mt-1">Sua equipe de atendimento está orquestrada e pronta.</p>
           </div>
           <button 
-            onClick={resetOnboarding}
+            onClick={editOnboarding}
             className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center gap-2"
           >
             <Settings className="w-4 h-4" />
@@ -1009,7 +1048,9 @@ function DashboardView({ resetOnboarding }: { resetOnboarding: () => void }) {
                       <RenderAgentIcon iconName={agent.icon} className="w-5 h-5" />
                     </div>
                     <div className="flex-1 pr-6">
-                      <h3 className="font-semibold text-sm text-slate-900 dark:text-white truncate">{agent.name}</h3>
+                      <h3 className="font-semibold text-sm text-slate-900 dark:text-white truncate">
+                        {agent.id === 'maestro' && knowledgeBase.botName ? `${knowledgeBase.botName} (Recepcionista)` : agent.name}
+                      </h3>
                       <p className={cn(
                         "text-xs transition-colors duration-500",
                         activeAgentRole === agent.role ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-slate-500 dark:text-slate-400"

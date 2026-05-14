@@ -98,6 +98,19 @@ export default function ClientLogin() {
          userRole = authResult.user.role;
          allowedInstances = authResult.user.allowed_instances || [];
          allowedCompanies = authResult.user.allowed_companies || [];
+         
+         if (allowedCompanies.length === 0) {
+            addDevLog('NO_ALLOWED_COMPANIES', 'Agente não tem empresas permitidas.', 'error');
+            setErrorMsg('Você não tem acesso a nenhuma empresa. Contate o administrador.');
+            setIsLoading(false);
+            return;
+         }
+
+         if (!allowedCompanies.includes(tenantData.id)) {
+            // Se a empresa principal (matriz) não estiver nas permitidas, pega a primeira permitida.
+            // O nome real será carregado pelo MainSidebar.tsx depois do login.
+            tenantData = { id: allowedCompanies[0], name: "Carregando..." };
+         }
       }
 
       if (tenantData.status === 'suspended') {

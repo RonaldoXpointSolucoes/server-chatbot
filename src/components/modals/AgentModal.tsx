@@ -75,7 +75,18 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
   };
 
   const toggleCompany = (id: string) => {
-    setAllowedCompanies(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
+    setAllowedCompanies(prev => {
+      if (prev.includes(id)) {
+        // Remover a empresa
+        const nextCompanies = prev.filter(c => c !== id);
+        // Remover também todas as instâncias que pertencem a essa empresa
+        const instancesToRemove = allInstances.filter(i => i.tenant_id === id).map(i => i.id);
+        setAllowedInstances(currInst => currInst.filter(i => !instancesToRemove.includes(i)));
+        return nextCompanies;
+      } else {
+        return [...prev, id];
+      }
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

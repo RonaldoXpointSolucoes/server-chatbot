@@ -266,7 +266,42 @@ class AutomationWorker {
 
             // 4. Envia resposta final
             if (finalResponseText && sock) {
-                await sock.sendMessage(jid, { text: finalResponseText });
+                const msgResult = await sock.sendMessage(jid, { text: finalResponseText });
+                if (msgResult && msgResult.key) {
+                    try {
+                        const { data: savedMsg } = await supabase.from('messages').insert({
+                            tenant_id: tenantId,
+                            instance_id: instanceId,
+                            conversation_id: conversationId,
+                            direction: 'outbound',
+                            message_type: 'text',
+                            status: 'sent',
+                            text_content: finalResponseText,
+                            whatsapp_message_id: msgResult.key.id,
+                            sender_type: 'bot',
+                            raw_payload: msgResult
+                        }).select('*').single();
+
+                        if (conversationId) {
+                            await supabase.from('conversations').update({
+                                updated_at: new Date().toISOString(),
+                                last_message_at: new Date().toISOString(),
+                                last_message_preview: finalResponseText.substring(0, 50)
+                            }).eq('id', conversationId);
+                        }
+
+                        if (savedMsg) {
+                            const { default: realtime } = await import('../realtime-publisher/index.js');
+                            await realtime.publishInboxEvent(tenantId, 'message.new', {
+                                message: savedMsg,
+                                contact_phone: jid.split('@')[0],
+                                conversation_id: conversationId
+                            });
+                        }
+                    } catch(err) {
+                        console.error('[AutomationWorker] Falha ao registrar envio no BD:', err);
+                    }
+                }
             }
 
         } catch (error) {

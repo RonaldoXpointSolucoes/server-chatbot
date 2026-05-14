@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus } from 'lucide-react';
+import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 
@@ -43,7 +43,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
         name: contactData.custom_name || contactData.name || '',
         fantasy_name: contactData.fantasy_name || '',
         document_type: contactData.document_type || 'contato',
-        document_number: contactData.document_number || '',
+        document_number: contactData.document_number ? formatDocumentNumber(contactData.document_number, contactData.document_type || 'cpf') : '',
         email: contactData.email || '',
         cep: contactData.cep || '',
         address_neighborhood: contactData.address_neighborhood || '',
@@ -114,16 +114,39 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (formData.name.trim()) {
-      setIsSaving(true);
-      try {
-        await onSave(formData);
-        onClose();
-      } catch (err) {
-        alert("Erro ao salvar contato.");
-      } finally {
-        setIsSaving(false);
-      }
+    setDocFeedback(null);
+    if (!formData.name.trim()) return;
+
+    if (formData.document_type === 'cpf' || formData.document_type === 'cnpj') {
+       const cleanDoc = formData.document_number.replace(/\D/g, '');
+       if (cleanDoc) {
+          setIsSaving(true);
+          const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+          const { supabase } = await import('../services/supabase');
+          let query = supabase.from('contacts').select('id, document_number').eq('tenant_id', tenantId).eq('document_number', cleanDoc);
+          
+          if (contactData && contactData.id) {
+             query = query.neq('id', contactData.id);
+          }
+          
+          const { data, error } = await query.limit(1);
+          
+          if (!error && data && data.length > 0) {
+             setDocFeedback(`Atenção: Este ${formData.document_type.toUpperCase()} já está cadastrado em outro contato.`);
+             setIsSaving(false);
+             return;
+          }
+       }
+    }
+
+    setIsSaving(true);
+    try {
+      await onSave(formData);
+      onClose();
+    } catch (err) {
+      alert("Erro ao salvar contato.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1003,6 +1026,81 @@ export function SnoozeModal({ isOpen, onClose, contactId }: SnoozeModalProps) {
                 </button>
              ))}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export interface AssociatedCompaniesModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  companies: any[];
+}
+
+export function AssociatedCompaniesModal({ isOpen, onClose, companies }: AssociatedCompaniesModalProps) {
+  const [copiedDoc, setCopiedDoc] = useState<string | null>(null);
+
+  if (!isOpen) return null;
+
+  const handleCopy = (doc: string) => {
+    navigator.clipboard.writeText(doc);
+    setCopiedDoc(doc);
+    setTimeout(() => setCopiedDoc(null), 2000);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
+      
+      <div className="relative w-full max-w-md bg-white dark:bg-[#111b21] rounded-[24px] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="flex items-center justify-between p-4 border-b border-black/5 dark:border-white/5 bg-[#f0f2f5] dark:bg-[#202c33]">
+          <h2 className="text-lg font-medium text-[#111b21] dark:text-[#e9edef] flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-indigo-500" />
+            Empresas Associadas
+          </h2>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+          {!companies || companies.length === 0 ? (
+            <div className="text-center py-8 text-[#54656f] dark:text-[#8696a0]">
+              <Building className="w-12 h-12 mx-auto mb-3 opacity-20" />
+              <p>Nenhuma empresa associada a este contato.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {companies.map((company, index) => (
+                <div key={company?.id || index} className="p-4 rounded-xl border border-black/5 dark:border-white/5 bg-[#f0f2f5] dark:bg-[#202c33] flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-[#111b21] dark:text-[#e9edef] text-sm">
+                      {company?.name || 'Empresa desconhecida'}
+                    </span>
+                    {company?.document_number && (
+                      <button
+                        onClick={() => handleCopy(company.document_number)}
+                        className="flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors"
+                      >
+                        {copiedDoc === company.document_number ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Copiado!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>{company.document_number}</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

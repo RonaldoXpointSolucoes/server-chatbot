@@ -2,7 +2,8 @@ import React, { memo } from 'react';
 import { 
   Bot, User, MoreVertical, Edit2, Trash2, Ban, 
   MessageSquareReply, Camera, Video, VideoOff, Mic, 
-  FileText, MapPin, Sparkles, Check, CheckCheck, RefreshCw 
+  FileText, MapPin, Sparkles, Check, CheckCheck, RefreshCw,
+  LayoutTemplate, Smartphone
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { cn, getContactDisplayName } from '../../pages/ChatDashboard';
@@ -350,10 +351,37 @@ export const MessageBubble = memo(({
         )}
         
         {(!msg.mediaType || (msg.mediaType !== 'document' && msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
-           <span className="text-[14px] leading-[1.4] block whitespace-pre-wrap break-words overflow-hidden shadow-none mt-1">
-              {renderMessageText(msg.text ? msg.text.replace(/^(?:磁|汐)\s*Vídeo\s*\n?/i, '').replace('梼 Formato não suportado (templateMessage)', '導 Mensagem Interativa (Abra no celular para ver)').replace('梼 Formato não suportado (highlyStructuredMessage)', '導 Mensagem Estruturada (Abra no celular para ver)') : msg.text)}
-              {!msg.buttons && <span className="inline-block w-[110px] h-3 ml-2 shrink-0"></span>}
-           </span>
+           (() => {
+             const t = msg.text || '';
+             const isUnsupported = t.includes('Mensagem não suportada');
+             const isInteractive = t.includes('Mensagem Interativa') || t.includes('Mensagem Estruturada');
+             const isSpecial = t.includes('Álbum de Fotos') || t.includes('Mensagem Editada');
+             
+             if (isUnsupported || isInteractive || isSpecial) {
+               return (
+                 <div className="flex flex-col gap-2 bg-gradient-to-br from-indigo-50/50 to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl border border-indigo-100 dark:border-gray-700/50 mt-1 shadow-sm group">
+                   <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                     <div className="bg-indigo-100 dark:bg-indigo-900/30 p-1.5 rounded-lg group-hover:scale-110 transition-transform">
+                       {isInteractive ? <LayoutTemplate size={18} /> : <Smartphone size={18} />}
+                     </div>
+                     <span className="font-semibold text-[13px]">
+                       {isInteractive ? 'Conteúdo Interativo' : isUnsupported ? 'Conteúdo não suportado' : t.replace(/^(?:📸|✏️)\s*/, '')}
+                     </span>
+                   </div>
+                   <span className="text-[12px] text-gray-600 dark:text-gray-300 leading-snug">
+                     {isInteractive ? 'Este tipo de mensagem (catálogo, botões ou listas) deve ser visualizado no aplicativo WhatsApp oficial.' : 'Esta mensagem utiliza um formato especial. Recomendamos abrir o WhatsApp no seu celular para visualizar.'}
+                   </span>
+                 </div>
+               );
+             }
+             
+             return (
+               <span className="text-[14px] leading-[1.4] block whitespace-pre-wrap break-words overflow-hidden shadow-none mt-1">
+                  {renderMessageText(t.replace(/^(?:磁|汐)\s*Vídeo\s*\n?/i, ''))}
+                  {!msg.buttons && <span className="inline-block w-[110px] h-3 ml-2 shrink-0"></span>}
+               </span>
+             );
+           })()
         )}
 
         {/* Render Interactive Buttons */}

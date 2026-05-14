@@ -56,6 +56,13 @@ export interface AgentType {
   email?: string | null;
 }
 
+export interface ContactGroup {
+  id: string;
+  name: string;
+  color?: string;
+  icon?: string;
+}
+
 export interface TenantInfo {
   id: string;
   name: string;
@@ -152,6 +159,11 @@ interface ChatState {
   updateQuickReply: (id: string, shortcut: string, content: string) => Promise<void>;
   deleteQuickReply: (id: string) => Promise<void>;
   
+  // Contact Groups (Grupos Empresariais)
+  addContactGroup: (group: Omit<ContactGroup, 'id'>) => Promise<void>;
+  updateContactGroup: (id: string, group: Partial<ContactGroup>) => Promise<void>;
+  deleteContactGroup: (id: string) => Promise<void>;
+  
   // Theme Global
   theme: 'light' | 'dark';
   setTheme: (theme: 'light' | 'dark') => void;
@@ -160,6 +172,7 @@ interface ChatState {
   logOperation: (action: 'INSERT' | 'UPDATE' | 'DELETE', tableName: string, recordId: string, beforeState: any, afterState: any) => Promise<void>;
   undoOperation: (logId: string, password: string) => Promise<{success: boolean; error?: string}>;
   toggleUnread: (contactId: string, currentUnread: number) => Promise<void>;
+  markAsRead: (contactId: string) => Promise<void>;
   resolveConversation: (contactId: string) => Promise<void>;
   clearStore: () => void;
 }
@@ -500,6 +513,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set(s => ({
          quickReplies: s.quickReplies.filter(q => q.id !== id)
       }));
+  },
+
+  addContactGroup: async (group) => {
+    const state = get();
+    if (!state.tenantInfo) return;
+    const currentGroups: ContactGroup[] = state.tenantInfo.settings?.contactGroups || [];
+    const newGroup = { ...group, id: crypto.randomUUID() };
+    await state.updateTenantSettings({ contactGroups: [...currentGroups, newGroup] });
+  },
+
+  updateContactGroup: async (id, payload) => {
+    const state = get();
+    if (!state.tenantInfo) return;
+    const currentGroups: ContactGroup[] = state.tenantInfo.settings?.contactGroups || [];
+    const updated = currentGroups.map(g => g.id === id ? { ...g, ...payload } : g);
+    await state.updateTenantSettings({ contactGroups: updated });
+  },
+
+  deleteContactGroup: async (id) => {
+    const state = get();
+    if (!state.tenantInfo) return;
+    const currentGroups: ContactGroup[] = state.tenantInfo.settings?.contactGroups || [];
+    const updated = currentGroups.filter(g => g.id !== id);
+    await state.updateTenantSettings({ contactGroups: updated });
   },
 
   logOperation: async (action, tableName, recordId, beforeState, afterState) => {
@@ -1579,6 +1616,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  markAsRead: async (contactId: string) => {
+    const state = get();
+    const contact = state.contacts.find(c => c.id === contactId);
+    if (!contact || contact.unread === 0) return;
+
+    set((s) => ({
+      contacts: s.contacts.map(c => c.id === contactId ? { ...c, unread: 0 } : c)
+    }));
+
+    try {
+      await supabase.from('conversations').update({ unread_count: 0 }).eq('contact_id', getRealContactId(contactId));
+    } catch (e) {
+      console.error('Erro ao marcar como lida:', e);
+    }
+  },
+
   fetchTenantLabels: async () => {
      const tenant = get().tenantInfo;
      if (!tenant) return;
@@ -1796,7 +1849,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           
        const activeChannel = get().activeChannelFilter;
        if (activeChannel) {
-          convQuery = convQuery.eq('instance_id', activeChannel);
+          convQuery = convQuery.or(`instance_id.eq.${activeChannel},unread_count.gt.0`);
        }
 
        const { data: dbConvs } = await convQuery
@@ -2593,12 +2646,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
         const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
         const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
-        if (effectiveInstanceId && !isGlobalAdmin) {
+        if (!isGlobalAdmin) {
             if (allowedStr) {
                 try { 
                     const allowedInstances = JSON.parse(allowedStr); 
                     if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                        if (!allowedInstances.includes(effectiveInstanceId)) return;
+                        if (!effectiveInstanceId || !allowedInstances.includes(effectiveInstanceId)) return;
                     } else {
                         return; // Agents with no allowed instances get nothing
                     }

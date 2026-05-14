@@ -5,6 +5,30 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import { uploadResumableFile } from '../services/tusUploader';
 
+const ExpandableText = ({ content }: { content: string }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isLong = content.split('\n').length > 3 || content.length > 150;
+
+  return (
+    <div className="mt-1">
+      <p className={`text-gray-700 dark:text-[#d1d7db] whitespace-pre-wrap ${!isExpanded && isLong ? 'line-clamp-3' : ''}`}>
+        {content}
+      </p>
+      {isLong && (
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsExpanded(!isExpanded);
+          }}
+          className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium mt-1.5 transition-colors"
+        >
+          {isExpanded ? 'Ver menos' : 'Ver tudo'}
+        </button>
+      )}
+    </div>
+  );
+};
+
 export function CannedResponses() {
   const navigate = useNavigate();
   const { quickReplies, fetchQuickReplies, addQuickReply, updateQuickReply, deleteQuickReply, tenantInfo } = useChatStore();
@@ -303,7 +327,7 @@ export function CannedResponses() {
                           </div>
                         )}
                       </div>
-                      <p className="text-gray-700 dark:text-[#d1d7db] whitespace-pre-wrap">{reply.content}</p>
+                      <ExpandableText content={reply.content} />
                     </div>
                     <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
