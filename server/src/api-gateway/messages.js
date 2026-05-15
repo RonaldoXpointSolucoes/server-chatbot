@@ -100,7 +100,24 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
 
         if (!instanceId) return res.status(400).json({ error: 'instanceId is required' });
 
-        const sock = sessionManager.getSocket(instanceId);
+        let sock = sessionManager.getSocket(instanceId);
+        
+        // Anti-Bug: Se o socket estiver no meio do boot (deploy/restart), aguarda
+        if (!sock && sessionManager.connectingState.has(instanceId)) {
+            console.log(`[Sync-History API] Segurando req. Aguardando socket conectar: ${instanceId}`);
+            sock = await sessionManager.connectingState.get(instanceId);
+        }
+        
+        // Anti-Bug: Se o socket não existe na memória (servidor reiniciou e não carregou ainda), força o boot!
+        if (!sock) {
+             console.log(`[Sync-History API] Forçando boot emergencial do socket na rota de sync: ${instanceId}`);
+             try {
+                 sock = await sessionManager.createSession(tenantId, instanceId);
+             } catch (e) {
+                 return res.status(400).json({ error: 'WhatsApp socket offline para esta instancia.' });
+             }
+        }
+        
         if (!sock) return res.status(400).json({ error: 'Socket offline para esta instancia' });
 
         // Identifica a conversa / JID no Supabase
