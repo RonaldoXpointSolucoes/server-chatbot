@@ -20,6 +20,7 @@ class EventProcessor {
         setInterval(() => this.flushQueue(), 2000);
         
         this.tenantConfigs = new Map();
+        this.instanceConfigs = new Map();
         this.lastGlobalMessageTimestamp = 0;
         
         this.pendingStatuses = new Map();
@@ -151,6 +152,22 @@ class EventProcessor {
         }
     }
 
+    async getInstanceConfig(instanceId) {
+        if (!instanceId) return {};
+        const cached = this.instanceConfigs.get(instanceId);
+        if (cached && (Date.now() - cached.timestamp < 5000)) {
+            return cached.config;
+        }
+        try {
+            const { data } = await supabase.from('whatsapp_instances').select('settings').eq('id', instanceId).single();
+            const config = data?.settings || {};
+            this.instanceConfigs.set(instanceId, { config, timestamp: Date.now() });
+            return config;
+        } catch (e) {
+            return {};
+        }
+    }
+
     // Auxiliar: Filtra se é um grupo
     isGroup(jid) {
         return jid && jid.endsWith('@g.us');
@@ -186,7 +203,8 @@ class EventProcessor {
 
             if (!jid) continue;
             
-            const config = await this.getTenantConfig(tenantId);
+            const instanceConfig = await this.getInstanceConfig(instanceId);
+            const allowedGroups = instanceConfig.allowed_groups || [];
             
             // Ignora status e LIDs isolados, forçando a ignorar as ecos de múltiplos aparelhos para IDs nativos
             if (this.isBroadcast(jid) || this.isLid(jid)) {
@@ -195,11 +213,12 @@ class EventProcessor {
                 continue;
             }
             
-            // Ignora grupos dependendo da opção da empresa
-            if (config.ignore_groups && this.isGroup(jid)) {
-                // Silenciado ou reduzido para não floodar os logs
-                console.log(`[EventProcessor] Mensagem Descartada - Motivo: Grupo (Configurado para ignorar). JID: ${jid}`);
-                continue;
+            // Ignora grupos se não estiverem na lista de permitidos
+            if (this.isGroup(jid)) {
+                if (!allowedGroups.includes(jid)) {
+                    console.log(`[EventProcessor] Mensagem Descartada - Motivo: Grupo não sincronizado manualmente. JID: ${jid}`);
+                    continue;
+                }
             }
 
             // [LID Sync / Ciphertext Error Override]
@@ -1022,15 +1041,19 @@ class EventProcessor {
         if (!updates || updates.length === 0) return;
 
         try {
-            const config = await this.getTenantConfig(tenantId);
+            const instanceConfig = await this.getInstanceConfig(instanceId);
+            const allowedGroups = instanceConfig.allowed_groups || [];
 
             for (const update of updates) {
                 if (!update.key || !update.key.id) continue;
                 
                 const jid = update.key.remoteJid;
                 
-                // Evita processar status para grupos/broadcast se configurado
-                if (jid && (this.isBroadcast(jid) || this.isLid(jid) || (config.ignore_groups && this.isGroup(jid)))) {
+                if (jid && (this.isBroadcast(jid) || this.isLid(jid))) {
+                    continue;
+                }
+                
+                if (jid && this.isGroup(jid) && !allowedGroups.includes(jid)) {
                     continue;
                 }
 

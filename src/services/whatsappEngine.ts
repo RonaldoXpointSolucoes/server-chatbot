@@ -250,3 +250,32 @@ export const acceptEngineGroupInvite = async (tenantId: string, instanceId: stri
   if (!res.ok) throw new Error('Falha ao aceitar convite do grupo');
   return res.json();
 };
+
+export const fetchEngineGroupProfilePicture = async (tenantId: string, instanceId: string, apiKey: string, groupId: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/profile-picture`, {
+    method: 'GET',
+    headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
+  });
+  if (!res.ok) throw new Error('Falha ao obter foto do grupo');
+  return res.json();
+};
+
+export const updateEngineGroupProfilePicture = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, url: string) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/profile-picture`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
+    body: JSON.stringify({ url })
+  });
+  if (!res.ok) throw new Error('Falha ao atualizar foto do grupo');
+  return res.json();
+};
+
+export const toggleEngineGroupEphemeral = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, ephemeralExpiration: number) => {
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/ephemeral`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
+    body: JSON.stringify({ ephemeralExpiration })
+  });
+  if (!res.ok) throw new Error('Falha ao configurar mensagens temporárias');
+  return res.json();
+};

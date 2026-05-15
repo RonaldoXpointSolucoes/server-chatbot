@@ -751,6 +751,7 @@ export function MainSidebar() {
             </div>
           )}
         </div>
+      </div>
 
          {/* User Footer Profile */}
       <div className="absolute bottom-0 w-full h-[60px] bg-[#202c33] border-t border-[#2a3942] flex items-center px-4 cursor-pointer hover:bg-[#2a3942] transition-colors group">
@@ -773,7 +774,6 @@ export function MainSidebar() {
         >
           <LogOut size={16} />
         </button>
-      </div>
       </div>
 
       {/* Context Menu das Caixas de Entrada */}

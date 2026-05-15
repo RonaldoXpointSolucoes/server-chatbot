@@ -256,7 +256,7 @@ function parseAdvancedMsgMetadata(m: any) {
 
           if (targetMsg?.templateMessage?.interactiveMessageTemplate) {
               const imt = targetMsg.templateMessage.interactiveMessageTemplate;
-              let full = [];
+              const full = [];
               if (imt.header?.title) full.push(`*${imt.header.title.trim()}*`);
               if (imt.body?.text) full.push(imt.body.text.trim());
               if (imt.footer?.text) full.push(`_${imt.footer.text.trim()}_`);
@@ -273,7 +273,7 @@ function parseAdvancedMsgMetadata(m: any) {
               }
           } else if (targetMsg?.interactiveMessage) {
               const im = targetMsg.interactiveMessage;
-              let full = [];
+              const full = [];
               if (im.header?.title) full.push(`*${im.header.title.trim()}*`);
               else if (im.header?.subtitle) full.push(`*${im.header.subtitle.trim()}*`);
               if (im.body?.text) full.push(im.body.text.trim());
@@ -291,7 +291,7 @@ function parseAdvancedMsgMetadata(m: any) {
               }
           } else if (targetMsg?.templateMessage?.hydratedTemplate) {
              const ht = targetMsg.templateMessage.hydratedTemplate;
-             let full = [];
+             const full = [];
              if (ht.hydratedTitleText) full.push(`*${ht.hydratedTitleText.trim()}*`);
              if (ht.hydratedContentText) full.push(ht.hydratedContentText.trim());
              if (ht.hydratedFooterText) full.push(`_${ht.hydratedFooterText.trim()}_`);
@@ -306,7 +306,7 @@ function parseAdvancedMsgMetadata(m: any) {
              }
           } else if (targetMsg?.buttonsMessage) {
              const bm = targetMsg.buttonsMessage;
-             let full = [];
+             const full = [];
              if (bm.contentText) full.push(bm.contentText.trim());
              if (bm.footerText) full.push(`_${bm.footerText.trim()}_`);
              if (full.length > 0) derivedText = full.join('\n\n');
@@ -319,7 +319,7 @@ function parseAdvancedMsgMetadata(m: any) {
              }
           } else if (targetMsg?.listMessage) {
              const lm = targetMsg.listMessage;
-             let full = [];
+             const full = [];
              if (lm.title) full.push(`*${lm.title.trim()}*`);
              if (lm.description) full.push(lm.description.trim());
              if (lm.footerText) full.push(`_${lm.footerText.trim()}_`);
@@ -984,7 +984,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!response.ok) throw new Error("Erro ao obter a mídia para encaminhamento.");
       const blob = await response.blob();
       
-      let initialType = blob.type;
+      const initialType = blob.type;
       let ext = initialType.split('/')[1] || 'bin';
       
       // Mapeia extensões
@@ -1252,7 +1252,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const effectiveInstanceId = contact.instance_id || 'default';
       const compositeId = contact.id.includes('_') ? contact.id : `${contact.id}_${effectiveInstanceId}`;
 
-      let targetIndex = state.contacts.findIndex(c => 
+      const targetIndex = state.contacts.findIndex(c => 
          c.id === compositeId ||
          c.id === contact.id ||
          (((c.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) || 
@@ -1312,7 +1312,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   updateContactCRM: async (contactId, payload) => {
     const currentState = get().contacts.find(c => c.id === contactId);
-    let beforeState = currentState ? { ...currentState } : null;
+    const beforeState = currentState ? { ...currentState } : null;
 
     // UI Otimista: caso seja passado 'name', garantimos custom_name = name e name renderizado
     set((state) => ({
@@ -2093,12 +2093,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
            const apiKey = instDataDB?.api_key || '';
            
            if (instDataDB?.status === 'connected') {
-             set({ evolutionConnected: true });
-             get().fetchInitialData();
+             try {
+                await fetchEngineStatus(currentTenantId, tenantData.evolution_api_instance, apiKey);
+                set({ evolutionConnected: true, modalReason: null });
+                get().fetchInitialData();
+             } catch (e) {
+                set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
+             }
            } else if (instDataDB?.status === 'connecting') {
              set({ evolutionConnected: false });
            } else {
-             set({ evolutionConnected: false });
+             try {
+                await fetchEngineStatus(currentTenantId, tenantData.evolution_api_instance, apiKey);
+                set({ evolutionConnected: false });
+             } catch (e) {
+                set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
+             }
            }
         } else {
            set({ evolutionConnected: false });
@@ -2166,7 +2176,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         
         // Puxa conversa pra este contato respeitando a instância!
         const localContact = get().contacts.find(c => c.id === contactId);
-        let conv_id = localContact?.conv_id;
+        const conv_id = localContact?.conv_id;
         let conv = null;
 
         if (conv_id) {
@@ -2224,7 +2234,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
            // O array bruto pode vir fora de ordem. Convertendo para ms caso haja epoch.
            const mappedMsgs = messagesArray.map(m => {
                const advanced = parseAdvancedMsgMetadata(m);
-               let realTimestamp = new Date(m.timestamp);
+               const realTimestamp = new Date(m.timestamp);
 
                return {
                    id: m.id,
@@ -2745,7 +2755,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele
         set((s) => {
-           let u = [...s.contacts];
+           const u = [...s.contacts];
            const i = u.findIndex(c => c.id === cid);
            if (i !== -1) {
               const updatedContact = { ...u[i] };
@@ -2792,7 +2802,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         console.log('[Realtime] Message UPDATE:', m);
         set((s) => {
-           let updatedContacts = [...s.contacts];
+           const updatedContacts = [...s.contacts];
            // Tenta achar com fallback iterando as mensagens para bypassar conversa ausente no state.
            for (let i = 0; i < updatedContacts.length; i++) {
               if (!updatedContacts[i].messages) continue;
@@ -2855,7 +2865,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
                            clearInterval((window as any)._disconnectTimer);
                            (window as any)._disconnectTimer = null;
                            (window as any)._failCheckCount = 0;
-                           set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp caiu ou o servidor reiniciou. Tentando reconectar...' });
+                           
+                           // Check if the backend is actually down or if it's just WhatsApp disconnected
+                           try {
+                              const { fetchEngineStatus } = await import('../services/whatsappEngine');
+                              await fetchEngineStatus(t.id, inst.id, '');
+                              set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp caiu. Escaneie o QR Code novamente para reconectar.' });
+                           } catch (err) {
+                              set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal parou de responder. Tentando reconectar...' });
+                           }
                         }
                      }, 10000);
                   }

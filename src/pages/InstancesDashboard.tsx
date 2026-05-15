@@ -105,7 +105,7 @@ export default function InstancesDashboard() {
                      return inst; // Se engine não responder 200, confia no Supabase
                   }
               } catch(e) {
-                 return { ...inst, status: 'offline' }; // Fallback to offline to permit a reconnect attempt
+                 return { ...inst, status: 'server_offline' }; // Fallback to server_offline to indicate Node is down
               }
           }
           return inst;
@@ -352,7 +352,8 @@ export default function InstancesDashboard() {
   const getStatusBadge = (status: string) => {
     if (status === 'connected' || status === 'open') return <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"><Signal size={12} className="animate-pulse" /> Conectado</span>;
     if (status === 'connecting') return <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-orange-500/10 text-orange-600 border border-orange-500/20"><RefreshCcw size={12} className="animate-spin" /> Conectando</span>;
-    return <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-red-500/10 text-red-600 border border-red-500/20"><AlertCircle size={12} /> Desconectado</span>;
+    if (status === 'server_offline') return <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-red-500/10 text-red-600 border border-red-500/20"><AlertCircle size={12} /> Servidor Offline</span>;
+    return <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-gray-500/10 text-gray-600 border border-gray-500/20"><AlertCircle size={12} /> Desconectado</span>;
   };
 
   return (
