@@ -571,6 +571,50 @@ router.post('/instances/:instanceId/groups/accept-invite/:code', requireTenant, 
     }
 });
 
+// Obter foto do grupo
+router.get('/instances/:instanceId/groups/:groupId/profile-picture', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, groupId } = req.params;
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        const url = await sock.profilePictureUrl(groupId, 'image').catch(() => null);
+        res.json({ ok: true, url });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Alterar foto do grupo
+router.put('/instances/:instanceId/groups/:groupId/profile-picture', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, groupId } = req.params;
+        const { url } = req.body;
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        await sock.updateProfilePicture(groupId, { url });
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Ligar/Desligar mensagens temporárias
+router.put('/instances/:instanceId/groups/:groupId/ephemeral', requireTenant, async (req, res) => {
+    try {
+        const { instanceId, groupId } = req.params;
+        const { ephemeralExpiration } = req.body;
+        const sock = sessionManager.getSocket(instanceId);
+        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        await sock.groupToggleEphemeral(groupId, ephemeralExpiration);
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
     try {
         const { instanceId } = req.params;
