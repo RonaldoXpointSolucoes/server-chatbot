@@ -102,6 +102,7 @@ export default function EvolutionModal({
   const [loading, setLoading] = useState(false);
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [engineUser, setEngineUser] = useState<any>(null);
 
   const [tab, setTab] = useState<"existing" | "new">("new");
@@ -169,6 +170,7 @@ export default function EvolutionModal({
   const handleConnectExisting = async (inst: any) => {
     setLoading(true);
     setError(null);
+    setSuccessMsg(null);
     setQrBase64(null);
     try {
       if (
@@ -231,6 +233,7 @@ export default function EvolutionModal({
   const handleGenerateNew = async () => {
     setLoading(true);
     setError(null);
+    setSuccessMsg(null);
     setQrBase64(null);
 
     const nameStr = customName.trim();
@@ -312,6 +315,21 @@ export default function EvolutionModal({
       }
     }, 20000); // 20s timeout
 
+    let pollInterval: any;
+
+    const handleSuccess = () => {
+      setSuccessMsg("Conectado com sucesso! Preparando ambiente...");
+      setLoading(false);
+      setQrBase64(null);
+      setActivePollingId(null);
+      setEvolutionConnection(true, activePollingId);
+      useChatStore.getState().syncEvolutionContacts(activePollingId);
+      setTimeout(() => {
+        setSuccessMsg(null);
+        onClose();
+      }, 2500);
+    };
+
     channel
       .on("broadcast", { event: "instance.qr_updated" }, (payload: any) => {
         if (payload.payload?.qr_code) {
@@ -331,23 +349,36 @@ export default function EvolutionModal({
           setQrBase64(null);
           setActivePollingId(null);
         } else if (st === "connected") {
-          setLoading(false);
-          setQrBase64(null);
-          setActivePollingId(null);
-          setEvolutionConnection(true, activePollingId);
-          useChatStore.getState().syncEvolutionContacts(activePollingId);
-          setTimeout(onClose, 1000);
+          handleSuccess();
         }
       })
       .subscribe((status) => {
         console.log(`[Realtime] Status inscrição modal:`, status);
+        if (status === 'SUBSCRIBED') {
+          pollInterval = setInterval(async () => {
+            try {
+              if(!tenantId || !activePollingId) return;
+              const currInst = existingInstances.find((i) => i.id === activePollingId);
+              if(!currInst) return;
+              
+              const st = await fetchEngineStatus(tenantId, activePollingId, currInst.api_key || "");
+              if (st?.data?.status === "connected") {
+                handleSuccess();
+                clearInterval(pollInterval);
+              }
+            } catch (e) {
+              // ignora erro silencioso no polling
+            }
+          }, 2500);
+        }
       });
 
     return () => {
       clearTimeout(timeoutId);
+      if (pollInterval) clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
-  }, [activePollingId, loading]);
+  }, [activePollingId, loading, existingInstances]);
 
   useEffect(() => {
     // If modal opens and we are marked as connected, let's load user from v2 status
@@ -437,14 +468,14 @@ export default function EvolutionModal({
 
       const { data: existingContacts } = await supabase
         .from('contacts')
-        .select('id, phone_number, tags')
+        .select('id, phone, tags')
         .eq('tenant_id', cId);
 
       const existingMap = new Map();
       if (existingContacts) {
         existingContacts.forEach(c => {
-          if (c.phone_number) {
-            existingMap.set(c.phone_number, c);
+          if (c.phone) {
+            existingMap.set(c.phone, c);
           }
         });
       }
@@ -471,7 +502,8 @@ export default function EvolutionModal({
             id: crypto.randomUUID(),
             tenant_id: cId,
             name: pName,
-            phone_number: num,
+            phone: num,
+            whatsapp_jid: p.id,
             tags: [targetTag.id]
           });
         }
@@ -526,7 +558,14 @@ export default function EvolutionModal({
             </div>
           )}
 
-          {isTargetConnected ? (
+          {successMsg && (
+            <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 p-4 rounded-2xl text-sm font-semibold mb-4 flex items-center justify-center w-full gap-2 transition-all animate-in zoom-in duration-300">
+              <CheckCircle size={20} className="animate-pulse" />
+              <span>{successMsg}</span>
+            </div>
+          )}
+
+          {isTargetConnected && !successMsg ? (
             <div className="flex flex-col w-full animate-in zoom-in slide-in-from-bottom-4 duration-500 delay-150">
               <div className="flex flex-col items-center bg-emerald-500/10 p-6 rounded-3xl border border-emerald-500/20 mb-2 relative overflow-hidden backdrop-blur-md">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
@@ -1224,7 +1263,8 @@ export default function EvolutionModal({
                                           const { data: existingContact } = await supabase
                                             .from("contacts")
                                             .select("*")
-                                            .eq("id", selectedGroup.id)
+                                            .eq("whatsapp_jid", selectedGroup.id)
+                                            .eq("tenant_id", cId)
                                             .maybeSingle();
 
                                           if (existingContact) {
@@ -1233,12 +1273,10 @@ export default function EvolutionModal({
                                             const { data: newContact } = await supabase
                                               .from("contacts")
                                               .insert({
-                                                id: selectedGroup.id,
                                                 tenant_id: cId,
                                                 name: groupSubject,
                                                 phone: num,
                                                 whatsapp_jid: selectedGroup.id,
-                                                is_group: true,
                                                 profile_picture_url: groupMetadata?.pictureUrl || ""
                                               })
                                               .select()

@@ -159,11 +159,13 @@ class EventProcessor {
             return cached.config;
         }
         try {
-            const { data } = await supabase.from('whatsapp_instances').select('settings').eq('id', instanceId).single();
+            const { data, error } = await supabase.from('whatsapp_instances').select('settings').eq('id', instanceId).single();
+            if (error) console.error('[EventProcessor] Erro ao buscar config da instância:', error);
             const config = data?.settings || {};
             this.instanceConfigs.set(instanceId, { config, timestamp: Date.now() });
             return config;
         } catch (e) {
+            console.error('[EventProcessor] Exception ao buscar config da instância:', e);
             return {};
         }
     }
@@ -216,7 +218,7 @@ class EventProcessor {
             // Ignora grupos se não estiverem na lista de permitidos
             if (this.isGroup(jid)) {
                 if (!allowedGroups.includes(jid)) {
-                    console.log(`[EventProcessor] Mensagem Descartada - Motivo: Grupo não sincronizado manualmente. JID: ${jid}`);
+                    console.log(`[EventProcessor] Mensagem Descartada - Motivo: Grupo não sincronizado manualmente. JID: ${jid}. Allowed: ${JSON.stringify(allowedGroups)}`);
                     continue;
                 }
             }

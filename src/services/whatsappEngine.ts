@@ -28,17 +28,19 @@ export const sendNativeMessage = async (tenantId: string, instanceId: string, nu
     body: JSON.stringify({ method: 'sendMessage', args: [number, { text }] })
   });
   
-  if (!res.ok) {
-     let errorDetail = 'Falha desconhecida';
-     try {
-       const errJson = await res.json();
-       errorDetail = errJson.error || JSON.stringify(errJson);
-     } catch (e) {
-       errorDetail = await res.text();
-     }
-     throw new Error(`Falha ao injetar mensagem nativa: ${res.status} - ${errorDetail}`);
+  let resJson;
+  try {
+    resJson = await res.json();
+  } catch(e) {
+    resJson = {};
   }
-  return res.json();
+
+  if (!res.ok || resJson.ok === false) {
+     const errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
+     throw new Error(`Falha ao injetar mensagem nativa: ${errorDetail}`);
+  }
+  
+  return resJson;
 };
 
 export const sendTextMessage = sendNativeMessage;
@@ -54,17 +56,19 @@ export const editNativeMessage = async (tenantId: string, instanceId: string, nu
     body: JSON.stringify({ method: 'sendMessage', args: [number, { text: newText, edit: messageKey }] })
   });
   
-  if (!res.ok) {
-     let errorDetail = 'Falha desconhecida';
-     try {
-       const errJson = await res.json();
-       errorDetail = errJson.error || JSON.stringify(errJson);
-     } catch (e) {
-       errorDetail = await res.text();
-     }
-     throw new Error(`Falha ao editar mensagem nativa: ${res.status} - ${errorDetail}`);
+  let resJson;
+  try {
+    resJson = await res.json();
+  } catch(e) {
+    resJson = {};
   }
-  return res.json();
+
+  if (!res.ok || resJson.ok === false) {
+     const errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
+     throw new Error(`Falha ao editar mensagem nativa: ${errorDetail}`);
+  }
+  
+  return resJson;
 };
 
 export const deleteNativeMessage = async (tenantId: string, instanceId: string, number: string, messageKey: any, apiKey: string) => {
@@ -78,17 +82,19 @@ export const deleteNativeMessage = async (tenantId: string, instanceId: string, 
     body: JSON.stringify({ method: 'sendMessage', args: [number, { delete: messageKey }] })
   });
   
-  if (!res.ok) {
-     let errorDetail = 'Falha desconhecida';
-     try {
-       const errJson = await res.json();
-       errorDetail = errJson.error || JSON.stringify(errJson);
-     } catch (e) {
-       errorDetail = await res.text();
-     }
-     throw new Error(`Falha ao apagar mensagem nativa: ${res.status} - ${errorDetail}`);
+  let resJson;
+  try {
+    resJson = await res.json();
+  } catch(e) {
+    resJson = {};
   }
-  return res.json();
+
+  if (!res.ok || resJson.ok === false) {
+     const errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
+     throw new Error(`Falha ao apagar mensagem nativa: ${errorDetail}`);
+  }
+  
+  return resJson;
 };
 
 export const logoutEngine = async (tenantId: string, instanceId: string, apiKey: string) => {

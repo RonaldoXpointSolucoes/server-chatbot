@@ -17,6 +17,22 @@ export default function DevLogger() {
   const [telemetry, setTelemetry] = useState<{ cpu: number, memory: number, uptime: number } | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   
+  const [windowSize, setWindowSize] = useState({
+    width: typeof window !== 'undefined' ? window.innerWidth : 0,
+    height: typeof window !== 'undefined' ? window.innerHeight : 0,
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setWindowSize({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const engineUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
   const checkEngineStatus = async () => {
@@ -395,6 +411,10 @@ export default function DevLogger() {
                  <div className="flex items-center gap-1.5 text-orange-300 bg-orange-900/20 px-2 py-0.5 rounded-md border border-orange-500/20">
                     <Calendar size={12} />
                     <span>Compilação: {serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString('pt-BR') : 'Indisponível'}</span>
+                 </div>
+                 <div className="flex items-center gap-1.5 text-purple-300 bg-purple-900/20 px-2 py-0.5 rounded-md border border-purple-500/20" title="Resolução atual da tela">
+                    <AppWindow size={12} />
+                    <span>{windowSize.width}x{windowSize.height}</span>
                  </div>
                  {telemetry && (
                    <>

@@ -343,13 +343,36 @@ function sanitizeContactName(targetName: string | null | undefined, fallbackPhon
   }
   return targetName;
 }
+const instanceStatusTimeouts: Record<string, ReturnType<typeof setTimeout>> = {};
 
 export const useChatStore = create<ChatState>((set, get) => ({
   contacts: [],
   activeChatId: null,
   evolutionConnected: false,
   instancesStatus: {},
-  setInstanceStatus: (id, status) => set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } })),
+  setInstanceStatus: (id, status) => {
+    // Implementa regra moderna de consulta: Aguarda alguns segundos antes de setar offline/connecting
+    // Se a conexão piscar, o timeout é limpo pelo status 'connected'
+    if (status === 'connected') {
+      if (instanceStatusTimeouts[id]) {
+        clearTimeout(instanceStatusTimeouts[id]);
+        delete instanceStatusTimeouts[id];
+      }
+      set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
+    } else {
+      // offline ou connecting
+      const currentState = get().instancesStatus[id];
+      if (currentState !== status) {
+        if (!instanceStatusTimeouts[id]) {
+          // Aguarda 10 segundos. Se a conexão voltar nesse período, o 'connected' cancela essa execução.
+          instanceStatusTimeouts[id] = setTimeout(() => {
+            set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
+            delete instanceStatusTimeouts[id];
+          }, 10000);
+        }
+      }
+    }
+  },
   connectedInstanceName: null,
   tenantInfo: null,
   agents: [],
@@ -1206,11 +1229,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (optIndex !== -1) {
               const updatedMsgs = [...c.messages];
               updatedMsgs[optIndex] = { ...msg, sender: 'human' }; // substitui pelo registro do Realtime com UUID real mantendo verde na UI
+              updatedMsgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
               return { ...c, messages: updatedMsgs, conv_status: updatedStatus, snoozed_until: updatedSnooze };
             }
           }
           
-          return { ...c, messages: [...c.messages, msg], conv_status: updatedStatus, snoozed_until: updatedSnooze };
+          // Prevenção de Bug de Ordenação Otimista: se for uma mensagem otimista, garante que ela vá para o fim
+          if (String(msg.id).startsWith('optimistic-') && c.messages.length > 0) {
+             const lastTimestamp = c.messages[c.messages.length - 1].timestamp.getTime();
+             if (msg.timestamp.getTime() <= lastTimestamp) {
+                 msg.timestamp = new Date(lastTimestamp + 1000);
+             }
+          }
+          
+          const newMessages = [...c.messages, msg];
+          newMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+          
+          return { ...c, messages: newMessages, conv_status: updatedStatus, snoozed_until: updatedSnooze };
         }
         return c;
       })
@@ -2761,10 +2796,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
               const updatedContact = { ...u[i] };
               
               if (!isIgnored) {
-                 updatedContact.lastMsgTimestamp = new Date(m.timestamp).getTime();
+                 const msgTimestamp = new Date(m.timestamp).getTime();
+                 const isHistorical = (Date.now() - msgTimestamp) > (5 * 60000); // Mais de 5 minutos = histórico
+                 const currentLastMsgTs = updatedContact.lastMsgTimestamp || 0;
+                 
+                 // Garante que uma mensagem velha não sobrescreva o último lastMsgTimestamp caso existam msg mais novas
+                 if (msgTimestamp > currentLastMsgTs) {
+                     updatedContact.lastMsgTimestamp = msgTimestamp;
+                 }
+                 
                  const isClient = (m.sender_type === 'client' || !m.sender_type);
                  
-                 if (isClient) {
+                 // Impede notificação/Unread em mensagens antigas de sincronismo de histórico
+                 if (isClient && !isHistorical) {
                      if (s.activeChatId !== cid) {
                          updatedContact.unread = (updatedContact.unread || 0) + 1;
                      }
@@ -2786,6 +2830,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
               
               u[i] = updatedContact;
            }
+           
+           // Se o lastMsgTimestamp foi atualizado, reordena a lista de contatos para o contato correto subir,
+           // ou descer, se for o caso. (Nossa view na sidebar renderiza baseado no timestamp)
+           u.sort((a, b) => {
+              const tsA = a.timestamp || a.lastMsgTimestamp || 0;
+              const tsB = b.timestamp || b.lastMsgTimestamp || 0;
+              return tsB - tsA;
+           });
+           
            return { contacts: u };
         });
       })
@@ -2869,7 +2922,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                            // Check if the backend is actually down or if it's just WhatsApp disconnected
                            try {
                               const { fetchEngineStatus } = await import('../services/whatsappEngine');
-                              await fetchEngineStatus(t.id, inst.id, '');
+                              await fetchEngineStatus(t.id, inst.id, inst.api_key || '');
                               set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp caiu. Escaneie o QR Code novamente para reconectar.' });
                            } catch (err) {
                               set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal parou de responder. Tentando reconectar...' });

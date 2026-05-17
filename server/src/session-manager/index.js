@@ -112,8 +112,8 @@ class SessionManager {
                 connectTimeoutMs: 60000,
                 keepAliveIntervalMs: 25000,
                 defaultQueryTimeoutMs: 120000,
-                retryRequestDelayMs: 5000,
-                maxMsgRetryCount: 5,
+                retryRequestDelayMs: 10000,
+                maxMsgRetryCount: 0, // Desativado para evitar loops de retry em grupos que causam BAN
                 msgRetryCounterCache,
                 getMessage: async (key) => {
                     return { conversation: 'MENSAGEM_RECUPEERADA_COM_FALHA' };

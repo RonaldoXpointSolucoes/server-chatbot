@@ -351,6 +351,7 @@ export default function ChatDashboard() {
   const [isGeminiProcessing, setIsGeminiProcessing] = useState(false);
   const [transcribingIds, setTranscribingIds] = useState<Record<string, boolean>>({});
   const [geminiSuggestion, setGeminiSuggestion] = useState<string | null>(null);
+  const [aiSuggestionsList, setAiSuggestionsList] = useState<string[]>([]);
   const [geminiModalState, setGeminiModalState] = useState<{
     isOpen: boolean;
     originalText: string;
@@ -555,6 +556,29 @@ export default function ChatDashboard() {
      }
   }, [activeChatId, activeChat?.instance_id, connectedInstanceName, evolutionConnected, loadHistoricalMessages]);
 
+  // Solução para o botão voltar nativo do Android (Mobile)
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      const state = useChatStore.getState();
+      if (state.activeChatId) {
+        // Se tem chat aberto, fecha o chat em vez de fechar o app
+        state.setActiveChat(null);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (activeChatId && window.innerWidth <= 768) {
+      // Quando abre o chat no mobile, empilha um estado
+      if (!window.history.state?.chatOpen) {
+        window.history.pushState({ chatOpen: true }, '');
+      }
+    }
+  }, [activeChatId]);
+
+
   const handleOpenVCardContact = (vcardWaid: string | undefined, contactName: string) => {
     if (!vcardWaid) {
       alert('Número de telefone não encontrado no vCard.');
@@ -710,15 +734,15 @@ export default function ChatDashboard() {
       const history = activeChat.messages
         ? activeChat.messages.slice(-50).map(m => ({ 
             role: m.sender === 'client' ? 'user' : 'model', 
-            text: m.text || '' 
+            text: m.transcription ? m.transcription : (m.text || '') 
           }))
         : [];
         
-      const suggestion = await geminiService.suggestReplyWithContext(msg.text || '', history);
+      const targetText = msg.transcription ? msg.transcription : (msg.text || '');
+      const suggestions = await geminiService.suggestReplyWithContext(targetText, history);
       
-      setReplyMessage({ id: msg.id, text: msg.text || 'Mídia enviada', sender: msg.sender });
-      setInputText(suggestion);
-      setTimeout(() => textareaRef.current?.focus(), 100);
+      setReplyMessage({ id: msg.id, text: targetText || 'Mídia enviada', sender: msg.sender });
+      setAiSuggestionsList(suggestions);
     } catch (error: any) {
       alert(error.message || 'Erro ao gerar sugestão de resposta com IA.');
     } finally {
@@ -952,7 +976,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.4.2'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '14/05/2026, 20:58')}`}
+            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.4.12'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '16/05/2026, 10:26')}`}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1589,7 +1613,10 @@ export default function ChatDashboard() {
           {/* Chat Header */}
           <div className="relative h-16 shrink-0 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5">
             <div className="flex items-center gap-3 relative">
-              <button className="sm:hidden p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1]" onClick={() => setActiveChat(null)}>
+              <button className="sm:hidden p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1]" onClick={() => {
+                setActiveChat(null);
+                if (window.history.state?.chatOpen) window.history.back();
+              }}>
                 <ChevronLeft size={24} />
               </button>
               
@@ -1601,7 +1628,10 @@ export default function ChatDashboard() {
                       return (
                         <div className="sm:hidden absolute -inset-y-2 -inset-x-2 z-30 flex items-center bg-[#f0f2f5] dark:bg-[#202c33] rounded-r-lg">
                           <button 
-                            onClick={() => setActiveChat(null)}
+                            onClick={() => {
+                              setActiveChat(null);
+                              if (window.history.state?.chatOpen) window.history.back();
+                            }}
                             className="group flex items-center gap-2.5 bg-[#00a884] px-4 py-1.5 rounded-full shadow-[0_0_20px_rgba(0,168,132,0.6)] animate-pulse hover:scale-105 transition-all w-full"
                           >
                             <div className="relative flex items-center justify-center w-7 h-7 bg-white/20 rounded-full text-white">
@@ -1935,6 +1965,44 @@ export default function ChatDashboard() {
                 </button>
               </div>
             )}
+            
+            {/* AI Processing State Box */}
+            {isGeminiProcessing && (
+              <div className="flex items-center gap-3 bg-gradient-to-r from-[#00a884]/10 to-teal-500/10 p-3 mx-2 mt-2 rounded-xl border border-[#00a884]/20 animate-in fade-in slide-in-from-bottom-2 duration-300 relative z-10 shadow-sm backdrop-blur-md">
+                <Sparkles size={16} className="text-[#00a884] animate-pulse" />
+                <span className="text-[12px] text-[#111b21] dark:text-[#e9edef] font-medium">A IA está processando sua sugestão de resposta...</span>
+              </div>
+            )}
+            
+            {/* AI Suggestions Box */}
+            {aiSuggestionsList.length > 0 && !isGeminiProcessing && (
+              <div className="flex flex-col gap-2 bg-gradient-to-r from-[#00a884]/10 to-teal-500/10 p-3 mx-2 mt-2 rounded-xl border border-[#00a884]/20 animate-in fade-in slide-in-from-bottom-2 duration-300 relative z-10 shadow-sm backdrop-blur-md">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#00a884] uppercase tracking-wide">
+                    <Sparkles size={12} className="animate-pulse" /> Escolha uma sugestão da IA:
+                  </div>
+                  <button onClick={() => setAiSuggestionsList([])} className="text-[#54656f] hover:text-red-500 transition-colors bg-white/50 dark:bg-black/20 p-1 rounded-full"><X size={14}/></button>
+                </div>
+                <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
+                  {aiSuggestionsList.map((suggestion, idx) => (
+                    <button 
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setInputText(suggestion);
+                        setAiSuggestionsList([]);
+                        setTimeout(() => textareaRef.current?.focus(), 100);
+                      }}
+                      className="shrink-0 max-w-[280px] bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] border border-[#00a884]/30 text-left px-3 py-2 rounded-lg shadow-sm transition-all hover:scale-[1.02] active:scale-95 flex flex-col group"
+                    >
+                      <span className="text-[12px] text-[#111b21] dark:text-[#e9edef] line-clamp-3 leading-relaxed">"{suggestion}"</span>
+                      <span className="text-[10px] text-[#00a884] font-medium mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">Usar esta →</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            
             {/* Offline Banner Above Input */}
             {activeChat && activeChat.instance_id && instancesStatus[activeChat.instance_id] && instancesStatus[activeChat.instance_id] !== 'connected' && (
               <div className="bg-red-50/90 dark:bg-[#2a1314]/90 backdrop-blur-md border-t border-red-200 dark:border-red-900/50 p-2.5 flex items-center justify-between z-20 shadow-inner">
@@ -2050,6 +2118,11 @@ export default function ChatDashboard() {
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
+                    const isMobileEnv = window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                    if (isMobileEnv) {
+                      // Pular linha no Android/Mobile
+                      return; // Deixa o comportamento default da textarea
+                    }
                     e.preventDefault();
                     if (inputText.trim()) {
                       handleSendHuman(e as any);

@@ -185,17 +185,19 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
     }
   }
 
-  async suggestReplyWithContext(targetMessageText: string, contextHistory: {role: string, text: string}[]): Promise<string> {
+  async suggestReplyWithContext(targetMessageText: string, contextHistory: {role: string, text: string}[]): Promise<string[]> {
     if (!this.isConfigured()) {
       throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
     }
     const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // Format the context
-    const historyText = contextHistory.map(m => `${m.role === 'user' ? 'Cliente' : 'Atendente'}: ${m.text}`).join('\n');
+    const historyText = contextHistory.map(m => `${m.role === 'user' ? 'Cliente' : 'Atendente (VOCÊ)'}: ${m.text}`).join('\n');
 
-    const promptObj = `Aja como um atendente especializado de altíssimo nível. 
-Preciso de uma sugestão de resposta para enviar ao cliente.
+    const promptObj = `Aja como um atendente especializado de altíssimo nível.
+O atendente SOU EU. Você deve SEMPRE responder em primeira pessoa (Eu, nós). NUNCA fale de mim em terceira pessoa (Ex: "Ele ficou tocado", "O Ronaldo agradece"). Use sempre "Eu fiquei tocado", "Eu agradeço", "Ficamos felizes".
+
+Preciso de TRÊS sugestões DIFERENTES de resposta para enviar ao cliente.
 Eu, o Atendente, cliquei para "Responder" ESPECIFICAMENTE a esta mensagem do cliente: "${targetMessageText}"
 
 Aqui está o histórico das últimas mensagens (até 50) para você entender perfeitamente o contexto geral:
@@ -203,20 +205,34 @@ Aqui está o histórico das últimas mensagens (até 50) para você entender per
 ${historyText}
 -----------------
 
-Sua tarefa: Crie a MELHOR resposta possível focada nessa mensagem específica ("${targetMessageText}"), baseando-se no contexto de toda a conversa.
-Seja educado, prestativo e mantenha uma postura profissional e mais formal, evitando linguagem excessivamente descontraída.`;
+Sua tarefa: Crie as TRÊS MELHORES sugestões possíveis focadas nessa mensagem específica ("${targetMessageText}"), baseando-se no contexto de toda a conversa.
+Seja educado, prestativo e mantenha uma postura profissional e mais formal, evitando linguagem excessivamente descontraída. Cada uma das 3 sugestões deve ter um tom um pouco diferente (ex: uma curta e direta, uma empática, uma mais detalhada).`;
 
     const formatRules = `
-ATENÇÃO E REGRAS DE FORMATO:
-1. Retorne APENAS o texto da mensagem sugerida pronta para envio. Não adicione textos como "Aqui está a sugestão" ou aspas.
-2. Formate a mensagem com quebras de linha claras.
-3. Mantenha o tom profissional e levemente mais formal. Limite drasticamente o uso de emojis (use no máximo 1 ou 2 por mensagem inteira, ou nenhum se o contexto for sério).`;
+ATENÇÃO E REGRAS DE FORMATO CRÍTICAS:
+1. Retorne EXATAMENTE UM ARRAY JSON contendo as 3 strings com o texto pronto para envio. Nada além disso. 
+2. NUNCA use marcadores markdown (\`\`\`json) ou textos introdutórios. Retorne apenas o array cru: ["Opção 1", "Opção 2", "Opção 3"]
+3. Mantenha o tom profissional. Limite o uso de emojis (máximo 1 ou 2 por mensagem, ou nenhum).
+4. LEMBRE-SE: PRIMEIRA PESSOA SEMPRE. NUNCA use terceira pessoa para falar do atendente/empresa.
+5. FORMATAÇÃO: Sempre formate a mensagem de forma legível, com quebras de linha separando parágrafos ou diferentes assuntos. Use "\\n\\n" nas strings para criar os espaçamentos necessários.`;
 
     const prompt = `${promptObj}\n${formatRules}`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    return response.text().trim();
+    const text = response.text().trim();
+    
+    try {
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map(String).slice(0, 3);
+      }
+      throw new Error("Formato inválido");
+    } catch (e) {
+      console.error("Erro no parse do JSON do Gemini, fallback:", text);
+      return [text.substring(0, 300).replace(/["\[\]]/g, '')];
+    }
   }
 }
 

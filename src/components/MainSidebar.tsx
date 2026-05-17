@@ -142,6 +142,33 @@ export function MainSidebar() {
   useEffect(() => {
     if (!tenantId) return;
 
+    const getActiveStorage = () => {
+      if (typeof window === 'undefined') return null;
+      return sessionStorage.getItem('current_user_email') ? sessionStorage : localStorage;
+    };
+
+    const fetchAgentPermissionsAndData = async () => {
+       const storage = getActiveStorage();
+       const userRole = storage ? storage.getItem('current_user_role') : null;
+       const userEmail = storage ? storage.getItem('current_user_email') : null;
+       
+       if ((userRole === 'agent' || userRole === 'Agente') && userEmail) {
+           const { data: agentData } = await supabase
+             .from('tenant_users')
+             .select('allowed_companies, allowed_instances')
+             .ilike('email', userEmail)
+             .maybeSingle();
+             
+           if (agentData && storage) {
+              storage.setItem('allowed_companies', JSON.stringify(agentData.allowed_companies || []));
+              storage.setItem('allowed_instances', JSON.stringify(agentData.allowed_instances || []));
+           }
+       }
+       
+       await fetchInstances();
+       await fetchCompanies();
+    };
+
     const fetchInstances = async () => {
         try {
           const { data, error } = await supabase.from('whatsapp_instances')
@@ -155,7 +182,8 @@ export function MainSidebar() {
           }
           if (data) {
              let finalData = data;
-             const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+             const storage = getActiveStorage();
+             const allowedStr = storage ? storage.getItem('allowed_instances') : null;
              if (allowedStr) {
                 try {
                     const allowedInstances = JSON.parse(allowedStr);
@@ -206,7 +234,8 @@ export function MainSidebar() {
         setCurrentCompanyContext(currentCompany);
         setGlobalAiEnabled(currentCompany.global_ai_enabled ?? true);
 
-        const allowedCompsStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_companies') || localStorage.getItem('allowed_companies')) : null;
+        const storage = getActiveStorage();
+        const allowedCompsStr = storage ? storage.getItem('allowed_companies') : null;
         let allowedCompanies: string[] = [];
         if (allowedCompsStr) {
           try {
@@ -218,8 +247,7 @@ export function MainSidebar() {
            if (allowedCompanies.length > 0 && !allowedCompanies.includes(tenantId)) {
                // Security enforcement: Se a matriz não é permitida ou ficou sujeira no localstorage
                const newTenantId = allowedCompanies[0];
-               localStorage.setItem('current_tenant_id', newTenantId);
-               sessionStorage.setItem('current_tenant_id', newTenantId);
+               if (storage) storage.setItem('current_tenant_id', newTenantId);
                window.location.reload();
                return;
            }
@@ -252,8 +280,7 @@ export function MainSidebar() {
       }
     };
 
-    fetchInstances();
-    fetchCompanies();
+    fetchAgentPermissionsAndData();
 
     const channel = supabase.channel(`public:whatsapp_instances:tenant_id=${tenantId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, () => {
