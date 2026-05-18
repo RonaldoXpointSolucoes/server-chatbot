@@ -48,7 +48,7 @@ process.on('unhandledRejection', (reason, promise) => {
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'apikey']
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'x-agent-id', 'apikey']
 }));
 app.use(helmet());
 app.use(express.json());

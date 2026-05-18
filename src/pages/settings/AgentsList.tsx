@@ -58,9 +58,9 @@ export default function AgentsList() {
       {/* Header Premium */}
       <div className="px-8 pt-8 pb-6 bg-gradient-to-b from-[#1a1b1e]/80 to-transparent border-b border-white/5">
         <div className="max-w-[1200px] mx-auto">
-          <h1 className="text-2xl font-semibold text-white/90 mb-3">Agentes</h1>
+          <h1 className="text-2xl font-semibold text-white/90 mb-3">Usuários</h1>
           <p className="text-[#a1a1aa] text-sm leading-relaxed max-w-3xl mb-4">
-            Um agente é um membro de seu time de atendimento ao cliente que pode visualizar e responder às mensagens de usuários. A lista abaixo mostra todos os agentes de sua conta.
+            Um usuário é um membro de seu time de atendimento ao cliente que pode visualizar e responder às mensagens de clientes. A lista abaixo mostra todos os usuários de sua conta.
           </p>
           <a
             href="#"
@@ -84,7 +84,7 @@ export default function AgentsList() {
               </div>
               <input
                 type="text"
-                placeholder="Pesquisar agentes..."
+                placeholder="Pesquisar usuários..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-4 py-2 bg-black/20 border border-white/10 rounded-xl text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all"
@@ -93,13 +93,13 @@ export default function AgentsList() {
 
             <div className="flex items-center gap-4">
               <span className="text-sm text-white/40 font-medium">
-                {filteredAgents.length} agentes
+                {filteredAgents.length} usuários
               </span>
               <button
                 onClick={handleAddNewClick}
                 className="px-4 py-2 bg-blue-600/90 hover:bg-blue-500 text-white text-sm font-medium rounded-xl transition-all duration-200 shadow-[0_0_20px_rgba(37,99,235,0.15)] hover:shadow-[0_0_25px_rgba(37,99,235,0.25)] flex items-center gap-2"
               >
-                Adicionar Agente
+                Adicionar Usuário
               </button>
             </div>
           </div>
@@ -111,8 +111,8 @@ export default function AgentsList() {
                 <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
                   <User className="w-8 h-8 text-white/20" />
                 </div>
-                <h3 className="text-white/70 font-medium mb-1">Nenhum agente encontrado</h3>
-                <p className="text-white/40 text-sm">Ajuste os filtros ou crie um novo agente.</p>
+                <h3 className="text-white/70 font-medium mb-1">Nenhum usuário encontrado</h3>
+                <p className="text-white/40 text-sm">Ajuste os filtros ou crie um novo usuário.</p>
               </div>
             ) : (
               filteredAgents.map((agent) => {
@@ -147,12 +147,12 @@ export default function AgentsList() {
 
                       {/* Info */}
                       <div>
-                        <h3 className="text-white/90 text-sm font-medium mb-0.5">{agent.full_name || 'Agente Sem Nome'}</h3>
+                        <h3 className="text-white/90 text-sm font-medium mb-0.5">{agent.full_name || 'Usuário Sem Nome'}</h3>
                         <div className="flex items-center gap-3 text-xs text-white/50">
                           <span>{agent.email || 'Email não cadastrado'}</span>
                           <span className="w-1 h-1 rounded-full bg-white/20" />
                           <span className="flex items-center gap-1">
-                            {agent.role === 'admin' ? 'Administrador' : 'Agente'}
+                            {agent.role === 'admin' ? 'Administrador' : 'Usuário'}
                           </span>
                           {isVerified && (
                             <>
@@ -169,14 +169,14 @@ export default function AgentsList() {
                       <button 
                         onClick={() => handleEditClick(agent)}
                         className="p-2 text-white/40 hover:text-white/90 bg-white/5 hover:bg-white/10 rounded-xl transition-all"
-                        title="Editar Agente"
+                        title="Editar Usuário"
                       >
                         <Edit3 className="w-4 h-4" />
                       </button>
                       <button 
                         onClick={() => setAgentToDelete(agent)}
                         className="p-2 text-rose-400/60 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 rounded-xl transition-all"
-                        title="Remover Agente"
+                        title="Remover Usuário"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -196,9 +196,9 @@ export default function AgentsList() {
             <div className="w-12 h-12 rounded-full bg-rose-500/10 flex items-center justify-center mb-4">
               <AlertTriangle className="w-6 h-6 text-rose-500" />
             </div>
-            <h3 className="text-lg font-semibold text-white/90 mb-2">Excluir Agente</h3>
+            <h3 className="text-lg font-semibold text-white/90 mb-2">Excluir Usuário</h3>
             <p className="text-white/60 text-sm mb-6">
-              Tem certeza que deseja excluir o agente <strong className="text-white/80">{agentToDelete.full_name}</strong>? 
+              Tem certeza que deseja excluir o usuário <strong className="text-white/80">{agentToDelete.full_name}</strong>? 
               <br/>Esta ação revogará todo o acesso corporativo associado a esta conta.
             </p>
             <div className="flex justify-end gap-3">

@@ -41,6 +41,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     try {
         // Obrigatório passar o x-tenant-id em multitenant
         const tenant_id = req.headers['x-tenant-id'] || req.body?.tenant_id;
+        const agent_id = req.headers['x-agent-id'] || req.body?.agent_id || null;
         if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
 
         if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
@@ -68,6 +69,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             .from('knowledge_documents')
             .insert([{
                 tenant_id,
+                agent_id,
                 name: originalname,
                 type: mimetype,
                 status: 'processing',
@@ -103,6 +105,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                     dbChunks.push({
                         document_id: documentId,
                         tenant_id,
+                        agent_id,
                         content: chunkText,
                         embedding: embeddingVector
                     });
@@ -138,15 +141,22 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 router.get('/', async (req, res) => {
     try {
         const tenant_id = req.headers['x-tenant-id'];
+        const agent_id = req.headers['x-agent-id'];
         if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
 
-        const { data, error } = await supabase
+        let query = supabase
             .from('knowledge_documents')
             .select('*')
             .eq('tenant_id', tenant_id)
             .order('created_at', { ascending: false });
 
-        if (error) throw error;
+        if (agent_id) {
+            query = query.eq('agent_id', agent_id);
+        } else {
+            query = query.is('agent_id', null);
+        }
+
+        const { data, error } = await query;
         res.json(data);
     } catch(e) {
         res.status(500).json({ error: e.message });
@@ -157,10 +167,18 @@ router.get('/', async (req, res) => {
 router.delete('/:id', async (req, res) => {
      try {
         const tenant_id = req.headers['x-tenant-id'];
+        const agent_id = req.headers['x-agent-id'];
         const docId = req.params.id;
         if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
 
-        const { error } = await supabase.from('knowledge_documents').delete().eq('id', docId).eq('tenant_id', tenant_id);
+        let query = supabase.from('knowledge_documents').delete().eq('id', docId).eq('tenant_id', tenant_id);
+        if (agent_id) {
+            query = query.eq('agent_id', agent_id);
+        } else {
+            query = query.is('agent_id', null);
+        }
+
+        const { error } = await query;
         if (error) throw error;
 
         res.json({ success: true });
@@ -173,6 +191,7 @@ router.delete('/:id', async (req, res) => {
 router.post('/match', async (req, res) => {
    try {
         const tenant_id = req.headers['x-tenant-id'];
+        const agent_id = req.headers['x-agent-id'] || null;
         const { query } = req.body;
         
         if (!query || !tenant_id) return res.status(400).json({ error: 'Missing query or tenant' });
@@ -187,7 +206,8 @@ router.post('/match', async (req, res) => {
              query_embedding: queryEmbedding,
              match_threshold: 0.45,
              match_count: 5,
-             p_tenant_id: tenant_id
+             p_tenant_id: tenant_id,
+             p_agent_id: agent_id
         });
 
         if (semanticError) throw semanticError;
@@ -195,12 +215,21 @@ router.post('/match', async (req, res) => {
         // 3. Busca Textual Exata (Keyword Match / Fallback WebSearch do Postgres)
         // Isso garante que palavras como "cadastro" e "produto" tenham peso extremo se baterem exato!
         let formattedQuery = query.trim().split(/\s+/).join(' | '); // Formata para websearch OR/AND se quiser
-        const { data: textMatches, error: textError } = await supabase
+        let queryBuilder = supabase
             .from('knowledge_chunks')
             .select('id, document_id, content, metadata')
             .eq('tenant_id', tenant_id)
             .textSearch('content', query, { type: 'websearch', config: 'portuguese' })
             .limit(3);
+
+        if (agent_id) {
+            // Busca o texto no agent E nos globais (null)
+            queryBuilder = queryBuilder.or(`agent_id.is.null,agent_id.eq.${agent_id}`);
+        } else {
+            queryBuilder = queryBuilder.is('agent_id', null);
+        }
+
+        const { data: textMatches, error: textError } = await queryBuilder;
 
         // 4. Fusão e Deduplicação (Algoritmo de Reciprocal Rank Fusion / Bônus Simplificado)
         const fusionMap = new Map();

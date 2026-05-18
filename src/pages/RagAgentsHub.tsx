@@ -23,11 +23,25 @@ import {
   Phone,
   Mail,
   CreditCard,
+  Key,
+  Loader2,
   Wifi,
   Car,
   Dog,
   Accessibility,
-  Info
+  Info,
+  Trash2,
+  Code,
+  FileJson,
+  Bug,
+  Search,
+  MapPin,
+  Clock,
+  Wand2,
+  Lightbulb,
+  UploadCloud,
+  FileText,
+  AlertCircle
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useRagStore, AgentSpecialist, RagKnowledgeBase } from '../store/ragStore';
@@ -79,9 +93,65 @@ const businessCategories = [
   }
 ];
 
-function AgentModal({ isOpen, onClose, agent, onSave }: { isOpen: boolean, onClose: () => void, agent: AgentSpecialist | null, onSave: (agent: AgentSpecialist) => void }) {
-  if (!isOpen || !agent) return null;
+function AgentModal({ isOpen, onClose, agent, onSave }: { isOpen: boolean, onClose: () => void, agent: AgentSpecialist, onSave: (agent: AgentSpecialist) => void }) {
   const [formData, setFormData] = useState<AgentSpecialist>(agent);
+  const [activeTab, setActiveTab] = useState<'profile' | 'memory' | 'knowledge'>('profile');
+  
+  const { knowledgeBase, setKnowledgeBase } = useRagStore();
+  const [localKb, setLocalKb] = useState<Partial<RagKnowledgeBase>>(knowledgeBase);
+
+  const [isSearchingCnpj, setIsSearchingCnpj] = useState(false);
+  const [isSearchingCep, setIsSearchingCep] = useState(false);
+
+  // States for Knowledge Tab
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+  const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+
+  useEffect(() => {
+    if (isOpen && agent) {
+      setFormData(agent);
+      setLocalKb(knowledgeBase);
+      setActiveTab('profile');
+    }
+  }, [isOpen, agent, knowledgeBase]);
+
+  const fetchDocuments = async () => {
+    if (!agent.id) return;
+    try {
+      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge`, {
+        headers: {
+          'x-tenant-id': tenantId,
+          'x-agent-id': agent.id
+        }
+      });
+      if (response.ok) {
+         const data = await response.json();
+         setDocuments(data || []);
+      }
+    } catch (err) {
+      console.error("Erro listando documentos do agente:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'knowledge' && agent.id) {
+       fetchDocuments();
+       const interval = setInterval(() => {
+         setDocuments(prev => {
+            if(prev.some(d => d.status === 'processing')) {
+                fetchDocuments();
+            }
+            return prev;
+         });
+       }, 4000);
+       return () => clearInterval(interval);
+    }
+  }, [activeTab, agent.id]);
 
   const availableIcons = [
     { name: 'Bot', icon: Bot },
@@ -92,112 +162,683 @@ function AgentModal({ isOpen, onClose, agent, onSave }: { isOpen: boolean, onClo
     { name: 'HeartHandshake', icon: HeartHandshake }
   ];
 
+  const fetchCnpj = async () => {
+    if (!localKb.cnpj) return;
+    setIsSearchingCnpj(true);
+    try {
+      const numericCnpj = localKb.cnpj.replace(/\D/g, '');
+      const response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${numericCnpj}`);
+      if (response.ok) {
+        const data = await response.json();
+        setLocalKb(prev => ({
+          ...prev,
+          corporateName: data.razao_social || prev.corporateName,
+          businessName: data.nome_fantasia || data.razao_social || prev.businessName,
+          zipCode: data.cep || prev.zipCode,
+          street: data.logradouro || prev.street,
+          number: data.numero || prev.number,
+          neighborhood: data.bairro || prev.neighborhood,
+          city: data.municipio || prev.city,
+          state: data.uf || prev.state
+        }));
+      }
+    } catch (error) {
+      console.error("Erro ao buscar CNPJ:", error);
+    } finally {
+      setIsSearchingCnpj(false);
+    }
+  };
+
+  const fetchCep = async () => {
+    if (!localKb.zipCode) return;
+    setIsSearchingCep(true);
+    try {
+      const numericCep = localKb.zipCode.replace(/\D/g, '');
+      const response = await fetch(`https://viacep.com.br/ws/${numericCep}/json/`);
+      if (response.ok) {
+        const data = await response.json();
+        if (!data.erro) {
+          setLocalKb(prev => ({
+            ...prev,
+            street: data.logradouro || prev.street,
+            neighborhood: data.bairro || prev.neighborhood,
+            city: data.localidade || prev.city,
+            state: data.uf || prev.state
+          }));
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao buscar CEP:", error);
+    } finally {
+      setIsSearchingCep(false);
+    }
+  };
+
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+
+  const generateWithAI = async () => {
+    if (!formData.name || !formData.role) return;
+    setIsGeneratingAi(true);
+    try {
+      const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!geminiApiKey) throw new Error("VITE_GEMINI_API_KEY não configurada.");
+
+      const prompt = `
+Você é um Engenheiro de Prompts Sênior. Sua tarefa é preencher os detalhes da persona de um agente de IA para um sistema RAG.
+Nome do Agente: "${formData.name}"
+Papel/Especialidade: "${formData.role}"
+Empresa: "${localKb.businessName || 'Empresa Padrão'}"
+
+Gere as seguintes informações para este agente em formato JSON exato:
+{
+  "description": "Missão principal do agente (1 a 2 frases curtas).",
+  "personality": "Tom de voz e traços de personalidade (ex: 'Profissional, acolhedor e direto').",
+  "guidelines": "Regras e restrições (Do's and Don'ts) em formato de lista (bullet points curtos). Ex: '- Nunca ofereça descontos.\\n- Sempre peça o e-mail.'",
+  "initialMessage": "Uma mensagem de saudação inicial sugerida."
+}
+Responda APENAS com o JSON válido.
+`;
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${geminiApiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { response_mime_type: 'application/json' }
+        })
+      });
+
+      if (!response.ok) throw new Error("Falha na requisição ao Gemini");
+      
+      const data = await response.json();
+      const resultText = data.candidates[0].content.parts[0].text;
+      const parsed = JSON.parse(resultText);
+
+      setFormData(prev => ({
+        ...prev,
+        description: parsed.description || prev.description,
+        personality: parsed.personality || prev.personality,
+        guidelines: parsed.guidelines || prev.guidelines,
+        initialMessage: parsed.initialMessage || prev.initialMessage,
+      }));
+    } catch (error) {
+      console.error("Erro ao gerar com IA:", error);
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  };
+
+  const handleSaveAll = () => {
+    const kbToSave = { ...localKb };
+    
+    // Concatenações Híbridas
+    if (kbToSave.street || kbToSave.neighborhood || kbToSave.city) {
+      const parts = [];
+      if (kbToSave.street) parts.push(`${kbToSave.street}${kbToSave.number ? `, ${kbToSave.number}` : ''}`);
+      if (kbToSave.neighborhood) parts.push(kbToSave.neighborhood);
+      if (kbToSave.city) parts.push(`${kbToSave.city}${kbToSave.state ? `/${kbToSave.state}` : ''}`);
+      if (kbToSave.zipCode) parts.push(`CEP: ${kbToSave.zipCode}`);
+      kbToSave.businessAddress = parts.join(' - ');
+    }
+
+    if (kbToSave.operatingDays || kbToSave.openTime || kbToSave.closeTime) {
+      const days = kbToSave.operatingDays || '';
+      const times = (kbToSave.openTime && kbToSave.closeTime) ? `das ${kbToSave.openTime} às ${kbToSave.closeTime}` : '';
+      kbToSave.openingHours = [days, times].filter(Boolean).join(', ');
+    }
+
+    setKnowledgeBase(kbToSave);
+    onSave(formData);
+  };
+
+  // Funções de Upload
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = () => { setIsDragging(false); };
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault(); setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      await uploadFile(e.dataTransfer.files[0]);
+    }
+  };
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      await uploadFile(e.target.files[0]);
+    }
+  };
+
+  const uploadFile = async (file: File) => {
+    if (!agent.id) {
+      alert("Agente sem ID válido.");
+      return;
+    }
+    setIsUploading(true);
+    const fd = new FormData();
+    fd.append('file', file);
+    
+    try {
+      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/upload`, {
+        method: 'POST',
+        headers: {
+          'x-tenant-id': tenantId,
+          'x-agent-id': agent.id
+        },
+        body: fd
+      });
+      if (!response.ok) throw new Error('Falha no upload');
+      await fetchDocuments();
+    } catch (err: any) {
+      alert(`Erro no envio: ${err.message}`);
+    } finally {
+      setIsUploading(false);
+      if(fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const deleteDocument = async (id: string) => {
+    if(!confirm('Tem certeza? Isso excluirá o documento deste agente.')) return;
+    try {
+      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'x-tenant-id': tenantId,
+          'x-agent-id': agent.id
+        }
+      });
+      if (!response.ok) throw new Error('Falha ao excluir');
+      setDocuments(prev => prev.filter(d => d.id !== id));
+    } catch (err: any) {
+      alert(`Erro ao excluir: ${err.message}`);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-2xl bg-white dark:bg-slate-800 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col max-h-[90vh]"
       >
-        <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-            {agent.name ? 'Editar Agente' : 'Novo Agente'}
-          </h2>
-          <button onClick={onClose} className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors">
-            <X className="w-5 h-5" />
-          </button>
+        <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex flex-col shrink-0">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+              {agent.name ? 'Editar Agente & Conhecimento' : 'Novo Agente'}
+            </h2>
+            <button onClick={onClose} className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          
+          <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl">
+            <button 
+              onClick={() => setActiveTab('profile')} 
+              className={cn("flex-1 py-2 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2", activeTab === 'profile' ? "bg-white dark:bg-slate-800 shadow text-emerald-600 dark:text-emerald-400" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300")}
+            >
+              <Bot className="w-4 h-4" />
+              Identidade do Agente
+            </button>
+            <button 
+              onClick={() => setActiveTab('memory')} 
+              className={cn("flex-1 py-2 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2", activeTab === 'memory' ? "bg-white dark:bg-slate-800 shadow text-emerald-600 dark:text-emerald-400" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300")}
+            >
+              <BookOpen className="w-4 h-4" />
+              Memória RAG
+            </button>
+            <button 
+              onClick={() => setActiveTab('knowledge')} 
+              className={cn("flex-1 py-2 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2", activeTab === 'knowledge' ? "bg-white dark:bg-slate-800 shadow text-emerald-600 dark:text-emerald-400" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300")}
+            >
+              <FileJson className="w-4 h-4" />
+              Conhecimento
+            </button>
+          </div>
         </div>
         
-        <div className="p-6 space-y-4 overflow-y-auto">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Nome do Agente *</label>
-            <input 
-              type="text" 
-              value={formData.name}
-              onChange={e => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
-              placeholder="Ex: Especialista em Vinhos"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Papel (Role) *</label>
-            <input 
-              type="text" 
-              value={formData.role}
-              onChange={e => setFormData({ ...formData, role: e.target.value })}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
-              placeholder="Ex: Sommelier"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Descrição</label>
-            <textarea 
-              value={formData.description}
-              onChange={e => setFormData({ ...formData, description: e.target.value })}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
-              rows={2}
-              placeholder="Descreva o que este agente faz..."
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Personalidade e Tom de Voz *</label>
-            <textarea 
-              value={formData.personality}
-              onChange={e => setFormData({ ...formData, personality: e.target.value })}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
-              rows={3}
-              placeholder="Ex: Seja elegante, use emojis de vinho 🍷, seja persuasivo e formal."
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Mensagem Inicial (Sugestão)</label>
-            <textarea 
-              value={formData.initialMessage || ''}
-              onChange={e => setFormData({ ...formData, initialMessage: e.target.value })}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
-              rows={2}
-              placeholder="Ex: Olá! Sou o especialista em vinhos. Como posso ajudar a escolher seu rótulo hoje?"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Ícone</label>
-            <div className="flex gap-3 flex-wrap">
-              {availableIcons.map(iconObj => {
-                const Icon = iconObj.icon;
-                const isSelected = formData.icon === iconObj.name;
-                return (
-                  <button
-                    key={iconObj.name}
-                    onClick={() => setFormData({ ...formData, icon: iconObj.name })}
-                    className={cn(
-                      "w-12 h-12 rounded-xl flex items-center justify-center border-2 transition-colors",
-                      isSelected ? "border-emerald-500 bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300 dark:hover:border-slate-600"
-                    )}
-                  >
-                    <Icon className="w-6 h-6" />
-                  </button>
-                )
-              })}
+        <div className="p-6 space-y-4 overflow-y-auto flex-1">
+          {activeTab === 'profile' && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              {/* Premium Auto-fill Action */}
+              <div className="bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 rounded-2xl p-4 flex flex-col sm:flex-row items-center gap-4 justify-between relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4" />
+                    Engenheiro de Prompts IA
+                  </h3>
+                  <p className="text-xs text-emerald-700/80 dark:text-emerald-400/80 mt-1">
+                    Preencha apenas o <strong>Nome</strong> e o <strong>Papel</strong>, e deixe a IA gerar a persona ideal.
+                  </p>
+                </div>
+                <button 
+                  onClick={generateWithAI}
+                  disabled={isGeneratingAi || !formData.name || !formData.role}
+                  className="w-full sm:w-auto px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
+                >
+                  {isGeneratingAi ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                  {isGeneratingAi ? 'Gerando...' : 'Auto-completar Persona'}
+                </button>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-5">
+                <div className="space-y-1">
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                    Nome do Agente <span className="text-red-500">*</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    value={formData.name}
+                    onChange={e => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                    placeholder="Ex: Luna, Especialista em Vinhos"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                    Papel (Role) <span className="text-red-500">*</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    value={formData.role}
+                    onChange={e => setFormData({ ...formData, role: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                    placeholder="Ex: Sommelier, Suporte Técnico"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1 group">
+                <div className="flex justify-between items-end mb-1">
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                    Missão Principal (Objetivo)
+                    <div className="group/tooltip relative flex items-center">
+                      <Info className="w-4 h-4 text-slate-400 cursor-help" />
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 bg-slate-800 text-xs text-white rounded-lg opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity z-10">
+                        O que o agente deve resolver? Ex: "Qualificar leads e agendar reuniões."
+                      </div>
+                    </div>
+                  </label>
+                </div>
+                <textarea 
+                  value={formData.description}
+                  onChange={e => setFormData({ ...formData, description: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none transition-all"
+                  rows={2}
+                  placeholder="Defina claramente o objetivo principal deste agente..."
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Personalidade e Tom de Voz <span className="text-red-500">*</span>
+                  <div className="group/tooltip relative flex items-center">
+                    <Lightbulb className="w-4 h-4 text-amber-500 cursor-help" />
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 bg-slate-800 text-xs text-white rounded-lg opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity z-10">
+                      Evite adjetivos genéricos. Use "Seja professoral e paciente" ou "Use tom enérgico e persuasivo".
+                    </div>
+                  </div>
+                </label>
+                <textarea 
+                  value={formData.personality}
+                  onChange={e => setFormData({ ...formData, personality: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none transition-all"
+                  rows={2}
+                  placeholder="Ex: Seja elegante, use emojis de vinho 🍷, seja persuasivo e formal."
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Regras e Diretrizes (Do's and Don'ts)
+                  <div className="group/tooltip relative flex items-center">
+                    <Info className="w-4 h-4 text-slate-400 cursor-help" />
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 bg-slate-800 text-xs text-white rounded-lg opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity z-10">
+                      Liste regras estritas. Ex: "Nunca ofereça descontos", "Sempre peça o email".
+                    </div>
+                  </div>
+                </label>
+                <textarea 
+                  value={formData.guidelines || ''}
+                  onChange={e => setFormData({ ...formData, guidelines: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none transition-all"
+                  rows={3}
+                  placeholder="- Responda sempre em português.&#10;- Nunca invente preços."
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Mensagem Inicial (Greeting)
+                </label>
+                <textarea 
+                  value={formData.initialMessage || ''}
+                  onChange={e => setFormData({ ...formData, initialMessage: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none transition-all"
+                  rows={2}
+                  placeholder="Ex: Olá! Sou o especialista em vinhos. Como posso ajudar a escolher seu rótulo hoje?"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Ícone de Exibição</label>
+                <div className="flex gap-3 flex-wrap">
+                  {availableIcons.map(iconObj => {
+                    const Icon = iconObj.icon;
+                    const isSelected = formData.icon === iconObj.name;
+                    return (
+                      <button
+                        key={iconObj.name}
+                        onClick={() => setFormData({ ...formData, icon: iconObj.name })}
+                        className={cn(
+                          "w-12 h-12 rounded-xl flex items-center justify-center border-2 transition-all",
+                          isSelected ? "border-emerald-500 bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400 scale-110 shadow-sm" : "border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300 dark:hover:border-slate-600 hover:scale-105"
+                        )}
+                      >
+                        <Icon className="w-6 h-6" />
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
-          </div>
+          )}
+
+          {activeTab === 'memory' && (
+            <div className="space-y-4 animate-in fade-in duration-200">
+              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl mb-4">
+                <p className="text-sm text-blue-800 dark:text-blue-300">
+                  <strong>Aviso:</strong> Estas informações compõem a memória global da sua central. Qualquer agente ativo usará esses dados para responder o usuário.
+                </p>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <h3 className="font-bold text-lg text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2 flex items-center gap-2 mb-4">
+                    <Store className="w-5 h-5 text-emerald-500" /> Identificação
+                  </h3>
+                </div>
+                
+                {/* CNPJ */}
+                <div className="sm:col-span-2 flex flex-col sm:flex-row gap-4 items-end">
+                  <div className="flex-1 w-full">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">CNPJ</label>
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        value={localKb.cnpj || ''}
+                        onChange={e => setLocalKb({ ...localKb, cnpj: e.target.value })}
+                        className="w-full pl-4 pr-12 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                        placeholder="00.000.000/0000-00"
+                      />
+                      <button 
+                        type="button"
+                        onClick={fetchCnpj}
+                        disabled={isSearchingCnpj || !localKb.cnpj}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {isSearchingCnpj ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-[2] w-full">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Razão Social</label>
+                    <input 
+                      type="text" 
+                      value={localKb.corporateName || ''}
+                      onChange={e => setLocalKb({ ...localKb, corporateName: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none bg-slate-50 dark:bg-slate-800/50"
+                      placeholder="Empresa LTDA"
+                    />
+                  </div>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Nome Fantasia (Estabelecimento) *</label>
+                  <input 
+                    type="text" 
+                    value={localKb.businessName || ''}
+                    onChange={e => setLocalKb({ ...localKb, businessName: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* ENDEREÇO */}
+              <div className="mt-8 mb-6">
+                <h3 className="font-bold text-lg text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2 flex items-center gap-2 mb-4">
+                  <MapPin className="w-5 h-5 text-blue-500" /> Endereço Físico
+                </h3>
+                <div className="grid sm:grid-cols-12 gap-4">
+                  <div className="col-span-12 sm:col-span-4">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">CEP</label>
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        value={localKb.zipCode || ''}
+                        onChange={e => setLocalKb({ ...localKb, zipCode: e.target.value })}
+                        className="w-full pl-4 pr-12 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                        placeholder="00000-000"
+                      />
+                      <button 
+                        type="button"
+                        onClick={fetchCep}
+                        disabled={isSearchingCep || !localKb.zipCode}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {isSearchingCep ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="col-span-12 sm:col-span-6">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Logradouro (Rua)</label>
+                    <input 
+                      type="text" 
+                      value={localKb.street || ''}
+                      onChange={e => setLocalKb({ ...localKb, street: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div className="col-span-12 sm:col-span-2">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Número</label>
+                    <input 
+                      type="text" 
+                      value={localKb.number || ''}
+                      onChange={e => setLocalKb({ ...localKb, number: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div className="col-span-12 sm:col-span-5">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Bairro</label>
+                    <input 
+                      type="text" 
+                      value={localKb.neighborhood || ''}
+                      onChange={e => setLocalKb({ ...localKb, neighborhood: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div className="col-span-12 sm:col-span-5">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Cidade</label>
+                    <input 
+                      type="text" 
+                      value={localKb.city || ''}
+                      onChange={e => setLocalKb({ ...localKb, city: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div className="col-span-12 sm:col-span-2">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">UF</label>
+                    <input 
+                      type="text" 
+                      value={localKb.state || ''}
+                      onChange={e => setLocalKb({ ...localKb, state: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      maxLength={2}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* HORÁRIOS */}
+              <div className="mt-8 mb-6">
+                <h3 className="font-bold text-lg text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2 flex items-center gap-2 mb-4">
+                  <Clock className="w-5 h-5 text-amber-500" /> Horários de Atendimento
+                </h3>
+                <div className="grid sm:grid-cols-12 gap-4">
+                  <div className="col-span-12 sm:col-span-6">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Dias de Funcionamento</label>
+                    <select
+                      value={localKb.operatingDays || ''}
+                      onChange={e => setLocalKb({ ...localKb, operatingDays: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                    >
+                      <option value="">Selecione...</option>
+                      <option value="Segunda a Sexta">Segunda a Sexta</option>
+                      <option value="Segunda a Sábado">Segunda a Sábado</option>
+                      <option value="Todos os dias">Todos os dias</option>
+                      <option value="Terça a Domingo">Terça a Domingo</option>
+                    </select>
+                  </div>
+                  <div className="col-span-6 sm:col-span-3">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Abertura</label>
+                    <input 
+                      type="time" 
+                      value={localKb.openTime || ''}
+                      onChange={e => setLocalKb({ ...localKb, openTime: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                    />
+                  </div>
+                  <div className="col-span-6 sm:col-span-3">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Fechamento</label>
+                    <input 
+                      type="time" 
+                      value={localKb.closeTime || ''}
+                      onChange={e => setLocalKb({ ...localKb, closeTime: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Regras Customizadas / Conhecimento Livre</label>
+                <textarea 
+                  value={localKb.customRules || ''}
+                  onChange={e => setLocalKb({ ...localKb, customRules: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none font-mono text-sm"
+                  rows={8}
+                  placeholder="Ex: A promoção de terça é compre 1 leve 2..."
+                />
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'knowledge' && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+               <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
+                <p className="text-sm text-emerald-800 dark:text-emerald-300">
+                  <strong>Conhecimento Específico:</strong> Arquivos enviados aqui estarão disponíveis <strong>apenas</strong> para o agente <strong>{formData.name || 'Atual'}</strong>.
+                </p>
+              </div>
+
+              {/* Upload Zone */}
+              <div 
+                className={cn(
+                  "relative flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-2xl transition-all duration-300 bg-slate-50 dark:bg-slate-800/50 cursor-pointer overflow-hidden",
+                  isDragging ? 'border-emerald-400 bg-emerald-500/10 scale-[1.02]' : 'border-slate-300 dark:border-slate-700 hover:border-emerald-500/50'
+                )}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileSelect} 
+                  className="hidden" 
+                  accept=".txt,.pdf,.csv" 
+                />
+                
+                {isUploading ? (
+                  <div className="flex flex-col items-center gap-3 relative z-10">
+                      <Loader2 size={32} className="animate-spin text-emerald-500" />
+                      <span className="text-sm font-bold text-slate-700 dark:text-slate-300">Processando arquivo...</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 relative z-10 text-center">
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-sm border border-slate-200 dark:border-slate-700">
+                      <UploadCloud size={24} className="text-emerald-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">Arraste seus PDFs ou TXTs aqui</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Ou clique para procurar em seu computador.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Lista de Documentos Específicos */}
+              {documents.length > 0 && (
+                <div className="mt-6">
+                  <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-2">
+                    Arquivos do Agente <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs px-2 py-0.5 rounded-full">{documents.length}</span>
+                  </h3>
+                  
+                  <div className="grid gap-3">
+                    {documents.map((doc: any) => (
+                      <div key={doc.id} className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={cn(
+                            "p-2 rounded-lg shrink-0",
+                            doc.status === 'processing' ? 'bg-amber-100 dark:bg-amber-900/30' : 
+                            doc.status === 'error' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-emerald-100 dark:bg-emerald-900/30'
+                          )}>
+                            {doc.status === 'processing' ? <Loader2 size={16} className="text-amber-600 dark:text-amber-400 animate-spin" /> : 
+                             doc.status === 'error' ? <AlertCircle size={16} className="text-red-600 dark:text-red-400" /> :
+                             <FileText size={16} className="text-emerald-600 dark:text-emerald-400" />}
+                          </div>
+                          <div className="truncate">
+                            <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">{doc.name}</h3>
+                            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                              <span>{(doc.metadata?.size / 1024).toFixed(1)} KB</span>
+                              <span>•</span>
+                              <span>
+                                {doc.status === 'processing' ? 'Processando...' : 
+                                 doc.status === 'error' ? 'Erro' : 'Pronto (Vetorizado)'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); deleteDocument(doc.id); }}
+                          className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors shrink-0"
+                          title="Excluir documento"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
         </div>
 
-        <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3 shrink-0">
+        <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3 shrink-0 bg-slate-50 dark:bg-slate-900">
           <button 
             onClick={onClose}
-            className="px-6 py-2.5 rounded-xl font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors"
+            className="px-6 py-2.5 rounded-xl font-medium text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors"
           >
             Cancelar
           </button>
           <button 
-            onClick={() => onSave(formData)}
-            disabled={!formData.name || !formData.role || !formData.personality}
-            className="px-6 py-2.5 rounded-xl font-medium bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+            onClick={handleSaveAll}
+            disabled={!formData.name || !formData.role || !formData.personality || (activeTab === 'memory' && !localKb.businessName)}
+            className="px-6 py-2.5 rounded-xl font-medium bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors shadow-lg shadow-emerald-500/20"
           >
-            Salvar Agente
+            Salvar Tudo
           </button>
         </div>
       </motion.div>
@@ -231,7 +872,9 @@ export default function RagAgentsHub() {
     resetOnboarding,
     editOnboarding,
     selectedCategory,
-    applyCategoryTemplate
+    applyCategoryTemplate,
+    openAiApiKey,
+    setOpenAiApiKey
   } = useRagStore();
 
   const [step, setStep] = useState(1);
@@ -297,6 +940,19 @@ export default function RagAgentsHub() {
       </div>
 
       <AnimatePresence mode="wait">
+        {/* Modal fora da AnimatePresence do formulário para não sofrer fade out quando o pai não estiver sendo desmontado */}
+      </AnimatePresence>
+      
+      {isModalOpen && editingAgent && (
+        <AgentModal 
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          agent={editingAgent}
+          onSave={handleSaveAgent}
+        />
+      )}
+
+      <AnimatePresence mode="wait">
         <motion.div 
           key={step}
           initial={{ opacity: 0, y: 20 }}
@@ -312,7 +968,7 @@ export default function RagAgentsHub() {
                   <Store className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Qual é o seu tipo de negócio?</h2>
-                <p className="text-slate-500 dark:text-slate-400">Isso nos ajuda a configurar os melhores agentes para você.</p>
+                <p className="text-slate-500 dark:text-slate-400">Isso nos ajuda a configurar os melhores usuários para você.</p>
               </div>
 
               {/* Categorias (Submenu Carrossel) */}
@@ -419,7 +1075,7 @@ export default function RagAgentsHub() {
                         <div className="flex-1">
                           <div className="flex items-center justify-between mb-1 pr-6">
                             <h3 className="font-semibold text-slate-900 dark:text-white truncate">
-                              {agent.id === 'maestro' && knowledgeBase.botName ? `${knowledgeBase.botName} (Recepcionista)` : agent.name}
+                              {agent.name}
                             </h3>
                             {agent.isActive && (
                               <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
@@ -472,7 +1128,7 @@ export default function RagAgentsHub() {
                   <BookOpen className="w-8 h-8 text-amber-600 dark:text-amber-400" />
                 </div>
                 <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Treine sua Equipe</h2>
-                <p className="text-slate-500 dark:text-slate-400">Dê o máximo de contexto para os agentes responderem com precisão.</p>
+                <p className="text-slate-500 dark:text-slate-400">Dê o máximo de contexto para os usuários responderem com precisão.</p>
               </div>
 
               <div className="space-y-8 mt-8">
@@ -705,7 +1361,7 @@ export default function RagAgentsHub() {
                     <BookOpen className="w-5 h-5 text-emerald-500" /> Conhecimento Específico Livre
                   </h3>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Adicione qualquer regra, promoção ativa ou informação relevante que os agentes devem saber:</label>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Adicione qualquer regra, promoção ativa ou informação relevante que os usuários devem saber:</label>
                     <textarea 
                       rows={5}
                       value={knowledgeBase.customRules}
@@ -753,13 +1409,6 @@ export default function RagAgentsHub() {
           </div>
         </motion.div>
       </AnimatePresence>
-
-      <AgentModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        agent={editingAgent} 
-        onSave={handleSaveAgent} 
-      />
     </div>
   );
 }
@@ -768,6 +1417,7 @@ interface SimulatedMessage {
   id: string;
   type: 'user' | 'orchestrator' | 'agent';
   content: React.ReactNode;
+  systemPrompt?: string;
 }
 
 function DashboardView({ editOnboarding }: { editOnboarding: () => void }) {
@@ -800,6 +1450,9 @@ function DashboardView({ editOnboarding }: { editOnboarding: () => void }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<AgentSpecialist | null>(null);
 
+  const [isDebugMode, setIsDebugMode] = useState(false);
+  const [promptModalMsg, setPromptModalMsg] = useState<string | null>(null);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -808,7 +1461,7 @@ function DashboardView({ editOnboarding }: { editOnboarding: () => void }) {
     scrollToBottom();
   }, [chatMessages, isSimulating]);
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputValue.trim() || isSimulating) return;
 
     const userText = inputValue;
@@ -826,121 +1479,119 @@ function DashboardView({ editOnboarding }: { editOnboarding: () => void }) {
     setInputValue('');
     setIsSimulating(true);
 
-    // Identificação burra da intenção baseada em regex
-    const lowerText = userText.toLowerCase();
-    
-    let intent = 'duvida_geral';
-    let agentDestino = `${botName} (Recepcionista)`;
-    let agentRole = 'Orquestrador';
-    let extracted: string[] = [];
-    let agentReply: React.ReactNode = (
-      <div className="space-y-2">
-        <p>Não tenho certeza se entendi perfeitamente. 🤔</p>
-        <p>Você pode tentar falar de outra forma? Ou, se preferir, digite <strong>"falar com humano"</strong> que eu transfiro você agora mesmo!</p>
-      </div>
-    );
-    let iconName = 'Bot';
-
-    if (lowerText === 'oi' || lowerText === 'olá' || lowerText === 'ola' || lowerText === 'bom dia' || lowerText === 'boa tarde' || lowerText === 'boa noite') {
-      intent = 'saudacao';
-      agentReply = (
-        <div className="space-y-2">
-          <p>Olá! Seja muito bem-vindo! Aqui é {knowledgeBase.botName ? botName : 'o assistente'}. 👋</p>
-          <p>Como posso ajudar hoje?</p>
-        </div>
-      );
-    } else if (lowerText.includes('pedido') || lowerText.includes('lanche') || lowerText.includes('pizza') || lowerText.includes('hamburguer')) {
-      intent = 'fazer_pedido';
-      agentDestino = 'Atendente de Delivery';
-      agentRole = 'Vendedor';
-      iconName = 'Motorcycle';
-      if (lowerText.includes('sem cebola')) extracted.push('- Restrição: sem cebola');
-      if (lowerText.includes('rua') || lowerText.includes('avenida')) extracted.push('- Endereço identificado');
-      agentReply = (
-        <div className="space-y-2">
-          <p>Ótima escolha! Já acionei o atendente de delivery para cuidar do seu pedido 🛵.</p>
-          <p>Para agilizarmos, pode me confirmar o <strong>endereço de entrega</strong> e se você vai precisar de <strong>troco</strong> ou máquina de cartão?</p>
-        </div>
-      );
-    } else if (lowerText.includes('cardápio') || lowerText.includes('cardapio') || lowerText.includes('menu') || lowerText.includes('opções')) {
-      intent = 'ver_cardapio';
-      agentDestino = 'Especialista em Cardápio';
-      agentRole = 'Apresentador';
-      iconName = 'Utensils';
-      agentReply = (
-        <div className="space-y-2">
-          <p>Aqui está nosso cardápio digital completo: <a href="https://demo.gastrofood.com/menu" target="_blank" rel="noreferrer" className="text-emerald-500 font-bold hover:underline">Acessar Cardápio 🍔</a></p>
-          <p>Temos uma promoção especial no <strong>Combo Smash Premium</strong> hoje. Já sabe o que vai pedir ou quer alguma sugestão?</p>
-        </div>
-      );
-    } else if (lowerText.includes('endereço') || lowerText.includes('endereco') || lowerText.includes('onde fica') || lowerText.includes('localização')) {
-      intent = 'informacao_local';
-      agentDestino = 'Atendimento Institucional';
-      agentRole = 'Hospitalidade';
-      iconName = 'Store';
-      agentReply = (
-        <div className="space-y-2">
-          <p>Nossa loja matriz fica na <strong>Rua das Flores, 123 - Centro</strong>.</p>
-          <p>Abrimos de terça a domingo, das 18h às 23h. Temos espaço kids e estacionamento conveniado! Posso reservar uma mesa para você?</p>
-        </div>
-      );
-    } else if (lowerText.includes('reclam') || lowerText.includes('errado') || lowerText.includes('frio') || lowerText.includes('atraso')) {
-      intent = 'reclamacao';
-      agentDestino = 'Pós-Venda e Suporte (SAC)';
-      agentRole = 'Resolução';
-      iconName = 'LifeBuoy';
-      extracted.push(`- Motivo: ${lowerText}`);
-      agentReply = (
-        <div className="space-y-2">
-          <p>Poxa, sinto muito pelo ocorrido! Prezamos muito pela qualidade e isso não é o nosso padrão 😔.</p>
-          <p>Já estou acionando a gerência e o time de qualidade para verificar o seu caso imediatamente. Um responsável já vai falar com você para resolvermos isso.</p>
-        </div>
-      );
-    } else if (lowerText.includes('humano') || lowerText.includes('atendente') || lowerText.includes('falar com pessoa')) {
-      intent = 'transbordo_humano';
-      agentDestino = 'Humano (Transbordo)';
-      agentRole = 'Transbordo';
-      iconName = 'HeartHandshake';
-      agentReply = (
-        <div className="space-y-2">
-          <p>Compreendo perfeitamente. Algumas coisas precisam mesmo de um toque humano!</p>
-          <p>Estou transferindo você para um dos nossos especialistas. Seu protocolo é <strong>#{Math.floor(Math.random() * 10000)}</strong>. Por favor, aguarde um instante na linha.</p>
-        </div>
-      );
-    }
-
-    // Step 1: Orchestrator thinking
-    setActiveAgentRole('Orquestrador');
-    setTimeout(() => {
-      const orchestratorMsg: SimulatedMessage = {
-        id: Date.now().toString() + '_orch',
+    try {
+      // Step 1: Orchestrator thinking (UI placeholder while fetching)
+      setActiveAgentRole('Orquestrador');
+      
+      const orchestratorMsgId = Date.now().toString() + '_orch';
+      const pendingOrchestratorMsg: SimulatedMessage = {
+        id: orchestratorMsgId,
         type: 'orchestrator',
         content: (
           <div className="bg-slate-900 dark:bg-slate-950 p-4 rounded-xl border border-slate-700 max-w-[90%] w-full font-mono text-xs">
             <div className="flex items-center gap-2 text-emerald-400 mb-2 border-b border-slate-800 pb-2">
-              <Network className="w-4 h-4" />
-              <span>Orquestrador [Recepcionista] analisando...</span>
-            </div>
-            <div className="text-slate-300">
-              <span className="text-purple-400">Intenção Extraída:</span> {intent}<br/>
-              <span className="text-purple-400">Agente Destino:</span> {agentDestino}<br/>
-              {extracted.length > 0 && (
-                <>
-                  <span className="text-purple-400">Entidades Identificadas:</span><br/>
-                  {extracted.map((e, idx) => (
-                    <span key={idx} className="text-amber-300 ml-2">{e}<br/></span>
-                  ))}
-                </>
-              )}
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Orquestrador [{activeAgents[0]?.name || 'Recepção'}] analisando com Gemini...</span>
             </div>
           </div>
         )
       };
-      setChatMessages(prev => [...prev, orchestratorMsg]);
+      setChatMessages(prev => [...prev, pendingOrchestratorMsg]);
 
-      // Step 2: Agent reply
+      // Montando o System Prompt baseado no contexto da empresa e nos agentes ativos
+      const contextBase = `
+Você é o "Orquestrador RAG" da empresa "${knowledgeBase.businessName}".
+O seu nome (nome do bot) é: ${botName}.
+Horário de funcionamento: ${knowledgeBase.openingHours}
+Telefone/WhatsApp: ${knowledgeBase.contactPhone}
+Link do Cardápio: ${knowledgeBase.digitalMenuLink}
+Endereço: ${knowledgeBase.businessAddress}
+Aceita PIX: ${knowledgeBase.acceptsPix ? 'Sim' : 'Não'}
+Tem taxa de entrega: ${knowledgeBase.hasDeliveryFee ? 'Sim' : 'Não'}
+
+Regras Customizadas / Super Prompt do Usuário:
+${knowledgeBase.customRules}
+
+Você tem a seguinte equipe de especialistas (Agentes Ativos) disponíveis:
+${activeAgents.map(a => `- ID: ${a.id} | Nome: ${a.name} | Papel: ${a.role} | Personalidade: ${a.personality} | Descrição/Missão: ${a.description} | Diretrizes (Do's and Don'ts): ${a.guidelines || 'Nenhuma'}`).join('\n')}
+
+INSTRUÇÕES DO ORQUESTRADOR:
+1. Analise a última mensagem do usuário considerando o contexto de conversas.
+2. Identifique qual é a intenção principal do usuário.
+3. Escolha OBRIGATORIAMENTE um dos agentes da lista acima (usando o campo ID) para assumir a resposta.
+   - Se for o primeiro contato (ex: "olá"), escolha o "maestro" (ou o id do Recepcionista correspondente).
+   - Baseado na escolha, você deverá gerar a resposta final EXATAMENTE COMO o agente escolhido responderia, assumindo a personalidade, papel e usando as regras customizadas disponíveis.
+4. Responda ESTRITAMENTE em formato JSON com os seguintes campos:
+   {
+     "intent": "classificação curta da intenção",
+     "agentId": "id_do_agente_escolhido",
+     "reasoning": "Sua justificativa para ter escolhido esse agente e gerado essa resposta",
+     "reply": "O texto de resposta formatado como se você fosse o agente escolhido, pronto para enviar ao cliente."
+   }
+`;
+
+      const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!geminiApiKey) throw new Error("VITE_GEMINI_API_KEY não configurada no .env.");
+
+      const geminiHistory = chatMessages.filter(m => m.type === 'user' || m.type === 'agent').slice(-5).map(m => ({
+        role: m.type === 'user' ? 'user' : 'model',
+        parts: [{ text: m.type === 'user' ? (m.content as any)?.props?.children : "..." }]
+      }));
+      geminiHistory.push({ role: 'user', parts: [{ text: userText }] });
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${geminiApiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: contextBase }] },
+          contents: geminiHistory,
+          generationConfig: { response_mime_type: 'application/json' }
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || "Erro desconhecido na API do Gemini.");
+      }
+
+      const data = await response.json();
+      const result = JSON.parse(data.candidates[0].content.parts[0].text);
+
+      const targetAgent = activeAgents.find(a => a.id === result.agentId) || activeAgents[0];
+      const intent = result.intent || 'indefinida';
+      const reasoning = result.reasoning || 'Agente alocado com sucesso.';
+      const agentReply = result.reply || '...';
+
+      // Update Orchestrator Box
+      setChatMessages(prev => prev.map(m => m.id === orchestratorMsgId ? {
+        ...m,
+        content: (
+          <div className="bg-slate-900 dark:bg-slate-950 p-4 rounded-xl border border-slate-700 max-w-[90%] w-full font-mono text-xs">
+            <div className="flex items-center gap-2 text-emerald-400 mb-2 border-b border-slate-800 pb-2">
+              <Network className="w-4 h-4" />
+              <span>Orquestrador RAG concluiu a análise.</span>
+            </div>
+            <div className="text-slate-300">
+              <span className="text-purple-400">Intenção:</span> {intent}<br/>
+              <span className="text-purple-400">Agente Escolhido:</span> {targetAgent.name}<br/>
+              <span className="text-purple-400">Raciocínio:</span> {reasoning}
+            </div>
+            {isDebugMode && (
+              <button
+                onClick={() => setPromptModalMsg(contextBase)}
+                className="mt-3 flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 transition-colors bg-purple-500/10 hover:bg-purple-500/20 px-2 py-1.5 rounded-md border border-purple-500/20"
+              >
+                <Code className="w-3 h-3" />
+                Inspecionar System Prompt Enviado
+              </button>
+            )}
+          </div>
+        )
+      } : m));
+
+      // Step 2: Render Agent reply
       setTimeout(() => {
-        setActiveAgentRole(agentRole);
+        setActiveAgentRole(targetAgent.role);
         
         const replyMsg: SimulatedMessage = {
           id: Date.now().toString() + '_reply',
@@ -948,16 +1599,10 @@ function DashboardView({ editOnboarding }: { editOnboarding: () => void }) {
           content: (
             <div className="flex gap-3 max-w-[80%]">
               <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-1">
-                <RenderAgentIcon iconName={iconName} className="w-4 h-4 text-emerald-600" />
+                <RenderAgentIcon iconName={targetAgent.icon} className="w-4 h-4 text-emerald-600" />
               </div>
-              <div className="bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white p-4 rounded-2xl rounded-tl-none relative overflow-hidden">
-                <motion.div 
-                  initial={{ opacity: 0, width: 0 }}
-                  animate={{ opacity: 1, width: '100%' }}
-                  transition={{ duration: 0.5 }}
-                  className="absolute bottom-0 left-0 h-1 bg-emerald-500"
-                />
-                <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400 mb-1">{agentDestino}</p>
+              <div className="bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white p-4 rounded-2xl rounded-tl-none relative overflow-hidden whitespace-pre-wrap">
+                <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400 mb-2">{targetAgent.name}</p>
                 {agentReply}
               </div>
             </div>
@@ -965,9 +1610,23 @@ function DashboardView({ editOnboarding }: { editOnboarding: () => void }) {
         };
         setChatMessages(prev => [...prev, replyMsg]);
         setIsSimulating(false);
-        setTimeout(() => setActiveAgentRole(null), 1500); // clear highlight after 1.5s
-      }, 2500);
-    }, 1000);
+        setTimeout(() => setActiveAgentRole(null), 1500);
+      }, 800);
+
+    } catch (error: any) {
+      console.error(error);
+      setIsSimulating(false);
+      setChatMessages(prev => [...prev, {
+        id: Date.now().toString() + '_err',
+        type: 'agent',
+        content: (
+          <div className="bg-red-100 text-red-700 p-4 rounded-2xl max-w-[80%] text-sm">
+            Erro ao conectar com I.A: {error.message}. <br/>
+            Verifique suas chaves de API no .env.
+          </div>
+        )
+      }]);
+    }
   };
 
   const handleSaveAgent = (agent: AgentSpecialist) => {
@@ -1002,7 +1661,7 @@ function DashboardView({ editOnboarding }: { editOnboarding: () => void }) {
           <div>
             <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
               <Network className="w-7 h-7 text-emerald-500" />
-              Central de Agentes RAG
+              Central de Usuários RAG
             </h1>
             <p className="text-slate-500 dark:text-slate-400 mt-1">Sua equipe de atendimento está orquestrada e pronta.</p>
           </div>
@@ -1049,7 +1708,7 @@ function DashboardView({ editOnboarding }: { editOnboarding: () => void }) {
                     </div>
                     <div className="flex-1 pr-6">
                       <h3 className="font-semibold text-sm text-slate-900 dark:text-white truncate">
-                        {agent.id === 'maestro' && knowledgeBase.botName ? `${knowledgeBase.botName} (Recepcionista)` : agent.name}
+                        {agent.name}
                       </h3>
                       <p className={cn(
                         "text-xs transition-colors duration-500",
@@ -1114,6 +1773,45 @@ function DashboardView({ editOnboarding }: { editOnboarding: () => void }) {
                     <p className="text-xs text-slate-500 dark:text-slate-400">Teste como a Central orquestra as intenções</p>
                   </div>
                 </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsDebugMode(!isDebugMode)}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border shadow-sm",
+                      isDebugMode 
+                        ? "bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-800" 
+                        : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 dark:hover:bg-slate-700"
+                    )}
+                  >
+                    <Bug className="w-3.5 h-3.5" />
+                    {isDebugMode ? 'Debug On' : 'Debug Off'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setChatMessages([
+                        {
+                          id: '1',
+                          type: 'agent',
+                          content: (
+                            <div className="flex gap-3 max-w-[80%]">
+                              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-1">
+                                <Bot className="w-4 h-4 text-emerald-600" />
+                              </div>
+                              <div className="bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white p-4 rounded-2xl rounded-tl-none">
+                                <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400 mb-1">{botName} (Recepcionista)</p>
+                                Olá! Aqui é {knowledgeBase.botName ? botName : 'o assistente'}. Como posso ajudar você hoje? Teste enviando "ver cardápio", "fazer pedido", "reclamar" ou "falar com humano".
+                              </div>
+                            </div>
+                          )
+                        }
+                      ])
+                    }}
+                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors border border-transparent hover:border-red-100 dark:hover:border-red-900/50"
+                    title="Limpar Conversa"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               
               <div className="flex-1 p-6 overflow-y-auto space-y-6">
@@ -1165,13 +1863,50 @@ function DashboardView({ editOnboarding }: { editOnboarding: () => void }) {
 
         </div>
       </div>
+      {isModalOpen && editingAgent && (
+        <AgentModal 
+          isOpen={isModalOpen} 
+          onClose={() => setIsModalOpen(false)} 
+          agent={editingAgent} 
+          onSave={handleSaveAgent} 
+        />
+      )}
 
-      <AgentModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        agent={editingAgent} 
-        onSave={handleSaveAgent} 
-      />
+      {/* Modal de Debug Prompt */}
+      <AnimatePresence>
+        {promptModalMsg && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                    <FileJson className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900 dark:text-white">System Prompt Enviado</h2>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Este é o contexto bruto que o Orquestrador repassou ao LLM.</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setPromptModalMsg(null)}
+                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto bg-slate-950 text-slate-300 font-mono text-sm whitespace-pre-wrap flex-1">
+                {promptModalMsg}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

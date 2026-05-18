@@ -635,7 +635,7 @@ export function MainSidebar() {
             <NavItem icon={<Contact size={16} />} title="Contatos" onClick={() => navigate('/contacts')} />
             <NavItem 
               icon={<Network size={16} className="text-emerald-500" />} 
-              title="Central de Agentes RAG" 
+              title="Central de Usuários RAG" 
               onClick={() => navigate('/agents-hub')}
               isActive={window.location.pathname === '/agents-hub'}
             />
@@ -763,7 +763,7 @@ export function MainSidebar() {
                 onToggle={() => toggleSection('settings')}
               >
                 <NavItem icon={<Briefcase size={16} />} title="Conta" isSub onClick={() => navigate('/settings/account')} />
-                <NavItem icon={<UserSquare2 size={16} />} title="Agentes" isSub onClick={() => navigate('/settings/agents')} />
+                <NavItem icon={<UserSquare2 size={16} />} title="Usuários" isSub onClick={() => navigate('/settings/agents')} />
                 <NavItem icon={<Users size={16} />} title="Times" isSub onClick={() => navigate('/settings/teams')} />
                 <NavItem icon={<Inbox size={16} />} title="Caixas de Entrada" isSub onClick={() => navigate('/settings/inboxes')} />
                 <NavItem icon={<Tag size={16} />} title="Etiquetas" isSub onClick={() => navigate('/settings/labels')} />

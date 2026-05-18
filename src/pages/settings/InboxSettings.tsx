@@ -227,7 +227,7 @@ export default function InboxSettings() {
 
   const tabs = [
     { id: 'settings', label: 'Configurações' },
-    { id: 'agents', label: 'Agentes' },
+    { id: 'agents', label: 'Usuários' },
     { id: 'hours', label: 'Horário de funcionamento' },
     { id: 'csat', label: 'CSAT' },
     { id: 'config', label: 'Configuração' },
@@ -352,7 +352,7 @@ export default function InboxSettings() {
                    <div className="flex flex-col gap-8 max-w-4xl">
                      <div className="flex gap-6 items-start">
                         <div className="w-1/4">
-                           <h3 className="text-sm font-bold text-white mb-1">Agentes</h3>
+                           <h3 className="text-sm font-bold text-white mb-1">Usuários</h3>
                         </div>
                         <div className="w-3/4 bg-[#182229] border border-white/5 rounded-2xl p-5 flex flex-col gap-4">
                            <div className="flex flex-wrap gap-2">
@@ -364,13 +364,13 @@ export default function InboxSettings() {
                                       onClick={() => toggleAgent(u.user_id)}
                                       className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${isSelected ? 'bg-white/10 text-white border border-white/20' : 'bg-transparent text-gray-400 hover:text-white border border-transparent hover:border-white/10 hover:bg-white/5'}`}
                                     >
-                                       {u.full_name || 'Agente'} 
+                                       {u.full_name || 'Usuário'} 
                                        <X size={14} className={isSelected ? 'opacity-100' : 'opacity-0 hidden'} />
                                     </button>
                                  );
                               })}
                            </div>
-                           <p className="text-xs text-gray-500">Adicionar ou remover agentes dessa caixa de entrada</p>
+                           <p className="text-xs text-gray-500">Adicionar ou remover usuários dessa caixa de entrada</p>
                            <div className="flex justify-end mt-2">
                               <button onClick={handleSaveSettings} disabled={saving} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold py-2 px-6 rounded-xl transition-all shadow-[0_5px_15px_-5px_rgba(37,99,235,0.5)] flex items-center gap-2">
                                 {saving ? <Loader2 size={16} className="animate-spin" /> : 'Atualizar'}
@@ -384,7 +384,7 @@ export default function InboxSettings() {
                         <div className="bg-[#182229] border border-white/5 p-5 rounded-2xl flex justify-between items-center transition-all hover:bg-white/5">
                            <div className="flex flex-col max-w-2xl gap-1">
                               <span className="font-bold text-white text-sm">Habilitar atribuição automática</span>
-                              <p className="text-xs text-gray-400 leading-relaxed">Ativar ou desativar a atribuição automática de novas conversas aos agentes adicionados a essa caixa de entrada.</p>
+                              <p className="text-xs text-gray-400 leading-relaxed">Ativar ou desativar a atribuição automática de novas conversas aos usuários adicionados a essa caixa de entrada.</p>
                            </div>
                            <button onClick={() => setAutoAssignment(!autoAssignment)} className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-[#111b21]">
                              <span className={`${autoAssignment ? 'bg-blue-600' : 'bg-gray-600'} absolute inset-0 w-full h-full rounded-full transition-colors`} />

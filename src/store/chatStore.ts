@@ -22,6 +22,7 @@ export type MessageType = {
   isIgnored?: boolean; // Flag para mensagens ignoradas por automações
   isIgnoredSilent?: boolean; // Flag para não atualizar posição no chat
   vcardWaid?: string; // WAID (Telefone) extraído de VCard
+  payload?: any; // Rastreio de leitura interno e outros metadados
 };
 
 
@@ -1656,12 +1657,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || contact.unread === 0) return;
 
+    const unreadCount = contact.unread;
+
+    const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email') || 'Agente') : 'Agente';
+    const currentUserName = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_name') || localStorage.getItem('current_user_name') || currentUserEmail) : 'Agente';
+
+    const clientMsgs = contact.messages.filter(m => m.sender === 'client');
+    const unreadMsgs = clientMsgs.slice(-unreadCount);
+    const unreadIds = unreadMsgs.map(m => m.id).filter(id => !String(id).startsWith('optimistic-'));
+
+    const readReceipt = {
+      read_by_name: currentUserName,
+      read_by_email: currentUserEmail,
+      read_at: new Date().toISOString()
+    };
+
     set((s) => ({
-      contacts: s.contacts.map(c => c.id === contactId ? { ...c, unread: 0 } : c)
+      contacts: s.contacts.map(c => c.id === contactId ? { 
+        ...c, 
+        unread: 0,
+        messages: c.messages.map(m => unreadIds.includes(m.id) ? {
+          ...m,
+          payload: { ...(m.payload || {}), read_receipt: readReceipt }
+        } : m)
+      } : c)
     }));
 
     try {
       await supabase.from('conversations').update({ unread_count: 0 }).eq('contact_id', getRealContactId(contactId));
+
+      if (unreadIds.length > 0) {
+          const { data: currentRecords } = await supabase.from('messages').select('id, raw_payload').in('id', unreadIds);
+          if (currentRecords) {
+             for (const record of currentRecords) {
+                 const newPayload = { ...((record as any).raw_payload || {}), read_receipt: readReceipt };
+                 await supabase.from('messages').update({ raw_payload: newPayload }).eq('id', record.id);
+             }
+          }
+      }
     } catch (e) {
       console.error('Erro ao marcar como lida:', e);
     }
@@ -2283,7 +2316,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                    quoted: advanced.quoted,
                    buttons: advanced.buttons,
                    transcription: m.transcription,
-                   vcardWaid: advanced.vcardWaid
+                   vcardWaid: advanced.vcardWaid,
+                   payload: m.payload
                };
            });
 
@@ -2362,10 +2396,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         const newMsgsLength = fetchNewMsgs ? fetchNewMsgs.length : 0;
                         
                         if (!fetchNewMsgs || newMsgsLength === 0 || newMsgsLength <= currentMsgsLength) {
-                            alert("Não encontramos nenhuma nova mensagem no histórico neste momento. Isso geralmente ocorre se o WhatsApp já liberou tudo que estava disponível ou a API aguarda sincronização de rede.");
+                            // Removido o alert bloqueante pois o backend pode levar mais de 6 segundos para inserir o histórico no banco de dados
                             useDevStore.getState().addLog({
                                 type: 'warn',
-                                message: `[History Sync] Operação concluída mas não há dados novos. A API pode não conter histórico local ou o endpoint respondeu vazio.`,
+                                message: `[History Sync] Operação de busca aguardou 6s. Os dados podem não ter sido salvos ainda ou não há mais histórico disponível.`,
                                 source: 'ChatStore',
                                 details: { 
                                     erroSupabase: fetchErr, 
@@ -2785,7 +2819,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           transcription: m.transcription,
           vcardWaid: advanced.vcardWaid,
           isIgnored: isIgnored,
-          isIgnoredSilent: isIgnoredSilent
+          isIgnoredSilent: isIgnoredSilent,
+          payload: m.payload
         });
 
         // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele

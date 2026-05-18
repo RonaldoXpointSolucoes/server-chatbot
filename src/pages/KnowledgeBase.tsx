@@ -167,10 +167,10 @@ export default function KnowledgeBase() {
               </div>
               <div>
                 <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300">
-                  Base de Conhecimento RAG
+                  Base de Conhecimento Global (RAG)
                 </h1>
                 <p className="text-gray-400 font-medium mt-1">
-                  Inteligência Artificial privada e multi-tenant (Isolada na sua empresa).
+                  Arquivos gerais da empresa. Todos os agentes terão acesso a estas informações.
                 </p>
               </div>
             </div>
@@ -288,7 +288,7 @@ export default function KnowledgeBase() {
         {/* Lista de Documentos */}
         <div className="mt-4">
            <h2 className="text-xl font-bold text-gray-200 mb-6 flex items-center gap-2">
-              Arquivos Ensinados à IA <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2 py-0.5 rounded-full">{documents.length}</span>
+              Arquivos Globais da Empresa <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2 py-0.5 rounded-full">{documents.length}</span>
            </h2>
            
            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

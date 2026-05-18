@@ -1,9 +1,10 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Bot, User, MoreVertical, Edit2, Trash2, Ban, 
   MessageSquareReply, Camera, Video, VideoOff, Mic, 
   FileText, MapPin, Sparkles, Check, CheckCheck, RefreshCw,
-  LayoutTemplate, Smartphone
+  LayoutTemplate, Smartphone, Eye
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { cn, getContactDisplayName } from '../../pages/ChatDashboard';
@@ -56,6 +57,10 @@ export const MessageBubble = memo(({
   
   const isMe = msg.sender === 'human' || msg.sender === 'bot' || msg.sender === 'me';
   
+  // Usado pra saber se a bolha precisa exibir menu pra cima ou baixo
+  const [dropdownDirection, setDropdownDirection] = useState<'up' | 'down'>('down');
+  const [dropdownCoords, setDropdownCoords] = useState<{x: number, y: number} | null>(null);
+  
   const separatorNode = showDateSeparator ? (
     <div className="flex justify-center my-4 w-full">
        <span className="bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 text-[#54656f] dark:text-[#8696a0] text-[11px] px-3 py-1 rounded-lg border border-black/5 dark:border-white/5 font-medium shadow-sm uppercase tracking-wider">
@@ -97,16 +102,42 @@ export const MessageBubble = memo(({
            className="absolute top-1 right-1 flex items-center justify-center w-7 h-7 cursor-pointer text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] dark:hover:text-[#00a884] bg-transparent hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-all duration-200 z-10"
            onClick={(e) => {
              e.stopPropagation();
-             setActiveMsgDropdown(activeMsgDropdown === msg.id ? null : msg.id);
+             if (activeMsgDropdown === msg.id) {
+                setActiveMsgDropdown(null);
+             } else {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setDropdownCoords({ x: rect.right, y: rect.bottom });
+                // Se a bolha estiver muito pra baixo e o menu (aprox 250px) for cortar a tela, abre pra cima
+                if (window.innerHeight - rect.bottom < 250) {
+                    setDropdownDirection('up');
+                } 
+                // Se a bolha estiver muito pra cima e o menu for sumir no cabeçalho (aprox 150px de folga pro cabeçalho)
+                else if (rect.top < 150) {
+                    setDropdownDirection('down');
+                }
+                // Senão usa uma decisão razoável
+                else {
+                    setDropdownDirection(isLastMessages ? 'up' : 'down');
+                }
+                setActiveMsgDropdown(msg.id);
+             }
            }}
          >
            <MoreVertical size={16} className="opacity-40 hover:opacity-100" />
            
-           {activeMsgDropdown === msg.id && (
-              <div className={cn(
-                "absolute right-0 w-44 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/10 dark:border-white/10 rounded-2xl md:rounded-[24px] shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-2 z-[99999] animate-in fade-in zoom-in-95 duration-200",
-                isLastMessages ? "bottom-8 origin-bottom-right" : "top-8 origin-top-right"
-              )} onClick={e => e.stopPropagation()}>
+           {activeMsgDropdown === msg.id && dropdownCoords && createPortal(
+              <div 
+                className={cn(
+                 "fixed w-44 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/10 dark:border-white/10 rounded-2xl md:rounded-[24px] shadow-[0_10px_40px_rgba(0,0,0,0.5)] py-2 z-[999999] animate-in fade-in zoom-in-95 duration-200",
+                 dropdownDirection === 'up' ? "origin-bottom-right" : "origin-top-right"
+                )}
+                style={{
+                  top: dropdownDirection === 'down' ? dropdownCoords.y + 4 : undefined,
+                  bottom: dropdownDirection === 'up' ? window.innerHeight - dropdownCoords.y + 24 : undefined,
+                  left: dropdownCoords.x - 176
+                }}
+                onClick={e => e.stopPropagation()}
+              >
                 <button 
                   onClick={() => {
                     setReplyMessage({ id: msg.id, text: msg.text || 'Mídia enviada', sender: msg.sender });
@@ -173,7 +204,8 @@ export const MessageBubble = memo(({
                     </button>
                   </>
                 )}
-              </div>
+              </div>,
+              document.body
            )}
          </div>
 
@@ -414,6 +446,16 @@ export const MessageBubble = memo(({
           )}
         </div>
       </div>
+      
+      {/* Rastreio de Leitura (Read Receipt Interno) */}
+      {!isMe && msg.payload?.read_receipt && (
+         <div className="flex items-center gap-1.5 mt-0.5 ml-2 animate-in fade-in slide-in-from-top-1 opacity-80">
+             <Eye size={12} className="text-[#00a884]" />
+             <span className="text-[10px] text-[#54656f] dark:text-[#aebac1] font-medium tracking-wide">
+               Lido por {msg.payload.read_receipt.read_by_name} às {format(new Date(msg.payload.read_receipt.read_at), "HH:mm")}
+             </span>
+         </div>
+      )}
     </div>
     </div>
   );
@@ -425,6 +467,7 @@ export const MessageBubble = memo(({
     prevProps.msg.text === nextProps.msg.text &&
     prevProps.msg.transcription === nextProps.msg.transcription &&
     prevProps.msg.mediaUrl === nextProps.msg.mediaUrl &&
+    prevProps.msg.payload?.read_receipt?.read_at === nextProps.msg.payload?.read_receipt?.read_at &&
     prevProps.activeMsgDropdown === nextProps.activeMsgDropdown &&
     prevProps.transcribingIds[prevProps.msg.id] === nextProps.transcribingIds[nextProps.msg.id] &&
     prevProps.showDateSeparator === nextProps.showDateSeparator

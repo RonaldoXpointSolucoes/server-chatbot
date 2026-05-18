@@ -10,6 +10,7 @@ export interface AgentSpecialist {
   icon: string;
   personality: string;
   initialMessage?: string;
+  guidelines?: string;
 }
 
 export interface RagKnowledgeBase {
@@ -23,6 +24,23 @@ export interface RagKnowledgeBase {
   acceptsPix: boolean;
   paymentMethods: string;
   
+  // Detalhes PJ
+  cnpj: string;
+  corporateName: string;
+
+  // Endereço Desestruturado
+  zipCode: string;
+  street: string;
+  number: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+
+  // Horários Desestruturados
+  operatingDays: string;
+  openTime: string;
+  closeTime: string;
+
   // Gastro
   averagePrepTime: string;
   parkingDetails: string;
@@ -117,6 +135,17 @@ const defaultKB: RagKnowledgeBase = {
   digitalMenuLink: '',
   acceptsPix: true,
   paymentMethods: '',
+  cnpj: '',
+  corporateName: '',
+  zipCode: '',
+  street: '',
+  number: '',
+  neighborhood: '',
+  city: '',
+  state: '',
+  operatingDays: '',
+  openTime: '',
+  closeTime: '',
   averagePrepTime: '',
   parkingDetails: '',
   petFriendly: '',
@@ -155,7 +184,6 @@ export const useRagStore = create<RagState>()(
       
       toggleAgent: (id) => set((state) => ({
         agents: state.agents.map(a => {
-          if (a.id === 'maestro') return a; 
           if (a.id === id) return { ...a, isActive: !a.isActive };
           return a;
         })
@@ -170,7 +198,7 @@ export const useRagStore = create<RagState>()(
       })),
 
       deleteAgent: (id) => set((state) => ({
-        agents: state.agents.filter(a => a.id !== id && a.id !== 'maestro')
+        agents: state.agents.filter(a => a.id !== id)
       })),
 
       setKnowledgeBase: (data) => set((state) => ({
