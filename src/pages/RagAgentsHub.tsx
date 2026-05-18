@@ -109,6 +109,15 @@ function AgentModal({ isOpen, onClose, agent, onSave }: { isOpen: boolean, onClo
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  // States for Document Edit & Testing
+  const [editingDoc, setEditingDoc] = useState<any>(null);
+  const [editContent, setEditContent] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  
+  const [testQuery, setTestQuery] = useState('');
+  const [testResults, setTestResults] = useState<any[]>([]);
+  const [isTesting, setIsTesting] = useState(false);
+  
   const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
   const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -324,7 +333,10 @@ Responda APENAS com o JSON válido.
         },
         body: fd
       });
-      if (!response.ok) throw new Error('Falha no upload');
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null);
+        throw new Error(errData?.error || 'Falha no upload');
+      }
       await fetchDocuments();
     } catch (err: any) {
       alert(`Erro no envio: ${err.message}`);
@@ -348,6 +360,72 @@ Responda APENAS com o JSON válido.
       setDocuments(prev => prev.filter(d => d.id !== id));
     } catch (err: any) {
       alert(`Erro ao excluir: ${err.message}`);
+    }
+  };
+
+  const handleEditDoc = async (doc: any) => {
+    try {
+      setEditingDoc(doc);
+      setEditContent('Carregando conteúdo...');
+      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/${doc.id}/content`, {
+        headers: {
+          'x-tenant-id': tenantId,
+          'x-agent-id': agent.id || ''
+        }
+      });
+      if (!response.ok) throw new Error('Falha ao carregar conteúdo');
+      const data = await response.json();
+      setEditContent(data.content || '');
+    } catch (e: any) {
+      alert(`Erro: ${e.message}`);
+      setEditingDoc(null);
+    }
+  };
+
+  const handleSaveDocEdit = async () => {
+    if (!editingDoc) return;
+    setIsSavingEdit(true);
+    try {
+      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/${editingDoc.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': tenantId,
+          'x-agent-id': agent.id || ''
+        },
+        body: JSON.stringify({ content: editContent })
+      });
+      if (!response.ok) throw new Error('Falha ao salvar edição');
+      setEditingDoc(null);
+      await fetchDocuments();
+    } catch (e: any) {
+      alert(`Erro ao salvar: ${e.message}`);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleTestMatch = async () => {
+    if (!testQuery.trim()) return;
+    setIsTesting(true);
+    setTestResults([]);
+    try {
+      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/match`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': tenantId,
+          'x-agent-id': agent.id || ''
+        },
+        body: JSON.stringify({ query: testQuery })
+      });
+      if (!response.ok) throw new Error('Falha ao testar');
+      const data = await response.json();
+      setTestResults(data.matches || []);
+    } catch (e: any) {
+      alert(`Erro no teste: ${e.message}`);
+    } finally {
+      setIsTesting(false);
     }
   };
 
@@ -733,11 +811,55 @@ Responda APENAS com o JSON válido.
 
           {activeTab === 'knowledge' && (
             <div className="space-y-6 animate-in fade-in duration-200">
-               <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
-                <p className="text-sm text-emerald-800 dark:text-emerald-300">
-                  <strong>Conhecimento Específico:</strong> Arquivos enviados aqui estarão disponíveis <strong>apenas</strong> para o agente <strong>{formData.name || 'Atual'}</strong>.
-                </p>
-              </div>
+              
+              {editingDoc ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <Pencil className="w-5 h-5 text-emerald-500" /> Editar Documento
+                    </h3>
+                    <button 
+                      onClick={() => setEditingDoc(null)}
+                      className="text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                    >
+                      Voltar
+                    </button>
+                  </div>
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
+                    <p className="text-xs text-emerald-800 dark:text-emerald-300">
+                      <strong>Aviso:</strong> Você está editando o conteúdo bruto do arquivo <strong>{editingDoc.name}</strong>. Ao salvar, os dados antigos serão apagados e o arquivo será re-vetorizado na inteligência artificial.
+                    </p>
+                  </div>
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none font-mono text-sm min-h-[300px]"
+                    placeholder="Conteúdo do documento..."
+                  />
+                  <div className="flex justify-end gap-3">
+                    <button 
+                      onClick={() => setEditingDoc(null)}
+                      className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 rounded-xl transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      onClick={handleSaveDocEdit}
+                      disabled={isSavingEdit || editContent.trim() === ''}
+                      className="px-4 py-2 text-sm font-medium text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 rounded-xl transition-colors flex items-center gap-2 shadow-lg shadow-emerald-500/20"
+                    >
+                      {isSavingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                      Salvar e Vetorizar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
+                    <p className="text-sm text-emerald-800 dark:text-emerald-300">
+                      <strong>Conhecimento Específico:</strong> Arquivos enviados aqui estarão disponíveis <strong>apenas</strong> para o agente <strong>{formData.name || 'Atual'}</strong>.
+                    </p>
+                  </div>
 
               {/* Upload Zone */}
               <div 
@@ -809,19 +931,77 @@ Responda APENAS com o JSON válido.
                           </div>
                         </div>
                         
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); deleteDocument(doc.id); }}
-                          className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors shrink-0"
-                          title="Excluir documento"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleEditDoc(doc); }}
+                            className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-colors"
+                            title="Ver / Editar Documento"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); deleteDocument(doc.id); }}
+                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors"
+                            title="Excluir documento"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
+
+                  {/* Seção de Teste de Conhecimento */}
+                  <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-700">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                      <Wand2 className="w-5 h-5 text-indigo-500" /> Testar Recuperação (RAG)
+                    </h3>
+                    <div className="flex gap-2 mb-4">
+                      <input
+                        type="text"
+                        value={testQuery}
+                        onChange={(e) => setTestQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleTestMatch()}
+                        placeholder="Faça uma pergunta para testar a memória do agente..."
+                        className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                      />
+                      <button
+                        onClick={handleTestMatch}
+                        disabled={isTesting || !testQuery.trim()}
+                        className="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-indigo-500/20 flex items-center gap-2 shrink-0"
+                      >
+                        {isTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                        <span className="hidden sm:inline">Pesquisar</span>
+                      </button>
+                    </div>
+                    
+                    {/* Resultados do Teste */}
+                    {testResults.length > 0 && (
+                      <div className="space-y-3 animate-in fade-in duration-200">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Trechos Encontrados (Contexto para o Bot)</p>
+                        {testResults.map((res, i) => (
+                          <div key={i} className="p-4 bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/50 rounded-xl relative overflow-hidden group">
+                            <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500" />
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="text-xs font-bold px-2 py-1 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                                {res.method}
+                              </span>
+                              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                Match: {(res.similarity * 100).toFixed(1)}%
+                              </span>
+                            </div>
+                            <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed italic">
+                              "{res.content}"
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
-
+                </>
+              )}
             </div>
           )}
         </div>

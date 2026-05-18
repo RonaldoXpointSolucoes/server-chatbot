@@ -110,7 +110,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                         tenant_id,
                         agent_id,
                         content: chunkText,
-                        embedding: embeddingVector
+                        embedding: embeddingVector,
+                        chunk_index: i
                     });
                     
                     // Supabase tem limites de inserção por lote. Caso DBChunks fique gigante, fariamos batch.
@@ -163,6 +164,112 @@ router.get('/', async (req, res) => {
         res.json(data);
     } catch(e) {
         res.status(500).json({ error: e.message });
+    }
+});
+
+// Resgata o conteúdo completo extraído do documento (Concatenando os chunks)
+router.get('/:id/content', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'];
+        const agent_id = req.headers['x-agent-id'];
+        const docId = req.params.id;
+
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        let query = supabase
+            .from('knowledge_chunks')
+            .select('content, chunk_index')
+            .eq('document_id', docId)
+            .eq('tenant_id', tenant_id)
+            .order('chunk_index', { ascending: true, nullsFirst: false });
+
+        if (agent_id) {
+            query = query.eq('agent_id', agent_id);
+        } else {
+            query = query.is('agent_id', null);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        // Se por algum motivo existirem chunks antigos sem chunk_index, a ordem original pode não estar estritamente preservada (mas será unida).
+        const fullContent = data.map(c => c.content).join(' ');
+        
+        res.json({ content: fullContent });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Atualiza o documento enviando um novo conteúdo em formato de texto (Re-vetorização)
+router.put('/:id', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'];
+        const agent_id = req.headers['x-agent-id'] || null;
+        const docId = req.params.id;
+        const { content } = req.body;
+
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+        if (!content || content.trim() === '') return res.status(400).json({ error: 'O conteúdo não pode ser vazio.' });
+
+        // 1. Atualizar status na doc para processando
+        let updateQuery = supabase.from('knowledge_documents').update({ status: 'processing', updated_at: new Date() }).eq('id', docId).eq('tenant_id', tenant_id);
+        if (agent_id) updateQuery = updateQuery.eq('agent_id', agent_id); else updateQuery = updateQuery.is('agent_id', null);
+        const { error: updateError } = await updateQuery;
+        
+        if (updateError) throw updateError;
+
+        // Retorna ok para a UI rapidamente.
+        res.json({ status: 'processing', document_id: docId, message: 'Re-vetorização iniciada.' });
+
+        // -- BACKGROUND PROCESS ENGINE --
+        (async () => {
+            try {
+                // 2. Apagar TODOS os chunks antigos deste documento!
+                await supabase.from('knowledge_chunks').delete().eq('document_id', docId).eq('tenant_id', tenant_id);
+
+                // 3. Gerar novos chunks e embeddings
+                const chunks = splitTextIntoChunks(content, 300, 50);
+                const transformer = await EmbeddingsPipeline.getInstance();
+                const dbChunks = [];
+
+                for (let i = 0; i < chunks.length; i++) {
+                    const chunkText = chunks[i];
+                    if(chunkText.trim().length < 5) continue;
+
+                    const output = await transformer(chunkText, { pooling: 'mean', normalize: true });
+                    const embeddingVector = Array.from(output.data);
+
+                    dbChunks.push({
+                        document_id: docId,
+                        tenant_id,
+                        agent_id,
+                        content: chunkText,
+                        embedding: embeddingVector,
+                        chunk_index: i
+                    });
+
+                    if (dbChunks.length >= 100) {
+                        await supabase.from('knowledge_chunks').insert([...dbChunks]);
+                        dbChunks.length = 0;
+                    }
+                }
+
+                if (dbChunks.length > 0) {
+                    await supabase.from('knowledge_chunks').insert(dbChunks);
+                }
+
+                // 4. Marca doc como ready
+                await supabase.from('knowledge_documents').update({ status: 'ready' }).eq('id', docId);
+
+            } catch (bgError) {
+                console.error("Erro crítico na Re-vetorização do RAG:", bgError);
+                await supabase.from('knowledge_documents').update({ status: 'error', metadata: { err: bgError.message } }).eq('id', docId);
+            }
+        })();
+
+    } catch(e) {
+        if (!res.headersSent) res.status(500).json({ error: e.message });
     }
 });
 
