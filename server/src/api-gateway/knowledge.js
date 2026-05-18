@@ -60,7 +60,10 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             content = buffer.toString('utf-8');
         }
 
+        console.log(`[Upload Debug] File: ${originalname}, Mime: ${mimetype}, Buffer Size: ${buffer.length}, Extracted Content Length: ${content?.length || 0}`);
+
         if (!content || content.trim() === '') {
+            console.log(`[Upload Debug] Failed: Content is empty or undetectable.`);
             return res.status(400).json({ error: 'Arquivo vazio ou texto indetectável.' });
         }
 
