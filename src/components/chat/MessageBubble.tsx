@@ -9,6 +9,7 @@ import {
 import { format, isToday, isYesterday } from 'date-fns';
 import { cn, getContactDisplayName } from '../../pages/ChatDashboard';
 import { ImageIcon } from 'lucide-react';
+import { VideoPlayerPremium } from './VideoPlayerPremium';
 
 // Necessitamos tipagens básicas
 interface MessageBubbleProps {
@@ -288,9 +289,7 @@ export const MessageBubble = memo(({
         )}
         
         {msg.mediaUrl && (msg.mediaType === 'video' || msg.mediaUrl.endsWith('.mp4')) && (
-           <div className="relative group overflow-hidden rounded-xl border border-black/5 dark:border-white/5 mb-1 bg-black/5 dark:bg-black/20">
-             <video src={msg.mediaUrl} controls className="max-w-full max-h-[350px] object-contain rounded-xl" />
-           </div>
+           <VideoPlayerPremium src={msg.mediaUrl} />
         )}
         
         {!msg.mediaUrl && msg.mediaType === 'video' && (

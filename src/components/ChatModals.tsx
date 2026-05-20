@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building } from 'lucide-react';
+import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 
@@ -1155,6 +1155,273 @@ export function AssociatedCompaniesModal({ isOpen, onClose, companies }: Associa
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+export interface CompanyDetailsModalProps extends BaseModalProps {
+  contact: any;
+}
+
+export function CompanyDetailsModal({ isOpen, onClose, contact }: CompanyDetailsModalProps) {
+  const [copiedDoc, setCopiedDoc] = useState(false);
+  const [copiedPhone, setCopiedPhone] = useState(false);
+  
+  const allContacts = useChatStore(s => s.contacts);
+  const tenantInfo = useChatStore(s => s.tenantInfo);
+  const contactGroups = tenantInfo?.settings?.contactGroups;
+
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [matchingGroups, setMatchingGroups] = useState<any[]>([]);
+  const [groupCompanies, setGroupCompanies] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!isOpen || !contact) return;
+
+    const fetchGroupData = async () => {
+      setLoadingGroups(true);
+      try {
+        const { supabase } = await import('../services/supabase');
+        const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+        
+        const { data: companiesData } = await supabase
+          .from('contacts')
+          .select('id, name, fantasy_name, document_number, tags, company_ids')
+          .eq('tenant_id', tenantId)
+          .eq('document_type', 'cnpj');
+
+        if (!companiesData) return;
+
+        const groupIds = new Set<string>();
+        if (Array.isArray(contact.tags)) {
+          contact.tags.forEach((t: string) => groupIds.add(t));
+        }
+        
+        const rawContactDoc = contact.document_number ? contact.document_number.replace(/\D/g, '') : null;
+        
+        const linkedCompanies = companiesData.filter((c: any) => {
+          const rawCompanyDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
+          return (
+            (rawContactDoc && rawCompanyDoc && rawContactDoc === rawCompanyDoc) || 
+            (Array.isArray(contact.company_ids) && contact.company_ids.includes(c.id))
+          );
+        });
+
+        for (const c of linkedCompanies) {
+          if (Array.isArray(c.tags)) {
+            c.tags.forEach((t: string) => groupIds.add(t));
+          }
+        }
+
+        const safeContactGroups = contactGroups || [];
+        const mGroups = safeContactGroups.filter(g => groupIds.has(g.id));
+        setMatchingGroups(mGroups);
+
+        if (mGroups.length > 0) {
+          const validGroupIds = new Set(mGroups.map(g => g.id));
+          const gCompanies = companiesData.filter((c: any) => 
+            Array.isArray(c.tags) && c.tags.some((t: string) => validGroupIds.has(t))
+          );
+          setGroupCompanies(Array.from(new Map(gCompanies.map((c: any) => [c.id, c])).values()));
+        } else {
+          setGroupCompanies([]);
+        }
+
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoadingGroups(false);
+      }
+    };
+
+    fetchGroupData();
+  }, [isOpen, contact, contactGroups]);
+
+  if (!isOpen || !contact) return null;
+
+  const rawCnpj = contact.document_number ? contact.document_number.replace(/\D/g, '') : '';
+  const billingUrl = rawCnpj ? `https://mensalidadedatadivas.vercel.app/?e=${rawCnpj}` : null;
+
+  // Format phone number to (XX) XXXXX-XXXX for display
+  const formatPhone = (p: string) => {
+    let clean = p.replace(/\D/g, '');
+    if (clean.startsWith('55') && clean.length >= 12) clean = clean.substring(2);
+    if (clean.length === 11) return `(${clean.substring(0, 2)}) ${clean.substring(2, 7)}-${clean.substring(7)}`;
+    if (clean.length === 10) return `(${clean.substring(0, 2)}) ${clean.substring(2, 6)}-${clean.substring(6)}`;
+    return p;
+  };
+
+  // Format CNPJ or CPF
+  const formatDocument = (doc: string) => {
+    if (!doc) return '';
+    const clean = doc.replace(/\D/g, '');
+    if (clean.length === 14) {
+      return clean.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+    }
+    if (clean.length === 11) {
+      return clean.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+    }
+    return doc;
+  };
+
+  const handleCopyDoc = () => {
+    if (contact.document_number) {
+      navigator.clipboard.writeText(contact.document_number);
+      setCopiedDoc(true);
+      setTimeout(() => setCopiedDoc(false), 2000);
+    }
+  };
+
+  const handleCopyPhone = () => {
+    if (contact.phone) {
+      navigator.clipboard.writeText(contact.phone);
+      setCopiedPhone(true);
+      setTimeout(() => setCopiedPhone(false), 2000);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
+      
+      <div className="relative w-full max-w-sm bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col gap-5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center shadow-inner border border-emerald-100 dark:border-emerald-500/20">
+            <Building2 className="w-6 h-6 text-emerald-500" />
+          </div>
+          <button onClick={onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Info Blocks */}
+        <div className="flex flex-col gap-1">
+          <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef] leading-tight break-words">
+            {contact.fantasy_name || contact.name || contact.custom_name || 'Empresa'}
+          </h2>
+          {(contact.fantasy_name && contact.name) && (
+            <p className="text-[13px] text-gray-500 dark:text-[#8696a0] leading-snug break-words">
+              {contact.name}
+            </p>
+          )}
+          {(!contact.fantasy_name && contact.custom_name && contact.name) && (
+            <p className="text-[13px] text-gray-500 dark:text-[#8696a0] leading-snug break-words">
+              {contact.name}
+            </p>
+          )}
+          <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-600 dark:text-emerald-500 mt-2">Ficha Cadastral</p>
+        </div>
+
+        <div className="flex flex-col gap-3 bg-[#f0f2f5]/80 dark:bg-black/20 p-4 rounded-2xl border border-black/5 dark:border-white/5">
+          {/* CNPJ */}
+          <div className="flex items-center justify-between group">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-400">
+                <FileText size={18} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">CNPJ / CPF</span>
+                <span className="text-[13px] font-mono font-semibold text-[#111b21] dark:text-[#e9edef]">
+                  {contact.document_number ? formatDocument(contact.document_number) : 'Não informado'}
+                </span>
+              </div>
+            </div>
+            {contact.document_number && (
+              <button onClick={handleCopyDoc} className="p-2 text-gray-400 hover:text-emerald-500 transition-colors bg-white dark:bg-[#202c33] rounded-lg shadow-sm border border-gray-100 dark:border-white/5 opacity-0 group-hover:opacity-100 focus:opacity-100">
+                {copiedDoc ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Copy size={16} />}
+              </button>
+            )}
+          </div>
+
+          {/* Divider */}
+          <div className="h-px w-full bg-gradient-to-r from-transparent via-gray-200 dark:via-gray-700 to-transparent my-1"></div>
+
+          {/* Telefone */}
+          <div className="flex items-center justify-between group">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-400">
+                <Phone size={18} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Celular</span>
+                <span className="text-[13px] font-mono font-semibold text-[#111b21] dark:text-[#e9edef]">
+                  {contact.phone ? formatPhone(contact.phone) : 'Não informado'}
+                </span>
+              </div>
+            </div>
+            {contact.phone && (
+              <button onClick={handleCopyPhone} className="p-2 text-gray-400 hover:text-emerald-500 transition-colors bg-white dark:bg-[#202c33] rounded-lg shadow-sm border border-gray-100 dark:border-white/5 opacity-0 group-hover:opacity-100 focus:opacity-100">
+                {copiedPhone ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Copy size={16} />}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Action Button */}
+        <div className="mt-2">
+          <button 
+            onClick={() => window.open(`https://mensalidadedatadivas.vercel.app/?e=${rawCnpj || ''}`, '_blank')}
+            className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-[#00a884] hover:bg-emerald-600 active:scale-[0.98] text-white rounded-2xl font-semibold shadow-lg shadow-emerald-500/20 transition-all duration-200 group"
+          >
+            <CircleDollarSign size={18} className="group-hover:rotate-12 transition-transform" />
+            <span>Ver Faturamento (NF-e)</span>
+            <ExternalLink size={16} className="ml-auto opacity-70 group-hover:opacity-100 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 transition-all" />
+          </button>
+        </div>
+
+        {/* Group Companies */}
+        {matchingGroups.length > 0 && groupCompanies.length > 0 && (
+          <div className="flex flex-col mt-2 pt-4 border-t border-black/5 dark:border-white/5 animate-in fade-in duration-500">
+            <div className="flex flex-col mb-3">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-600 dark:text-emerald-500 mb-1">
+                Grupo Empresarial
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {matchingGroups.map(g => (
+                  <span key={g.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white shadow-sm" style={{ backgroundColor: g.color || '#3b82f6' }}>
+                    <Building size={10} />
+                    {g.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+            
+            <div className="flex flex-col gap-2 max-h-[180px] overflow-y-auto custom-scrollbar pr-1">
+              {groupCompanies.map(c => (
+                <div key={c.id} className="flex flex-col p-3 rounded-xl bg-[#f0f2f5]/50 dark:bg-[#202c33]/50 border border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                  <span className="text-[12px] font-bold text-[#111b21] dark:text-[#e9edef] truncate" title={c.fantasy_name || c.name}>
+                    {c.fantasy_name || c.name}
+                  </span>
+                  {(c.fantasy_name && c.name) && (
+                    <span className="text-[10px] text-gray-500 dark:text-[#8696a0] truncate" title={c.name}>
+                      {c.name}
+                    </span>
+                  )}
+                  <span className="text-[10px] font-mono text-gray-400 mt-1 flex justify-between items-center">
+                    {c.document_number ? formatDocument(c.document_number) : 'CNPJ indisponível'}
+                    
+                    {c.document_number && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigator.clipboard.writeText(c.document_number);
+                        }}
+                        className="opacity-60 hover:opacity-100 hover:text-emerald-500 transition-colors"
+                        title="Copiar CNPJ"
+                      >
+                        <Copy size={12} />
+                      </button>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

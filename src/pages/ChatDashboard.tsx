@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
-import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal } from '../components/ChatModals';
+import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal, CompanyDetailsModal } from '../components/ChatModals';
 import ImageEditorModal from '../components/ImageEditorModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { AgentSettingsModal } from '../components/AgentSettingsModal';
@@ -151,6 +151,7 @@ export default function ChatDashboard() {
   const [copiedDoc, setCopiedDoc] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [associatedCompaniesOpen, setAssociatedCompaniesOpen] = useState(false);
+  const [companyDetailsOpen, setCompanyDetailsOpen] = useState(false);
   const [allCompanies, setAllCompanies] = useState<any[]>([]);
 
   useEffect(() => {
@@ -803,16 +804,18 @@ export default function ChatDashboard() {
         onClose={() => setShowSnoozeModal(null)}
         contactId={showSnoozeModal || ''}
       />
+      
+      <AssociatedCompaniesModal 
+        isOpen={associatedCompaniesOpen}
+        onClose={() => setAssociatedCompaniesOpen(false)}
+        companies={activeChat?.company_ids?.map((id: string) => allCompanies.find((c: any) => c.id === id)).filter(Boolean) || []}
+      />
 
-      {activeChat?.company_ids && (
-        <AssociatedCompaniesModal
-          isOpen={associatedCompaniesOpen}
-          onClose={() => setAssociatedCompaniesOpen(false)}
-          companies={activeChat.company_ids
-            .map((id: string) => allCompanies.find((c: any) => c.id === id))
-            .filter(Boolean)}
-        />
-      )}
+      <CompanyDetailsModal
+        isOpen={companyDetailsOpen}
+        onClose={() => setCompanyDetailsOpen(false)}
+        contact={activeChat}
+      />
 
       {/* Modal de Preview de Imagem Colada (Agora com Editor de Imagem) */}
       {pastedImage && (
@@ -976,7 +979,7 @@ export default function ChatDashboard() {
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
           <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.4.7'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '17/05/2026, 22:15')}`}
+            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.5.1'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '19/05/2026, 22:04')}`}
           </span>
           
           <div className="flex items-center justify-between w-full mt-2">
@@ -1226,8 +1229,8 @@ export default function ChatDashboard() {
                  }
              }
 
-             // 2) FILTRO POR CAIXA ESPECÇ孝ICA (Menu esquerdo)
-             if (activeChannelFilter) {
+             // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - IGNORADO DURANTE PESQUISA
+             if (activeChannelFilter && !searchTerm) {
                  const dbInstId = c.instance_id;
                  const effectiveId = connectedInstanceName;
 
@@ -1240,10 +1243,18 @@ export default function ChatDashboard() {
                  }
              }
 
-             // 3) BUSCA EM TEXTO
-             if (searchTerm && !c.name?.toLowerCase().includes(searchTerm.toLowerCase()) && !c.whatsapp_jid?.includes(searchTerm)) {
-               return false;
+             // 3) BUSCA EM TEXTO E METADADOS
+             if (searchTerm) {
+                 const s = searchTerm.toLowerCase();
+                 const match = c.name?.toLowerCase().includes(s) ||
+                               c.custom_name?.toLowerCase().includes(s) ||
+                               c.whatsapp_jid?.includes(searchTerm) ||
+                               c.phone?.includes(searchTerm) ||
+                               c.fantasy_name?.toLowerCase().includes(s) ||
+                               c.document_number?.includes(searchTerm);
+                 if (!match) return false;
              }
+             
              // Lógica de Contatos Bloqueados
              if (filterType === 'blocked') {
                  if (!c.is_blocked) return false;
@@ -1251,14 +1262,16 @@ export default function ChatDashboard() {
                  if (c.is_blocked) return false; // Esconde os bloqueados em todas as outras views (All, Unread, Favoritos, etc)
              }
 
-             // Filtros de Pills
-             if (filterType === 'unread' && c.unread <= 0 && c.id !== activeChatId) return false;
-             if (filterType === 'favorite' && !c.is_favorite) return false;
-             if (filterType === 'labels' && !(c.conv_labels && c.conv_labels.length > 0)) return false;
-             if (filterType === 'mine') {
-                 const currentUserEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
-                 const currentAgent = agents.find(a => a.email === currentUserEmail);
-                 if (!currentAgent || c.assigned_to !== currentAgent.id) return false;
+             // Filtros de Pills - IGNORADOS DURANTE PESQUISA
+             if (!searchTerm) {
+                 if (filterType === 'unread' && c.unread <= 0 && c.id !== activeChatId) return false;
+                 if (filterType === 'favorite' && !c.is_favorite) return false;
+                 if (filterType === 'labels' && !(c.conv_labels && c.conv_labels.length > 0)) return false;
+                 if (filterType === 'mine') {
+                     const currentUserEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
+                     const currentAgent = agents.find(a => a.email === currentUserEmail);
+                     if (!currentAgent || c.assigned_to !== currentAgent.id) return false;
+                 }
              }
              
              // Filtro de Adiado (Snoozed)
@@ -1417,7 +1430,7 @@ export default function ChatDashboard() {
                             e.stopPropagation();
                             setActiveDropdown(activeDropdown === contact.id ? null : contact.id);
                           }}
-                          className="p-1 text-[#54656f] hover:text-[#111b21] dark:text-[#aebac1] dark:hover:text-[#e9edef] rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors opacity-0 group-hover:opacity-100"
+                          className="p-1 text-[#54656f] hover:text-[#111b21] dark:text-[#aebac1] dark:hover:text-[#e9edef] rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-all opacity-80 hover:opacity-100"
                         >
                           <MoreVertical size={16} />
                         </button>
@@ -1624,33 +1637,6 @@ export default function ChatDashboard() {
               </button>
               
               <div className="flex items-center gap-3 relative">
-                {/* Badge flutuante cobrindo foto e nome */}
-                {(() => {
-                   const otherUnreadCount = contacts.filter(c => c.id !== activeChatId).reduce((acc, c) => acc + (c.unread || 0), 0);
-                   if (otherUnreadCount > 0) {
-                      return (
-                        <div className="sm:hidden absolute -inset-y-2 -inset-x-2 z-30 flex items-center bg-[#f0f2f5] dark:bg-[#202c33] rounded-r-lg">
-                          <button 
-                            onClick={() => {
-                              setActiveChat(null);
-                              if (window.history.state?.chatOpen) window.history.back();
-                            }}
-                            className="group flex items-center gap-2.5 bg-[#00a884] px-4 py-1.5 rounded-full shadow-[0_0_20px_rgba(0,168,132,0.6)] animate-pulse hover:scale-105 transition-all w-full"
-                          >
-                            <div className="relative flex items-center justify-center w-7 h-7 bg-white/20 rounded-full text-white">
-                              <MessageCircle size={14} className="group-hover:animate-bounce" />
-                              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 border border-[#00a884] rounded-full" />
-                            </div>
-                            <span className="text-[13px] font-bold text-white tracking-tight whitespace-nowrap">
-                              {otherUnreadCount} {otherUnreadCount === 1 ? 'nova' : 'novas'}
-                            </span>
-                          </button>
-                        </div>
-                      );
-                   }
-                   return null;
-                })()}
-
                 <img 
                     src={activeChat.avatar} 
                     alt="Avatar" 
@@ -1663,81 +1649,22 @@ export default function ChatDashboard() {
                 <div className="flex flex-col justify-center">
                   <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
                     <span className="truncate max-w-[200px] sm:max-w-md">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
-                    
-                    {activeChat.phone && (
+                  </h2>
+                  
+                  {/* Premium Company Info Button */}
+                  {(activeChat.fantasy_name || activeChat.document_number) && (
+                    <div className="flex items-center mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300">
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (activeChat.phone) {
-                            navigator.clipboard.writeText(activeChat.phone);
-                            setCopiedPhone(true);
-                            setTimeout(() => setCopiedPhone(false), 2000);
-                          }
+                          setCompanyDetailsOpen(true);
                         }}
-                        className={cn(
-                          "transition-all p-1 rounded cursor-pointer duration-300 flex items-center justify-center border border-black/5 dark:border-white/5",
-                          copiedPhone 
-                            ? "text-[#00a884] bg-[#00a884]/10 opacity-100 scale-105" 
-                            : "text-[#54656f] dark:text-[#aebac1] opacity-60 hover:opacity-100 hover:text-[#00a884] bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10"
-                        )}
-                        title="Copiar Número"
+                        className="flex items-center gap-1.5 bg-[#00a884]/10 hover:bg-[#00a884]/20 px-2.5 py-0.5 rounded-full border border-[#00a884]/20 transition-all duration-200 group"
+                        title="Ver Dados da Empresa e Faturamento"
                       >
-                        {copiedPhone ? <CheckCircle2 size={13} className="animate-in zoom-in" /> : <Copy size={13} />}
+                        <Building2 size={12} className="text-[#00a884] group-hover:scale-110 transition-transform" />
+                        <span className="text-[11px] font-semibold text-[#00a884]">Ver Empresa</span>
                       </button>
-                    )}
-
-                    {activeChat.phone && getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone) !== formatPhoneNumber(activeChat.phone) && (
-                      <span className="text-[12px] text-[#54656f] dark:text-[#8696a0] font-mono inline-block mt-0.5 border border-black/5 dark:border-white/10 px-1.5 rounded-md bg-black/5 dark:bg-white/5 hidden sm:inline-block">
-                        {formatPhoneNumber(activeChat.phone)}
-                      </span>
-                    )}
-                  </h2>
-                  
-                  {/* Premium Company Info & Document */}
-                  {(activeChat.fantasy_name || activeChat.document_number) && (
-                    <div className="flex items-center gap-2 text-[12px] text-[#54656f] dark:text-[#8696a0] mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300">
-                      {activeChat.fantasy_name && (
-                        <div className="flex items-center gap-1.5 bg-black/5 dark:bg-white/5 px-2 py-0.5 rounded-full border border-black/5 dark:border-white/5 backdrop-blur-sm" title="Empresa">
-                          <Building2 size={12} className="text-[#00a884] opacity-80" />
-                          <span className="font-medium truncate max-w-[150px]">{activeChat.fantasy_name}</span>
-                        </div>
-                      )}
-                      
-                      {activeChat.document_number && (
-                        <div className="flex items-center gap-1.5 group/doc bg-black/5 dark:bg-white/5 px-2 py-0.5 rounded-full border border-black/5 dark:border-white/5 backdrop-blur-sm transition-all hover:border-[#00a884]/30">
-                          <span className="font-mono tracking-wide">{activeChat.document_number}</span>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (activeChat.document_number) {
-                                const rawCnpj = activeChat.document_number.replace(/\D/g, '');
-                                window.open(`https://mensalidadedatadivas.vercel.app/?e=${rawCnpj}`, '_blank');
-                              }
-                            }}
-                            className="transition-all p-0.5 rounded cursor-pointer duration-300 flex items-center justify-center text-[#54656f] dark:text-[#aebac1] opacity-40 group-hover/doc:opacity-100 hover:text-emerald-500 hover:bg-black/5 dark:hover:bg-white/10"
-                            title="Ver Faturamento (NF-e)"
-                          >
-                            <CircleDollarSign size={12} />
-                          </button>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (activeChat.document_number) {
-                                navigator.clipboard.writeText(activeChat.document_number);
-                                setCopiedDoc(true);
-                                setTimeout(() => setCopiedDoc(false), 2000);
-                              }
-                            }}
-                            className={cn(
-                              "transition-all p-0.5 rounded cursor-pointer duration-300 flex items-center justify-center",
-                              copiedDoc ? "text-[#00a884] opacity-100 scale-110" : "text-[#54656f] dark:text-[#aebac1] opacity-40 group-hover/doc:opacity-100 hover:text-[#00a884] hover:bg-black/5 dark:hover:bg-white/10"
-                            )}
-                            title="Copiar Documento"
-                          >
-                            {copiedDoc ? <CheckCircle2 size={12} className="animate-in zoom-in" /> : <Copy size={12} />}
-                          </button>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>

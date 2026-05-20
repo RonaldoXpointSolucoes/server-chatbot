@@ -6,7 +6,7 @@ const supabase = createClient(process.env.VITE_SUPABASE_URL, process.env.SUPABAS
 
 async function run() {
   const { data, error } = await supabase.from('app_version').insert({
-    version: '2.1.6',
+    version: '2.5.1',
     deploy_date: new Date().toISOString()
   });
   console.log('Error:', error);

@@ -712,33 +712,52 @@ export const useChatStore = create<ChatState>((set, get) => ({
        return;
     }
     
-    // Injeção Mágica de Assinatura (Signature)
+    // Injeção Mágica de Assinatura Síncrona (Signature) para evitar atrasos na UI
     let finalMessageText = text;
     try {
        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
        if (currentUserEmail) {
            let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
-           
-           if (!agent && state.tenantInfo) {
-               // Fallback direto no banco caso a store não tenha sido populada ainda
-               const { data: agentData } = await supabase.from('tenant_users')
-                  .select('use_signature, signature')
-                  .eq('email', currentUserEmail)
-                  .eq('tenant_id', state.tenantInfo.id)
-                  .limit(1)
-                  .maybeSingle();
-               if (agentData) agent = agentData as any;
+           let useSignature = false;
+           let signature = '';
+
+           if (agent) {
+               useSignature = !!agent.use_signature;
+               signature = agent.signature || '';
+           } else {
+               // Fallback síncrono do cache no localStorage
+               useSignature = localStorage.getItem('current_user_use_signature') === 'true';
+               signature = localStorage.getItem('current_user_signature') || '';
            }
 
-           if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
-              finalMessageText = `*${agent.signature}*\n\n${text}`;
+           if (useSignature && signature.trim().length > 0) {
+              finalMessageText = `*${signature}*\n\n${text}`;
+           }
+
+           // Se o agente não está mapeado no cache local de forma alguma,
+           // disparamos uma query em background para popular o localStorage para futuros envios,
+           // mas SEM usar await para não bloquear o render do chat atual.
+           if (!agent && !signature && state.tenantInfo) {
+              supabase.from('tenant_users')
+                 .select('use_signature, signature')
+                 .eq('email', currentUserEmail)
+                 .eq('tenant_id', state.tenantInfo.id)
+                 .limit(1)
+                 .maybeSingle()
+                 .then(({ data: agentData }) => {
+                    if (agentData) {
+                       localStorage.setItem('current_user_signature', agentData.signature || '');
+                       localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
+                    }
+                 })
+                 .catch(e => console.warn('[sendHumanMessage] Falha ao recuperar assinatura em background:', e));
            }
        }
     } catch (e) {
-      console.error("Erro na injeção de assinatura:", e);
+      console.error("Erro na injeção de assinatura síncrona:", e);
     }
 
-    // Atualiza otimista UI
+    // Atualiza otimista UI (Instantâneo)
     const pseudoId = 'optimistic-' + Math.random().toString();
     state.addMessageLocally(contactId, { id: pseudoId, text: finalMessageText, sender: 'human', timestamp: new Date() });
 
@@ -906,7 +925,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
 
-    // Injeção Mágica de Assinatura na mídia
+    // Injeção Mágica de Assinatura Síncrona na mídia para evitar atrasos na UI
     let finalCaption = caption?.trim() ? caption.trim() : (mediaType === 'image' || mediaType === 'video' ? '' : (file.name || ''));
     
     if (!isPtt) {
@@ -914,23 +933,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
            const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
            if (currentUserEmail) {
                let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
-               
-               if (!agent && state.tenantInfo) {
-                   const { data: agentData } = await supabase.from('tenant_users')
-                      .select('use_signature, signature')
-                      .eq('email', currentUserEmail)
-                      .eq('tenant_id', state.tenantInfo.id)
-                      .limit(1)
-                      .maybeSingle();
-                   if (agentData) agent = agentData as any;
+               let useSignature = false;
+               let signature = '';
+
+               if (agent) {
+                   useSignature = !!agent.use_signature;
+                   signature = agent.signature || '';
+               } else {
+                   // Fallback síncrono do cache no localStorage
+                   useSignature = localStorage.getItem('current_user_use_signature') === 'true';
+                   signature = localStorage.getItem('current_user_signature') || '';
                }
 
-               if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
-                  finalCaption = finalCaption ? `*${agent.signature}*\n\n${finalCaption}` : `*${agent.signature}*`;
+               if (useSignature && signature.trim().length > 0) {
+                  finalCaption = finalCaption ? `*${signature}*\n\n${finalCaption}` : `*${signature}*`;
+               }
+
+               // Se o agente não está mapeado no cache local de forma alguma,
+               // disparamos uma query em background para popular o localStorage para futuros envios.
+               if (!agent && !signature && state.tenantInfo) {
+                  supabase.from('tenant_users')
+                     .select('use_signature, signature')
+                     .eq('email', currentUserEmail)
+                     .eq('tenant_id', state.tenantInfo.id)
+                     .limit(1)
+                     .maybeSingle()
+                     .then(({ data: agentData }) => {
+                        if (agentData) {
+                           localStorage.setItem('current_user_signature', agentData.signature || '');
+                           localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
+                        }
+                     })
+                     .catch(e => console.warn('[uploadAndSendMedia] Falha ao recuperar assinatura em background:', e));
                }
            }
        } catch (e) {
-          console.error("Erro na injeção de assinatura na mídia:", e);
+          console.error("Erro na injeção de assinatura síncrona na mídia:", e);
        }
     }
 
@@ -1034,29 +1072,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
 
-    // Injeção Mágica de Assinatura na mídia
+    // Injeção Mágica de Assinatura Síncrona na mídia para evitar atrasos na UI
     let finalCaption = caption?.trim() ? caption.trim() : '';
     
     try {
        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
        if (currentUserEmail) {
            let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
-           if (!agent && state.tenantInfo) {
-               const { data: agentData } = await supabase.from('tenant_users')
-                  .select('use_signature, signature')
-                  .eq('email', currentUserEmail)
-                  .eq('tenant_id', state.tenantInfo.id)
-                  .limit(1)
-                  .maybeSingle();
-               if (agentData) agent = agentData as any;
+           let useSignature = false;
+           let signature = '';
+
+           if (agent) {
+               useSignature = !!agent.use_signature;
+               signature = agent.signature || '';
+           } else {
+               // Fallback síncrono do cache no localStorage
+               useSignature = localStorage.getItem('current_user_use_signature') === 'true';
+               signature = localStorage.getItem('current_user_signature') || '';
            }
-           
-           if (agent && agent.use_signature && agent.signature && agent.signature.trim().length > 0) {
-               finalCaption = finalCaption ? `*${agent.signature}*\n\n${finalCaption}` : `*${agent.signature}*`;
+
+           if (useSignature && signature.trim().length > 0) {
+               finalCaption = finalCaption ? `*${signature}*\n\n${finalCaption}` : `*${signature}*`;
+           }
+
+           // Se o agente não está mapeado no cache local de forma alguma,
+           // disparamos uma query em background para popular o localStorage para futuros envios.
+           if (!agent && !signature && state.tenantInfo) {
+              supabase.from('tenant_users')
+                 .select('use_signature, signature')
+                 .eq('email', currentUserEmail)
+                 .eq('tenant_id', state.tenantInfo.id)
+                 .limit(1)
+                 .maybeSingle()
+                 .then(({ data: agentData }) => {
+                    if (agentData) {
+                       localStorage.setItem('current_user_signature', agentData.signature || '');
+                       localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
+                    }
+                 })
+                 .catch(e => console.warn('[sendMediaFromUrl] Falha ao recuperar assinatura em background:', e));
            }
        }
     } catch (e) {
-      console.warn("Erro ao injetar assinatura na midia por URL", e);
+      console.warn("Erro ao injetar assinatura síncrona na midia por URL:", e);
     }
 
     // 1) Otimistic render - Criamos a bolha de mensagem simulando carregamento
@@ -1664,7 +1722,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const clientMsgs = contact.messages.filter(m => m.sender === 'client');
     const unreadMsgs = clientMsgs.slice(-unreadCount);
-    const unreadIds = unreadMsgs.map(m => m.id).filter(id => !String(id).startsWith('optimistic-'));
+    const unreadIds = unreadMsgs.map(m => m.id).filter(id => !String(id).startsWith('optimistic-') && !String(id).startsWith('preview-'));
 
     const readReceipt = {
       read_by_name: currentUserName,
@@ -2449,6 +2507,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { data: agentsData, error } = await supabase.from('tenant_users').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: true });
       if (error) throw error;
       set({ agents: agentsData || [] });
+
+      // Cache de Assinatura do Usuário Logado para evitar queries bloqueantes no envio de mensagens
+      const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+      if (currentUserEmail && agentsData) {
+        const myAgent = agentsData.find((a: any) => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+        if (myAgent) {
+          localStorage.setItem('current_user_signature', myAgent.signature || '');
+          localStorage.setItem('current_user_use_signature', String(!!myAgent.use_signature));
+        }
+      }
     } catch (e) {
       console.error('Erro ao buscar agentes:', e);
     }
@@ -2576,6 +2644,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           
           if (error) throw error;
       }
+
+      // Sincroniza no cache do localStorage local
+      localStorage.setItem('current_user_signature', signature || '');
+      localStorage.setItem('current_user_use_signature', String(use_signature));
       
       await get().fetchTenantAgents(); // Sincroniza localmente
     } catch (e) {
