@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { cn, getContactDisplayName } from '../../pages/ChatDashboard';
-import { ImageIcon } from 'lucide-react';
+import { ImageIcon, Download } from 'lucide-react';
 import { VideoPlayerPremium } from './VideoPlayerPremium';
 
 // Necessitamos tipagens básicas
@@ -61,6 +61,34 @@ export const MessageBubble = memo(({
   // Usado pra saber se a bolha precisa exibir menu pra cima ou baixo
   const [dropdownDirection, setDropdownDirection] = useState<'up' | 'down'>('down');
   const [dropdownCoords, setDropdownCoords] = useState<{x: number, y: number} | null>(null);
+
+  const handleDownloadMedia = async (url: string, mediaType: string, id: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      
+      let ext = '';
+      if (mediaType === 'image') ext = '.png';
+      else if (mediaType === 'video') ext = '.mp4';
+      else if (mediaType === 'audio') ext = '.mp3';
+      else if (mediaType === 'document') {
+        const match = url.match(/\.([a-zA-Z0-9]+)(?:[\?#]|$)/);
+        ext = match ? `.${match[1]}` : '.bin';
+      }
+      
+      link.download = `midia_${mediaType}_${id}${ext}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Erro ao baixar mídia:', error);
+      window.open(url, '_blank');
+    }
+  };
   
   const separatorNode = showDateSeparator ? (
     <div className="flex justify-center my-4 w-full">
@@ -167,6 +195,18 @@ export const MessageBubble = memo(({
                 >
                   Encaminhar
                 </button>
+
+                {msg.mediaUrl && msg.status !== 'deleted' && (
+                  <button 
+                    onClick={() => {
+                      handleDownloadMedia(msg.mediaUrl, msg.mediaType || 'media', msg.id);
+                      setActiveMsgDropdown(null);
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors text-[14px] text-[#3b4a54] dark:text-[#d1d7db]"
+                  >
+                    <Download size={16} className="text-[#00a884]" /> Fazer download
+                  </button>
+                )}
                 
                 {msg.mediaType === 'audio' && msg.mediaUrl && !msg.transcription && (
                   <button 

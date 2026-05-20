@@ -423,7 +423,6 @@ class EventProcessor {
                  contactIdMap.set(`${c.tenant_id}_${c.phone}`, c.id);
              }
              
-             // 2. Processa Conversas (Conversations)
              const convMap = new Map();
              for(const b of batch) {
                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
@@ -438,7 +437,8 @@ class EventProcessor {
                          unread_count: 0,
                          last_message_preview: b.textMessage,
                          last_message_at: b.timestamp,
-                         status: 'bot'
+                         status: 'bot',
+                         has_inbound: false
                      });
                  }
                  
@@ -449,6 +449,7 @@ class EventProcessor {
                  }
                  if (b.direction === 'inbound') {
                      conv.unread_count += 1;
+                     conv.has_inbound = true;
                  }
              }
              
@@ -473,6 +474,11 @@ class EventProcessor {
              for(const [key, data] of convMap.entries()) {
                  const exist = existingConvMap.get(key);
                  if(exist) {
+                     let nextStatus = exist.status || 'bot';
+                     if ((exist.status === 'resolved' || exist.status === 'closed') && data.has_inbound) {
+                         nextStatus = 'open'; // Reabertura automática por nova mensagem do cliente (inbound)
+                     }
+                     
                      toUpdateConvs.push({
                          id: exist.id,
                          tenant_id: data.tenant_id,
@@ -480,7 +486,8 @@ class EventProcessor {
                          unread_count: Number(exist.unread_count || 0) + Number(data.unread_count || 0),
                          last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
                          last_message_at: new Date(data.last_message_at).toISOString(),
-                         updated_at: new Date().toISOString()
+                         updated_at: new Date().toISOString(),
+                         status: nextStatus
                      });
                  } else {
                      toInsertConvs.push({

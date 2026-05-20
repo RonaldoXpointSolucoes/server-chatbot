@@ -174,8 +174,16 @@ interface ChatState {
   undoOperation: (logId: string, password: string) => Promise<{success: boolean; error?: string}>;
   toggleUnread: (contactId: string, currentUnread: number) => Promise<void>;
   markAsRead: (contactId: string) => Promise<void>;
+  ticketMode: boolean;
+  setTicketMode: (active: boolean) => void;
+  reopenConversation: (contactId: string) => Promise<void>;
   resolveConversation: (contactId: string) => Promise<void>;
+  lastBatchResolvedConversations: { conversationId: string, contactId: string, previousStatus: string, assignedTo: string | null, instanceId?: string | null }[] | null;
+  resolveAllConversations: () => Promise<{ success: boolean, count: number }>;
+  undoLastBatchResolve: () => Promise<boolean>;
   clearStore: () => void;
+  reopenedTicketToast: { contactName: string } | null;
+  setReopenedTicketToast: (toast: { contactName: string } | null) => void;
 }
 
 export interface QuickReply {
@@ -390,9 +398,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   tenantLabels: [],
   isSearchingGlobally: false,
   quickReplies: [],
-  userSettings: {},
-  filterType: (localStorage.getItem('chat_filter_preference') as string) || 'all',
-  theme: (localStorage.getItem('theme') as 'light' | 'dark') || 'light',
+  filterType: (typeof window !== 'undefined' ? localStorage.getItem('chat_filter_preference') : null) || 'all',
+  theme: (typeof window !== 'undefined' ? localStorage.getItem('theme') as 'light' | 'dark' : 'light') || 'light',
+  ticketMode: typeof window !== 'undefined' ? localStorage.getItem('chatboot_ticket_mode') === 'true' : false,
+  lastBatchResolvedConversations: null,
+  reopenedTicketToast: null,
+  setReopenedTicketToast: (toast) => set({ reopenedTicketToast: toast }),
 
   clearStore: () => {
     if (get().isSubscribed) {
@@ -458,6 +469,296 @@ export const useChatStore = create<ChatState>((set, get) => ({
       document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#f0f2f5');
     }
     set({ theme });
+  },
+
+  setTicketMode: (active) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chatboot_ticket_mode', String(active));
+    }
+    set({ ticketMode: active });
+  },
+
+  resolveAllConversations: async () => {
+    try {
+      const state = get();
+      const tenantInfo = state.tenantInfo;
+      if (!tenantInfo) return { success: false, count: 0 };
+
+      const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+      let agentName = 'Agente';
+      if (currentUserEmail) {
+          const agent = state.agents.find(a => a.email === currentUserEmail);
+          if (agent && agent.full_name) agentName = agent.full_name;
+      }
+
+      const activeChannel = state.activeChannelFilter;
+      
+      let query = supabase.from('conversations')
+        .select('id, contact_id, status, assigned_to, instance_id')
+        .eq('tenant_id', tenantInfo.id)
+        .neq('status', 'resolved');
+
+      if (activeChannel) {
+        query = query.eq('instance_id', activeChannel);
+      }
+
+      const { data: convsToResolve, error } = await query;
+      
+      if (error || !convsToResolve || convsToResolve.length === 0) {
+        return { success: true, count: 0 };
+      }
+
+      const undoData = convsToResolve.map(c => ({
+        conversationId: c.id,
+        contactId: c.contact_id,
+        previousStatus: c.status,
+        assignedTo: c.assigned_to,
+        instanceId: c.instance_id
+      }));
+
+      const systemMessages = undoData.map(c => ({
+        conversation_id: c.conversationId,
+        tenant_id: tenantInfo.id,
+        text_content: `✅ Resolvido em lote por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`,
+        sender_type: 'system',
+        direction: 'outgoing',
+        instance_id: c.instanceId
+      }));
+
+      await supabase.from('messages').insert(systemMessages);
+
+      const convIds = undoData.map(c => c.conversationId);
+      
+      // Processamento em lotes (chunks) de no máximo 100 para evitar Bad Request no PostgREST
+      const chunkSize = 100;
+      for (let i = 0; i < convIds.length; i += chunkSize) {
+        const chunk = convIds.slice(i, i + chunkSize);
+        await supabase.from('conversations')
+          .update({ assigned_to: null, status: 'resolved' })
+          .in('id', chunk);
+      }
+
+      set((s) => ({
+        lastBatchResolvedConversations: undoData,
+        contacts: s.contacts.map((c) => {
+          const realId = getRealContactId(c.id);
+          const matchedUndo = undoData.find(u => getRealContactId(u.contactId) === realId);
+          if (matchedUndo) {
+            const msgTypeObj: MessageType = {
+              id: 'batch-sys-' + Math.random().toString(),
+              text: `✅ Resolvido em lote por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`,
+              sender: 'system',
+              timestamp: new Date()
+            };
+            return {
+              ...c,
+              assigned_to: null,
+              conv_status: 'resolved',
+              messages: [...c.messages, msgTypeObj].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+            };
+          }
+          return c;
+        })
+      }));
+
+      // 1) Gravar logs de auditoria de forma eficiente e otimizada em lote (Bulk Insert)
+      const logTenantId = tenantInfo.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (logTenantId) {
+        const userStr = typeof window !== 'undefined' ? localStorage.getItem('user_info') : null;
+        const storedEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+        const storedName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
+        
+        let userName = 'Sistema';
+        if (storedEmail) {
+          userName = storedEmail;
+        } else if (storedName) {
+          userName = storedName;
+        } else if (userStr) {
+          try {
+             const user = JSON.parse(userStr);
+             userName = user.email || user.name || 'Sistema';
+          } catch(e) {}
+        }
+
+        const logsToInsert = convsToResolve.map(conv => ({
+          tenant_id: logTenantId,
+          user_name: userName,
+          action: 'UPDATE',
+          table_name: 'conversations',
+          record_id: conv.id,
+          before_state: { status: conv.status, assigned_to: conv.assigned_to },
+          after_state: { status: 'resolved', assigned_to: null }
+        }));
+
+        if (logsToInsert.length > 0) {
+          await supabase.from('operation_logs').insert(logsToInsert);
+        }
+      }
+
+      return { success: true, count: convsToResolve.length };
+    } catch (e) {
+      console.error('Erro ao resolver conversas em lote:', e);
+      return { success: false, count: 0 };
+    }
+  },
+
+  undoLastBatchResolve: async () => {
+    const state = get();
+    const undoData = state.lastBatchResolvedConversations;
+    if (!undoData || undoData.length === 0) return false;
+
+    try {
+      const tenantInfo = state.tenantInfo;
+      if (!tenantInfo) return false;
+
+      // 1) Agrupar e atualizar conversas em lote por status/atribuição para máxima performance
+      const groups: Record<string, { status: string, assignedTo: string | null, ids: string[] }> = {};
+      for (const item of undoData) {
+        const key = `${item.previousStatus}_${item.assignedTo || 'null'}`;
+        if (!groups[key]) {
+          groups[key] = {
+            status: item.previousStatus,
+            assignedTo: item.assignedTo,
+            ids: []
+          };
+        }
+        groups[key].ids.push(item.conversationId);
+      }
+
+      // Executa os updates em lote (divididos em chunks de no máximo 100)
+      for (const key of Object.keys(groups)) {
+        const { status, assignedTo, ids } = groups[key];
+        const chunkSize = 100;
+        for (let i = 0; i < ids.length; i += chunkSize) {
+          const chunk = ids.slice(i, i + chunkSize);
+          await supabase.from('conversations')
+            .update({ status, assigned_to: assignedTo })
+            .in('id', chunk);
+        }
+      }
+
+      set((s) => ({
+        lastBatchResolvedConversations: null,
+        contacts: s.contacts.map((c) => {
+          const realId = getRealContactId(c.id);
+          const matchedUndo = undoData.find(u => getRealContactId(u.contactId) === realId);
+          if (matchedUndo) {
+            const msgTypeObj: MessageType = {
+              id: 'batch-undo-' + Math.random().toString(),
+              text: `🔄 Ação desfeita. Ticket restaurado para o status anterior.`,
+              sender: 'system',
+              timestamp: new Date()
+            };
+            return {
+              ...c,
+              assigned_to: matchedUndo.assignedTo,
+              conv_status: matchedUndo.previousStatus,
+              messages: [...c.messages, msgTypeObj].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+            };
+          }
+          return c;
+        })
+      }));
+
+      // 2) Registrar logs de auditoria de forma eficiente em lote (Bulk Insert)
+      const logTenantId = tenantInfo.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (logTenantId) {
+        const userStr = typeof window !== 'undefined' ? localStorage.getItem('user_info') : null;
+        const storedEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+        const storedName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
+        
+        let userName = 'Sistema';
+        if (storedEmail) {
+          userName = storedEmail;
+        } else if (storedName) {
+          userName = storedName;
+        } else if (userStr) {
+          try {
+             const user = JSON.parse(userStr);
+             userName = user.email || user.name || 'Sistema';
+          } catch(e) {}
+        }
+
+        const logsToInsert = undoData.map(item => ({
+          tenant_id: logTenantId,
+          user_name: userName,
+          action: 'UPDATE',
+          table_name: 'conversations',
+          record_id: item.conversationId,
+          before_state: { status: 'resolved', assigned_to: null },
+          after_state: { status: item.previousStatus, assigned_to: item.assignedTo }
+        }));
+
+        if (logsToInsert.length > 0) {
+          await supabase.from('operation_logs').insert(logsToInsert);
+        }
+      }
+
+      return true;
+    } catch (e) {
+      console.error('Erro ao desfazer encerramento em lote:', e);
+      return false;
+    }
+  },
+
+  reopenConversation: async (contactId) => {
+    try {
+      const tenantInfo = get().tenantInfo;
+      if (!tenantInfo) return;
+
+      const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+      let agentName = 'Agente';
+      if (currentUserEmail) {
+          const agent = get().agents.find(a => a.email === currentUserEmail);
+          if (agent && agent.full_name) agentName = agent.full_name;
+      }
+
+      const realContactId = getRealContactId(contactId);
+      const instId = getInstanceIdFromContact(contactId);
+      let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenantInfo.id);
+      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
+
+      if (!conv) {
+          console.warn('Conversa não encontrada para reabrir o ticket.');
+          return;
+      }
+
+      // 1. Inserir a mensagem interna System de reabertura
+      const msgText = `🔓 Reaberta por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
+      
+      const dbMsg = {
+         conversation_id: conv.id,
+         tenant_id: tenantInfo.id,
+         text_content: msgText,
+         sender_type: 'system',
+         direction: 'outgoing',
+         instance_id: get().contacts.find(c => c.id === contactId)?.instance_id
+      };
+
+      const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
+      
+      if (!error && insertedMsg) {
+          const msgTypeObj: MessageType = {
+             id: insertedMsg.id,
+             text: insertedMsg.text_content,
+             sender: 'system',
+             timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
+          };
+          get().addMessageLocally(contactId, msgTypeObj);
+      }
+
+      // 2. Atualiza no Supabase status para 'open'
+      await supabase.from('conversations').update({ status: 'open' }).eq('id', conv.id);
+
+      // 3. Atualização local do estado para 'open'
+      set((state) => ({
+          contacts: state.contacts.map((c) => c.id === contactId ? { ...c, conv_status: 'open' } : c)
+      }));
+
+    } catch (e) {
+      console.error('Erro ao reabrir conversa:', e);
+    }
   },
   
   fetchAutomations: async () => {
@@ -1260,12 +1561,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       contacts: state.contacts.map((c) => {
         if (c.id === contactId) {
-          // Acorda (Wake Up) se for mensagem de cliente e estiver em Snooze
+          // Acorda (Wake Up) se for mensagem de cliente e o status for diferente de 'open'
           let updatedStatus = c.conv_status;
           let updatedSnooze = c.snoozed_until;
-          if (msg.sender === 'client' && c.conv_status === 'snoozed') {
+          if (msg.sender === 'client' && c.conv_status !== 'open') {
               updatedStatus = 'open';
-              updatedSnooze = undefined; // trigger null cleanup
+              if (c.conv_status === 'snoozed') {
+                  updatedSnooze = undefined; // trigger null cleanup
+              }
               // Atualiza o DB assincronamente em background sem bloquear
               setTimeout(() => {
                  get().updateConversationField(contactId, { status: 'open', snoozed_until: null });
@@ -1501,11 +1804,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         // 2. Remove o assignment direto na tabela certa (conversations)
-        await supabase.from('conversations').update({ assigned_to: null, status: 'bot' }).eq('id', conv.id);
+        await supabase.from('conversations').update({ assigned_to: null, status: 'resolved' }).eq('id', conv.id);
 
         // 3. Atualização local do estado para sumir da lista
         set((state) => ({
-            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, assigned_to: null, conv_status: 'bot' } : c)
+            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, assigned_to: null, conv_status: 'resolved' } : c)
         }));
 
     } catch (e) {
@@ -2985,6 +3288,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if(payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
            get().upsertContactLocally(payload.new as ContactRow);
         }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
+         const conv = payload.new as any;
+         console.log('[Realtime] Conversation UPDATE:', conv);
+         set((s: any) => {
+            let foundContactName = '';
+            const updatedContacts = s.contacts.map((c: any) => {
+               const realId = getRealContactId(c.id);
+               if (realId === conv.contact_id) {
+                  foundContactName = c.custom_name || c.name || c.phone;
+                  
+                  // Se o status anterior era resolved ou closed e mudou para open
+                  if ((c.conv_status === 'resolved' || c.conv_status === 'closed') && conv.status === 'open') {
+                     // Dispara o toast informando a reabertura!
+                     setTimeout(() => {
+                        get().setReopenedTicketToast({ contactName: foundContactName });
+                        // Fecha o toast automaticamente após 4 segundos
+                        setTimeout(() => {
+                           get().setReopenedTicketToast(null);
+                        }, 4000);
+                     }, 100);
+                  }
+                  
+                  return {
+                     ...c,
+                     conv_status: conv.status,
+                     assigned_to: conv.assigned_to,
+                     unread: conv.unread_count,
+                     is_pinned: conv.is_pinned,
+                     is_favorite: conv.is_favorite,
+                     instance_id: conv.instance_id || c.instance_id
+                  };
+               }
+               return c;
+            });
+            return { contacts: updatedContacts };
+         });
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
          const t = get().tenantInfo;

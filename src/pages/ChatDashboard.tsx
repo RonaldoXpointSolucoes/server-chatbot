@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal, CompanyDetailsModal } from '../components/ChatModals';
@@ -12,7 +12,7 @@ import { GeminiEditorModal } from '../components/GeminiEditorModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Flag, Clock, Mail, MailOpen, CircleDollarSign, Edit2 } from 'lucide-react'; // Adicionado lucide pro flag
+import { Flag, Clock, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare } from 'lucide-react'; // Adicionado lucide pro flag
 import { useShallow } from 'zustand/react/shallow';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import clsx from 'clsx';
@@ -208,7 +208,14 @@ export default function ChatDashboard() {
     editHumanMessage,
     deleteHumanMessage,
     instancesStatus,
-    setInstanceStatus
+    setInstanceStatus,
+    ticketMode,
+    setTicketMode,
+    reopenConversation,
+    resolveAllConversations,
+    undoLastBatchResolve,
+    reopenedTicketToast,
+    setReopenedTicketToast
   } = useChatStore(useShallow(state => ({
     contacts: state.contacts, 
     activeChatId: state.activeChatId, 
@@ -250,7 +257,14 @@ export default function ChatDashboard() {
     editHumanMessage: state.editHumanMessage,
     deleteHumanMessage: state.deleteHumanMessage,
     instancesStatus: state.instancesStatus,
-    setInstanceStatus: state.setInstanceStatus
+    setInstanceStatus: state.setInstanceStatus,
+    ticketMode: state.ticketMode,
+    setTicketMode: state.setTicketMode,
+    reopenConversation: state.reopenConversation,
+    resolveAllConversations: state.resolveAllConversations,
+    undoLastBatchResolve: state.undoLastBatchResolve,
+    reopenedTicketToast: state.reopenedTicketToast,
+    setReopenedTicketToast: state.setReopenedTicketToast
   })));
 
   const [editingMessage, setEditingMessage] = useState<{ id: string, text: string } | null>(null);
@@ -271,6 +285,107 @@ export default function ChatDashboard() {
   const [pastedImagePreview, setPastedImagePreview] = useState<string | null>(null);
   const [pastedImageCaption, setPastedImageCaption] = useState('');
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
+
+  // Estados para Fechamento em Lote de Tickets (Modo Ticket Ativo)
+  const [isConfirmBatchResolveOpen, setIsConfirmBatchResolveOpen] = useState(false);
+  const [isUndoToastVisible, setIsUndoToastVisible] = useState(false);
+  const [batchResolvedCount, setBatchResolvedCount] = useState(0);
+  const [isProcessingBatchResolve, setIsProcessingBatchResolve] = useState(false);
+  const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cálculo de Tickets Ativos da Caixa Selecionada (respeitando RBAC e status)
+  const activeTicketsCount = React.useMemo(() => {
+    const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+    const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
+    
+    let allowedInstances: string[] = [];
+    if (!isGlobalAdmin) {
+      const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+      if (allowedStr) {
+        try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
+      }
+    }
+
+    return contacts.filter(c => {
+      // 1) RBAC Enforcement
+      if (!isGlobalAdmin) {
+        const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+        if (allowedStr) {
+          if (allowedInstances.length === 0) return false;
+          const effectiveInstId = c.instance_id || connectedInstanceName;
+          if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) {
+            return false;
+          }
+        } else {
+          return false;
+        }
+      }
+
+      // 2) Filtro de Caixa Ativa
+      if (activeChannelFilter) {
+        const dbInstId = c.instance_id;
+        const effectiveId = connectedInstanceName;
+        if (!dbInstId) {
+          if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
+        } else {
+          if (dbInstId !== activeChannelFilter && dbInstId !== activeChannelName) return false;
+        }
+      }
+
+      // 3) Não estar bloqueado
+      if (c.is_blocked) return false;
+
+      // 4) Não estar resolvido (Somente tickets ativos)
+      if (c.conv_status === 'resolved') return false;
+
+      // 5) Não estar adiado ativo
+      if (c.conv_status === 'snoozed' && c.snoozed_until) {
+        const untilTimestamp = new Date(c.snoozed_until).getTime();
+        if (untilTimestamp > Date.now()) return false;
+      }
+
+      return true;
+    }).length;
+  }, [contacts, activeChannelFilter, activeChannelName, connectedInstanceName]);
+
+  const handleBatchResolveConfirm = async () => {
+    setIsProcessingBatchResolve(true);
+    try {
+      const res = await resolveAllConversations();
+      setIsConfirmBatchResolveOpen(false);
+      if (res.success && res.count > 0) {
+        setBatchResolvedCount(res.count);
+        setIsUndoToastVisible(true);
+        
+        if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+        
+        undoTimeoutRef.current = setTimeout(() => {
+          setIsUndoToastVisible(false);
+        }, 8000);
+      } else {
+        alert("Nenhum ticket ativo para fechar no momento.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao fechar tickets.");
+    } finally {
+      setIsProcessingBatchResolve(false);
+    }
+  };
+
+  const handleUndoBatchResolve = async () => {
+    try {
+      const undone = await undoLastBatchResolve();
+      if (undone) {
+        setIsUndoToastVisible(false);
+        if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+        alert("Encerramento em lote desfeito! Conversas restauradas.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao desfazer ação.");
+    }
+  };
 
   // Lógica de rascunhos por chat
   const draftsRef = useRef<Record<string, string>>({});
@@ -961,6 +1076,100 @@ export default function ChatDashboard() {
         }}
       />
 
+      {/* Modal de Confirmação de Resolução de Tickets em Lote (Design Premium) */}
+      {isConfirmBatchResolveOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="absolute inset-0 bg-black/60 dark:bg-black/85 backdrop-blur-sm transition-opacity" onClick={() => setIsConfirmBatchResolveOpen(false)} />
+          
+          <div className="relative bg-white dark:bg-[#202c33] rounded-3xl p-6 max-w-md w-full shadow-2xl border border-violet-500/10 dark:border-violet-500/20 transform transition-all animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex flex-col items-center text-center">
+              <div className="w-16 h-16 rounded-2xl bg-violet-500/10 dark:bg-violet-500/20 flex items-center justify-center text-violet-600 dark:text-violet-400 mb-4 shadow-inner ring-4 ring-violet-500/5">
+                <Ticket size={32} className="animate-pulse" />
+              </div>
+              
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2 leading-snug">
+                Fechar Todos os Tickets Ativos?
+              </h3>
+              
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 leading-relaxed">
+                Esta ação marcará **todas as conversas ativas** {activeChannelFilter ? `da instância "${activeChannelFilter}"` : ''} como resolvidas (concluídas). Elas serão removidas da visualização ativa e arquivadas no banco de dados.
+              </p>
+              
+              <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-600 dark:text-amber-400 text-xs mb-6 w-full justify-center">
+                <AlertTriangle size={14} className="shrink-0" />
+                <span>Esta operação será registrada nos logs de auditoria.</span>
+              </div>
+              
+              <div className="flex gap-3 w-full">
+                <button
+                  onClick={() => setIsConfirmBatchResolveOpen(false)}
+                  className="flex-1 py-3 px-4 rounded-xl text-sm font-semibold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleBatchResolveConfirm}
+                  disabled={isProcessingBatchResolve}
+                  className="flex-1 py-3 px-4 rounded-xl text-sm font-semibold bg-gradient-to-tr from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-md shadow-violet-500/25 transition-all flex items-center justify-center gap-2"
+                >
+                  {isProcessingBatchResolve ? (
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  ) : (
+                    <>
+                      <CheckCheck size={16} />
+                      Sim, Fechar Todos
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Flutuante de Undo (Desfazer) para Encerramento em Lote */}
+      {isUndoToastVisible && (
+        <div className="fixed bottom-6 left-6 z-[9999] max-w-sm w-full bg-white/80 dark:bg-[#202c33]/85 backdrop-blur-xl border border-violet-500/20 dark:border-violet-500/30 rounded-3xl p-4 shadow-2xl flex items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-5 duration-300 ring-4 ring-violet-500/5">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-violet-500/20 dark:bg-violet-500/30 rounded-2xl text-violet-600 dark:text-violet-400 flex items-center justify-center shadow-inner">
+              <CheckSquare size={18} />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-gray-900 dark:text-white">{batchResolvedCount} Tickets Resolvidos</span>
+              <span className="text-[10px] text-gray-500 dark:text-gray-400">Ação registrada na auditoria.</span>
+            </div>
+          </div>
+          <button
+            onClick={handleUndoBatchResolve}
+            className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-tr from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold uppercase transition-all shadow-md shadow-violet-500/20"
+          >
+            <Undo2 size={12} />
+            Desfazer
+          </button>
+        </div>
+      )}
+
+      {/* Toast Flutuante de Reabertura Automática de Ticket */}
+      {reopenedTicketToast && (
+        <div className="fixed bottom-6 left-6 z-[9999] max-w-sm w-full bg-white/85 dark:bg-[#202c33]/90 backdrop-blur-xl border border-emerald-500/20 dark:border-emerald-500/30 rounded-3xl p-4 shadow-2xl flex items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-5 duration-300 ring-4 ring-emerald-500/5 animate-bounce-short">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-emerald-500/20 dark:bg-emerald-500/30 rounded-2xl text-emerald-600 dark:text-emerald-400 flex items-center justify-center shadow-inner">
+              <MessageSquare size={18} className="animate-pulse" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-gray-900 dark:text-white">Ticket Reaberto</span>
+              <span className="text-[10px] text-gray-500 dark:text-gray-400">Cliente <b>{reopenedTicketToast.contactName}</b> enviou nova mensagem!</span>
+            </div>
+          </div>
+          <button
+            onClick={() => setReopenedTicketToast(null)}
+            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* MainSidebar movido para o MainLayout global */}
 
       {/* Middle Sidebar (Contacts List) */}
@@ -1088,6 +1297,21 @@ export default function ChatDashboard() {
               />
             </div>
             <button 
+              onClick={() => setTicketMode(!ticketMode)}
+              className={cn(
+                "p-2 rounded-full transition-all duration-300 flex-shrink-0 relative", 
+                ticketMode 
+                  ? "text-violet-600 bg-violet-500/10 dark:text-violet-400 dark:bg-violet-500/20 shadow-[0_0_10px_rgba(139,92,246,0.3)] animate-pulse" 
+                  : "text-[#54656f] dark:text-[#aebac1] hover:bg-gray-100 dark:hover:bg-[#202c33]"
+              )}
+              title={ticketMode ? "Desativar Modo Ticket (Mostrando todas)" : "Ativar Modo Ticket (Escondendo resolvidas)"}
+            >
+              <Ticket size={18} className={cn("transition-transform duration-300", ticketMode && "rotate-[15deg] scale-110")} />
+              {ticketMode && (
+                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-violet-600 dark:bg-violet-400 rounded-full border border-white dark:border-[#111b21]"></span>
+              )}
+            </button>
+            <button 
               onClick={() => setShowFilters(!showFilters)}
               className={cn("p-2 rounded-full transition-colors flex-shrink-0", showFilters || filterType !== 'all' ? "text-[#00a884] bg-[#00a884]/10" : "text-[#54656f] dark:text-[#aebac1] hover:bg-gray-100 dark:hover:bg-[#202c33]")}
               title="Filtros">
@@ -1198,6 +1422,63 @@ export default function ChatDashboard() {
           )}
         </div>
 
+        {/* Banner informativo do Modo Ticket (Design Premium com Menu de 3 Pontinhos) */}
+        {ticketMode && !searchTerm && (
+          <div className="mx-3 my-2 p-3 bg-violet-500/10 dark:bg-violet-500/20 border border-violet-500/20 dark:border-violet-500/30 rounded-2xl flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-300 backdrop-blur-md shadow-sm">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-violet-500/20 dark:bg-violet-500/30 rounded-xl text-violet-600 dark:text-violet-400 flex items-center justify-center">
+                <Ticket size={14} className="animate-pulse" />
+              </div>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-violet-700 dark:text-violet-300">Modo Ticket Ativo</span>
+                  <span className="px-2 py-0.5 text-[9px] font-extrabold text-violet-600 bg-violet-500/20 dark:text-violet-300 dark:bg-violet-500/30 rounded-full border border-violet-500/20 animate-in zoom-in duration-300">
+                    {activeTicketsCount}
+                  </span>
+                </div>
+                <span className="text-[10px] text-violet-600/80 dark:text-violet-400/80">Exibindo apenas conversas abertas</span>
+              </div>
+            </div>
+            <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveDropdown(activeDropdown === 'ticket-menu' ? null : 'ticket-menu');
+                }}
+                className="p-1.5 text-violet-700 dark:text-violet-400 hover:bg-violet-500/20 rounded-xl transition-all opacity-95 hover:opacity-100 flex items-center justify-center"
+                title="Opções do Ticket"
+              >
+                <MoreVertical size={16} />
+              </button>
+              
+              {activeDropdown === 'ticket-menu' && (
+                <div className="absolute right-0 top-8 w-52 bg-white/95 dark:bg-[#233138]/95 backdrop-blur-xl border border-violet-500/10 dark:border-violet-500/20 rounded-2xl shadow-xl py-2 z-50 animate-in fade-in zoom-in-95 duration-100">
+                  <button 
+                    onClick={() => {
+                      setTicketMode(false);
+                      setActiveDropdown(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-violet-500/10 transition-colors flex items-center gap-2"
+                  >
+                    <Ban size={14} className="text-gray-500 dark:text-gray-400" />
+                    Desativar Modo Ticket
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setIsConfirmBatchResolveOpen(true);
+                      setActiveDropdown(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-violet-700 dark:text-violet-400 hover:bg-violet-500/10 transition-colors flex items-center gap-2 border-t border-violet-500/5"
+                  >
+                    <CheckSquare size={14} className="text-violet-600 dark:text-violet-400" />
+                    Fechar todos os tickets
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Chat List Realtime */}
         <div className="flex-1 overflow-y-auto" ref={contactListRef} onScroll={handleContactScroll}>
           {contacts.length === 0 && (
@@ -1280,6 +1561,13 @@ export default function ChatDashboard() {
                 if (untilTimestamp > Date.now()) {
                    // Esconde se ainda não expirou, a menos que o usuário esteja forçando a pesquisa ativamente
                    if (!searchTerm) return false;
+                }
+             }
+
+             // Filtro de Modo Ticket (Estilo Chatwoot)
+             if (ticketMode && !searchTerm) {
+                if (c.conv_status === 'resolved') {
+                   return false;
                 }
              }
 
@@ -1513,6 +1801,23 @@ export default function ChatDashboard() {
                               <Tag size={14} className="text-blue-500" />
                               Atribuir etiqueta
                             </button>
+                            {contact.conv_status === 'resolved' ? (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); reopenConversation(contact.id); setActiveDropdown(null); }}
+                                className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                              >
+                                <RotateCcw size={14} className="text-blue-500" />
+                                Reabrir Conversa
+                              </button>
+                            ) : (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); resolveConversation(contact.id); setActiveDropdown(null); }}
+                                className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                              >
+                                <CheckCircle2 size={14} className="text-emerald-500" />
+                                Resolver Conversa
+                              </button>
+                            )}
                             <button 
                               onClick={(e) => { e.stopPropagation(); setContactToEdit(contact); setActiveDropdown(null); }}
                               className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
@@ -1675,16 +1980,29 @@ export default function ChatDashboard() {
             <div className="flex items-center gap-2 sm:gap-4">
               
               <div className="hidden lg:flex items-center gap-2">
-                <button 
-                  onClick={() => {
-                    resolveConversation(activeChat.id);
-                  }}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-colors text-sm font-medium border border-emerald-200 dark:border-emerald-500/20 animate-in fade-in"
-                  title="Resolver Conversa"
-                >
-                  <CheckCircle2 size={16} />
-                  <span>Resolver</span>
-                </button>
+                {activeChat.conv_status === 'resolved' ? (
+                  <button 
+                    onClick={() => {
+                      reopenConversation(activeChat.id);
+                    }}
+                    className="flex items-center gap-2 px-4 py-1.5 bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-full transition-all duration-300 text-sm font-semibold border border-blue-200 dark:border-blue-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95"
+                    title="Reabrir Conversa"
+                  >
+                    <RotateCcw size={16} className="animate-spin-once" />
+                    <span>Reabrir Conversa</span>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => {
+                      resolveConversation(activeChat.id);
+                    }}
+                    className="flex items-center gap-2 px-4 py-1.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-all duration-300 text-sm font-semibold border border-emerald-200 dark:border-emerald-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95"
+                    title="Resolver Conversa"
+                  >
+                    <CheckCircle2 size={16} />
+                    <span>Resolver</span>
+                  </button>
+                )}
 
                 <ChatOmniMenu contactId={activeChat.id} />
               </div>
@@ -1704,16 +2022,29 @@ export default function ChatDashboard() {
                 </button>
                 {mobileHeaderMenuOpen && (
                    <div className="absolute right-0 top-12 w-[260px] bg-white dark:bg-[#233138] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 dark:border-[#304046] p-3 z-[100] animate-in fade-in zoom-in-95 duration-200 flex flex-col gap-3">
-                      <button 
-                        onClick={() => {
-                          resolveConversation(activeChat.id);
-                          setMobileHeaderMenuOpen(false);
-                        }}
-                        className="flex items-center justify-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-lg transition-colors text-sm font-medium border border-emerald-200 dark:border-emerald-500/20 w-full"
-                      >
-                        <CheckCircle2 size={16} />
-                        <span>Resolver Conversa</span>
-                      </button>
+                      {activeChat.conv_status === 'resolved' ? (
+                        <button 
+                          onClick={() => {
+                            reopenConversation(activeChat.id);
+                            setMobileHeaderMenuOpen(false);
+                          }}
+                          className="flex items-center justify-center gap-2 px-3 py-2.5 bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-xl transition-all text-sm font-semibold border border-blue-200 dark:border-blue-500/20 w-full shadow-sm hover:scale-[1.02]"
+                        >
+                          <RotateCcw size={16} />
+                          <span>Reabrir Conversa</span>
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => {
+                            resolveConversation(activeChat.id);
+                            setMobileHeaderMenuOpen(false);
+                          }}
+                          className="flex items-center justify-center gap-2 px-3 py-2.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-xl transition-all text-sm font-semibold border border-emerald-200 dark:border-emerald-500/20 w-full shadow-sm hover:scale-[1.02]"
+                        >
+                          <CheckCircle2 size={16} />
+                          <span>Resolver Conversa</span>
+                        </button>
+                      )}
                       
                       <div className="flex flex-col gap-2 bg-gray-50 dark:bg-[#111b21] p-2 rounded-lg border border-black/5 dark:border-white/5">
                         <span className="text-[11px] text-gray-500 text-center font-bold uppercase tracking-wider">Status & Atribuição</span>
