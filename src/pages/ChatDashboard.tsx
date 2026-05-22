@@ -12,7 +12,7 @@ import { GeminiEditorModal } from '../components/GeminiEditorModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Flag, Clock, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare } from 'lucide-react'; // Adicionado lucide pro flag
+import { Flag, Clock, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut } from 'lucide-react'; // Adicionado lucide pro flag
 import { useShallow } from 'zustand/react/shallow';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import clsx from 'clsx';
@@ -302,6 +302,70 @@ export default function ChatDashboard() {
   const [pastedImagePreview, setPastedImagePreview] = useState<string | null>(null);
   const [pastedImageCaption, setPastedImageCaption] = useState('');
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
+  const [fullscreenZoom, setFullscreenZoom] = useState(1);
+  const [fullscreenPan, setFullscreenPan] = useState({ x: 0, y: 0 });
+  const [isFullscreenDragging, setIsFullscreenDragging] = useState(false);
+  const [fullscreenDragStart, setFullscreenDragStart] = useState({ x: 0, y: 0 });
+
+  const closeFullscreenImage = () => {
+    setFullscreenImage(null);
+    setFullscreenZoom(1);
+    setFullscreenPan({ x: 0, y: 0 });
+    setIsFullscreenDragging(false);
+  };
+
+  const handleZoomIn = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setFullscreenZoom(prev => Math.min(prev + 0.5, 5));
+  };
+
+  const handleZoomOut = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setFullscreenZoom(prev => {
+      const next = prev - 0.5;
+      if (next <= 1) {
+        setFullscreenPan({ x: 0, y: 0 });
+        return 1;
+      }
+      return next;
+    });
+  };
+
+  const handleResetZoom = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setFullscreenZoom(1);
+    setFullscreenPan({ x: 0, y: 0 });
+    setIsFullscreenDragging(false);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLImageElement>) => {
+    if (fullscreenZoom <= 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsFullscreenDragging(true);
+    setFullscreenDragStart({
+      x: e.clientX - fullscreenPan.x,
+      y: e.clientY - fullscreenPan.y
+    });
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLImageElement>) => {
+    if (!isFullscreenDragging || fullscreenZoom <= 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const newX = e.clientX - fullscreenDragStart.x;
+    const newY = e.clientY - fullscreenDragStart.y;
+    setFullscreenPan({ x: newX, y: newY });
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLImageElement>) => {
+    if (!isFullscreenDragging) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsFullscreenDragging(false);
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
 
   // Estados para Monitor de Saúde Premium e Internet
   const [isOnline, setIsOnline] = useState(typeof window !== 'undefined' ? navigator.onLine : true);
@@ -465,6 +529,20 @@ export default function ChatDashboard() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  // Estados para Gravação e Preview de Áudio Premium (Glassmorphism UI)
+  const [audioState, setAudioState] = useState<'idle' | 'recording' | 'reviewing'>('idle');
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
+  const [recordedAudioFile, setRecordedAudioFile] = useState<File | null>(null);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [isRecordingPaused, setIsRecordingPaused] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState<1 | 1.5 | 2>(1);
+
+  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const reviewAudioRef = useRef<HTMLAudioElement | null>(null);
+
   // Auto-resize do textarea sincronizado com o state inputText
   useEffect(() => {
     if (textareaRef.current) {
@@ -560,6 +638,71 @@ export default function ChatDashboard() {
     const { scrollTop, scrollHeight, clientHeight } = contactListRef.current;
     if (scrollHeight - scrollTop - clientHeight < 150) {
       setContactPageLimit(prev => prev + 20);
+    }
+  };
+
+  const handleStartChatWithSearchedNumber = async (phoneNumber: string) => {
+    let cleanPhone = phoneNumber.replace(/\D/g, '');
+    if (!cleanPhone) return;
+    
+    if (cleanPhone.length >= 10 && cleanPhone.length <= 11 && !cleanPhone.startsWith('55')) {
+      cleanPhone = '55' + cleanPhone;
+    }
+    
+    const jid = `${cleanPhone}@s.whatsapp.net`;
+    const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || tenantInfo?.id;
+    const properInstance = activeChannelFilter || connectedInstanceName;
+
+    try {
+      let { data: existingContact } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .eq('phone', cleanPhone)
+        .maybeSingle();
+        
+      if (!existingContact) {
+        const { data: newContact, error } = await supabase.from('contacts').insert({
+          tenant_id: tenantId,
+          instance_id: properInstance || null,
+          name: cleanPhone,
+          phone: cleanPhone,
+          whatsapp_jid: jid,
+          bot_status: 'active'
+        }).select().single();
+        
+        if (newContact && !error) {
+          existingContact = newContact;
+        } else {
+          console.error('Erro ao criar novo contato na base:', error);
+          return;
+        }
+      }
+      
+      if (existingContact) {
+         useChatStore.setState(state => {
+           const exists = state.contacts.find(c => c.id === existingContact.id);
+           if (exists) return state;
+           return { 
+             contacts: [{
+               ...existingContact,
+               instance_id: properInstance || existingContact.instance_id,
+               messages: [],
+               unread: 0,
+               custom_name: existingContact.custom_name || existingContact.name,
+             }, ...state.contacts] 
+           };
+         });
+
+         setActiveChat(existingContact.id);
+         const targetInstance = properInstance || existingContact.instance_id;
+         if (targetInstance) {
+           useChatStore.getState().loadHistoricalMessages(existingContact.id, targetInstance);
+         }
+         setSearchTerm('');
+      }
+    } catch (err) {
+      console.error('Erro no fluxo de iniciar novo chat com número pesquisado:', err);
     }
   };
 
@@ -841,17 +984,51 @@ export default function ChatDashboard() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const formatAudioTime = (seconds: number) => {
+    if (isNaN(seconds) || seconds === Infinity) return '00:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handlePauseRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.pause();
+      setIsRecordingPaused(true);
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
+      }
+    }
+  };
+
+  const handleResumeRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+      mediaRecorderRef.current.resume();
+      setIsRecordingPaused(false);
+      
+      if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    }
+  };
+
+  const changePlaybackRate = () => {
+    const nextRate = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1;
+    setPlaybackRate(nextRate);
+    if (reviewAudioRef.current) {
+      reviewAudioRef.current.playbackRate = nextRate;
+    }
+  };
+
   const handleMicClick = async () => {
     const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
     if (!activeChatId || !properTargetInstance) return;
 
-    if (isRecording) {
-       // Stop recording
-       if (mediaRecorderRef.current) {
-          mediaRecorderRef.current.stop();
-          mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-       }
-       setIsRecording(false);
+    if (audioState === 'recording') {
+       // Stop recording (para revisar)
+       handleStopRecording();
     } else {
        // Start recording
        try {
@@ -865,14 +1042,145 @@ export default function ChatDashboard() {
             const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
             const fileName = `audio_record_${Date.now()}.webm`;
             const file = new File([audioBlob], fileName, { type: 'audio/webm' });
-            await useChatStore.getState().uploadAndSendMedia(activeChatId, file, 'audio', properTargetInstance as string, true);
+            const localUrl = URL.createObjectURL(audioBlob);
+
+            setRecordedAudioFile(file);
+            setRecordedAudioUrl(localUrl);
+            setAudioState('reviewing');
+            setAudioPlaying(false);
+            setAudioCurrentTime(0);
+            setIsRecordingPaused(false);
+            setPlaybackRate(1);
          };
 
          mediaRecorder.start();
          setIsRecording(true);
+         setAudioState('recording');
+         setRecordingTime(0);
+         setIsRecordingPaused(false);
+
+         if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
+         recordingIntervalRef.current = setInterval(() => {
+           setRecordingTime(prev => prev + 1);
+         }, 1000);
        } catch (e) {
          alert("Permissão de microfone negada ou não suportada no seu navegador.");
        }
+    }
+  };
+
+  const handleStopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+    }
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = null;
+    }
+    setIsRecording(false);
+    setIsRecordingPaused(false);
+  };
+
+  const handleCancelRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.onstop = null; // evita disparar onstop
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+    }
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = null;
+    }
+    setIsRecording(false);
+    setIsRecordingPaused(false);
+    setAudioState('idle');
+    setRecordingTime(0);
+    setRecordedAudioFile(null);
+    setRecordedAudioUrl(null);
+  };
+
+  const handleDiscardAudio = () => {
+    if (recordedAudioUrl) {
+      URL.revokeObjectURL(recordedAudioUrl);
+    }
+    setRecordedAudioFile(null);
+    setRecordedAudioUrl(null);
+    setAudioState('idle');
+    setAudioPlaying(false);
+    setAudioCurrentTime(0);
+    setAudioDuration(0);
+    setIsRecordingPaused(false);
+    setPlaybackRate(1);
+  };
+
+  const handleSendRecordedAudio = async () => {
+    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+    if (!activeChatId || !properTargetInstance || !recordedAudioFile) return;
+
+    try {
+      const fileToSend = recordedAudioFile;
+      const localUrl = recordedAudioUrl;
+
+      // Reset de estado rápido para melhor percepção de velocidade do atendente (UX instantânea)
+      setRecordedAudioFile(null);
+      setRecordedAudioUrl(null);
+      setAudioState('idle');
+      setAudioPlaying(false);
+      setAudioCurrentTime(0);
+      setAudioDuration(0);
+      setIsRecordingPaused(false);
+      setPlaybackRate(1);
+
+      if (localUrl) {
+        URL.revokeObjectURL(localUrl);
+      }
+
+      await useChatStore.getState().uploadAndSendMedia(activeChatId, fileToSend, 'audio', properTargetInstance as string, true);
+    } catch (err) {
+      console.error('Erro ao enviar áudio gravado:', err);
+      alert('Erro ao enviar áudio.');
+    }
+  };
+
+  const togglePlayAudio = () => {
+    if (!reviewAudioRef.current) return;
+    if (audioPlaying) {
+      reviewAudioRef.current.pause();
+      setAudioPlaying(false);
+    } else {
+      reviewAudioRef.current.playbackRate = playbackRate;
+      reviewAudioRef.current.play().then(() => {
+        setAudioPlaying(true);
+      }).catch(err => {
+        console.error('Erro ao reproduzir áudio:', err);
+      });
+    }
+  };
+
+  const handleAudioTimeUpdate = () => {
+    if (!reviewAudioRef.current) return;
+    setAudioCurrentTime(reviewAudioRef.current.currentTime);
+  };
+
+  const handleAudioMetadata = () => {
+    if (!reviewAudioRef.current) return;
+    setAudioDuration(reviewAudioRef.current.duration || 0);
+    reviewAudioRef.current.playbackRate = playbackRate;
+  };
+
+  const handleAudioSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const targetTime = parseFloat(e.target.value);
+    if (!reviewAudioRef.current) return;
+    reviewAudioRef.current.currentTime = targetTime;
+    setAudioCurrentTime(targetTime);
+  };
+
+  const handleAudioEnded = () => {
+    setAudioPlaying(false);
+    setAudioCurrentTime(0);
+    if (reviewAudioRef.current) {
+      reviewAudioRef.current.currentTime = 0;
     }
   };
 
@@ -1258,7 +1566,7 @@ export default function ChatDashboard() {
         {/* Header Premium da Sidebar */}
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.5.6'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '21/05/2026, 21:38'}`}</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.5.7'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '21/05/2026, 22:53'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
@@ -1671,428 +1979,395 @@ export default function ChatDashboard() {
           )}
         </div>
 
-
-
         {/* Chat List Realtime */}
         <div className="flex-1 overflow-y-auto" ref={contactListRef} onScroll={handleContactScroll}>
-          {contacts.length === 0 && (
-             <p className="text-xs text-center p-6 text-gray-400">Nenhuma conversa encontrada ou aguardando conexão web-socket...</p>
-          )}
-
-          {contacts.filter(c => {
-             // 1) RBAC ENFORCEMENT - A REGRA DE OURO (Nunca mostrar conversas que não tenho acesso)
-             const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
-             const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
-             
-             if (!isGlobalAdmin) {
-                 const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-                 let allowedInstances: string[] = [];
-                 if (allowedStr) {
-                     try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
-                 }
-                 
-                 // Agente sem array de permissões não vê nada.
-                 if (allowedStr) {
-                     if (allowedInstances.length === 0) return false; // Sem instÇ｢ncias -> Sem acesso
-
-                     const effectiveInstId = c.instance_id || connectedInstanceName; // fallback pra órfãos
-                     if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) {
-                         return false; // BLOQUEADO!
-                     }
-                 } else {
-                     return false; // BLOQUEADO! Agente logado precisa de permissão clara
-                 }
-             }
-
-             // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - IGNORADO DURANTE PESQUISA
-             if (activeChannelFilter && !searchTerm) {
-                 const dbInstId = c.instance_id;
-                 const effectiveId = connectedInstanceName;
-
-                 if (!dbInstId) {
-                     // Fallback conversas antigas órfãs
-                     if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
-                 } else {
-                     // Conversas nativas
-                     if (dbInstId !== activeChannelFilter && dbInstId !== activeChannelName) return false;
-                 }
-             }
-
-             // 3) BUSCA EM TEXTO E METADADOS
-             if (searchTerm) {
-                 const s = searchTerm.toLowerCase();
-                 const match = c.name?.toLowerCase().includes(s) ||
-                               c.custom_name?.toLowerCase().includes(s) ||
-                               c.whatsapp_jid?.includes(searchTerm) ||
-                               c.phone?.includes(searchTerm) ||
-                               c.fantasy_name?.toLowerCase().includes(s) ||
-                               c.document_number?.includes(searchTerm);
-                 if (!match) return false;
-             }
-             
-             // Lógica de Contatos Bloqueados
-             if (filterType === 'blocked') {
-                 if (!c.is_blocked) return false;
-             } else {
-                 if (c.is_blocked) return false; // Esconde os bloqueados em todas as outras views (All, Unread, Favoritos, etc)
-             }
-
-             // Filtros de Pills - IGNORADOS DURANTE PESQUISA
-             if (!searchTerm) {
-                 if (filterType === 'unread' && c.unread <= 0 && c.id !== activeChatId) return false;
-                 if (filterType === 'favorite' && !c.is_favorite) return false;
-                 if (filterType === 'labels' && !(c.conv_labels && c.conv_labels.length > 0)) return false;
-                 if (filterType === 'mine') {
-                     const currentUserEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
-                     const currentAgent = agents.find(a => a.email === currentUserEmail);
-                     if (!currentAgent || c.assigned_to !== currentAgent.id) return false;
-                 }
-             }
-             
-             // Filtro de Adiado (Snoozed)
-             if (c.conv_status === 'snoozed' && c.snoozed_until) {
-                const untilTimestamp = new Date(c.snoozed_until).getTime();
-                if (untilTimestamp > Date.now()) {
-                   // Esconde se ainda não expirou, a menos que o usuário esteja forçando a pesquisa ativamente
-                   if (!searchTerm) return false;
-                }
-             }
-
-             // Filtro de Modo Ticket (Estilo Chatwoot)
-             if (ticketMode && !searchTerm) {
-                if (c.conv_status === 'resolved') {
-                   return false;
-                }
-             }
-
-             return true;
-          }).sort((a,b) => {
-             const aPinned = isContactPinned(a);
-             const bPinned = isContactPinned(b);
-             if (aPinned && !bPinned) return -1;
-             if (!aPinned && bPinned) return 1;
-             
-             let aLastMsg;
-             if (a.messages) {
-               for (let i = a.messages.length - 1; i >= 0; i--) {
-                 if (!a.messages[i].isIgnoredSilent && !a.messages[i].isIgnored) { aLastMsg = a.messages[i]; break; }
+          {(() => {
+            const filtered = contacts.filter(c => {
+               // 1) RBAC ENFORCEMENT - A REGRA DE OURO (Nunca mostrar conversas que não tenho acesso)
+               const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+               const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
+               
+               if (!isGlobalAdmin) {
+                   const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+                   let allowedInstances: string[] = [];
+                   if (allowedStr) {
+                       try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
+                   }
+                   
+                   // Agente sem array de permissões não vê nada.
+                   if (allowedStr) {
+                       if (allowedInstances.length === 0) return false; // Sem instâncias -> Sem acesso
+  
+                       const effectiveInstId = c.instance_id || connectedInstanceName; // fallback pra órfãos
+                       if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) {
+                           return false; // BLOQUEADO!
+                       }
+                   } else {
+                       return false; // BLOQUEADO! Agente logado precisa de permissão clara
+                   }
                }
-             }
-
-             let bLastMsg;
-             if (b.messages) {
-               for (let i = b.messages.length - 1; i >= 0; i--) {
-                 if (!b.messages[i].isIgnoredSilent && !b.messages[i].isIgnored) { bLastMsg = b.messages[i]; break; }
+  
+               // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - IGNORADO DURANTE PESQUISA
+               if (activeChannelFilter && !searchTerm) {
+                   const dbInstId = c.instance_id;
+                   const effectiveId = connectedInstanceName;
+   
+                   if (!dbInstId) {
+                       // Fallback conversas antigas órfãs
+                       if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
+                   } else {
+                       // Conversas nativas
+                       if (dbInstId !== activeChannelFilter && dbInstId !== activeChannelName) return false;
+                   }
                }
-             }
-             
-             const aTime = Math.max(a.lastMsgTimestamp || 0, aLastMsg ? new Date(aLastMsg.timestamp).getTime() : 0);
-             const bTime = Math.max(b.lastMsgTimestamp || 0, bLastMsg ? new Date(bLastMsg.timestamp).getTime() : 0);
-             
-             return bTime - aTime;
-          }).slice(0, contactPageLimit).map((contact) => {
-             const lastMsg = contact.messages?.[contact.messages.length - 1];
-             const timeDisplay = lastMsg 
-               ? (isToday(lastMsg.timestamp) ? format(lastMsg.timestamp, 'HH:mm') 
-                  : isYesterday(lastMsg.timestamp) ? 'Ontem' 
-                  : format(lastMsg.timestamp, 'dd/MM/yyyy'))
-               : contact.lastMsgTimestamp 
-                  ? (isToday(new Date(contact.lastMsgTimestamp)) ? format(new Date(contact.lastMsgTimestamp), 'HH:mm') 
-                     : isYesterday(new Date(contact.lastMsgTimestamp)) ? 'Ontem' 
-                     : format(new Date(contact.lastMsgTimestamp), 'dd/MM/yyyy'))
-                  : '';
-                  
-             // Verifica se a ultima msg foi mandada por voce testando sender
-             const isMe = lastMsg && (lastMsg.sender === 'bot' || lastMsg.sender === 'human');
-
-             return (
-              <div 
-                key={contact.id}
-                onClick={() => {
-                  setActiveChat(contact.id);
-                  const properTargetInstance = activeChannelFilter || contact.instance_id || connectedInstanceName;
-                  if (properTargetInstance) {
-                    useChatStore.getState().loadHistoricalMessages(contact.id, properTargetInstance);
-                    if (contact.avatar?.includes('ui-avatars')) {
-                      useChatStore.getState().fetchContactPicture(contact.id, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), properTargetInstance);
-                    }
+  
+               // 3) BUSCA EM TEXTO E METADADOS
+               if (searchTerm) {
+                   const s = searchTerm.toLowerCase();
+                   const match = c.name?.toLowerCase().includes(s) ||
+                                 c.custom_name?.toLowerCase().includes(s) ||
+                                 c.whatsapp_jid?.includes(searchTerm) ||
+                                 c.phone?.includes(searchTerm) ||
+                                 c.fantasy_name?.toLowerCase().includes(s) ||
+                                 c.document_number?.includes(searchTerm);
+                   if (!match) return false;
+               }
+               
+               // Lógica de Contatos Bloqueados
+               if (filterType === 'blocked') {
+                   if (!c.is_blocked) return false;
+               } else {
+                   if (c.is_blocked) return false; // Esconde os bloqueados em todas as outras views (All, Unread, Favoritos, etc)
+               }
+  
+               // Filtros de Pills - IGNORADOS DURANTE PESQUISA
+               if (!searchTerm) {
+                   if (filterType === 'unread' && c.unread <= 0 && c.id !== activeChatId) return false;
+                   if (filterType === 'favorite' && !c.is_favorite) return false;
+                   if (filterType === 'labels' && !(c.conv_labels && c.conv_labels.length > 0)) return false;
+                   if (filterType === 'mine') {
+                       const currentUserEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
+                       const currentAgent = agents.find(a => a.email === currentUserEmail);
+                       if (!currentAgent || c.assigned_to !== currentAgent.id) return false;
+                   }
+               }
+               
+               // Filtro de Adiado (Snoozed)
+               if (c.conv_status === 'snoozed' && c.snoozed_until) {
+                  const untilTimestamp = new Date(c.snoozed_until).getTime();
+                  if (untilTimestamp > Date.now()) {
+                     // Esconde se ainda não expirou, a menos que o usuário esteja forçando a pesquisa ativamente
+                     if (!searchTerm) return false;
                   }
-                  if (contact.unread > 0) {
-                    useChatStore.getState().markAsRead(contact.id);
+               }
+  
+               // Filtro de Modo Ticket (Estilo Chatwoot)
+               if (ticketMode && !searchTerm) {
+                  if (c.conv_status === 'resolved') {
+                     return false;
                   }
-                }}
-                className={cn(
-                  "group flex items-center gap-3 px-3 py-3 cursor-pointer transition-colors border-b border-[#f2f2f2] dark:border-[#222d34] overflow-visible",
-                  activeChatId === contact.id ? "bg-[#f0f2f5] dark:bg-[#2a3942]" : "hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]"
-                )}
-              >
-                <div className="relative shrink-0">
-                  <img 
-                      src={contact.avatar} 
-                      alt="Avatar" 
-                      className="w-12 h-12 rounded-full object-cover shadow-sm hover:scale-105 transition-transform duration-200 cursor-pointer ring-2 ring-transparent hover:ring-[#00a884]/30" 
-                      onClick={(e) => { e.stopPropagation(); setFullscreenImage(contact.avatar); }}
-                      onError={(e) => {
-                        e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone))}&background=random&color=fff`;
-                      }}
-                    />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center mb-0.5">
-                    <div className="flex flex-col truncate pr-2">
-                       <div className="flex flex-col gap-0.5 w-full">
-                         {/* Name and Priority Flags */}
-                         <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate flex items-center gap-1.5">
-                           <span className="truncate">{getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone)}</span>
-                           {contact.priority === 'urgent' && <Flag size={12} className="fill-rose-500 text-rose-500 shrink-0" />}
-                           {contact.priority === 'high' && <Flag size={12} className="fill-orange-500 text-orange-500 shrink-0" />}
-                           {contact.conv_status === 'snoozed' && contact.snoozed_until && new Date(contact.snoozed_until).getTime() > Date.now() && <Clock size={12} className="text-amber-500 shrink-0" />}
-                         </span>
+               }
+  
+               return true;
+            }).sort((a,b) => {
+               const aPinned = isContactPinned(a);
+               const bPinned = isContactPinned(b);
+               if (aPinned && !bPinned) return -1;
+               if (!aPinned && bPinned) return 1;
+               
+               let aLastMsg;
+               if (a.messages) {
+                 for (let i = a.messages.length - 1; i >= 0; i--) {
+                   if (!a.messages[i].isIgnoredSilent && !a.messages[i].isIgnored) { aLastMsg = a.messages[i]; break; }
+                 }
+               }
+  
+               let bLastMsg;
+               if (b.messages) {
+                 for (let i = b.messages.length - 1; i >= 0; i--) {
+                   if (!b.messages[i].isIgnoredSilent && !b.messages[i].isIgnored) { bLastMsg = b.messages[i]; break; }
+                 }
+               }
+               
+               const aTime = Math.max(a.lastMsgTimestamp || 0, aLastMsg ? new Date(aLastMsg.timestamp).getTime() : 0);
+               const bTime = Math.max(b.lastMsgTimestamp || 0, bLastMsg ? new Date(bLastMsg.timestamp).getTime() : 0);
+               
+               return bTime - aTime;
+            });
 
-                         {/* Labels and Assigned Agent on a new line */}
-                         {(contact.assigned_to || (contact.conv_labels && contact.conv_labels.length > 0)) && (
-                           <div className="flex items-center gap-1.5 overflow-hidden w-full flex-wrap mt-0.5">
-                             {contact.assigned_to && (
-                               <span className="shrink-0 px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 border border-indigo-100 dark:border-indigo-500/20 text-[9px] font-bold uppercase rounded flex items-center gap-1">
-                                 <User size={9} />
-                                 <span className="max-w-[50px] truncate">{agents.find(a => a.id === contact.assigned_to)?.full_name?.split(' ')[0] || 'Ag'}</span>
-                               </span>
-                             )}
-                             {contact.conv_labels && contact.conv_labels.length > 0 && (
-                               <div className="flex items-center gap-1 overflow-hidden shrink-0">
-                                 {contact.conv_labels.map((l: any, i: number) => {
-                                   const isHex = l.color?.startsWith('#');
-                                   return (
-                                     <span key={i} className={cn("px-1.5 py-0.5 text-[9px] font-bold text-white rounded-full flex items-center max-w-[80px] truncate shadow-sm border border-black/10", !isHex && l.color ? l.color : "bg-blue-500")} style={isHex ? { backgroundColor: l.color } : {}} title={l.name}>
-                                       {l.name}
-                                     </span>
-                                   );
-                                 })}
-                               </div>
-                             )}
-                           </div>
-                         )}
-                       </div>
-                       {contact.fantasy_name && (
-                         <span className="text-[11px] text-gray-500 dark:text-[#8696a0] truncate flex items-center gap-1">
-                           <Building2 size={10} className="shrink-0" />
-                           {contact.fantasy_name}
-                         </span>
-                       )}
-                      {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (() => {
-                          const instColor = contact.instance_id ? instanceColorsMap[contact.instance_id] : undefined;
-                          return (
-                            <span 
-                              className="text-[10px] px-1.5 py-[2px] rounded-md border font-medium truncate mt-1 w-fit max-w-[140px] flex items-center gap-1 shadow-sm transition-all"
-                              style={instColor ? { 
-                                backgroundColor: `${instColor}15`, 
-                                borderColor: `${instColor}30`, 
-                                color: instColor 
-                              } : {
-                                backgroundColor: 'rgba(0,0,0,0.05)',
-                                borderColor: 'rgba(0,0,0,0.05)'
-                              }}
-                            >
-                              <Smartphone size={10} className="shrink-0 opacity-80" />
-                              <span className="truncate">{contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName}</span>
-                            </span>
-                          );
-                      })()}
+            if (filtered.length === 0 && searchTerm) {
+              const onlyNumbers = searchTerm.replace(/\D/g, '');
+              const isValidPhone = onlyNumbers.length >= 8;
+
+              return (
+                <div className="flex flex-col items-center justify-center p-6 text-center animate-in fade-in slide-in-from-bottom-4 duration-300">
+                  <div className="w-full max-w-sm bg-white/5 dark:bg-[#182229]/30 backdrop-blur-md border border-gray-100 dark:border-white/5 rounded-3xl p-6 shadow-xl flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-500 animate-pulse">
+                      <MessageSquarePlus size={24} />
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className={cn("text-[11px] font-medium min-w-fit ml-1 flex items-center gap-1", contact.unread > 0 ? "text-[#00a884]" : "text-[#54656f] dark:text-[#8696a0]")}>
-                        {isContactPinned(contact) && <Pin size={12} className="text-[#00a884] rotate-45 fill-current opacity-80" />}
-                        {timeDisplay}
-                      </span>
-                      
-                      {/* Menu de Ações (Dropdown) */}
-                      <div className="relative isolate" onClick={e => e.stopPropagation()}>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveDropdown(activeDropdown === contact.id ? null : contact.id);
-                          }}
-                          className="p-1 text-[#54656f] hover:text-[#111b21] dark:text-[#aebac1] dark:hover:text-[#e9edef] rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-all opacity-80 hover:opacity-100"
-                        >
-                          <MoreVertical size={16} />
-                        </button>
-                        
-                        {activeDropdown === contact.id && (
-                          <div className="absolute right-0 top-6 w-52 bg-white dark:bg-[#233138] border border-black/5 dark:border-white/5 rounded-xl shadow-xl py-2 z-[99] animate-in fade-in zoom-in-95 duration-100">
-                            <button 
-                              className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 border-t border-gray-100 dark:border-[#304046]"
-                              onClick={(e) => { 
-                                e.stopPropagation(); 
-                                const instanceToPin = activeChannelFilter || contact.instance_id || connectedInstanceName;
-                                togglePinContact(contact.id, instanceToPin); 
-                                setActiveDropdown(null); 
-                              }}
-                            >
-                              <Pin size={14} className={isContactPinned(contact) ? "rotate-45" : ""} />
-                              {isContactPinned(contact) ? "Desafixar conversa" : "Fixar no topo"}
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); toggleFavorite(contact.id); setActiveDropdown(null); }}
-                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
-                            >
-                              <Star size={14} className={contact.is_favorite ? "text-yellow-500 fill-yellow-500" : "text-gray-400"} />
-                              {contact.is_favorite ? "Remover dos favoritos" : "Favoritar"}
-                            </button>
-                            <button 
-                              onClick={async (e) => { 
-                                e.stopPropagation(); 
-                                const properTargetInstance = activeChannelFilter || contact.instance_id || connectedInstanceName;
-                                if (properTargetInstance) {
-                                  await useChatStore.getState().loadHistoricalMessages(contact.id, properTargetInstance, true);
-                                }
-                                setActiveDropdown(null); 
-                              }}
-                              disabled={isSyncingHistory[contact.id]}
-                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
-                            >
-                              <History size={14} className={cn(isSyncingHistory[contact.id] ? "animate-spin text-[#00a884]" : "")} />
-                              {isSyncingHistory[contact.id] ? "Buscando..." : "Buscar Histórico"}
-                            </button>
-                            
-                            {/* Novos botões inseridos */}
-                            <button 
-                              onClick={async (e) => { 
-                                e.stopPropagation(); 
-                                const email = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
-                                if (email) {
-                                  const me = agents.find(a => a.email === email);
-                                  if (me) {
-                                    await useChatStore.getState().updateConversationField(contact.id, { assigned_to: me.id });
-                                  }
-                                }
-                                setActiveDropdown(null); 
-                              }}
-                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
-                            >
-                              <UserCheck size={14} className="text-[#00a884]" /> Atribuir a mim
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); toggleUnread(contact.id, contact.unread); setActiveDropdown(null); }}
-                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
-                            >
-                              {contact.unread > 0 ? (
-                                <><MailOpen size={14} className="text-gray-500" /> Marcar como lida</>
-                              ) : (
-                                <><Mail size={14} className="text-[#00a884]" /> Marcar como não lida</>
-                              )}
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setShowSnoozeModal(contact.id); setActiveDropdown(null); }}
-                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
-                            >
-                              <Clock size={14} className="text-amber-500" />
-                              Adiar
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setContactForLabels(contact); setActiveDropdown(null); }}
-                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
-                            >
-                              <Tag size={14} className="text-blue-500" />
-                              Atribuir etiqueta
-                            </button>
-                            {contact.conv_status === 'resolved' ? (
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); reopenConversation(contact.id); setActiveDropdown(null); }}
-                                className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
-                              >
-                                <RotateCcw size={14} className="text-blue-500" />
-                                Reabrir Conversa
-                              </button>
-                            ) : (
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); resolveConversation(contact.id); setActiveDropdown(null); }}
-                                className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
-                              >
-                                <CheckCircle2 size={14} className="text-emerald-500" />
-                                Resolver Conversa
-                              </button>
-                            )}
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setContactToEdit(contact); setActiveDropdown(null); }}
-                              className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
-                            >
-                              <User size={14} className="text-gray-500" />
-                              Editar contato
-                            </button>
-
-                            <div className="h-px w-full bg-gray-100 dark:bg-white/10 my-1" />
-
-                            {currentUserRole === 'admin' && (
-                              <>
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); setContactToBlock({id: contact.id, name: contact.name || contact.phone, isBlocked: !!contact.is_blocked}); setActiveDropdown(null); }}
-                                  className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex items-center gap-2"
-                                >
-                                  <ShieldAlert size={14} />
-                                  {contact.is_blocked ? "Desbloquear contato" : "Bloquear contato"}
-                                </button>
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); setContactToDelete({id: contact.id, name: contact.name || contact.phone}); setActiveDropdown(null); }}
-                                  className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex items-center gap-2"
-                                >
-                                  <Trash2 size={14} />
-                                  Apagar conversa
-                                </button>
-                              </>
-                            )}
-
-                            <div className="h-px w-full bg-gray-100 dark:bg-white/10 my-1" />
-
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setActiveDropdown(null); }}
-                              className="w-full text-left px-4 py-2 text-sm text-gray-500 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors flex items-center gap-2"
-                            >
-                              <X size={14} />
-                              Fechar menu
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                    <div className="flex flex-col gap-1">
+                      <p className="text-sm font-semibold text-gray-700 dark:text-[#d1d7db]">
+                        Nenhum contato encontrado
+                      </p>
+                      <p className="text-xs text-gray-400 dark:text-[#8696a0] max-w-[200px] mx-auto">
+                        Não encontramos nenhum chat ou contato para "{searchTerm}".
+                      </p>
                     </div>
-                  </div>
-                  <div className="flex text-[13px] text-[#54656f] dark:text-[#8696a0] truncate mt-0.5 items-center justify-between">
-                    <div className="flex items-center gap-1.5 truncate w-full pr-2">
-                       {isMe && (
-                           lastMsg?.status === 'READ' || lastMsg?.status === 'read' ? <CheckCheck size={14} className="text-[#53bdeb] shrink-0" /> : 
-                           lastMsg?.status === 'DELIVERY_ACK' || lastMsg?.status === 'SERVER_ACK' || lastMsg?.status === 'delivered' ? <CheckCheck size={14} className="text-gray-400 shrink-0" /> :
-                           <Check size={14} className="text-gray-400 shrink-0" />
-                       )}
-                       {contact.bot_status === 'paused' ? <span className="w-2 h-2 rounded-full bg-yellow-500 shrink-0 mr-1" /> : !isMe && <Bot size={13} className="text-[#00a884] shrink-0" />}
-                       
-                       {/* Renderiza indicador de midia estilo WhatsApp Web */}
-                       {(() => {
-                           if (!lastMsg) return <span className="truncate">Nova conversa...</span>;
-                           let icon = null;
-                           if (lastMsg.mediaType === 'image') icon = <Camera size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
-                           else if (lastMsg.mediaType === 'video') icon = <Video size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
-                           else if (lastMsg.mediaType === 'audio') icon = <Mic size={13} className={cn("shrink-0", lastMsg.status === 'READ' && isMe ? "text-[#53bdeb]" : "text-[#00a884]")} />;
-                           else if (lastMsg.mediaType === 'document') icon = <FileText size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
-                           else if (lastMsg.mediaType === 'location') icon = <MapPin size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
-                           else if (lastMsg.mediaType === 'contact') icon = <User size={13} className="shrink-0 text-gray-500 dark:text-gray-400" />;
-                           
-                           return (
-                              <div className="flex items-center gap-1 truncate w-full">
-                                {icon}
-                                <span className={cn("truncate", icon ? "" : "ml-0")}>{lastMsg.text || 'Nova conversa...'}</span>
-                              </div>
-                           );
-                       })()}
-                    </div>
-                    {contact.unread > 0 && (
-                      <div className="bg-[#00a884] text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0 shadow-sm">
-                        {contact.unread > 99 ? '99+' : contact.unread}
-                      </div>
+                    
+                    {isValidPhone && (
+                      <button
+                        onClick={() => handleStartChatWithSearchedNumber(onlyNumbers)}
+                        className="w-full flex items-center justify-center gap-2.5 px-5 py-3.5 bg-[#00a884] hover:bg-[#008f70] text-white rounded-2xl shadow-lg hover:shadow-emerald-500/20 font-semibold text-sm transition-all active:scale-95 hover:scale-[1.02] duration-200"
+                      >
+                        <MessageSquarePlus size={18} className="shrink-0" />
+                        <span>Enviar mensagem para {formatPhoneNumber(onlyNumbers)}</span>
+                      </button>
                     )}
                   </div>
                 </div>
-              </div>
-             )
-          })}
+              );
+            }
+
+            return filtered.slice(0, contactPageLimit).map((contact) => {
+               const lastMsg = contact.messages?.[contact.messages.length - 1];
+               const timeDisplay = lastMsg 
+                 ? (isToday(lastMsg.timestamp) ? format(lastMsg.timestamp, 'HH:mm') 
+                    : isYesterday(lastMsg.timestamp) ? 'Ontem' 
+                    : format(lastMsg.timestamp, 'dd/MM/yyyy'))
+                 : contact.lastMsgTimestamp 
+                    ? (isToday(new Date(contact.lastMsgTimestamp)) ? format(new Date(contact.lastMsgTimestamp), 'HH:mm') 
+                       : isYesterday(new Date(contact.lastMsgTimestamp)) ? 'Ontem' 
+                       : format(new Date(contact.lastMsgTimestamp), 'dd/MM/yyyy'))
+                    : '';
+                    
+               // Verifica se a ultima msg foi mandada por voce testando sender
+               const isMe = lastMsg && (lastMsg.sender === 'bot' || lastMsg.sender === 'human');
+  
+               return (
+                <div 
+                  key={contact.id}
+                  onClick={() => {
+                    setActiveChat(contact.id);
+                    const properTargetInstance = activeChannelFilter || contact.instance_id || connectedInstanceName;
+                    if (properTargetInstance) {
+                      useChatStore.getState().loadHistoricalMessages(contact.id, properTargetInstance);
+                      if (contact.avatar?.includes('ui-avatars')) {
+                        useChatStore.getState().fetchContactPicture(contact.id, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), properTargetInstance);
+                      }
+                    }
+                    if (contact.unread > 0) {
+                      useChatStore.getState().markAsRead(contact.id);
+                    }
+                  }}
+                  className={cn(
+                    "group flex items-center gap-3 px-3 py-3 cursor-pointer transition-colors border-b border-[#f2f2f2] dark:border-[#222d34] overflow-visible",
+                    activeChatId === contact.id ? "bg-[#f0f2f5] dark:bg-[#2a3942]" : "hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]"
+                  )}
+                >
+                  <div className="relative shrink-0">
+                    <img 
+                        src={contact.avatar} 
+                        alt="Avatar" 
+                        className="w-12 h-12 rounded-full object-cover shadow-sm hover:scale-105 transition-transform duration-200 cursor-pointer ring-2 ring-transparent hover:ring-[#00a884]/30" 
+                        onClick={(e) => { e.stopPropagation(); setFullscreenImage(contact.avatar); }}
+                        onError={(e) => {
+                          e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone))}&background=random&color=fff`;
+                        }}
+                      />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-center mb-0.5">
+                      <div className="flex flex-col truncate pr-2">
+                         <div className="flex flex-col gap-0.5 w-full">
+                           {/* Name and Priority Flags */}
+                           <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate flex items-center gap-1.5">
+                             <span className="truncate">{getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone)}</span>
+                             {contact.priority === 'urgent' && <Flag size={12} className="fill-rose-500 text-rose-500 shrink-0" />}
+                             {contact.priority === 'high' && <Flag size={12} className="fill-orange-500 text-orange-500 shrink-0" />}
+                             {contact.conv_status === 'snoozed' && contact.snoozed_until && new Date(contact.snoozed_until).getTime() > Date.now() && <Clock size={12} className="text-amber-500 shrink-0" />}
+                           </span>
+  
+                           {/* Labels and Assigned Agent on a new line */}
+                           {(contact.assigned_to || (contact.conv_labels && contact.conv_labels.length > 0)) && (
+                             <div className="flex items-center gap-1.5 overflow-hidden w-full flex-wrap mt-0.5">
+                               {contact.assigned_to && (
+                                 <span className="shrink-0 px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 border border-indigo-100 dark:border-indigo-500/20 text-[9px] font-bold uppercase rounded flex items-center gap-1">
+                                   <User size={9} />
+                                   <span className="max-w-[50px] truncate">{agents.find(a => a.id === contact.assigned_to)?.full_name?.split(' ')[0] || 'Ag'}</span>
+                                 </span>
+                               )}
+                               {contact.conv_labels && contact.conv_labels.length > 0 && (
+                                 <div className="flex items-center gap-1 overflow-hidden shrink-0">
+                                   {contact.conv_labels.map((l: any, i: number) => {
+                                     const isHex = l.color?.startsWith('#');
+                                     return (
+                                       <span key={i} className={cn("px-1.5 py-0.5 text-[9px] font-bold text-white rounded-full flex items-center max-w-[80px] truncate shadow-sm border border-black/10", !isHex && l.color ? l.color : "bg-blue-500")} style={isHex ? { backgroundColor: l.color } : {}} title={l.name}>
+                                         {l.name}
+                                       </span>
+                                     );
+                                    })}
+                                 </div>
+                               )}
+                             </div>
+                           )}
+                         </div>
+                         {contact.fantasy_name && (
+                           <span className="text-[11px] text-gray-500 dark:text-[#8696a0] truncate flex items-center gap-1">
+                             <Building2 size={10} className="shrink-0" />
+                             {contact.fantasy_name}
+                           </span>
+                         )}
+                        {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (() => {
+                            const instColor = contact.instance_id ? instanceColorsMap[contact.instance_id] : undefined;
+                            return (
+                              <span 
+                                className="text-[10px] px-1.5 py-[2px] rounded-md border font-medium truncate mt-1 w-fit max-w-[140px] flex items-center gap-1 shadow-sm transition-all"
+                                style={instColor ? { 
+                                  backgroundColor: `${instColor}15`, 
+                                  borderColor: `${instColor}30`, 
+                                  color: instColor 
+                                } : {
+                                  backgroundColor: 'rgba(0,0,0,0.05)',
+                                  borderColor: 'rgba(0,0,0,0.05)'
+                                }}
+                              >
+                                <Smartphone size={10} className="shrink-0 opacity-80" />
+                                <span className="truncate">{contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName}</span>
+                              </span>
+                            );
+                        })()}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className={cn("text-[11px] font-medium min-w-fit ml-1 flex items-center gap-1", contact.unread > 0 ? "text-[#00a884]" : "text-[#54656f] dark:text-[#8696a0]")}>
+                          {isContactPinned(contact) && <Pin size={12} className="text-[#00a884] rotate-45 fill-current opacity-80" />}
+                          {timeDisplay}
+                        </span>
+                        
+                        {/* Menu de Ações (Dropdown) */}
+                        <div className="relative isolate" onClick={e => e.stopPropagation()}>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveDropdown(activeDropdown === contact.id ? null : contact.id);
+                            }}
+                            className="p-1 text-[#54656f] hover:text-[#111b21] dark:text-[#aebac1] dark:hover:text-[#e9edef] rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-all opacity-80 hover:opacity-100"
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+                          
+                          {activeDropdown === contact.id && (
+                            <div className="absolute right-0 top-6 w-52 bg-white dark:bg-[#233138] border border-black/5 dark:border-white/5 rounded-xl shadow-xl py-2 z-[99] animate-in fade-in zoom-in-95 duration-100">
+                              <button 
+                                className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 border-t border-gray-100 dark:border-[#304046]"
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  const instanceToPin = activeChannelFilter || contact.instance_id || connectedInstanceName;
+                                  togglePinContact(contact.id, instanceToPin); 
+                                  setActiveDropdown(null); 
+                                }}
+                              >
+                                <Pin size={14} className={isContactPinned(contact) ? "rotate-45" : ""} />
+                                {isContactPinned(contact) ? "Desafixar conversa" : "Fixar no topo"}
+                              </button>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); toggleFavorite(contact.id); setActiveDropdown(null); }}
+                                className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                              >
+                                <Star size={14} className={contact.is_favorite ? "text-yellow-500 fill-yellow-500" : "text-gray-400"} />
+                                {contact.is_favorite ? "Remover dos favoritos" : "Favoritar"}
+                              </button>
+                              <button 
+                                onClick={async (e) => { 
+                                  e.stopPropagation(); 
+                                  const properTargetInstance = activeChannelFilter || contact.instance_id || connectedInstanceName;
+                                  if (properTargetInstance) {
+                                    await useChatStore.getState().loadHistoricalMessages(contact.id, properTargetInstance, true);
+                                  }
+                                  setActiveDropdown(null); 
+                                }}
+                                disabled={isSyncingHistory[contact.id]}
+                                className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                              >
+                                <History size={14} className={cn(isSyncingHistory[contact.id] ? "animate-spin text-[#00a884]" : "")} />
+                                {isSyncingHistory[contact.id] ? "Buscando..." : "Buscar Histórico"}
+                              </button>
+                              
+                              {/* Novos botões inseridos */}
+                              <button 
+                                onClick={async (e) => { 
+                                  e.stopPropagation(); 
+                                  const email = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
+                                  if (email) {
+                                    const me = agents.find(a => a.email === email);
+                                    if (me) {
+                                      await useChatStore.getState().updateConversationField(contact.id, { assigned_to: me.id });
+                                    }
+                                  }
+                                  setActiveDropdown(null); 
+                                }}
+                                className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                              >
+                                <UserCheck size={14} className="text-[#00a884]" /> Atribuir a mim
+                              </button>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); toggleUnread(contact.id, contact.unread); setActiveDropdown(null); }}
+                                className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                              >
+                                {contact.unread > 0 ? (
+                                  <><MailOpen size={14} className="text-gray-500" /> Marcar como lida</>
+                                ) : (
+                                  <><Mail size={14} className="text-[#00a884]" /> Marcar como não lida</>
+                                )}
+                              </button>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setShowSnoozeModal(contact.id); setActiveDropdown(null); }}
+                                className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                              >
+                                <Clock size={14} className="text-amber-500" />
+                                Adiar
+                              </button>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setContactForLabels(contact); setActiveDropdown(null); }}
+                                className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                              >
+                                <Tag size={14} className="text-blue-500" />
+                                Atribuir etiqueta
+                              </button>
+                              {contact.conv_status === 'resolved' ? (
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); reopenConversation(contact.id); setActiveDropdown(null); }}
+                                  className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                                >
+                                  <RotateCcw size={14} className="text-blue-500" />
+                                  Reabrir Conversa
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); resolveConversation(contact.id); setActiveDropdown(null); }}
+                                  className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                                >
+                                  <CheckCircle2 size={14} className="text-emerald-500" />
+                                  Resolver Conversa
+                                </button>
+                              )}
+                              
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setContactToDelete({id: contact.id, name: contact.name}); setActiveDropdown(null); }}
+                                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors flex items-center gap-2 border-t border-gray-100 dark:border-[#304046]"
+                              >
+                                <Trash2 size={14} />
+                                Excluir Contato
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            });
+          })()}
         </div>
       </div>
 
@@ -2450,278 +2725,480 @@ export default function ChatDashboard() {
 
           {/* Input Area */}
           <div className="flex flex-col shrink-0 z-10 w-full bg-[#f0f2f5] dark:bg-[#202c33] shadow-sm border-t border-[#d1d7db] dark:border-[#222d34] relative">
-            {/* Reply Preview Box */}
-            {replyMessage && (
-              <div className="flex items-start bg-black/5 dark:bg-black/20 p-3 relative animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-t-xl mx-2 mt-2 group/replybox border border-black/5 dark:border-white/5">
-                <div className="w-1.5 h-full absolute left-0 top-0 bottom-0 bg-[#00a884] rounded-l-xl"></div>
-                <div className="flex flex-col ml-3 flex-1 pr-8">
-                  <span className="text-[12px] font-bold text-[#00a884] mb-0.5">{replyMessage.sender === 'human' || replyMessage.sender === 'me' ? 'Você' : getContactDisplayName(activeChat?.custom_name || activeChat?.name, activeChat?.push_name, activeChat?.phone)}</span>
-                  <span className="text-[13px] text-[#54656f] dark:text-[#aebac1] line-clamp-2 leading-relaxed">{replyMessage.text}</span>
-                </div>
-                <button 
-                  type="button" 
-                  onClick={() => setReplyMessage(null)} 
-                  className="absolute right-3 top-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors bg-white/50 dark:bg-black/20 p-1.5 rounded-full shadow-sm hover:scale-105"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            )}
-            
-            {/* AI Processing State Box */}
-            {isGeminiProcessing && (
-              <div className="flex items-center gap-3 bg-gradient-to-r from-[#00a884]/10 to-teal-500/10 p-3 mx-2 mt-2 rounded-xl border border-[#00a884]/20 animate-in fade-in slide-in-from-bottom-2 duration-300 relative z-10 shadow-sm backdrop-blur-md">
-                <Sparkles size={16} className="text-[#00a884] animate-pulse" />
-                <span className="text-[12px] text-[#111b21] dark:text-[#e9edef] font-medium">A IA está processando sua sugestão de resposta...</span>
-              </div>
-            )}
-            
-            {/* AI Suggestions Box */}
-            {aiSuggestionsList.length > 0 && !isGeminiProcessing && (
-              <div className="flex flex-col gap-2 bg-gradient-to-r from-[#00a884]/10 to-teal-500/10 p-3 mx-2 mt-2 rounded-xl border border-[#00a884]/20 animate-in fade-in slide-in-from-bottom-2 duration-300 relative z-10 shadow-sm backdrop-blur-md">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#00a884] uppercase tracking-wide">
-                    <Sparkles size={12} className="animate-pulse" /> Escolha uma sugestão da IA:
-                  </div>
-                  <button onClick={() => setAiSuggestionsList([])} className="text-[#54656f] hover:text-red-500 transition-colors bg-white/50 dark:bg-black/20 p-1 rounded-full"><X size={14}/></button>
-                </div>
-                <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
-                  {aiSuggestionsList.map((suggestion, idx) => (
-                    <button 
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        setInputText(suggestion);
-                        setAiSuggestionsList([]);
-                        setTimeout(() => textareaRef.current?.focus(), 100);
-                      }}
-                      className="shrink-0 max-w-[280px] bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] border border-[#00a884]/30 text-left px-3 py-2 rounded-lg shadow-sm transition-all hover:scale-[1.02] active:scale-95 flex flex-col group"
-                    >
-                      <span className="text-[12px] text-[#111b21] dark:text-[#e9edef] line-clamp-3 leading-relaxed">"{suggestion}"</span>
-                      <span className="text-[10px] text-[#00a884] font-medium mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">Usar esta →</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Offline Banner Above Input */}
-            {activeChat && activeChat.instance_id && instancesStatus[activeChat.instance_id] && instancesStatus[activeChat.instance_id] !== 'connected' && (
-              <div className="bg-red-50/90 dark:bg-[#2a1314]/90 backdrop-blur-md border-t border-red-200 dark:border-red-900/50 p-2.5 flex items-center justify-between z-20 shadow-inner">
-                <div className="flex items-center gap-2.5 text-red-600 dark:text-[#f48686]">
-                  <div className="bg-red-500/10 p-1.5 rounded-lg border border-red-500/20">
-                    <ShieldAlert size={16} className="animate-pulse" />
-                  </div>
-                  <span className="text-[12px] font-medium tracking-wide">InstÇ｢ncia offline. Conecte-a para enviar mensagens.</span>
-                </div>
+            {audioState === 'recording' ? (
+              <div className="min-h-[85px] w-full flex items-center px-6 py-4 gap-4 bg-gradient-to-r from-gray-50/90 to-white/90 dark:from-[#111b21]/95 dark:to-[#202c33]/95 backdrop-blur-xl border-t border-white/20 dark:border-white/5 animate-in slide-in-from-bottom duration-300">
+                {/* Botão de Cancelar Gravação e Descartar */}
                 <button 
                   type="button"
-                  onClick={() => useChatStore.getState().openQRModal(activeChat.instance_id)}
-                  className="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-[11px] font-bold uppercase shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5"
+                  onClick={handleCancelRecording}
+                  className="w-11 h-11 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 bg-black/5 dark:bg-white/5 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-full transition-all duration-300 active:scale-90 hover:scale-110 shrink-0 border border-black/5 dark:border-white/5 hover:border-red-200 dark:hover:border-red-900/50 shadow-sm"
+                  title="Cancelar Gravação e Descartar"
                 >
-                  <Power size={14} />
-                  Reconectar
+                  <Trash2 size={20} className="transition-transform duration-300 hover:rotate-12" />
+                </button>
+
+                {/* Área do Gravador Ativo */}
+                <div className={cn(
+                  "flex-1 flex items-center rounded-2xl px-5 py-3 border transition-all duration-500 shadow-inner gap-4 min-w-0 bg-white/50 dark:bg-white/5 backdrop-blur-md",
+                  isRecordingPaused 
+                    ? "border-gray-300/30 dark:border-gray-700/30 shadow-none" 
+                    : "border-red-500/20 dark:border-red-500/10"
+                )}>
+                  {/* Indicador de Status Gravação / Pausado */}
+                  <div className="relative flex items-center justify-center shrink-0">
+                    {isRecordingPaused ? (
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-gray-400 dark:bg-gray-500" />
+                    ) : (
+                      <>
+                        <span className="animate-ping absolute inline-flex h-3.5 w-3.5 rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                      </>
+                    )}
+                  </div>
+                  
+                  <span className={cn(
+                    "text-xs font-bold uppercase tracking-widest shrink-0 select-none hidden md:inline transition-colors duration-300",
+                    isRecordingPaused 
+                      ? "text-gray-400 dark:text-gray-500" 
+                      : "text-red-500 dark:text-red-400"
+                  )}>
+                    {isRecordingPaused ? "Gravação Pausada" : "Gravando Áudio"}
+                  </span>
+                  
+                  {/* Onda sonora visual de 14 barras com delays e alturas variadas */}
+                  <div className="flex-1 flex items-center justify-center gap-1.5 px-3 overflow-hidden h-7">
+                    {[
+                      { h: 'h-3', delay: '0.1s', dur: '0.8s' },
+                      { h: 'h-5', delay: '0.2s', dur: '0.6s' },
+                      { h: 'h-2', delay: '0.3s', dur: '1s' },
+                      { h: 'h-6', delay: '0.4s', dur: '0.7s' },
+                      { h: 'h-4', delay: '0.15s', dur: '0.5s' },
+                      { h: 'h-7', delay: '0.5s', dur: '0.9s' },
+                      { h: 'h-3', delay: '0.25s', dur: '0.6s' },
+                      { h: 'h-5', delay: '0.6s', dur: '0.8s' },
+                      { h: 'h-2', delay: '0.35s', dur: '1.1s' },
+                      { h: 'h-6', delay: '0.7s', dur: '0.7s' },
+                      { h: 'h-4', delay: '0.45s', dur: '0.6s' },
+                      { h: 'h-7', delay: '0.8s', dur: '0.9s' },
+                      { h: 'h-3', delay: '0.55s', dur: '0.8s' },
+                      { h: 'h-5', delay: '0.9s', dur: '0.7s' }
+                    ].map((bar, index) => (
+                      <div
+                        key={index}
+                        className={cn(
+                          "w-0.75 rounded-full transition-all duration-500",
+                          bar.h,
+                          isRecordingPaused
+                            ? "bg-gray-300 dark:bg-gray-600 scale-y-75"
+                            : "bg-gradient-to-t from-red-500 via-pink-500 to-rose-500 animate-bounce"
+                        )}
+                        style={!isRecordingPaused ? {
+                          animationDelay: bar.delay,
+                          animationDuration: bar.dur
+                        } : undefined}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Cronômetro */}
+                  <span className={cn(
+                    "font-mono text-sm font-black select-none shrink-0 transition-colors duration-300",
+                    isRecordingPaused 
+                      ? "text-gray-400 dark:text-gray-500" 
+                      : "text-red-500 dark:text-red-400"
+                  )}>
+                    {formatAudioTime(recordingTime)}
+                  </span>
+                </div>
+
+                {/* Botão de Pausar / Retomar Gravação */}
+                <button 
+                  type="button"
+                  onClick={isRecordingPaused ? handleResumeRecording : handlePauseRecording}
+                  className={cn(
+                    "w-11 h-11 flex items-center justify-center rounded-full shadow-md transition-all duration-300 hover:scale-105 active:scale-95 shrink-0 border border-white/20 dark:border-white/5",
+                    isRecordingPaused
+                      ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20"
+                      : "bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-white/10 dark:hover:bg-white/15 dark:text-gray-200"
+                  )}
+                  title={isRecordingPaused ? "Retomar Gravação" : "Pausar Gravação"}
+                >
+                  {isRecordingPaused ? (
+                    <Play size={18} className="translate-x-0.5" fill="currentColor" />
+                  ) : (
+                    <Pause size={18} fill="currentColor" />
+                  )}
+                </button>
+
+                {/* Botão de Finalizar Gravação */}
+                <button 
+                  type="button"
+                  onClick={handleStopRecording}
+                  className="w-11 h-11 flex items-center justify-center bg-red-500 text-white rounded-full shadow-lg shadow-red-500/25 hover:bg-red-600 transition-all hover:scale-105 active:scale-95 shrink-0 border border-white/20 dark:border-white/5 animate-in zoom-in duration-300"
+                  title="Concluir Gravação e Revisar"
+                >
+                  <StopCircle size={20} className={cn("transition-transform duration-300", !isRecordingPaused && "animate-pulse")} />
                 </button>
               </div>
-            )}
-            
-            <form onSubmit={handleSendHuman} className="min-h-[70px] flex items-end px-4 py-3 gap-3 relative">
-              <button 
-                type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="p-2 text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
-            >
-              <Paperclip size={20} />
-            </button>
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              style={{ display: 'none' }} 
-              onChange={handleFileUpload} 
-              accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
-            />
+            ) : audioState === 'reviewing' ? (
+              <div className="min-h-[85px] w-full flex items-center px-6 py-4 gap-4 bg-gradient-to-r from-gray-50/90 to-white/90 dark:from-[#111b21]/95 dark:to-[#202c33]/95 backdrop-blur-xl border-t border-white/20 dark:border-white/5 animate-in slide-in-from-bottom duration-300">
+                {/* Elemento de Áudio oculto para o Preview */}
+                {recordedAudioUrl && (
+                  <audio 
+                    ref={reviewAudioRef}
+                    src={recordedAudioUrl}
+                    onTimeUpdate={handleAudioTimeUpdate}
+                    onLoadedMetadata={handleAudioMetadata}
+                    onEnded={handleAudioEnded}
+                    className="hidden"
+                  />
+                )}
 
-            <div className="flex flex-1 items-end bg-white dark:bg-[#2a3942] rounded-xl px-4 py-2 border border-transparent focus-within:border-[#00a884]/50 transition-colors shadow-sm relative">
-              {/* Quick Replies Popover */}
-              {showQuickReplies && quickReplies.length > 0 && (
-                <div className="absolute bottom-full left-0 mb-2 w-[350px] max-w-[90vw] bg-white dark:bg-[#202c33] rounded-2xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden z-[100] animate-in fade-in zoom-in-95 slide-in-from-bottom-4">
-                  <div className="p-3 bg-gray-50/50 dark:bg-[#111b21]/50 border-b border-gray-100 dark:border-white/5 text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                    笞｡ Respostas Prontas
+                {/* Botão de Descartar Áudio (Lixeira) */}
+                <button 
+                  type="button"
+                  onClick={handleDiscardAudio}
+                  className="w-11 h-11 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 bg-black/5 dark:bg-white/5 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-full transition-all duration-300 active:scale-90 hover:scale-110 shrink-0 border border-black/5 dark:border-white/5 hover:border-red-200 dark:hover:border-red-900/50 shadow-sm"
+                  title="Descartar Gravação"
+                >
+                  <Trash2 size={20} className="transition-transform duration-300 hover:rotate-12" />
+                </button>
+
+                {/* Área do Player de Áudio Premium Glassmorphic */}
+                <div className="flex-1 flex items-center bg-white/60 dark:bg-white/5 backdrop-blur-md rounded-2xl px-5 py-2.5 border border-emerald-500/10 dark:border-emerald-500/5 shadow-inner gap-4 min-w-0">
+                  {/* Play / Pause */}
+                  <button
+                    type="button"
+                    onClick={togglePlayAudio}
+                    className="w-10 h-10 rounded-full flex items-center justify-center bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/25 hover:scale-105 active:scale-95 transition-all duration-300 shrink-0"
+                    title={audioPlaying ? "Pausar" : "Ouvir Gravação"}
+                  >
+                    {audioPlaying ? (
+                      <Pause size={16} fill="currentColor" />
+                    ) : (
+                      <Play size={16} className="translate-x-0.5" fill="currentColor" />
+                    )}
+                  </button>
+
+                  <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest shrink-0 select-none hidden md:inline">
+                    Revisar
+                  </span>
+
+                  {/* Acelerador de Velocidade (Pílula Glassmorphic) */}
+                  <button
+                    type="button"
+                    onClick={changePlaybackRate}
+                    className="px-2.5 py-1 rounded-full text-xs font-black bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 text-gray-700 dark:text-gray-200 hover:scale-105 active:scale-95 transition-all duration-300 shrink-0 border border-black/5 dark:border-white/5 select-none font-mono min-w-[45px] text-center"
+                    title="Alterar Velocidade de Reprodução"
+                  >
+                    {playbackRate}x
+                  </button>
+
+                  {/* Timeline estilizada */}
+                  <div className="flex-1 flex items-center relative group min-w-[60px] h-4">
+                    <input 
+                      type="range"
+                      min={0}
+                      max={audioDuration || 100}
+                      step={0.01}
+                      value={audioCurrentTime}
+                      onChange={handleAudioSeek}
+                      className="w-full h-1 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500 dark:accent-emerald-500 outline-none transition-all duration-300 group-hover:h-1.5 focus:ring-1 focus:ring-emerald-500/35"
+                    />
                   </div>
-                  <div className="max-h-64 overflow-y-auto custom-scrollbar">
-                    {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).map(qr => (
-                      <button
-                        key={qr.id}
-                        type="button"
-                        className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-[#2a3942] transition-colors border-b border-gray-50 dark:border-white/5 last:border-0 group"
-                        onClick={async () => {
-                          setShowQuickReplies(false);
-                          if (qr.media_url) {
-                            try {
-                              const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
-                              if (activeChat && properTargetInstance) {
-                                await useChatStore.getState().sendMediaFromUrl(
-                                  activeChat.id, 
-                                  qr.media_url, 
-                                  (qr.media_type as 'image'|'video'|'audio'|'document') || 'image', 
-                                  properTargetInstance, 
-                                  qr.content
-                                );
-                              }
-                              setInputText('');
-                              setTimeout(() => textareaRef.current?.focus(), 10);
-                            } catch (e) {
-                              console.error('Erro ao enviar mídia da resposta rápida:', e);
-                              alert('Falha ao enviar mídia da resposta pronta.');
-                              setInputText(qr.content);
-                              setTimeout(() => textareaRef.current?.focus(), 10);
-                            }
-                          } else {
-                            setInputText(qr.content);
-                            setTimeout(() => textareaRef.current?.focus(), 10);
-                          }
-                        }}
-                      >
-                        <div className="font-semibold text-blue-600 dark:text-blue-400 text-[13px] mb-1 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors flex items-center gap-1.5">
-                          {qr.shortcut}
-                          {qr.media_url && (
-                             <span className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded-md">
-                                {qr.media_type === 'video' ? <Video className="w-3 h-3" /> : qr.media_type === 'audio' ? <Mic className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
-                                Mídia
-                             </span>
+
+                  {/* Tempos do player */}
+                  <div className="font-mono text-xs font-bold text-gray-500 dark:text-gray-400 shrink-0 select-none whitespace-nowrap bg-black/5 dark:bg-white/5 px-2.5 py-1 rounded-lg border border-black/5 dark:border-white/5">
+                    {formatAudioTime(audioCurrentTime)} <span className="opacity-30 mx-0.5">/</span> {formatAudioTime(audioDuration)}
+                  </div>
+                </div>
+
+                {/* Botão de Enviar Áudio Gravado */}
+                <button 
+                  type="button"
+                  onClick={handleSendRecordedAudio}
+                  className="w-11 h-11 flex items-center justify-center bg-gradient-to-tr from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white rounded-full shadow-lg shadow-emerald-500/25 transition-all hover:scale-105 active:scale-95 shrink-0 border border-white/20 dark:border-white/5 animate-in zoom-in duration-300 hover:rotate-2"
+                  title="Enviar Áudio"
+                >
+                  <Send size={16} className="translate-x-0.5" />
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Reply Preview Box */}
+                {replyMessage && (
+                  <div className="flex items-start bg-black/5 dark:bg-black/20 p-3 relative animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-t-xl mx-2 mt-2 group/replybox border border-black/5 dark:border-white/5">
+                    <div className="w-1.5 h-full absolute left-0 top-0 bottom-0 bg-[#00a884] rounded-l-xl"></div>
+                    <div className="flex flex-col ml-3 flex-1 pr-8">
+                      <span className="text-[12px] font-bold text-[#00a884] mb-0.5">{replyMessage.sender === 'human' || replyMessage.sender === 'me' ? 'Você' : getContactDisplayName(activeChat?.custom_name || activeChat?.name, activeChat?.push_name, activeChat?.phone)}</span>
+                      <span className="text-[13px] text-[#54656f] dark:text-[#aebac1] line-clamp-2 leading-relaxed">{replyMessage.text}</span>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={() => setReplyMessage(null)} 
+                      className="absolute right-3 top-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors bg-white/50 dark:bg-black/20 p-1.5 rounded-full shadow-sm hover:scale-105"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+                
+                {/* AI Processing State Box */}
+                {isGeminiProcessing && (
+                  <div className="flex items-center gap-3 bg-gradient-to-r from-[#00a884]/10 to-teal-500/10 p-3 mx-2 mt-2 rounded-xl border border-[#00a884]/20 animate-in fade-in slide-in-from-bottom-2 duration-300 relative z-10 shadow-sm backdrop-blur-md">
+                    <Sparkles size={16} className="text-[#00a884] animate-pulse" />
+                    <span className="text-[12px] text-[#111b21] dark:text-[#e9edef] font-medium">A IA está processando sua sugestão de resposta...</span>
+                  </div>
+                )}
+                
+                {/* AI Suggestions Box */}
+                {aiSuggestionsList.length > 0 && !isGeminiProcessing && (
+                  <div className="flex flex-col gap-2 bg-gradient-to-r from-[#00a884]/10 to-teal-500/10 p-3 mx-2 mt-2 rounded-xl border border-[#00a884]/20 animate-in fade-in slide-in-from-bottom-2 duration-300 relative z-10 shadow-sm backdrop-blur-md">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#00a884] uppercase tracking-wide">
+                        <Sparkles size={12} className="animate-pulse" /> Escolha uma sugestão da IA:
+                      </div>
+                      <button onClick={() => setAiSuggestionsList([])} className="text-[#54656f] hover:text-red-500 transition-colors bg-white/50 dark:bg-black/20 p-1 rounded-full"><X size={14}/></button>
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
+                      {aiSuggestionsList.map((suggestion, idx) => (
+                        <button 
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setInputText(suggestion);
+                            setAiSuggestionsList([]);
+                            setTimeout(() => textareaRef.current?.focus(), 100);
+                          }}
+                          className="shrink-0 max-w-[280px] bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] border border-[#00a884]/30 text-left px-3 py-2 rounded-lg shadow-sm transition-all hover:scale-[1.02] active:scale-95 flex flex-col group"
+                        >
+                          <span className="text-[12px] text-[#111b21] dark:text-[#e9edef] line-clamp-3 leading-relaxed">"{suggestion}"</span>
+                          <span className="text-[10px] text-[#00a884] font-medium mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">Usar esta →</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Offline Banner Above Input */}
+                {activeChat && activeChat.instance_id && instancesStatus[activeChat.instance_id] && instancesStatus[activeChat.instance_id] !== 'connected' && (
+                  <div className="bg-red-50/90 dark:bg-[#2a1314]/90 backdrop-blur-md border-t border-red-200 dark:border-red-900/50 p-2.5 flex items-center justify-between z-20 shadow-inner">
+                    <div className="flex items-center gap-2.5 text-red-600 dark:text-[#f48686]">
+                      <div className="bg-red-500/10 p-1.5 rounded-lg border border-red-500/20">
+                        <ShieldAlert size={16} className="animate-pulse" />
+                      </div>
+                      <span className="text-[12px] font-medium tracking-wide">Instância offline. Conecte-a para enviar mensagens.</span>
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={() => useChatStore.getState().openQRModal(activeChat.instance_id)}
+                      className="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-[11px] font-bold uppercase shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5"
+                    >
+                      <Power size={14} />
+                      Reconectar
+                    </button>
+                  </div>
+                )}
+                
+                <form onSubmit={handleSendHuman} className="min-h-[70px] flex items-end px-4 py-3 gap-3 relative">
+                  <button 
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2 text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
+                  >
+                    <Paperclip size={20} />
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    style={{ display: 'none' }} 
+                    onChange={handleFileUpload} 
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
+                  />
+
+                  <div className="flex flex-1 items-end bg-white dark:bg-[#2a3942] rounded-xl px-4 py-2 border border-transparent focus-within:border-[#00a884]/50 transition-colors shadow-sm relative">
+                    {/* Quick Replies Popover */}
+                    {showQuickReplies && quickReplies.length > 0 && (
+                      <div className="absolute bottom-full left-0 mb-2 w-[350px] max-w-[90vw] bg-white dark:bg-[#202c33] rounded-2xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden z-[100] animate-in fade-in zoom-in-95 slide-in-from-bottom-4">
+                        <div className="p-3 bg-gray-50/50 dark:bg-[#111b21]/50 border-b border-gray-100 dark:border-white/5 text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                          ⚡ Respostas Prontas
+                        </div>
+                        <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                          {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).map(qr => (
+                            <button
+                              key={qr.id}
+                              type="button"
+                              className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-[#2a3942] transition-colors border-b border-gray-50 dark:border-white/5 last:border-0 group"
+                              onClick={async () => {
+                                setShowQuickReplies(false);
+                                if (qr.media_url) {
+                                  try {
+                                    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+                                    if (activeChat && properTargetInstance) {
+                                      await useChatStore.getState().sendMediaFromUrl(
+                                        activeChat.id, 
+                                        qr.media_url, 
+                                        (qr.media_type as 'image'|'video'|'audio'|'document') || 'image', 
+                                        properTargetInstance, 
+                                        qr.content
+                                      );
+                                    }
+                                    setInputText('');
+                                    setTimeout(() => textareaRef.current?.focus(), 10);
+                                  } catch (e) {
+                                    console.error('Erro ao enviar mídia da resposta rápida:', e);
+                                    alert('Falha ao enviar mídia da resposta pronta.');
+                                    setInputText(qr.content);
+                                    setTimeout(() => textareaRef.current?.focus(), 10);
+                                  }
+                                } else {
+                                  setInputText(qr.content);
+                                  setTimeout(() => textareaRef.current?.focus(), 10);
+                                }
+                              }}
+                            >
+                              <div className="font-semibold text-blue-600 dark:text-blue-400 text-[13px] mb-1 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors flex items-center gap-1.5">
+                                {qr.shortcut}
+                                {qr.media_url && (
+                                   <span className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded-md">
+                                      {qr.media_type === 'video' ? <Video className="w-3 h-3" /> : qr.media_type === 'audio' ? <Mic className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
+                                      Mídia
+                                   </span>
+                                )}
+                              </div>
+                              <div className="text-gray-600 dark:text-gray-300 text-[13px] line-clamp-2 leading-relaxed">{qr.content}</div>
+                            </button>
+                          ))}
+                          {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).length === 0 && (
+                            <div className="p-6 text-center text-gray-500 dark:text-gray-400 text-[13px]">
+                              Nenhuma resposta encontrada para "{quickReplyFilter}"
+                            </div>
                           )}
                         </div>
-                        <div className="text-gray-600 dark:text-gray-300 text-[13px] line-clamp-2 leading-relaxed">{qr.content}</div>
-                      </button>
-                    ))}
-                    {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).length === 0 && (
-                      <div className="p-6 text-center text-gray-500 dark:text-gray-400 text-[13px]">
-                        Nenhuma resposta encontrada para "{quickReplyFilter}"
+                      </div>
+                    )}
+                    
+                    <textarea 
+                      ref={textareaRef}
+                      value={inputText}
+                      spellCheck={true}
+                      lang="pt-BR"
+                      onChange={e => {
+                        const val = e.target.value;
+                        setInputText(val);
+                        if (val.startsWith('/')) {
+                          setShowQuickReplies(true);
+                          setQuickReplyFilter(val.substring(1).toLowerCase());
+                        } else {
+                          setShowQuickReplies(false);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          const isCompactMobile = window.innerWidth < 500;
+                          if (isCompactMobile) {
+                            // Pular linha se a largura da tela for menor que 500px
+                            return; // Deixa o comportamento default da textarea
+                          }
+                          e.preventDefault();
+                          if (inputText.trim()) {
+                            handleSendHuman(e as any);
+                          }
+                        }
+                      }}
+                      onPaste={(e) => {
+                        const items = e.clipboardData?.items;
+                        if (!items) return;
+                        for (let i = 0; i < items.length; i++) {
+                          if (items[i].type.indexOf('image') !== -1) {
+                            e.preventDefault();
+                            const file = items[i].getAsFile();
+                            if (file) {
+                              setPastedImage(file);
+                              setPastedImagePreview(URL.createObjectURL(file));
+                              setPastedImageCaption('');
+                            }
+                            break;
+                          }
+                        }
+                      }}
+                      rows={1}
+                      placeholder="Responda como humano e a IA sera pausada automaticamente..."
+                      className="bg-transparent border-none outline-none w-full text-sm text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin"
+                    />
+                    <button 
+                      type="button" 
+                      onClick={() => setIsGeminiPopoverOpen(!isGeminiPopoverOpen)}
+                      className="ml-2 mb-0.5 p-1.5 text-[#00a884] hover:bg-[#00a884]/10 rounded-full transition-colors flex-shrink-0"
+                      title="Assistente IA"
+                    >
+                      <Sparkles size={20} />
+                    </button>
+
+                    {/* Popover UI Gemini */}
+                    {isGeminiPopoverOpen && (
+                      <div className="absolute bottom-full right-0 mb-3 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/5 dark:border-white/5 rounded-2xl shadow-xl w-72 p-2 animate-in fade-in zoom-in duration-200 z-50">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-black/5 dark:border-white/5 mb-2">
+                          <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-[#00a884] to-teal-500 flex items-center justify-center text-white shadow-sm">
+                            <Wand2 size={12} />
+                          </div>
+                          <span className="text-xs font-semibold text-[#111b21] dark:text-[#aebac1]">Magia da IA</span>
+                          <button onClick={() => setIsGeminiPopoverOpen(false)} className="ml-auto text-[#54656f] hover:text-red-500 p-1"><X size={14}/></button>
+                        </div>
+                        
+                        {isGeminiProcessing ? (
+                          <div className="flex flex-col items-center justify-center py-6 gap-3">
+                              <RefreshCw size={24} className="text-[#00a884] animate-spin" />
+                              <span className="text-xs text-[#54656f] dark:text-[#aebac1] animate-pulse">A IA está processando...</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-1">
+                            <button onClick={() => handleGeminiAction('grammar')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                              <CheckCircle2 size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Corrigir Gramática & Ortografia
+                            </button>
+                            <button onClick={() => handleGeminiAction('sales')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                              <ShoppingBag size={16} className="text-emerald-500 group-hover:scale-110 transition-transform" /> Focar em Vendas
+                            </button>
+                            <button onClick={() => handleGeminiAction('enchant')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                              <HeartHandshake size={16} className="text-pink-500 group-hover:scale-110 transition-transform" /> Encantar Cliente
+                            </button>
+                            <button onClick={() => handleGeminiAction('support')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                              <LifeBuoy size={16} className="text-orange-500 group-hover:scale-110 transition-transform" /> Melhorar Suporte/Dúvida
+                            </button>
+                            
+                            <div className="my-1 border-t border-black/5 dark:border-white/5"></div>
+                            
+                            <button onClick={() => handleGeminiAction('analyze')} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors text-[#111b21] dark:text-[#e9edef] group">
+                              <BrainCircuit size={16} className="text-purple-500 group-hover:scale-110 transition-transform" /> Analisar Conversa / Dar Feedback
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                </div>
-              )}
-              
-              <textarea 
-                ref={textareaRef}
-                value={inputText}
-                spellCheck={true}
-                lang="pt-BR"
-                onChange={e => {
-                  const val = e.target.value;
-                  setInputText(val);
-                  if (val.startsWith('/')) {
-                    setShowQuickReplies(true);
-                    setQuickReplyFilter(val.substring(1).toLowerCase());
-                  } else {
-                    setShowQuickReplies(false);
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    const isCompactMobile = window.innerWidth < 500;
-                    if (isCompactMobile) {
-                      // Pular linha se a largura da tela for menor que 500px
-                      return; // Deixa o comportamento default da textarea
-                    }
-                    e.preventDefault();
-                    if (inputText.trim()) {
-                      handleSendHuman(e as any);
-                    }
-                  }
-                }}
-                onPaste={(e) => {
-                  const items = e.clipboardData?.items;
-                  if (!items) return;
-                  for (let i = 0; i < items.length; i++) {
-                    if (items[i].type.indexOf('image') !== -1) {
-                      e.preventDefault();
-                      const file = items[i].getAsFile();
-                      if (file) {
-                        setPastedImage(file);
-                        setPastedImagePreview(URL.createObjectURL(file));
-                        setPastedImageCaption('');
-                      }
-                      break;
-                    }
-                  }
-                }}
-                rows={1}
-                placeholder="Responda como humano e a IA sera pausada automaticamente..."
-                className="bg-transparent border-none outline-none w-full text-sm text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin"
-              />
-              <button 
-                type="button" 
-                onClick={() => setIsGeminiPopoverOpen(!isGeminiPopoverOpen)}
-                className="ml-2 mb-0.5 p-1.5 text-[#00a884] hover:bg-[#00a884]/10 rounded-full transition-colors flex-shrink-0"
-                title="Assistente IA"
-              >
-                <Sparkles size={20} />
-              </button>
-
-              {/* Popover UI Gemini */}
-              {isGeminiPopoverOpen && (
-                <div className="absolute bottom-full right-0 mb-3 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/5 dark:border-white/5 rounded-2xl shadow-xl w-72 p-2 animate-in fade-in zoom-in duration-200 z-50">
-                  <div className="flex items-center gap-2 px-3 py-2 border-b border-black/5 dark:border-white/5 mb-2">
-                    <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-[#00a884] to-teal-500 flex items-center justify-center text-white shadow-sm">
-                      <Wand2 size={12} />
-                    </div>
-                    <span className="text-xs font-semibold text-[#111b21] dark:text-[#aebac1]">Magia da IA</span>
-                    <button onClick={() => setIsGeminiPopoverOpen(false)} className="ml-auto text-[#54656f] hover:text-red-500 p-1"><X size={14}/></button>
-                  </div>
                   
-                  {isGeminiProcessing ? (
-                    <div className="flex flex-col items-center justify-center py-6 gap-3">
-                        <RefreshCw size={24} className="text-[#00a884] animate-spin" />
-                        <span className="text-xs text-[#54656f] dark:text-[#aebac1] animate-pulse">A IA está processando...</span>
-                    </div>
+                  {inputText.trim() ? (
+                    <button 
+                      type="submit"
+                      className="w-10 h-10 flex items-center justify-center bg-[#00a884] text-white rounded-full shadow-md hover:scale-105 transition-transform active:scale-95 shrink-0"
+                    >
+                      <Send size={16} className="translate-x-0.5" />
+                    </button>
                   ) : (
-                    <div className="flex flex-col gap-1">
-                      <button onClick={() => handleGeminiAction('grammar')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
-                        <CheckCircle2 size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Corrigir Gramática & Ortografia
-                      </button>
-                      <button onClick={() => handleGeminiAction('sales')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
-                        <ShoppingBag size={16} className="text-emerald-500 group-hover:scale-110 transition-transform" /> Focar em Vendas
-                      </button>
-                      <button onClick={() => handleGeminiAction('enchant')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
-                        <HeartHandshake size={16} className="text-pink-500 group-hover:scale-110 transition-transform" /> Encantar Cliente
-                      </button>
-                      <button onClick={() => handleGeminiAction('support')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
-                        <LifeBuoy size={16} className="text-orange-500 group-hover:scale-110 transition-transform" /> Melhorar Suporte/Dúvida
-                      </button>
-                      
-                      <div className="my-1 border-t border-black/5 dark:border-white/5"></div>
-                      
-                      <button onClick={() => handleGeminiAction('analyze')} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors text-[#111b21] dark:text-[#e9edef] group">
-                        <BrainCircuit size={16} className="text-purple-500 group-hover:scale-110 transition-transform" /> Analisar Conversa / Dar Feedback
-                      </button>
-                    </div>
+                    <button 
+                      type="button"
+                      onClick={handleMicClick}
+                      className={cn(
+                         "w-10 h-10 flex items-center justify-center rounded-full shadow-md hover:scale-105 transition-all active:scale-95 shrink-0",
+                         audioState === 'recording' ? "bg-red-500 text-white animate-pulse" : "bg-transparent text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 shadow-none"
+                      )}
+                    >
+                      <Mic size={20} />
+                    </button>
                   )}
-                </div>
-              )}
-            </div>
-            
-            {inputText.trim() ? (
-              <button 
-                type="submit"
-                className="w-10 h-10 flex items-center justify-center bg-[#00a884] text-white rounded-full shadow-md hover:scale-105 transition-transform active:scale-95"
-              >
-                <Send size={16} className="translate-x-0.5" />
-              </button>
-            ) : (
-              <button 
-                type="button"
-                onClick={handleMicClick}
-                className={cn(
-                   "w-10 h-10 flex items-center justify-center rounded-full shadow-md hover:scale-105 transition-all active:scale-95",
-                   isRecording ? "bg-red-500 text-white animate-pulse" : "bg-transparent text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 shadow-none"
-                )}
-              >
-                <Mic size={20} />
-              </button>
+                </form>
+              </>
             )}
-          </form>
           </div>
         </div>
       ) : (
@@ -2735,23 +3212,77 @@ export default function ChatDashboard() {
       {/* Modal de Tela Cheia para Imagens */}
       {fullscreenImage && (
         <div 
-          className="fixed inset-0 z-[99999] bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200"
-          onClick={() => setFullscreenImage(null)}
-          onContextMenu={(e) => { e.preventDefault(); setFullscreenImage(null); }}
+          className="fixed inset-0 z-[99999] bg-black/95 flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-200 overflow-hidden"
+          onClick={closeFullscreenImage}
+          onContextMenu={(e) => { e.preventDefault(); closeFullscreenImage(); }}
         >
-          <button 
-            onClick={() => setFullscreenImage(null)}
-            className="absolute top-6 right-6 text-white p-2 bg-black/50 hover:bg-white/20 rounded-full transition-colors z-50 shadow-lg"
-          >
-            <X size={24} />
-          </button>
-          <img 
-            src={fullscreenImage} 
-            alt="Imagem em Tela Cheia" 
-            className="max-w-full max-h-[90vh] object-contain select-none animate-in zoom-in-95 duration-300 shadow-2xl rounded-lg"
+          {/* Barra de Ferramentas Premium de Zoom (Glassmorphism) */}
+          <div 
+            className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-2 bg-black/50 backdrop-blur-md border border-white/10 rounded-full shadow-2xl z-50 animate-in slide-in-from-top-4 duration-300 select-none"
             onClick={(e) => e.stopPropagation()}
-            onContextMenu={(e) => e.stopPropagation()}
-          />
+          >
+            <button
+              onClick={handleZoomOut}
+              disabled={fullscreenZoom <= 1}
+              className="text-white hover:text-emerald-400 p-1.5 hover:bg-white/10 active:scale-95 rounded-full transition-all disabled:opacity-40 disabled:hover:text-white disabled:hover:bg-transparent"
+              title="Zoom Out"
+            >
+              <ZoomOut size={18} />
+            </button>
+            
+            <span className="text-white text-xs font-semibold min-w-[2.5rem] text-center font-mono select-none">
+              {fullscreenZoom.toFixed(1)}x
+            </span>
+            
+            <button
+              onClick={handleZoomIn}
+              disabled={fullscreenZoom >= 5}
+              className="text-white hover:text-emerald-400 p-1.5 hover:bg-white/10 active:scale-95 rounded-full transition-all disabled:opacity-40 disabled:hover:text-white disabled:hover:bg-transparent"
+              title="Zoom In"
+            >
+              <ZoomIn size={18} />
+            </button>
+
+            {fullscreenZoom > 1 && (
+              <button
+                onClick={handleResetZoom}
+                className="text-white hover:text-red-400 p-1.5 hover:bg-white/10 active:scale-95 rounded-full transition-all border-l border-white/10 pl-2.5 ml-1"
+                title="Redefinir Foco"
+              >
+                <RotateCcw size={16} />
+              </button>
+            )}
+          </div>
+
+          <button 
+            onClick={closeFullscreenImage}
+            className="absolute top-6 right-6 text-white p-2.5 bg-black/50 hover:bg-white/10 active:scale-95 rounded-full transition-all z-50 shadow-lg border border-white/10"
+          >
+            <X size={20} />
+          </button>
+
+          <div 
+            className="w-full h-full flex items-center justify-center overflow-hidden"
+            onClick={closeFullscreenImage}
+          >
+            <img 
+              src={fullscreenImage} 
+              alt="Imagem em Tela Cheia" 
+              className="max-w-full max-h-[90vh] object-contain select-none animate-in zoom-in-95 duration-300 shadow-2xl rounded-2xl"
+              style={{
+                transform: `translate(${fullscreenPan.x}px, ${fullscreenPan.y}px) scale(${fullscreenZoom})`,
+                transition: isFullscreenDragging ? 'none' : 'transform 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+                cursor: fullscreenZoom > 1 ? (isFullscreenDragging ? 'grabbing' : 'grab') : 'default',
+                touchAction: 'none'
+              }}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
+              onClick={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.stopPropagation()}
+            />
+          </div>
         </div>
       )}
 

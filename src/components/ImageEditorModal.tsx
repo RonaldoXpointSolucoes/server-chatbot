@@ -450,8 +450,16 @@ export default function ImageEditorModal({ file, onClose, onSend }: ImageEditorM
             className="flex-1 bg-[#2a3942] text-white border-none rounded-2xl px-5 py-3 text-sm placeholder:text-[#8696a0] focus:outline-none focus:ring-1 focus:ring-[#00a884]/50"
           />
           <button 
+            type="button"
+            onClick={onClose}
+            className="px-5 py-3 rounded-xl text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 transition-all active:scale-95 duration-200 font-medium shrink-0"
+          >
+            Cancelar
+          </button>
+          <button 
+            type="button"
             onClick={handleSend}
-            className="bg-[#00a884] hover:bg-[#008f6f] text-white px-5 py-3 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2 font-medium"
+            className="bg-[#00a884] hover:bg-[#008f6f] text-white px-5 py-3 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2 font-medium shrink-0"
           >
             <Send size={18} />
             <span className="hidden sm:inline">Enviar Edição</span>

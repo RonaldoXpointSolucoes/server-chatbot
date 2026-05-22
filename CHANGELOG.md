@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.5.7] - 2026-05-21
+
+### Adicionado
+- **Deploy em Produção (v2.5.7)**: Correção cirúrgica de balanceamento de tags na estrutura de lista de contatos do chat para evitar erros de renderização (*Adjacent JSX elements*) e deploy oficial do aplicativo frontend na nuvem da Vercel.
+
 ## [2.5.6] - 2026-05-21
 
 ### Adicionado
