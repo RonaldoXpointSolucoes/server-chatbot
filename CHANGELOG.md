@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.5.6] - 2026-05-21
+
+### Adicionado
+- **Deploy em Produção (v2.5.6)**: Atualização incremental da aplicação em produção com toda a segurança, controle de auditoria de versão no Supabase e build robusta no pipeline oficial da Vercel.
+
+## [2.5.5] - 2026-05-21
+
+### Adicionado
+- **Snooze Premium (Adiar Conversas)**: Integração robusta (frontend React + banco Supabase + servidor Node no Coolify executando monitoramento contínuo de 30 segundos) para adiar contatos e reabrir na tela no horário exato.
+- **Exibição Condicional de Empresa ou Celular**: Exibição dinâmica no cabeçalho. Mostra botão "Ver Empresa" se o contato possuir empresa associada, ou badge azul translúcida premium com o telefone formatado nacionalmente e botão de cópia rápida com feedback tátil de 2 segundos.
+- **Melhoria Técnica de Compilação Estática**: Rigorosa validação estática de tipos do compilador TypeScript (`npx tsc --noEmit`) resultando em zero erros no projeto.
+- **Controle Dinâmico de Versão (Header)**: Indicador de versão dinâmico sincronizado nos cantos superiores esquerdos de `ChatDashboard` e `AdminDashboard`.
+
+### Corrigido
+- **Correção no Envio (Enter)**: Ajuste fino para desativar envio por enter apenas em telas mobile estritas (largura menor que 500px), permitindo que em resoluções maiores o enter funcione normalmente para enviar.
+
+## [2.5.3] - 2026-05-20
+
+### Adicionado
+- **Deploy em Produção**: Deploy oficial do frontend no ambiente Vercel com todas as correções de estabilidade acumuladas.
+
 ## [2.5.2] - 2026-05-20
 
 ### Corrigido

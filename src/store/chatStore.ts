@@ -92,6 +92,7 @@ interface ChatState {
   tenantLabels: any[];
   appVersion: { version: string, deploy_date: string } | null;
   isSearchingGlobally: boolean;
+  realtimeStatus: 'connected' | 'connecting' | 'disconnected';
   
   searchGlobalContacts: (term: string) => Promise<void>;
   openQRModal: (instanceId?: string | null) => void;
@@ -108,7 +109,7 @@ interface ChatState {
   updateTenantInstance: (newInstance: string) => Promise<void>;
   updateTenantSettings: (newSettings: any) => Promise<void>; // Novo campo
   fetchInitialData: () => Promise<void>;
-  subscribeToNewMessages: () => void;
+  subscribeToNewMessages: (force?: boolean) => void;
   // Historical Sync
   syncEvolutionContacts: (instanceName: string) => Promise<void>;
   loadHistoricalMessages: (contactId: string, instanceName: string, forceSync?: boolean) => Promise<void>;
@@ -182,8 +183,8 @@ interface ChatState {
   resolveAllConversations: () => Promise<{ success: boolean, count: number }>;
   undoLastBatchResolve: () => Promise<boolean>;
   clearStore: () => void;
-  reopenedTicketToast: { contactName: string } | null;
-  setReopenedTicketToast: (toast: { contactName: string } | null) => void;
+  reopenedTicketToast: { contactName: string; reason?: string } | null;
+  setReopenedTicketToast: (toast: { contactName: string; reason?: string } | null) => void;
 }
 
 export interface QuickReply {
@@ -359,6 +360,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeChatId: null,
   evolutionConnected: false,
   instancesStatus: {},
+  realtimeStatus: 'disconnected',
   setInstanceStatus: (id, status) => {
     // Implementa regra moderna de consulta: Aguarda alguns segundos antes de setar offline/connecting
     // Se a conexão piscar, o timeout é limpo pelo status 'connected'
@@ -414,6 +416,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeChatId: null,
       evolutionConnected: false,
       instancesStatus: {},
+      realtimeStatus: 'disconnected',
       connectedInstanceName: null,
       tenantInfo: null,
       agents: [],
@@ -3019,9 +3022,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  subscribeToNewMessages: () => {
+  subscribeToNewMessages: (force?: boolean) => {
     const state = get() as any;
-    if (state.isSubscribed) return; // React 18 protection
+    if (state.isSubscribed && !force) return; // React 18 protection
     let tenantId = state.tenantInfo?.id;
     if (!tenantId) {
         tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
@@ -3030,13 +3033,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         console.error('[Realtime] Cannot subscribe without tenantId. Ensure user is logged in.');
         return;
     }
-    set({ isSubscribed: true } as any);
+    set({ isSubscribed: true, realtimeStatus: 'connecting' } as any);
 
     const channelName = `realtime_chat_${tenantId}`;
     // HMR fallback: Remove o canal caso já exista no cache do Supabase Client para evitar "cannot add callback after subscribe"
-    const existingChannel = supabase.getChannels().find(c => c.topic === `realtime:${channelName}`);
-    if (existingChannel) {
-        supabase.removeChannel(existingChannel);
+    try {
+      const existingChannel = supabase.getChannels().find(c => c.topic === `realtime:${channelName}`);
+      if (existingChannel) {
+          supabase.removeChannel(existingChannel);
+      }
+    } catch(e) {
+      console.warn('[Realtime] Erro ao limpar canal anterior:', e);
     }
     
     const channel = supabase.channel(channelName);
@@ -3205,6 +3212,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
            if (i !== -1) {
               const updatedContact = { ...u[i] };
               
+              // MEMORY LEAK PROTECTION: Limita o número de mensagens locais mantidas em contatos inativos para prevenir congelamento da aba do browser
+              if (s.activeChatId !== cid && updatedContact.messages && updatedContact.messages.length > 100) {
+                  updatedContact.messages = updatedContact.messages.slice(-100);
+              }
+              
               if (!isIgnored) {
                  const msgTimestamp = new Date(m.timestamp).getTime();
                  const isHistorical = (Date.now() - msgTimestamp) > (5 * 60000); // Mais de 5 minutos = histórico
@@ -3309,6 +3321,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
                            get().setReopenedTicketToast(null);
                         }, 4000);
                      }, 100);
+                  } else if (c.conv_status === 'snoozed' && conv.status === 'open') {
+                     // Dispara o toast informando a reabertura de snooze!
+                     setTimeout(() => {
+                        get().setReopenedTicketToast({ contactName: foundContactName, reason: 'snooze' });
+                        // Fecha o toast automaticamente após 4 segundos
+                        setTimeout(() => {
+                           get().setReopenedTicketToast(null);
+                        }, 4000);
+                     }, 100);
                   }
                   
                   return {
@@ -3318,6 +3339,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      unread: conv.unread_count,
                      is_pinned: conv.is_pinned,
                      is_favorite: conv.is_favorite,
+                     snoozed_until: conv.snoozed_until,
                      instance_id: conv.instance_id || c.instance_id
                   };
                }
@@ -3381,8 +3403,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
          }
       })
-      .subscribe((_status, err) => {
-         if (err) console.error("Realtime Error", err);
+      .subscribe((status, err) => {
+         if (err) {
+            console.error("[Realtime] Subscription critical error:", err);
+            set({ realtimeStatus: 'disconnected' });
+         } else {
+            console.log(`[Realtime status]: ${status}`);
+            if (status === 'SUBSCRIBED') {
+               set({ realtimeStatus: 'connected' });
+            } else if (status === 'CLOSED') {
+               set({ realtimeStatus: 'disconnected' });
+            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+               set({ realtimeStatus: 'disconnected' });
+               // Rotina ativa de auto-reparo e reconexão silenciosa
+               setTimeout(() => {
+                  console.log("[Realtime] Rotina ativa de auto-reparo iniciada...");
+                  get().subscribeToNewMessages(true);
+               }, 5000);
+            }
+         }
       });
   }
 }));

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, ShieldCheck } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal, CompanyDetailsModal } from '../components/ChatModals';
@@ -141,6 +141,21 @@ export function renderMessageText(text: string) {
   });
 }
 
+const formatDisplayPhone = (phoneNum: string) => {
+  if (!phoneNum) return '';
+  let clean = phoneNum.replace(/\D/g, '');
+  if (clean.startsWith('55') && clean.length >= 12) {
+    clean = clean.substring(2);
+  }
+  if (clean.length === 11) {
+    return `(${clean.substring(0, 2)}) ${clean.substring(2, 7)}-${clean.substring(7)}`;
+  }
+  if (clean.length === 10) {
+    return `(${clean.substring(0, 2)}) ${clean.substring(2, 6)}-${clean.substring(6)}`;
+  }
+  return phoneNum;
+};
+
 export default function ChatDashboard() {
   const navigate = useNavigate();
   const tenantName = (localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name'));
@@ -215,7 +230,8 @@ export default function ChatDashboard() {
     resolveAllConversations,
     undoLastBatchResolve,
     reopenedTicketToast,
-    setReopenedTicketToast
+    setReopenedTicketToast,
+    realtimeStatus
   } = useChatStore(useShallow(state => ({
     contacts: state.contacts, 
     activeChatId: state.activeChatId, 
@@ -229,6 +245,7 @@ export default function ChatDashboard() {
     fetchInitialData: state.fetchInitialData,
     fetchTenantConfig: state.fetchTenantConfig,
     subscribeToNewMessages: state.subscribeToNewMessages,
+    realtimeStatus: state.realtimeStatus,
     loadHistoricalMessages: state.loadHistoricalMessages,
     fetchTenantAgents: state.fetchTenantAgents,
     modalReason: state.modalReason,
@@ -285,6 +302,52 @@ export default function ChatDashboard() {
   const [pastedImagePreview, setPastedImagePreview] = useState<string | null>(null);
   const [pastedImageCaption, setPastedImageCaption] = useState('');
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
+
+  // Estados para Monitor de Saúde Premium e Internet
+  const [isOnline, setIsOnline] = useState(typeof window !== 'undefined' ? navigator.onLine : true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [showHealthPanel, setShowHealthPanel] = useState(false);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      console.log('[Manual Sync] Forçando reconexão e recarga...');
+      await fetchInitialData();
+      await subscribeToNewMessages(true);
+    } catch (err) {
+      console.error('[Manual Sync] Erro ao sincronizar:', err);
+    } finally {
+      setTimeout(() => {
+        setIsSyncing(false);
+      }, 1200);
+    }
+  };
+
+  const systemHealth = React.useMemo<'green' | 'yellow' | 'red'>(() => {
+    const internetOk = isOnline;
+    const realtimeOk = realtimeStatus === 'connected';
+    const evoOk = evolutionConnected;
+
+    if (!internetOk || !evoOk || realtimeStatus === 'disconnected') {
+      return 'red';
+    } else if (realtimeStatus === 'connecting') {
+      return 'yellow';
+    }
+    return 'green';
+  }, [isOnline, realtimeStatus, evolutionConnected]);
 
   // Estados para Fechamento em Lote de Tickets (Modo Ticket Ativo)
   const [isConfirmBatchResolveOpen, setIsConfirmBatchResolveOpen] = useState(false);
@@ -649,7 +712,7 @@ export default function ChatDashboard() {
       if (document.visibilityState === 'visible') {
         console.log('[PWA Sync] App no foreground, sincronizando...');
         fetchInitialData();
-        subscribeToNewMessages(); // Restabelece/Reconecta canal realtime
+        subscribeToNewMessages(true); // Restabelece/Reconecta canal realtime de forma ativa, eliminando conexões zumbis
       }
     };
 
@@ -1157,8 +1220,16 @@ export default function ChatDashboard() {
               <MessageSquare size={18} className="animate-pulse" />
             </div>
             <div className="flex flex-col">
-              <span className="text-xs font-bold text-gray-900 dark:text-white">Ticket Reaberto</span>
-              <span className="text-[10px] text-gray-500 dark:text-gray-400">Cliente <b>{reopenedTicketToast.contactName}</b> enviou nova mensagem!</span>
+              <span className="text-xs font-bold text-gray-900 dark:text-white">
+                {reopenedTicketToast.reason === 'snooze' ? 'Adiantamento Expirado' : 'Ticket Reaberto'}
+              </span>
+              <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                {reopenedTicketToast.reason === 'snooze' ? (
+                  <>O atendimento de <b>{reopenedTicketToast.contactName}</b> retornou porque o adiamento expirou!</>
+                ) : (
+                  <>Cliente <b>{reopenedTicketToast.contactName}</b> enviou nova mensagem!</>
+                )}
+              </span>
             </div>
           </div>
           <button
@@ -1187,10 +1258,7 @@ export default function ChatDashboard() {
         {/* Header Premium da Sidebar */}
         <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
           {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 pointer-events-none whitespace-nowrap tracking-wide">
-            {`v${appVersion?.version || import.meta.env.PACKAGE_VERSION || '2.5.1'} | Deploy: ${appVersion?.deploy_date ? new Date(appVersion.deploy_date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '19/05/2026, 22:04')}`}
-          </span>
-          
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.5.6'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '21/05/2026, 21:38'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
@@ -1266,9 +1334,9 @@ export default function ChatDashboard() {
         {(activeChannelFilter && instancesStatus[activeChannelFilter] !== 'connected') && (
           <div className="bg-orange-50 dark:bg-orange-950/40 border-y border-orange-200 dark:border-orange-900/50 p-3 flex flex-col gap-1 z-20 shadow-sm animate-in fade-in zoom-in-95 duration-300">
              <div className="flex items-center gap-2 text-orange-600 dark:text-orange-400 font-bold text-sm">
-               <span className="w-2 h-2 rounded-full bg-orange-500 animate-ping absolute"></span>
-               <span className="w-2 h-2 rounded-full bg-orange-500 relative"></span>
-               Atenção: Instância Offline
+                <span className="w-2 h-2 rounded-full bg-orange-500 animate-ping absolute"></span>
+                <span className="w-2 h-2 rounded-full bg-orange-500 relative"></span>
+                Atenção: Instância Offline
              </div>
              <p className="text-xs text-orange-700/80 dark:text-orange-300/80 leading-tight">
                 A instância {activeChannelFilter} está offline. Verifique o aparelho ou reconecte.
@@ -1276,6 +1344,192 @@ export default function ChatDashboard() {
              <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="mt-1 text-xs bg-orange-100 dark:bg-orange-900/40 hover:bg-orange-200 dark:hover:bg-orange-800/40 text-orange-700 dark:text-orange-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
                 Resolver Agora
              </button>
+          </div>
+        )}
+
+        {/* Painel Premium de Controle Rápido (Saúde do Sistema & Modo Ticket) */}
+        <div className="flex gap-2 mx-3 my-2 z-10 relative">
+          {/* Botão de Semáforo de Saúde */}
+          <button 
+            onClick={() => setShowHealthPanel(!showHealthPanel)}
+            className={cn(
+              "flex-1 px-3 py-2.5 bg-white/40 dark:bg-black/20 backdrop-blur-md border border-gray-200/50 dark:border-white/5 rounded-2xl flex items-center justify-between transition-all hover:bg-gray-100/50 dark:hover:bg-white/10 active:scale-[0.98] shadow-sm select-none animate-in fade-in",
+              showHealthPanel && "bg-gray-100/50 dark:bg-white/10 border-gray-300/50 dark:border-white/10"
+            )}
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className={cn(
+                  "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                  systemHealth === 'green' ? "bg-emerald-400" :
+                  systemHealth === 'yellow' ? "bg-amber-400" : "bg-rose-400"
+                )}></span>
+                <span className={cn(
+                  "relative inline-flex rounded-full h-2 w-2",
+                  systemHealth === 'green' ? "bg-emerald-500" :
+                  systemHealth === 'yellow' ? "bg-amber-500" : "bg-rose-500"
+                )}></span>
+              </span>
+              <span className="text-[11px] font-bold text-gray-600 dark:text-[#d1d7db] truncate">
+                {systemHealth === 'green' ? "Operando" :
+                 systemHealth === 'yellow' ? "Atenção" : "Offline"}
+              </span>
+            </div>
+            <ChevronDown 
+              size={12} 
+              className={cn(
+                "text-gray-400 dark:text-[#aebac1] transition-transform duration-300 shrink-0",
+                showHealthPanel && "rotate-180"
+              )} 
+            />
+          </button>
+
+          {/* Botão Modo Ticket Ativo */}
+          <div className="flex-1 relative flex items-stretch">
+            <button 
+              onClick={() => setTicketMode(!ticketMode)}
+              className={cn(
+                "flex-1 px-3 py-2.5 backdrop-blur-md rounded-2xl flex items-center justify-between transition-all active:scale-[0.98] shadow-sm select-none border animate-in fade-in group",
+                ticketMode 
+                  ? "bg-violet-500/15 dark:bg-violet-500/25 border-violet-500/30 text-violet-700 dark:text-violet-300 font-semibold" 
+                  : "bg-white/40 dark:bg-black/20 border-gray-200/50 dark:border-white/5 text-gray-500 dark:text-gray-400 hover:bg-gray-100/50 dark:hover:bg-white/10"
+              )}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Ticket size={13} className={cn("shrink-0 transition-transform duration-300 group-hover:scale-110", ticketMode && "animate-pulse text-violet-500 dark:text-violet-400")} />
+                <span className="text-[11px] font-bold truncate">
+                  Tickets
+                </span>
+              </div>
+              
+              {ticketMode && (
+                <span className="px-1.5 py-0.5 text-[9px] font-extrabold text-violet-600 bg-violet-500/20 dark:text-violet-300 dark:bg-violet-500/30 rounded-full border border-violet-500/20 shrink-0">
+                  {activeTicketsCount}
+                </span>
+              )}
+            </button>
+            
+            {ticketMode && (
+              <div className="relative shrink-0 flex items-stretch">
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveDropdown(activeDropdown === 'ticket-menu' ? null : 'ticket-menu');
+                  }}
+                  className="px-1.5 py-2.5 rounded-r-2xl border-l border-violet-500/20 bg-violet-500/10 dark:bg-violet-500/20 text-violet-700 dark:text-violet-400 hover:bg-violet-500/25 flex items-center justify-center transition-all"
+                  title="Opções do Ticket"
+                >
+                  <MoreVertical size={13} />
+                </button>
+                
+                {activeDropdown === 'ticket-menu' && (
+                  <div className="absolute right-0 top-11 w-52 bg-white dark:bg-[#233138] border border-gray-100 dark:border-[#304046] rounded-2xl shadow-xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                    <button 
+                      onClick={() => {
+                        setTicketMode(false);
+                        setActiveDropdown(null);
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-violet-500/10 transition-colors flex items-center gap-2"
+                    >
+                      <Ban size={13} className="text-gray-500 dark:text-gray-400" />
+                      Desativar Modo Ticket
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setIsConfirmBatchResolveOpen(true);
+                        setActiveDropdown(null);
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-xs font-semibold text-violet-700 dark:text-violet-400 hover:bg-violet-500/10 transition-colors flex items-center gap-2 border-t border-violet-500/5"
+                    >
+                      <CheckSquare size={13} className="text-violet-600 dark:text-violet-400" />
+                      Fechar todos os tickets
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+
+        {showHealthPanel && (
+          <div className="bg-white/40 dark:bg-black/20 backdrop-blur-md border border-gray-200/50 dark:border-white/5 shadow-md rounded-2xl p-3.5 mx-3 mb-2 flex flex-col gap-3 animate-in fade-in slide-in-from-top-4 duration-300">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                Status do Sistema
+              </span>
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleManualSync(); }}
+                disabled={isSyncing}
+                className={cn(
+                  "p-1.5 rounded-lg text-gray-500 dark:text-[#aebac1] hover:bg-gray-100/50 dark:hover:bg-white/10 transition-all flex items-center gap-1 text-[11px] font-semibold",
+                  isSyncing && "text-[#00a884] dark:text-[#53bdeb]"
+                )}
+                title="Sincronizar conexões agora"
+              >
+                <RefreshCw size={13} className={cn(isSyncing && "animate-spin")} />
+                {isSyncing ? "Sincronizando..." : "Sincronizar"}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {/* Status 1: Internet */}
+              <div className="bg-gray-50/50 dark:bg-[#202c33]/40 border border-gray-100 dark:border-white/5 rounded-xl p-2 flex flex-col items-center justify-center gap-1.5 text-center transition-all hover:scale-[1.02] duration-300">
+                <div className="relative">
+                  <Wifi size={16} className={isOnline ? "text-emerald-500" : "text-rose-500"} />
+                  <span className={cn(
+                    "absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border border-white dark:border-[#111b21]",
+                    isOnline ? "bg-emerald-500 animate-pulse" : "bg-rose-500"
+                  )}></span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-medium text-gray-400 dark:text-[#8696a0]">Internet</span>
+                  <span className="text-[11px] font-bold text-gray-700 dark:text-[#d1d7db]">
+                    {isOnline ? "Online" : "Offline"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Status 2: Banco de Dados (Realtime) */}
+              <div className="bg-gray-50/50 dark:bg-[#202c33]/40 border border-gray-100 dark:border-white/5 rounded-xl p-2 flex flex-col items-center justify-center gap-1.5 text-center transition-all hover:scale-[1.02] duration-300">
+                <div className="relative">
+                  <Database size={16} className={
+                    realtimeStatus === 'connected' ? "text-emerald-500" :
+                    realtimeStatus === 'connecting' ? "text-amber-500" : "text-rose-500"
+                  } />
+                  <span className={cn(
+                    "absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border border-white dark:border-[#111b21]",
+                    realtimeStatus === 'connected' ? "bg-emerald-500 animate-pulse" :
+                    realtimeStatus === 'connecting' ? "bg-amber-500 animate-pulse" : "bg-rose-500"
+                  )}></span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-medium text-gray-400 dark:text-[#8696a0]">Realtime</span>
+                  <span className="text-[11px] font-bold text-gray-700 dark:text-[#d1d7db] truncate max-w-full px-0.5">
+                    {realtimeStatus === 'connected' ? "Ativo" :
+                     realtimeStatus === 'connecting' ? "Conectando" : "Inativo"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Status 3: Evolution Engine */}
+              <div className="bg-gray-50/50 dark:bg-[#202c33]/40 border border-gray-100 dark:border-white/5 rounded-xl p-2 flex flex-col items-center justify-center gap-1.5 text-center transition-all hover:scale-[1.02] duration-300">
+                <div className="relative">
+                  <ShieldCheck size={16} className={evolutionConnected ? "text-emerald-500" : "text-rose-500"} />
+                  <span className={cn(
+                    "absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border border-white dark:border-[#111b21]",
+                    evolutionConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"
+                  )}></span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-medium text-gray-400 dark:text-[#8696a0]">WhatsApp</span>
+                  <span className="text-[11px] font-bold text-gray-700 dark:text-[#d1d7db]">
+                    {evolutionConnected ? "Conectado" : "Offline"}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1295,22 +1549,17 @@ export default function ChatDashboard() {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="bg-transparent border-none outline-none text-sm w-full dark:text-[#d1d7db] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1]"
               />
+              {searchTerm && (
+                <button 
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="p-1 text-[#54656f] dark:text-[#aebac1] hover:text-red-500 dark:hover:text-red-400 hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-all flex-shrink-0 animate-in fade-in zoom-in-95 duration-200 active:scale-90"
+                  title="Limpar pesquisa"
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
-            <button 
-              onClick={() => setTicketMode(!ticketMode)}
-              className={cn(
-                "p-2 rounded-full transition-all duration-300 flex-shrink-0 relative", 
-                ticketMode 
-                  ? "text-violet-600 bg-violet-500/10 dark:text-violet-400 dark:bg-violet-500/20 shadow-[0_0_10px_rgba(139,92,246,0.3)] animate-pulse" 
-                  : "text-[#54656f] dark:text-[#aebac1] hover:bg-gray-100 dark:hover:bg-[#202c33]"
-              )}
-              title={ticketMode ? "Desativar Modo Ticket (Mostrando todas)" : "Ativar Modo Ticket (Escondendo resolvidas)"}
-            >
-              <Ticket size={18} className={cn("transition-transform duration-300", ticketMode && "rotate-[15deg] scale-110")} />
-              {ticketMode && (
-                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-violet-600 dark:bg-violet-400 rounded-full border border-white dark:border-[#111b21]"></span>
-              )}
-            </button>
             <button 
               onClick={() => setShowFilters(!showFilters)}
               className={cn("p-2 rounded-full transition-colors flex-shrink-0", showFilters || filterType !== 'all' ? "text-[#00a884] bg-[#00a884]/10" : "text-[#54656f] dark:text-[#aebac1] hover:bg-gray-100 dark:hover:bg-[#202c33]")}
@@ -1422,62 +1671,7 @@ export default function ChatDashboard() {
           )}
         </div>
 
-        {/* Banner informativo do Modo Ticket (Design Premium com Menu de 3 Pontinhos) */}
-        {ticketMode && !searchTerm && (
-          <div className="mx-3 my-2 p-3 bg-violet-500/10 dark:bg-violet-500/20 border border-violet-500/20 dark:border-violet-500/30 rounded-2xl flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-300 backdrop-blur-md shadow-sm">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 bg-violet-500/20 dark:bg-violet-500/30 rounded-xl text-violet-600 dark:text-violet-400 flex items-center justify-center">
-                <Ticket size={14} className="animate-pulse" />
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-violet-700 dark:text-violet-300">Modo Ticket Ativo</span>
-                  <span className="px-2 py-0.5 text-[9px] font-extrabold text-violet-600 bg-violet-500/20 dark:text-violet-300 dark:bg-violet-500/30 rounded-full border border-violet-500/20 animate-in zoom-in duration-300">
-                    {activeTicketsCount}
-                  </span>
-                </div>
-                <span className="text-[10px] text-violet-600/80 dark:text-violet-400/80">Exibindo apenas conversas abertas</span>
-              </div>
-            </div>
-            <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveDropdown(activeDropdown === 'ticket-menu' ? null : 'ticket-menu');
-                }}
-                className="p-1.5 text-violet-700 dark:text-violet-400 hover:bg-violet-500/20 rounded-xl transition-all opacity-95 hover:opacity-100 flex items-center justify-center"
-                title="Opções do Ticket"
-              >
-                <MoreVertical size={16} />
-              </button>
-              
-              {activeDropdown === 'ticket-menu' && (
-                <div className="absolute right-0 top-8 w-52 bg-white/95 dark:bg-[#233138]/95 backdrop-blur-xl border border-violet-500/10 dark:border-violet-500/20 rounded-2xl shadow-xl py-2 z-50 animate-in fade-in zoom-in-95 duration-100">
-                  <button 
-                    onClick={() => {
-                      setTicketMode(false);
-                      setActiveDropdown(null);
-                    }}
-                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-violet-500/10 transition-colors flex items-center gap-2"
-                  >
-                    <Ban size={14} className="text-gray-500 dark:text-gray-400" />
-                    Desativar Modo Ticket
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setIsConfirmBatchResolveOpen(true);
-                      setActiveDropdown(null);
-                    }}
-                    className="w-full text-left px-4 py-2.5 text-sm text-violet-700 dark:text-violet-400 hover:bg-violet-500/10 transition-colors flex items-center gap-2 border-t border-violet-500/5"
-                  >
-                    <CheckSquare size={14} className="text-violet-600 dark:text-violet-400" />
-                    Fechar todos os tickets
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+
 
         {/* Chat List Realtime */}
         <div className="flex-1 overflow-y-auto" ref={contactListRef} onScroll={handleContactScroll}>
@@ -1956,9 +2150,9 @@ export default function ChatDashboard() {
                     <span className="truncate max-w-[200px] sm:max-w-md">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
                   </h2>
                   
-                  {/* Premium Company Info Button */}
-                  {(activeChat.fantasy_name || activeChat.document_number) && (
-                    <div className="flex items-center mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                  {/* Premium Company Info Button or Phone with Copy Option */}
+                  <div className="flex items-center mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                    {(activeChat.fantasy_name || activeChat.document_number) ? (
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1970,8 +2164,28 @@ export default function ChatDashboard() {
                         <Building2 size={12} className="text-[#00a884] group-hover:scale-110 transition-transform" />
                         <span className="text-[11px] font-semibold text-[#00a884]">Ver Empresa</span>
                       </button>
-                    </div>
-                  )}
+                    ) : activeChat.phone ? (
+                      <div className="flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/5 px-2.5 py-0.5 rounded-full border border-blue-500/20 text-blue-600 dark:text-blue-400 text-[11px] font-medium transition-all duration-200">
+                        <span className="font-mono">{formatDisplayPhone(activeChat.phone)}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(activeChat.phone);
+                            setCopiedPhone(true);
+                            setTimeout(() => setCopiedPhone(false), 2000);
+                          }}
+                          className="p-0.5 rounded hover:bg-blue-500/20 transition-colors flex items-center justify-center"
+                          title="Copiar Celular"
+                        >
+                          {copiedPhone ? (
+                            <CheckCircle2 size={11} className="text-emerald-500 animate-in zoom-in-95 duration-200" />
+                          ) : (
+                            <Copy size={11} className="opacity-70 hover:opacity-100 hover:scale-110 active:scale-95 transition-all duration-200" />
+                          )}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             </div>
@@ -2005,6 +2219,33 @@ export default function ChatDashboard() {
                 )}
 
                 <ChatOmniMenu contactId={activeChat.id} />
+              </div>
+
+              {/* Mobile Quick Resolve Button (Visible only on mobile/tablet) */}
+              <div className="lg:hidden animate-in zoom-in duration-200">
+                {activeChat.conv_status === 'resolved' ? (
+                  <button 
+                    onClick={() => reopenConversation(activeChat.id)}
+                    className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-200 dark:border-blue-500/20 active:scale-95 transition-all shadow-sm relative group"
+                    title="Reabrir Conversa"
+                  >
+                    <RotateCcw size={14} className="group-hover:rotate-180 transition-transform duration-300" />
+                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[9px] font-bold text-white shadow-sm ring-1 ring-white">
+                      R
+                    </span>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => resolveConversation(activeChat.id)}
+                    className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-[#00a884] border border-emerald-200 dark:border-emerald-500/20 active:scale-95 transition-all shadow-sm relative group"
+                    title="Resolver Conversa"
+                  >
+                    <CheckCircle2 size={14} className="group-hover:scale-110 transition-transform text-emerald-600 dark:text-[#00a884]" />
+                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 dark:bg-[#00a884] text-[9px] font-bold text-white shadow-sm ring-1 ring-white">
+                      R
+                    </span>
+                  </button>
+                )}
               </div>
 
               {/* Mobile Actions Menu (Responsive Menu) */}
@@ -2379,9 +2620,9 @@ export default function ChatDashboard() {
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
-                    const isMobileEnv = window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-                    if (isMobileEnv) {
-                      // Pular linha no Android/Mobile
+                    const isCompactMobile = window.innerWidth < 500;
+                    if (isCompactMobile) {
+                      // Pular linha se a largura da tela for menor que 500px
                       return; // Deixa o comportamento default da textarea
                     }
                     e.preventDefault();

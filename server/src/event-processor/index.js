@@ -423,35 +423,39 @@ class EventProcessor {
                  contactIdMap.set(`${c.tenant_id}_${c.phone}`, c.id);
              }
              
-             const convMap = new Map();
-             for(const b of batch) {
-                 const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
-                 if(!cid) continue; 
-                 
-                 const key = `${b.tenantId}_${b.instanceId}_${cid}`;
-                 if(!convMap.has(key)) {
-                     convMap.set(key, {
-                         tenant_id: b.tenantId,
-                         instance_id: b.instanceId,
-                         contact_id: cid,
-                         unread_count: 0,
-                         last_message_preview: b.textMessage,
-                         last_message_at: b.timestamp,
-                         status: 'bot',
-                         has_inbound: false
-                     });
-                 }
-                 
-                 const conv = convMap.get(key);
-                 if (b.timestamp >= conv.last_message_at) {
-                     conv.last_message_preview = b.textMessage;
-                     conv.last_message_at = b.timestamp;
-                 }
-                 if (b.direction === 'inbound') {
-                     conv.unread_count += 1;
-                     conv.has_inbound = true;
-                 }
-             }
+              const convMap = new Map();
+              for(const b of batch) {
+                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
+                  if(!cid) continue; 
+                  
+                  const key = `${b.tenantId}_${b.instanceId}_${cid}`;
+                  if(!convMap.has(key)) {
+                      convMap.set(key, {
+                          tenant_id: b.tenantId,
+                          instance_id: b.instanceId,
+                          contact_id: cid,
+                          unread_count: 0,
+                          last_message_preview: b.textMessage,
+                          last_message_at: b.timestamp,
+                          status: 'bot',
+                          has_inbound: false,
+                          has_human_outbound: false
+                      });
+                  }
+                  
+                  const conv = convMap.get(key);
+                  if (b.timestamp >= conv.last_message_at) {
+                      conv.last_message_preview = b.textMessage;
+                      conv.last_message_at = b.timestamp;
+                  }
+                  if (b.direction === 'inbound') {
+                      conv.unread_count += 1;
+                      conv.has_inbound = true;
+                  }
+                  if (b.direction === 'outbound' && b.senderType === 'human') {
+                      conv.has_human_outbound = true;
+                  }
+              }
              
              // Verifica quais conversas já existem no banco
              const contactIds = Array.from(new Set(Array.from(convMap.values()).map(c => c.contact_id)));
@@ -475,8 +479,8 @@ class EventProcessor {
                  const exist = existingConvMap.get(key);
                  if(exist) {
                      let nextStatus = exist.status || 'bot';
-                     if ((exist.status === 'resolved' || exist.status === 'closed') && data.has_inbound) {
-                         nextStatus = 'open'; // Reabertura automática por nova mensagem do cliente (inbound)
+                     if ((exist.status === 'resolved' || exist.status === 'closed') && (data.has_inbound || data.has_human_outbound)) {
+                         nextStatus = 'open'; // Reabertura automática por nova mensagem do cliente (inbound) ou operador humano (outbound)
                      }
                      
                      toUpdateConvs.push({
@@ -490,11 +494,18 @@ class EventProcessor {
                          status: nextStatus
                      });
                  } else {
+                     let initialStatus = 'resolved';
+                     if (data.has_inbound) {
+                         initialStatus = 'bot';
+                     } else if (data.has_human_outbound) {
+                         initialStatus = 'open';
+                     }
+                     
                      toInsertConvs.push({
                          tenant_id: data.tenant_id,
                          instance_id: data.instance_id,
                          contact_id: data.contact_id,
-                         status: 'bot',
+                         status: initialStatus,
                          unread_count: data.unread_count,
                          last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
                          last_message_at: data.last_message_at.toISOString()

@@ -184,16 +184,16 @@ export function MainSidebar() {
              let finalData = data;
              const storage = getActiveStorage();
              const allowedStr = storage ? storage.getItem('allowed_instances') : null;
-             if (allowedStr) {
-                try {
-                    const allowedInstances = JSON.parse(allowedStr);
-                    if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                        finalData = data.filter(d => allowedInstances.includes(d.id));
-                    } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
-                        finalData = [];
-                    }
-                } catch(e) {}
-             }
+              if (allowedStr && (currentUserRole === 'agent' || currentUserRole === 'Agente')) {
+                 try {
+                     const allowedInstances = JSON.parse(allowedStr);
+                     if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+                         finalData = data.filter(d => allowedInstances.includes(d.id));
+                     } else {
+                         finalData = [];
+                     }
+                 } catch(e) {}
+              }
              setInstances(finalData);
 
              // Auto-seleciona a única caixa disponível
@@ -281,8 +281,13 @@ export function MainSidebar() {
     };
 
     fetchAgentPermissionsAndData();
+    const sidebarChannelName = `sidebar_instances_realtime_${tenantId}`;
+    const existingSidebarChannel = supabase.getChannels().find(c => c.topic === `realtime:${sidebarChannelName}`);
+    if (existingSidebarChannel) {
+      supabase.removeChannel(existingSidebarChannel);
+    }
 
-    const channel = supabase.channel(`public:whatsapp_instances:tenant_id=${tenantId}`)
+    const channel = supabase.channel(sidebarChannelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, () => {
          fetchInstances();
       })

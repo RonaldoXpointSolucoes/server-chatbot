@@ -1014,12 +1014,45 @@ export function SnoozeModal({ isOpen, onClose, contactId }: SnoozeModalProps) {
 
   if (!isOpen) return null;
 
-  const handleSnooze = async (hours: number, days: number = 0) => {
+  const handleSnooze = async (type: '1h' | '2h' | '4h' | 'tomorrow' | 'next_week' | '15d' | '30d' | '60d') => {
     setIsSaving(true);
     try {
       const targetDate = new Date();
-      if (hours > 0) targetDate.setHours(targetDate.getHours() + hours);
-      if (days > 0) targetDate.setDate(targetDate.getDate() + days);
+      
+      switch (type) {
+        case '1h':
+          targetDate.setHours(targetDate.getHours() + 1);
+          break;
+        case '2h':
+          targetDate.setHours(targetDate.getHours() + 2);
+          break;
+        case '4h':
+          targetDate.setHours(targetDate.getHours() + 4);
+          break;
+        case 'tomorrow':
+          targetDate.setDate(targetDate.getDate() + 1);
+          targetDate.setHours(8, 30, 0, 0);
+          break;
+        case 'next_week': {
+          const currentDay = targetDate.getDay();
+          const daysToNextMonday = currentDay === 0 ? 1 : 8 - currentDay;
+          targetDate.setDate(targetDate.getDate() + daysToNextMonday);
+          targetDate.setHours(8, 30, 0, 0);
+          break;
+        }
+        case '15d':
+          targetDate.setDate(targetDate.getDate() + 15);
+          targetDate.setHours(8, 30, 0, 0);
+          break;
+        case '30d':
+          targetDate.setDate(targetDate.getDate() + 30);
+          targetDate.setHours(8, 30, 0, 0);
+          break;
+        case '60d':
+          targetDate.setDate(targetDate.getDate() + 60);
+          targetDate.setHours(8, 30, 0, 0);
+          break;
+      }
 
       await updateConversationField(contactId, { 
         status: 'snoozed', 
@@ -1035,14 +1068,14 @@ export function SnoozeModal({ isOpen, onClose, contactId }: SnoozeModalProps) {
   };
 
   const options = [
-    { label: '1 Hora', icon: <Clock size={16} />, onClick: () => handleSnooze(1, 0) },
-    { label: '2 Horas', icon: <Clock size={16} />, onClick: () => handleSnooze(2, 0) },
-    { label: '4 Horas', icon: <Clock size={16} />, onClick: () => handleSnooze(4, 0) },
-    { label: 'Amanhã', icon: <CalendarDays size={16} />, onClick: () => handleSnooze(24, 0) },
-    { label: 'Próx. Semana', icon: <CalendarDays size={16} />, onClick: () => handleSnooze(0, 7) },
-    { label: '15 Dias', icon: <CalendarDays size={16} />, onClick: () => handleSnooze(0, 15) },
-    { label: '30 Dias', icon: <CalendarDays size={16} />, onClick: () => handleSnooze(0, 30) },
-    { label: '60 Dias', icon: <CalendarDays size={16} />, onClick: () => handleSnooze(0, 60) },
+    { label: '1 Hora', icon: <Clock size={16} />, onClick: () => handleSnooze('1h') },
+    { label: '2 Horas', icon: <Clock size={16} />, onClick: () => handleSnooze('2h') },
+    { label: '4 Horas', icon: <Clock size={16} />, onClick: () => handleSnooze('4h') },
+    { label: 'Amanhã', icon: <CalendarDays size={16} />, onClick: () => handleSnooze('tomorrow') },
+    { label: 'Próx. Semana', icon: <CalendarDays size={16} />, onClick: () => handleSnooze('next_week') },
+    { label: '15 Dias', icon: <CalendarDays size={16} />, onClick: () => handleSnooze('15d') },
+    { label: '30 Dias', icon: <CalendarDays size={16} />, onClick: () => handleSnooze('30d') },
+    { label: '60 Dias', icon: <CalendarDays size={16} />, onClick: () => handleSnooze('60d') },
   ];
 
   return (

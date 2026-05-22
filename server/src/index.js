@@ -10,6 +10,7 @@ import { setupSwagger } from './api-gateway/swagger.js';
 import systemLogger from './system-logger.js';
 import { supabase } from './supabase.js';
 import sessionManager from './session-manager/index.js';
+import snoozeManager from './snooze-manager.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -153,5 +154,12 @@ app.listen(PORT, '0.0.0.0', async () => {
         }
     } catch(err) {
         console.error("Erro no worker boot", err);
+    }
+
+    try {
+        console.log("[Worker Boot] Inicializando SnoozeManager...");
+        snoozeManager.start();
+    } catch(err) {
+        console.error("[Worker Boot] Erro ao iniciar SnoozeManager:", err.message);
     }
 });

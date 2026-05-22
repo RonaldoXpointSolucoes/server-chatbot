@@ -16,6 +16,9 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.ts',
       injectRegister: 'auto',
+      injectManifest: {
+        maximumFileSizeToCacheInBytes: 5000000,
+      },
       includeAssets: ['vite.svg', 'pwa-192x192.svg', 'pwa-512x512.svg'],
       devOptions: {
         enabled: true,

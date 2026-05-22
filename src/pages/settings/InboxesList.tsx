@@ -43,7 +43,7 @@ export default function InboxesList() {
     
     fetchInstances();
 
-    const channelName = `public:whatsapp_instances:tenant_id=${tenantId}`;
+    const channelName = `inboxes_list_instances_${tenantId}`;
     const existingChannel = supabase.getChannels().find(c => c.topic === `realtime:${channelName}`);
     if (existingChannel) {
       supabase.removeChannel(existingChannel);
