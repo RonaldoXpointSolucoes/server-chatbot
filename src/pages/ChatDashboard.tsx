@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, ShieldCheck } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
-import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal, CompanyDetailsModal } from '../components/ChatModals';
+import { motion, AnimatePresence } from 'framer-motion';
+import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal, CompanyDetailsModal, SnoozedListModal } from '../components/ChatModals';
 import ImageEditorModal from '../components/ImageEditorModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { AgentSettingsModal } from '../components/AgentSettingsModal';
@@ -12,7 +13,7 @@ import { GeminiEditorModal } from '../components/GeminiEditorModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Flag, Clock, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut } from 'lucide-react'; // Adicionado lucide pro flag
+import { Flag, Clock, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb } from 'lucide-react'; // Adicionado lucide pro flag e lightbulb para corretor discreto
 import { useShallow } from 'zustand/react/shallow';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import clsx from 'clsx';
@@ -24,6 +25,12 @@ import { useScheduleMonitor } from '../hooks/useScheduleMonitor';
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
+
+export const getStrictInstance = (c: any): string | null => {
+  if (!c) return null;
+  const compositeInst = typeof c.id === 'string' && c.id.includes('_') ? c.id.split('_')[1] : null;
+  return compositeInst || c.instance_id || null;
+};
 
 export function getContactDisplayName(name: string | undefined | null, pushName: string | undefined | null, phone: string | undefined | null): string {
   let finalName = name || pushName;
@@ -163,6 +170,233 @@ export default function ChatDashboard() {
   const { isEnabled: isDevLoggerEnabled } = useDevStore();
   // Monitor de agendamentos
   useScheduleMonitor();
+  const lastSyncTimeRef = useRef(0);
+
+  // Estados do Corretor Ortográfico PT-BR (Ultra-Performance)
+  const [validWords, setValidWords] = useState<Set<string>>(new Set());
+  const [personalDict, setPersonalDict] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('chatboot_personal_dict');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [activeWordUnderCursor, setActiveWordUnderCursor] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [showSuggestionsPopover, setShowSuggestionsPopover] = useState(false);
+  const [spellcheckerLoaded, setSpellcheckerLoaded] = useState(false);
+  const [scrollTop, setScrollTop] = useState(0);
+
+  useEffect(() => {
+    async function loadSpellchecker() {
+      try {
+        const dicRes = await fetch('/dictionaries/pt_BR.dic');
+        if (!dicRes.ok) {
+          throw new Error('Falha ao obter o dicionário local.');
+        }
+        const dicText = await dicRes.text();
+        const lines = dicText.split('\n');
+        
+        const wordSet = new Set<string>();
+        
+        // Ignorar a primeira linha (contagem) e popular o Set
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          
+          const parts = line.split('/');
+          const word = parts[0].trim();
+          if (word) {
+            wordSet.add(word.toLowerCase());
+          }
+        }
+        
+        setValidWords(wordSet);
+        setSpellcheckerLoaded(true);
+        console.log(`Corretor ortográfico PT-BR carregado localmente com ${wordSet.size} palavras!`);
+      } catch (e) {
+        console.error('Erro ao carregar o corretor ortográfico:', e);
+      }
+    }
+    loadSpellchecker();
+  }, []);
+
+  const getLevenshteinDistance = (a: string, b: string): number => {
+    const tmp = [];
+    for (let i = 0; i <= a.length; i++) {
+      tmp[i] = [i];
+    }
+    for (let j = 0; j <= b.length; j++) {
+      tmp[0][j] = j;
+    }
+    for (let i = 1; i <= a.length; i++) {
+      for (let j = 1; j <= b.length; j++) {
+        tmp[i][j] = a[i - 1] === b[j - 1] 
+          ? tmp[i - 1][j - 1] 
+          : Math.min(tmp[i - 1][j - 1] + 1, tmp[i][j - 1] + 1, tmp[i - 1][j] + 1);
+      }
+    }
+    return tmp[a.length][b.length];
+  };
+
+  const getSuggestions = (incorrectWord: string): string[] => {
+    const word = incorrectWord.toLowerCase().trim();
+    if (!word || validWords.size === 0) return [];
+    
+    const firstChar = word[0];
+    const candidates: string[] = [];
+    
+    for (const val of validWords) {
+      if (val[0] === firstChar && Math.abs(val.length - word.length) <= 2) {
+        candidates.push(val);
+      }
+    }
+    
+    const scores = candidates.map(cand => ({
+      word: cand,
+      dist: getLevenshteinDistance(word, cand)
+    }));
+    
+    const sorted = scores
+      .filter(item => item.dist <= 2)
+      .sort((a, b) => a.dist - b.dist);
+      
+    return sorted.slice(0, 4).map(item => item.word);
+  };
+
+  const isWordCorrect = (word: string) => {
+    if (!spellcheckerLoaded) return true;
+    const cleanWord = word.replace(/^[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+|[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+$/g, '').trim().toLowerCase();
+    if (!cleanWord || /^\d+$/.test(cleanWord)) return true;
+    if (personalDict.includes(cleanWord)) return true;
+    return validWords.has(cleanWord);
+  };
+
+  const handleTextareaSelection = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget;
+    const pos = target.selectionStart;
+    const text = target.value;
+    setScrollTop(target.scrollTop);
+    
+    if (!text || !spellcheckerLoaded) {
+      setActiveWordUnderCursor(null);
+      setSuggestions([]);
+      return;
+    }
+    
+    let start = pos;
+    while (start > 0 && !/\s/.test(text[start - 1])) {
+      start--;
+    }
+    let end = pos;
+    while (end < text.length && !/\s/.test(text[end])) {
+      end++;
+    }
+    
+    const rawWord = text.substring(start, end);
+    const cleanWord = rawWord.replace(/^[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+|[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+$/g, '').trim();
+    
+    if (cleanWord && !isWordCorrect(cleanWord)) {
+      setActiveWordUnderCursor(cleanWord);
+      const suggs = getSuggestions(cleanWord);
+      setSuggestions(suggs);
+    } else {
+      setActiveWordUnderCursor(null);
+      setSuggestions([]);
+    }
+  };
+
+  const replaceWordInText = (oldWord: string, newWord: string) => {
+    if (!textareaRef.current) return;
+    const textarea = textareaRef.current;
+    const text = inputText;
+    const pos = textarea.selectionStart;
+    
+    let start = pos;
+    while (start > 0 && !/\s/.test(text[start - 1])) {
+      start--;
+    }
+    let end = pos;
+    while (end < text.length && !/\s/.test(text[end])) {
+      end++;
+    }
+    
+    const rawWord = text.substring(start, end);
+    const startPunctMatch = rawWord.match(/^[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+/);
+    const endPunctMatch = rawWord.match(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+$/);
+    
+    const startPunct = startPunctMatch ? startPunctMatch[0] : '';
+    const endPunct = endPunctMatch ? endPunctMatch[0] : '';
+    
+    const replacement = startPunct + newWord + endPunct;
+    const newText = text.substring(0, start) + replacement + text.substring(end);
+    setInputText(newText);
+    
+    setActiveWordUnderCursor(null);
+    setSuggestions([]);
+    
+    setTimeout(() => {
+      textarea.focus();
+      const newCursorPos = start + replacement.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 50);
+  };
+
+  const addToPersonalDict = (word: string) => {
+    const cleanWord = word.toLowerCase().trim();
+    if (!cleanWord || personalDict.includes(cleanWord)) return;
+    
+    const newDict = [...personalDict, cleanWord];
+    setPersonalDict(newDict);
+    localStorage.setItem('chatboot_personal_dict', JSON.stringify(newDict));
+    
+    setActiveWordUnderCursor(null);
+    setSuggestions([]);
+  };
+
+  const renderHighlightedText = () => {
+    if (!inputText) return null;
+    const wordsAndSpaces = inputText.split(/(\s+)/);
+    
+    return wordsAndSpaces.map((part, index) => {
+      if (/^\s+$/.test(part)) {
+        return <span key={index}>{part}</span>;
+      }
+      
+      const cleanWord = part.replace(/^[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+|[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+$/g, '');
+      
+      if (cleanWord && !isWordCorrect(cleanWord)) {
+        const startPunctMatch = part.match(/^[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+/);
+        const endPunctMatch = part.match(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+$/);
+        
+        const startPunct = startPunctMatch ? startPunctMatch[0] : '';
+        const endPunct = endPunctMatch ? endPunctMatch[0] : '';
+        
+        return (
+          <span key={index} className="text-transparent">
+            {startPunct}
+            <span className="border-b-2 border-red-500 border-dotted text-transparent bg-red-500/5 select-none">
+              {cleanWord}
+            </span>
+            {endPunct}
+          </span>
+        );
+      }
+      
+      return <span key={index} className="text-transparent">{part}</span>;
+    });
+  };
+
+  // Estados para Filtros (Movido para o topo para evitar erro de inicialização)
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
+  const [filterContextMenu, setFilterContextMenu] = useState<{ type: string, x: number, y: number } | null>(null);
+  const [instanceNamesMap, setInstanceNamesMap] = useState<Record<string, string>>({});
+  const [instanceColorsMap, setInstanceColorsMap] = useState<Record<string, string>>({});
+  const [availableInstancesList, setAvailableInstancesList] = useState<{id: string, display_name: string, color: string}[]>([]);
+
   const [copiedDoc, setCopiedDoc] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [associatedCompaniesOpen, setAssociatedCompaniesOpen] = useState(false);
@@ -231,7 +465,9 @@ export default function ChatDashboard() {
     undoLastBatchResolve,
     reopenedTicketToast,
     setReopenedTicketToast,
-    realtimeStatus
+    realtimeStatus,
+    tenantLabels,
+    fetchTenantLabels
   } = useChatStore(useShallow(state => ({
     contacts: state.contacts, 
     activeChatId: state.activeChatId, 
@@ -281,18 +517,31 @@ export default function ChatDashboard() {
     resolveAllConversations: state.resolveAllConversations,
     undoLastBatchResolve: state.undoLastBatchResolve,
     reopenedTicketToast: state.reopenedTicketToast,
-    setReopenedTicketToast: state.setReopenedTicketToast
+    setReopenedTicketToast: state.setReopenedTicketToast,
+    tenantLabels: state.tenantLabels,
+    fetchTenantLabels: state.fetchTenantLabels
   })));
 
   const [editingMessage, setEditingMessage] = useState<{ id: string, text: string } | null>(null);
   const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
+
+  // Garante que o chat ativo seja marcado como lido automaticamente ao ser aberto ou ao receber novas mensagens
+  useEffect(() => {
+    if (activeChatId) {
+      const activeContact = contacts.find(c => c.id === activeChatId);
+      if (activeContact && Number(activeContact.unread || 0) > 0) {
+        useChatStore.getState().markAsRead(activeChatId);
+      }
+    }
+  }, [activeChatId, contacts]);
 
   // Execucao Incial Reativa
   // Efect removido (duplicado com o useEffect consolidado mais abaixo)
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
-  const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen;
+  const [isSnoozedListOpen, setIsSnoozedListOpen] = useState(false);
+  const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen || isSnoozedListOpen;
   const [inputText, setInputText] = useState('');
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [quickReplyFilter, setQuickReplyFilter] = useState('');
@@ -475,6 +724,148 @@ export default function ChatDashboard() {
     }).length;
   }, [contacts, activeChannelFilter, activeChannelName, connectedInstanceName]);
 
+  const isContactPinned = (c: any) => {
+    if (c.is_pinned) return true;
+    const currentBox = activeChannelFilter || c.instance_id || connectedInstanceName;
+    return currentBox && c.pinned_instances?.includes(currentBox);
+  };
+
+  const filteredContacts = React.useMemo(() => {
+    const sorted = contacts.filter(c => {
+       // 1) RBAC ENFORCEMENT - A REGRA DE OURO (Nunca mostrar conversas que não tenho acesso)
+       const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+       const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
+       
+       if (!isGlobalAdmin) {
+           const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+           let allowedInstances: string[] = [];
+           if (allowedStr) {
+               try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
+           }
+           
+           // Agente sem array de permissões não vê nada.
+           if (allowedStr) {
+               if (allowedInstances.length === 0) return false; // Sem instâncias -> Sem acesso
+
+               const effectiveInstId = c.instance_id || connectedInstanceName; // fallback pra órfãos
+               if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) {
+                   return false; // BLOQUEADO!
+               }
+           } else {
+               return false; // BLOQUEADO! Agente logado precisa de permissão clara
+           }
+       }
+
+       // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - MANTIDO DURANTE PESQUISA A PEDIDO DO USUÁRIO
+       if (activeChannelFilter) {
+           const dbInstId = c.instance_id;
+           const effectiveId = connectedInstanceName;
+
+           if (!dbInstId) {
+               // Fallback conversas antigas órfãs
+               if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
+           } else {
+               // Conversas nativas
+               if (dbInstId !== activeChannelFilter && dbInstId !== activeChannelName) return false;
+           }
+       }
+
+       // 3) BUSCA EM TEXTO E METADADOS
+       if (searchTerm) {
+           const s = searchTerm.toLowerCase();
+           const match = c.name?.toLowerCase().includes(s) ||
+                         c.custom_name?.toLowerCase().includes(s) ||
+                         c.whatsapp_jid?.includes(searchTerm) ||
+                         c.phone?.includes(searchTerm) ||
+                         c.fantasy_name?.toLowerCase().includes(s) ||
+                         c.document_number?.includes(searchTerm) ||
+                         c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(s));
+           if (!match) return false;
+       }
+       
+       // Lógica de Contatos Bloqueados
+       if (filterType === 'blocked') {
+           if (!c.is_blocked) return false;
+       } else {
+           if (c.is_blocked) return false; // Esconde os bloqueados em todas as outras views (All, Unread, Favoritos, etc)
+       }
+
+       // Filtros de Pills - IGNORADOS DURANTE PESQUISA
+       if (!searchTerm) {
+           if (filterType === 'unread' && c.unread <= 0 && c.id !== activeChatId) return false;
+           if (filterType === 'favorite' && !c.is_favorite) return false;
+           if (filterType === 'labels') {
+              if (selectedLabelId) {
+                 if (!(c.conv_labels && c.conv_labels.some((l: any) => l.id === selectedLabelId))) return false;
+              } else {
+                 if (!(c.conv_labels && c.conv_labels.length > 0)) return false;
+              }
+           }
+           if (filterType === 'mine') {
+               const currentUserEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
+               const currentAgent = agents.find(a => a.email === currentUserEmail);
+               if (!currentAgent || c.assigned_to !== currentAgent.id) return false;
+           }
+       }
+       
+       // Filtro de Adiado (Snoozed)
+       if (c.conv_status === 'snoozed' && c.snoozed_until) {
+          const untilTimestamp = new Date(c.snoozed_until).getTime();
+          if (untilTimestamp > Date.now()) {
+             // Esconde se ainda não expirou, a menos que o usuário esteja forçando a pesquisa ativamente
+             if (!searchTerm) return false;
+          }
+       }
+
+       // Filtro de Modo Ticket (Estilo Chatwoot)
+       if (ticketMode && !searchTerm) {
+          if (c.conv_status === 'resolved') {
+             return false;
+          }
+       }
+
+       return true;
+    }).sort((a,b) => {
+       const aPinned = isContactPinned(a);
+       const bPinned = isContactPinned(b);
+       if (aPinned && !bPinned) return -1;
+       if (!aPinned && bPinned) return 1;
+       
+       let aLastMsg;
+       if (a.messages) {
+         for (let i = a.messages.length - 1; i >= 0; i--) {
+           if (!a.messages[i].isIgnoredSilent && !a.messages[i].isIgnored) { aLastMsg = a.messages[i]; break; }
+         }
+       }
+
+       let bLastMsg;
+       if (b.messages) {
+         for (let i = b.messages.length - 1; i >= 0; i--) {
+           if (!b.messages[i].isIgnoredSilent && !b.messages[i].isIgnored) { bLastMsg = b.messages[i]; break; }
+         }
+       }
+       
+       const aTime = Math.max(a.lastMsgTimestamp || 0, aLastMsg ? new Date(aLastMsg.timestamp).getTime() : 0);
+       const bTime = Math.max(b.lastMsgTimestamp || 0, bLastMsg ? new Date(bLastMsg.timestamp).getTime() : 0);
+       
+       return bTime - aTime;
+    });
+
+    // Deduplicação rígida de contatos na mesma caixa de atendimento (caixa_efetiva)
+    const seenKeys = new Set<string>();
+    const deduped: any[] = [];
+    for (const c of sorted) {
+      const realId = c.id.includes('_') ? c.id.split('_')[0] : c.id;
+      const caixa = c.instance_id || connectedInstanceName || 'default';
+      const key = `${realId}_${caixa}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        deduped.push(c);
+      }
+    }
+    return deduped;
+  }, [contacts, activeChannelFilter, searchTerm, filterType, selectedLabelId, activeChatId, ticketMode, agents, connectedInstanceName, activeChannelName]);
+
   const handleBatchResolveConfirm = async () => {
     setIsProcessingBatchResolve(true);
     try {
@@ -553,6 +944,7 @@ export default function ChatDashboard() {
 
   // Estados dos novos menus fluídos
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [menuOpenUpward, setMenuOpenUpward] = useState(false);
   const [contactToEdit, setContactToEdit] = useState<any | null>(null);
   const [contactToDelete, setContactToDelete] = useState<{id: string; name: string} | null>(null);
   const [contactToBlock, setContactToBlock] = useState<{id: string; name: string; isBlocked: boolean} | null>(null);
@@ -621,13 +1013,6 @@ export default function ChatDashboard() {
     intent: null
   });
 
-  // Estados para Filtros
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
-  const [filterContextMenu, setFilterContextMenu] = useState<{ type: string, x: number, y: number } | null>(null);
-  const [instanceNamesMap, setInstanceNamesMap] = useState<Record<string, string>>({});
-  const [instanceColorsMap, setInstanceColorsMap] = useState<Record<string, string>>({});
-  const [availableInstancesList, setAvailableInstancesList] = useState<{id: string, display_name: string, color: string}[]>([]);
 
   // Estados de Paginação Local Virtual
   const [contactPageLimit, setContactPageLimit] = useState(20);
@@ -849,10 +1234,16 @@ export default function ChatDashboard() {
     });
   }, []);
 
-  // Solução PWA: Atualiza os dados (contatos e mensagens) e força reconexão Realtime quando o app volta de background
+  // Solução PWA: Atualiza os dados (contatos e mensagens) e força reconexão Realtime com Cooldown de 10s quando volta do background
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
+        const now = Date.now();
+        if (now - lastSyncTimeRef.current < 10000) {
+          console.log('[PWA Sync] Ignorando sincronização excessiva (cooldown ativo)');
+          return;
+        }
+        lastSyncTimeRef.current = now;
         console.log('[PWA Sync] App no foreground, sincronizando...');
         fetchInitialData();
         subscribeToNewMessages(true); // Restabelece/Reconecta canal realtime de forma ativa, eliminando conexões zumbis
@@ -860,18 +1251,16 @@ export default function ChatDashboard() {
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleVisibilityChange);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleVisibilityChange);
     };
   }, [fetchInitialData, subscribeToNewMessages]);
 
   // Carrega mensagens do Evolution ao clicar num chat novo
   useEffect(() => {
      if (activeChatId && activeChat && evolutionConnected) {
-       const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+       const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
        if (properTargetInstance) {
           loadHistoricalMessages(activeChatId, properTargetInstance);
        }
@@ -933,7 +1322,7 @@ export default function ChatDashboard() {
 
   const handleSendHuman = (e: React.FormEvent) => {
     e.preventDefault();
-    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
     console.log("[handleSendHuman] Attempting to send. Values:", { inputText, activeChatId, activeChatInstance: activeChat?.instance_id, connectedInstanceName, properTargetInstance });
     
     if (!inputText.trim() || !activeChatId || !properTargetInstance) {
@@ -972,7 +1361,7 @@ export default function ChatDashboard() {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
     if (!file || !activeChatId || !properTargetInstance) return;
     
     let mediaType: 'image' | 'video' | 'audio' | 'document' = 'document';
@@ -1023,7 +1412,7 @@ export default function ChatDashboard() {
   };
 
   const handleMicClick = async () => {
-    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
     if (!activeChatId || !properTargetInstance) return;
 
     if (audioState === 'recording') {
@@ -1115,7 +1504,7 @@ export default function ChatDashboard() {
   };
 
   const handleSendRecordedAudio = async () => {
-    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
     if (!activeChatId || !properTargetInstance || !recordedAudioFile) return;
 
     try {
@@ -1249,11 +1638,7 @@ export default function ChatDashboard() {
     }
   };
 
-  const isContactPinned = (c: any) => {
-    if (c.is_pinned) return true;
-    const currentBox = activeChannelFilter || c.instance_id || connectedInstanceName;
-    return currentBox && c.pinned_instances?.includes(currentBox);
-  };
+
 
   return (
     <div className="flex w-full h-[100dvh] min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
@@ -1314,7 +1699,7 @@ export default function ChatDashboard() {
           }}
           onSend={(editedFile, caption) => {
             if (activeChatId) {
-              const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+              const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
               
               // Fechar imediatamente para percepção instantânea
               setPastedImage(null);
@@ -1337,6 +1722,7 @@ export default function ChatDashboard() {
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <AgentSettingsModal isOpen={isAgentSettingsOpen} onClose={() => setIsAgentSettingsOpen(false)} />
+      <SnoozedListModal isOpen={isSnoozedListOpen} onClose={() => setIsSnoozedListOpen(false)} />
 
       <BlockModal 
         isOpen={!!contactToBlock}
@@ -1436,7 +1822,7 @@ export default function ChatDashboard() {
         suggestedText={geminiModalState.suggestedText}
         intent={geminiModalState.intent}
         onSend={(finalText) => {
-           const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+           const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
            if (activeChatId && properTargetInstance) {
              sendHumanMessage(activeChatId, finalText, properTargetInstance as string);
              setInputText('');
@@ -1520,35 +1906,6 @@ export default function ChatDashboard() {
         </div>
       )}
 
-      {/* Toast Flutuante de Reabertura Automática de Ticket */}
-      {reopenedTicketToast && (
-        <div className="fixed bottom-6 left-6 z-[9999] max-w-sm w-full bg-white/85 dark:bg-[#202c33]/90 backdrop-blur-xl border border-emerald-500/20 dark:border-emerald-500/30 rounded-3xl p-4 shadow-2xl flex items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-5 duration-300 ring-4 ring-emerald-500/5 animate-bounce-short">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-emerald-500/20 dark:bg-emerald-500/30 rounded-2xl text-emerald-600 dark:text-emerald-400 flex items-center justify-center shadow-inner">
-              <MessageSquare size={18} className="animate-pulse" />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-xs font-bold text-gray-900 dark:text-white">
-                {reopenedTicketToast.reason === 'snooze' ? 'Adiantamento Expirado' : 'Ticket Reaberto'}
-              </span>
-              <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                {reopenedTicketToast.reason === 'snooze' ? (
-                  <>O atendimento de <b>{reopenedTicketToast.contactName}</b> retornou porque o adiamento expirou!</>
-                ) : (
-                  <>Cliente <b>{reopenedTicketToast.contactName}</b> enviou nova mensagem!</>
-                )}
-              </span>
-            </div>
-          </div>
-          <button
-            onClick={() => setReopenedTicketToast(null)}
-            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-
       {/* MainSidebar movido para o MainLayout global */}
 
       {/* Middle Sidebar (Contacts List) */}
@@ -1564,9 +1921,12 @@ export default function ChatDashboard() {
       >
         
         {/* Header Premium da Sidebar */}
-        <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
+        <div className={cn(
+          "h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 shadow-sm relative transition-all duration-200",
+          activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
+        )}>
           {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.5.7'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '21/05/2026, 22:53'}`}</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.7.6'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '25/05/2026, 22:24'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
@@ -1752,6 +2112,16 @@ export default function ChatDashboard() {
                       <CheckSquare size={13} className="text-violet-600 dark:text-violet-400" />
                       Fechar todos os tickets
                     </button>
+                    <button 
+                      onClick={() => {
+                        setIsSnoozedListOpen(true);
+                        setActiveDropdown(null);
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-violet-500/10 transition-colors flex items-center gap-2 border-t border-gray-100 dark:border-[#304046]"
+                    >
+                      <CalendarClock size={13} className="text-amber-500" />
+                      Conversas Adiadas
+                    </button>
                   </div>
                 )}
               </div>
@@ -1878,43 +2248,92 @@ export default function ChatDashboard() {
           
           {/* Pills Filters (Glassmorphism inspired) */}
           {showFilters && (
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide relative select-none animate-in fade-in slide-in-from-top-2 duration-200">
-               <button 
-                  onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'all', x: e.clientX, y: e.clientY }); }}
-                  onClick={() => setFilterType('all')} 
-                  className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'all' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-                 Tudo
-               </button>
-               <button 
-                  onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'unread', x: e.clientX, y: e.clientY }); }}
-                  onClick={() => setFilterType('unread')} 
-                  className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'unread' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-                 Não Lidas
-               </button>
-               <button 
-                  onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'mine', x: e.clientX, y: e.clientY }); }}
-                  onClick={() => setFilterType('mine')} 
-                  className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'mine' ? "bg-indigo-500/10 text-indigo-600 ring-1 ring-indigo-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-                 <User size={14} className={filterType === 'mine' ? "text-indigo-600" : ""} /> Minhas
-               </button>
-               <button 
-                  onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'favorite', x: e.clientX, y: e.clientY }); }}
-                  onClick={() => setFilterType('favorite')} 
-                  className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'favorite' ? "bg-yellow-500/10 text-yellow-600 ring-1 ring-yellow-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-                 <Star size={14} className={filterType === 'favorite' ? "fill-yellow-600" : ""} /> Favoritas
-               </button>
-               <button 
-                  onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'labels', x: e.clientX, y: e.clientY }); }}
-                  onClick={() => setFilterType('labels')} 
-                  className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'labels' ? "bg-blue-500/10 text-blue-600 ring-1 ring-blue-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-                 <Tag size={14} /> Etiquetas
-               </button>
-               <button 
-                  onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'blocked', x: e.clientX, y: e.clientY }); }}
-                  onClick={() => setFilterType('blocked')} 
-                  className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'blocked' ? "bg-red-500/10 text-red-600 ring-1 ring-red-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-                 <Ban size={14} className={filterType === 'blocked' ? "text-red-600" : ""} /> Bloqueados
-               </button>
+            <div className="flex flex-col gap-2 relative">
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide relative select-none animate-in fade-in slide-in-from-top-2 duration-200">
+                 <button 
+                    onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'all', x: e.clientX, y: e.clientY }); }}
+                    onClick={() => { setFilterType('all'); setSelectedLabelId(null); }} 
+                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'all' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                   Tudo
+                 </button>
+                 <button 
+                    onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'unread', x: e.clientX, y: e.clientY }); }}
+                    onClick={() => { setFilterType('unread'); setSelectedLabelId(null); }} 
+                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'unread' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                   Não Lidas
+                 </button>
+                 <button 
+                    onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'mine', x: e.clientX, y: e.clientY }); }}
+                    onClick={() => { setFilterType('mine'); setSelectedLabelId(null); }} 
+                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'mine' ? "bg-indigo-500/10 text-indigo-600 ring-1 ring-indigo-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                   <User size={14} className={filterType === 'mine' ? "text-indigo-600" : ""} /> Minhas
+                 </button>
+                 <button 
+                    onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'favorite', x: e.clientX, y: e.clientY }); }}
+                    onClick={() => { setFilterType('favorite'); setSelectedLabelId(null); }} 
+                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'favorite' ? "bg-yellow-500/10 text-yellow-600 ring-1 ring-yellow-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                   <Star size={14} className={filterType === 'favorite' ? "fill-yellow-600" : ""} /> Favoritas
+                 </button>
+                 <button 
+                    onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'labels', x: e.clientX, y: e.clientY }); }}
+                    onClick={() => setFilterType('labels')} 
+                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'labels' ? "bg-blue-500/10 text-blue-600 ring-1 ring-blue-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                   <Tag size={14} /> Etiquetas
+                 </button>
+                 <button 
+                    onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'blocked', x: e.clientX, y: e.clientY }); }}
+                    onClick={() => { setFilterType('blocked'); setSelectedLabelId(null); }} 
+                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'blocked' ? "bg-red-500/10 text-red-600 ring-1 ring-red-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                   <Ban size={14} className={filterType === 'blocked' ? "text-red-600" : ""} /> Bloqueados
+                 </button>
+              </div>
+
+              {filterType === 'labels' && tenantLabels && tenantLabels.length > 0 && (
+                <div className="flex flex-col gap-1.5 p-2.5 bg-gray-50/60 dark:bg-black/30 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/5 animate-in fade-in slide-in-from-top-2 duration-300 shadow-inner">
+                  <span className="text-[10px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider px-1 flex items-center gap-1.5">
+                    <Tag size={10} className="text-[#00a884] dark:text-emerald-400" />
+                    Filtrar por etiqueta:
+                  </span>
+                  <div className="flex gap-1.5 overflow-x-auto pb-1 px-0.5 scrollbar-hide select-none">
+                    <button
+                      onClick={() => setSelectedLabelId(null)}
+                      className={cn(
+                        "px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5",
+                        selectedLabelId === null
+                          ? "bg-[#00a884]/15 text-[#00a884] dark:text-emerald-400 ring-1 ring-[#00a884]/30"
+                          : "bg-gray-100 dark:bg-[#202c33] text-gray-500 dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700"
+                      )}
+                    >
+                      Todas
+                    </button>
+                    {tenantLabels.map((label) => {
+                      const isSelected = selectedLabelId === label.id;
+                      const colorBase = label.color?.replace('bg-', '') || 'indigo';
+                      return (
+                        <button
+                          key={label.id}
+                          onClick={() => setSelectedLabelId(label.id)}
+                          className={cn(
+                            "px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5 border border-transparent shadow-sm",
+                            isSelected
+                              ? `bg-${colorBase}-500/15 text-${colorBase}-600 dark:text-${colorBase}-400 ring-1 ring-${colorBase}-500/30`
+                              : "bg-gray-100 dark:bg-[#202c33] text-gray-600 dark:text-[#d1d7db] hover:bg-gray-200 dark:hover:bg-gray-700"
+                          )}
+                        >
+                          <span 
+                            className={cn(
+                              "w-2 h-2 rounded-full shadow-inner shrink-0", 
+                              !label.color?.startsWith('#') && label.color
+                            )} 
+                            style={label.color?.startsWith('#') ? { backgroundColor: label.color } : undefined} 
+                          />
+                          <span>{label.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1979,176 +2398,85 @@ export default function ChatDashboard() {
           )}
         </div>
 
-        {/* Chat List Realtime */}
-        <div className="flex-1 overflow-y-auto" ref={contactListRef} onScroll={handleContactScroll}>
-          {(() => {
-            const filtered = contacts.filter(c => {
-               // 1) RBAC ENFORCEMENT - A REGRA DE OURO (Nunca mostrar conversas que não tenho acesso)
-               const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
-               const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
-               
-               if (!isGlobalAdmin) {
-                   const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-                   let allowedInstances: string[] = [];
-                   if (allowedStr) {
-                       try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
-                   }
-                   
-                   // Agente sem array de permissões não vê nada.
-                   if (allowedStr) {
-                       if (allowedInstances.length === 0) return false; // Sem instâncias -> Sem acesso
-  
-                       const effectiveInstId = c.instance_id || connectedInstanceName; // fallback pra órfãos
-                       if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) {
-                           return false; // BLOQUEADO!
-                       }
-                   } else {
-                       return false; // BLOQUEADO! Agente logado precisa de permissão clara
-                   }
-               }
-  
-               // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - IGNORADO DURANTE PESQUISA
-               if (activeChannelFilter && !searchTerm) {
-                   const dbInstId = c.instance_id;
-                   const effectiveId = connectedInstanceName;
-   
-                   if (!dbInstId) {
-                       // Fallback conversas antigas órfãs
-                       if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
-                   } else {
-                       // Conversas nativas
-                       if (dbInstId !== activeChannelFilter && dbInstId !== activeChannelName) return false;
-                   }
-               }
-  
-               // 3) BUSCA EM TEXTO E METADADOS
-               if (searchTerm) {
-                   const s = searchTerm.toLowerCase();
-                   const match = c.name?.toLowerCase().includes(s) ||
-                                 c.custom_name?.toLowerCase().includes(s) ||
-                                 c.whatsapp_jid?.includes(searchTerm) ||
-                                 c.phone?.includes(searchTerm) ||
-                                 c.fantasy_name?.toLowerCase().includes(s) ||
-                                 c.document_number?.includes(searchTerm);
-                   if (!match) return false;
-               }
-               
-               // Lógica de Contatos Bloqueados
-               if (filterType === 'blocked') {
-                   if (!c.is_blocked) return false;
-               } else {
-                   if (c.is_blocked) return false; // Esconde os bloqueados em todas as outras views (All, Unread, Favoritos, etc)
-               }
-  
-               // Filtros de Pills - IGNORADOS DURANTE PESQUISA
-               if (!searchTerm) {
-                   if (filterType === 'unread' && c.unread <= 0 && c.id !== activeChatId) return false;
-                   if (filterType === 'favorite' && !c.is_favorite) return false;
-                   if (filterType === 'labels' && !(c.conv_labels && c.conv_labels.length > 0)) return false;
-                   if (filterType === 'mine') {
-                       const currentUserEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
-                       const currentAgent = agents.find(a => a.email === currentUserEmail);
-                       if (!currentAgent || c.assigned_to !== currentAgent.id) return false;
-                   }
-               }
-               
-               // Filtro de Adiado (Snoozed)
-               if (c.conv_status === 'snoozed' && c.snoozed_until) {
-                  const untilTimestamp = new Date(c.snoozed_until).getTime();
-                  if (untilTimestamp > Date.now()) {
-                     // Esconde se ainda não expirou, a menos que o usuário esteja forçando a pesquisa ativamente
-                     if (!searchTerm) return false;
-                  }
-               }
-  
-               // Filtro de Modo Ticket (Estilo Chatwoot)
-               if (ticketMode && !searchTerm) {
-                  if (c.conv_status === 'resolved') {
-                     return false;
-                  }
-               }
-  
-               return true;
-            }).sort((a,b) => {
-               const aPinned = isContactPinned(a);
-               const bPinned = isContactPinned(b);
-               if (aPinned && !bPinned) return -1;
-               if (!aPinned && bPinned) return 1;
-               
-               let aLastMsg;
-               if (a.messages) {
-                 for (let i = a.messages.length - 1; i >= 0; i--) {
-                   if (!a.messages[i].isIgnoredSilent && !a.messages[i].isIgnored) { aLastMsg = a.messages[i]; break; }
-                 }
-               }
-  
-               let bLastMsg;
-               if (b.messages) {
-                 for (let i = b.messages.length - 1; i >= 0; i--) {
-                   if (!b.messages[i].isIgnoredSilent && !b.messages[i].isIgnored) { bLastMsg = b.messages[i]; break; }
-                 }
-               }
-               
-               const aTime = Math.max(a.lastMsgTimestamp || 0, aLastMsg ? new Date(aLastMsg.timestamp).getTime() : 0);
-               const bTime = Math.max(b.lastMsgTimestamp || 0, bLastMsg ? new Date(bLastMsg.timestamp).getTime() : 0);
-               
-               return bTime - aTime;
-            });
+        <div 
+          ref={contactListRef} 
+          onScroll={handleContactScroll} 
+          className="flex-1 overflow-y-auto custom-scrollbar"
+        >
+           <AnimatePresence mode="popLayout">
+            {/* Expressão 1: Nenhum contato encontrado durante a busca */}
+            {filteredContacts.length === 0 && searchTerm && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                key="no-contacts"
+                className="flex flex-col items-center justify-center p-6 text-center w-full"
+              >
+                <div className="w-full max-w-sm bg-white/5 dark:bg-[#182229]/30 backdrop-blur-md border border-gray-100 dark:border-white/5 rounded-3xl p-6 shadow-xl flex flex-col items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-500 animate-pulse">
+                    <MessageSquarePlus size={24} />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm font-semibold text-gray-700 dark:text-[#d1d7db]">
+                      Nenhum contato encontrado
+                    </p>
+                    <p className="text-xs text-gray-400 dark:text-[#8696a0] max-w-[200px] mx-auto">
+                      Não encontramos nenhum chat ou contato para "{searchTerm}".
+                    </p>
+                  </div>
+                  
+                  {searchTerm.replace(/\D/g, '').length >= 8 && (
+                    <button
+                      onClick={() => handleStartChatWithSearchedNumber(searchTerm.replace(/\D/g, ''))}
+                      className="w-full flex items-center justify-center gap-2.5 px-5 py-3.5 bg-[#00a884] hover:bg-[#008f70] text-white rounded-2xl shadow-lg hover:shadow-emerald-500/20 font-semibold text-sm transition-all active:scale-95 hover:scale-[1.02] duration-200"
+                    >
+                      <MessageSquarePlus size={18} className="shrink-0" />
+                      <span>Enviar mensagem para {formatPhoneNumber(searchTerm.replace(/\D/g, ''))}</span>
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            )}
 
-            if (filtered.length === 0 && searchTerm) {
-              const onlyNumbers = searchTerm.replace(/\D/g, '');
-              const isValidPhone = onlyNumbers.length >= 8;
+            {/* Expressão 2: Renderização estável dos contatos correspondentes */}
+            {(filteredContacts.length > 0 || !searchTerm) && filteredContacts.slice(0, contactPageLimit).map((contact) => {
+              const lastMsg = contact.messages?.[contact.messages.length - 1];
+              const timeDisplay = lastMsg 
+                ? (isToday(lastMsg.timestamp) ? format(lastMsg.timestamp, 'HH:mm') 
+                   : isYesterday(lastMsg.timestamp) ? 'Ontem' 
+                   : format(lastMsg.timestamp, 'dd/MM/yyyy'))
+                : contact.lastMsgTimestamp 
+                   ? (isToday(new Date(contact.lastMsgTimestamp)) ? format(new Date(contact.lastMsgTimestamp), 'HH:mm') 
+                      : isYesterday(new Date(contact.lastMsgTimestamp)) ? 'Ontem' 
+                      : format(new Date(contact.lastMsgTimestamp), 'dd/MM/yyyy'))
+                   : '';
+                   
+              // Verifica se a ultima msg foi mandada por voce testando sender
+              const isMe = lastMsg && (lastMsg.sender === 'bot' || lastMsg.sender === 'human');
+              const instColor = contact.instance_id ? instanceColorsMap[contact.instance_id] : undefined;
+
+              const lastMsgText = (() => {
+                if (!lastMsg) return contact.last_message_preview || '';
+                if (lastMsg.text) return lastMsg.text;
+                if (lastMsg.mediaType === 'image') return '📸 Imagem';
+                if (lastMsg.mediaType === 'video') return '🎥 Vídeo';
+                if (lastMsg.mediaType === 'audio') return '🎵 Áudio';
+                if (lastMsg.mediaType === 'document') return '📁 Documento';
+                return contact.last_message_preview || 'Mídia';
+              })();
 
               return (
-                <div className="flex flex-col items-center justify-center p-6 text-center animate-in fade-in slide-in-from-bottom-4 duration-300">
-                  <div className="w-full max-w-sm bg-white/5 dark:bg-[#182229]/30 backdrop-blur-md border border-gray-100 dark:border-white/5 rounded-3xl p-6 shadow-xl flex flex-col items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-500 animate-pulse">
-                      <MessageSquarePlus size={24} />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <p className="text-sm font-semibold text-gray-700 dark:text-[#d1d7db]">
-                        Nenhum contato encontrado
-                      </p>
-                      <p className="text-xs text-gray-400 dark:text-[#8696a0] max-w-[200px] mx-auto">
-                        Não encontramos nenhum chat ou contato para "{searchTerm}".
-                      </p>
-                    </div>
-                    
-                    {isValidPhone && (
-                      <button
-                        onClick={() => handleStartChatWithSearchedNumber(onlyNumbers)}
-                        className="w-full flex items-center justify-center gap-2.5 px-5 py-3.5 bg-[#00a884] hover:bg-[#008f70] text-white rounded-2xl shadow-lg hover:shadow-emerald-500/20 font-semibold text-sm transition-all active:scale-95 hover:scale-[1.02] duration-200"
-                      >
-                        <MessageSquarePlus size={18} className="shrink-0" />
-                        <span>Enviar mensagem para {formatPhoneNumber(onlyNumbers)}</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            }
-
-            return filtered.slice(0, contactPageLimit).map((contact) => {
-               const lastMsg = contact.messages?.[contact.messages.length - 1];
-               const timeDisplay = lastMsg 
-                 ? (isToday(lastMsg.timestamp) ? format(lastMsg.timestamp, 'HH:mm') 
-                    : isYesterday(lastMsg.timestamp) ? 'Ontem' 
-                    : format(lastMsg.timestamp, 'dd/MM/yyyy'))
-                 : contact.lastMsgTimestamp 
-                    ? (isToday(new Date(contact.lastMsgTimestamp)) ? format(new Date(contact.lastMsgTimestamp), 'HH:mm') 
-                       : isYesterday(new Date(contact.lastMsgTimestamp)) ? 'Ontem' 
-                       : format(new Date(contact.lastMsgTimestamp), 'dd/MM/yyyy'))
-                    : '';
-                    
-               // Verifica se a ultima msg foi mandada por voce testando sender
-               const isMe = lastMsg && (lastMsg.sender === 'bot' || lastMsg.sender === 'human');
-  
-               return (
-                <div 
+                <motion.div 
+                  layout
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ type: "spring", stiffness: 350, damping: 35 }}
                   key={contact.id}
                   onClick={() => {
                     setActiveChat(contact.id);
-                    const properTargetInstance = activeChannelFilter || contact.instance_id || connectedInstanceName;
+                    const properTargetInstance = getStrictInstance(contact) || activeChannelFilter || contact.instance_id || connectedInstanceName;
                     if (properTargetInstance) {
                       useChatStore.getState().loadHistoricalMessages(contact.id, properTargetInstance);
                       if (contact.avatar?.includes('ui-avatars')) {
@@ -2161,7 +2489,8 @@ export default function ChatDashboard() {
                   }}
                   className={cn(
                     "group flex items-center gap-3 px-3 py-3 cursor-pointer transition-colors border-b border-[#f2f2f2] dark:border-[#222d34] overflow-visible",
-                    activeChatId === contact.id ? "bg-[#f0f2f5] dark:bg-[#2a3942]" : "hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]"
+                    activeChatId === contact.id ? "bg-[#f0f2f5] dark:bg-[#2a3942]" : "hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]",
+                    activeDropdown === contact.id ? "z-30 relative" : "relative z-0"
                   )}
                 >
                   <div className="relative shrink-0">
@@ -2179,30 +2508,67 @@ export default function ChatDashboard() {
                     <div className="flex justify-between items-center mb-0.5">
                       <div className="flex flex-col truncate pr-2">
                          <div className="flex flex-col gap-0.5 w-full">
-                           {/* Name and Priority Flags */}
-                           <span className="font-medium text-[#111b21] dark:text-[#e9edef] truncate flex items-center gap-1.5">
+                           {/* Nome e Flag / Badges de Prioridade */}
+                           <span className="font-semibold text-[#111b21] dark:text-[#e9edef] text-sm tracking-tight truncate flex items-center justify-between gap-1.5 w-full">
                              <span className="truncate">{getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone)}</span>
-                             {contact.priority === 'urgent' && <Flag size={12} className="fill-rose-500 text-rose-500 shrink-0" />}
-                             {contact.priority === 'high' && <Flag size={12} className="fill-orange-500 text-orange-500 shrink-0" />}
-                             {contact.conv_status === 'snoozed' && contact.snoozed_until && new Date(contact.snoozed_until).getTime() > Date.now() && <Clock size={12} className="text-amber-500 shrink-0" />}
+                             <div className="flex items-center gap-1 shrink-0">
+                               {contact.priority === 'urgent' && (
+                                 <span className="px-1.5 py-[2px] rounded-md text-[8px] font-extrabold uppercase bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center gap-0.5 shadow-sm animate-pulse">
+                                   <Flag size={8} className="fill-current" />
+                                   Urgente
+                                 </span>
+                               )}
+                               {contact.priority === 'high' && (
+                                 <span className="px-1.5 py-[2px] rounded-md text-[8px] font-extrabold uppercase bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-0.5 shadow-sm">
+                                   <Flag size={8} className="fill-current" />
+                                   Alta
+                                 </span>
+                               )}
+                               {contact.conv_status === 'snoozed' && contact.snoozed_until && new Date(contact.snoozed_until).getTime() > Date.now() && (
+                                 <span className="px-1.5 py-[2px] rounded-md text-[8px] font-extrabold uppercase bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30 flex items-center gap-0.5 shadow-sm">
+                                   <Clock size={8} />
+                                   Adiado
+                                 </span>
+                               )}
+                             </div>
                            </span>
   
                            {/* Labels and Assigned Agent on a new line */}
                            {(contact.assigned_to || (contact.conv_labels && contact.conv_labels.length > 0)) && (
-                             <div className="flex items-center gap-1.5 overflow-hidden w-full flex-wrap mt-0.5">
+                             <div className="flex items-center gap-1.5 overflow-hidden w-full flex-wrap mt-1">
                                {contact.assigned_to && (
-                                 <span className="shrink-0 px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 border border-indigo-100 dark:border-indigo-500/20 text-[9px] font-bold uppercase rounded flex items-center gap-1">
-                                   <User size={9} />
-                                   <span className="max-w-[50px] truncate">{agents.find(a => a.id === contact.assigned_to)?.full_name?.split(' ')[0] || 'Ag'}</span>
+                                 <span className="shrink-0 px-1.5 py-[2px] bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-500/20 text-[8px] font-extrabold uppercase rounded-md flex items-center gap-1 shadow-sm">
+                                   <User size={8} />
+                                   <span className="max-w-[60px] truncate">{agents.find(a => a.id === contact.assigned_to)?.full_name?.split(' ')[0] || 'Agente'}</span>
                                  </span>
                                )}
                                {contact.conv_labels && contact.conv_labels.length > 0 && (
-                                 <div className="flex items-center gap-1 overflow-hidden shrink-0">
+                                 <div className="flex items-center gap-1.5 overflow-hidden shrink-0 flex-wrap">
                                    {contact.conv_labels.map((l: any, i: number) => {
                                      const isHex = l.color?.startsWith('#');
+                                     const colorBase = l.color?.replace('bg-', '') || 'blue';
+                                     
                                      return (
-                                       <span key={i} className={cn("px-1.5 py-0.5 text-[9px] font-bold text-white rounded-full flex items-center max-w-[80px] truncate shadow-sm border border-black/10", !isHex && l.color ? l.color : "bg-blue-500")} style={isHex ? { backgroundColor: l.color } : {}} title={l.name}>
-                                         {l.name}
+                                       <span 
+                                         key={i} 
+                                         className={cn(
+                                           "px-1.5 py-[2px] text-[8px] font-extrabold rounded-md flex items-center max-w-[95px] truncate shadow-sm border transition-all hover:scale-105 duration-200", 
+                                           isHex 
+                                             ? "" 
+                                             : `bg-${colorBase}-500/15 text-${colorBase}-600 dark:text-${colorBase}-400 border-${colorBase}-500/20`
+                                         )} 
+                                         style={isHex ? { 
+                                           backgroundColor: `${l.color}15`, 
+                                           borderColor: `${l.color}30`, 
+                                           color: l.color 
+                                         } : {}} 
+                                         title={l.name}
+                                       >
+                                         <span 
+                                           className={cn("w-1.5 h-1.5 rounded-full mr-1 shrink-0 shadow-inner", !isHex && l.color)} 
+                                           style={isHex ? { backgroundColor: l.color } : {}}
+                                         />
+                                         <span className="truncate">{l.name}</span>
                                        </span>
                                      );
                                     })}
@@ -2217,25 +2583,22 @@ export default function ChatDashboard() {
                              {contact.fantasy_name}
                            </span>
                          )}
-                        {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (() => {
-                            const instColor = contact.instance_id ? instanceColorsMap[contact.instance_id] : undefined;
-                            return (
-                              <span 
-                                className="text-[10px] px-1.5 py-[2px] rounded-md border font-medium truncate mt-1 w-fit max-w-[140px] flex items-center gap-1 shadow-sm transition-all"
-                                style={instColor ? { 
-                                  backgroundColor: `${instColor}15`, 
-                                  borderColor: `${instColor}30`, 
-                                  color: instColor 
-                                } : {
-                                  backgroundColor: 'rgba(0,0,0,0.05)',
-                                  borderColor: 'rgba(0,0,0,0.05)'
-                                }}
-                              >
-                                <Smartphone size={10} className="shrink-0 opacity-80" />
-                                <span className="truncate">{contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName}</span>
-                              </span>
-                            );
-                        })()}
+                        {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (
+                          <span 
+                            className="text-[10px] px-1.5 py-[2px] rounded-md border font-medium truncate mt-1 w-fit max-w-[140px] flex items-center gap-1 shadow-sm transition-all"
+                            style={instColor ? { 
+                              backgroundColor: `${instColor}15`, 
+                              borderColor: `${instColor}30`, 
+                              color: instColor 
+                            } : {
+                              backgroundColor: 'rgba(0,0,0,0.05)',
+                              borderColor: 'rgba(0,0,0,0.05)'
+                            }}
+                          >
+                            <Smartphone size={10} className="shrink-0 opacity-80" />
+                            <span className="truncate">{contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName}</span>
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1">
                         <span className={cn("text-[11px] font-medium min-w-fit ml-1 flex items-center gap-1", contact.unread > 0 ? "text-[#00a884]" : "text-[#54656f] dark:text-[#8696a0]")}>
@@ -2244,10 +2607,12 @@ export default function ChatDashboard() {
                         </span>
                         
                         {/* Menu de Ações (Dropdown) */}
-                        <div className="relative isolate" onClick={e => e.stopPropagation()}>
+                        <div className="relative" onClick={e => e.stopPropagation()}>
                           <button 
                             onClick={(e) => {
                               e.stopPropagation();
+                              const openUp = e.clientY > window.innerHeight * 0.6;
+                              setMenuOpenUpward(openUp);
                               setActiveDropdown(activeDropdown === contact.id ? null : contact.id);
                             }}
                             className="p-1 text-[#54656f] hover:text-[#111b21] dark:text-[#aebac1] dark:hover:text-[#e9edef] rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-all opacity-80 hover:opacity-100"
@@ -2256,7 +2621,10 @@ export default function ChatDashboard() {
                           </button>
                           
                           {activeDropdown === contact.id && (
-                            <div className="absolute right-0 top-6 w-52 bg-white dark:bg-[#233138] border border-black/5 dark:border-white/5 rounded-xl shadow-xl py-2 z-[99] animate-in fade-in zoom-in-95 duration-100">
+                            <div className={cn(
+                              "absolute right-0 w-52 bg-white dark:bg-[#233138] border border-black/5 dark:border-white/5 rounded-xl shadow-xl py-2 z-[99] animate-in fade-in zoom-in-95 duration-100",
+                              menuOpenUpward ? "bottom-6 origin-bottom" : "top-6 origin-top"
+                            )}>
                               <button 
                                 className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 border-t border-gray-100 dark:border-[#304046]"
                                 onClick={(e) => { 
@@ -2313,7 +2681,7 @@ export default function ChatDashboard() {
                                 onClick={(e) => { e.stopPropagation(); toggleUnread(contact.id, contact.unread); setActiveDropdown(null); }}
                                 className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
                               >
-                                {contact.unread > 0 ? (
+                                {Number(contact.unread || 0) > 0 ? (
                                   <><MailOpen size={14} className="text-gray-500" /> Marcar como lida</>
                                 ) : (
                                   <><Mail size={14} className="text-[#00a884]" /> Marcar como não lida</>
@@ -2352,6 +2720,14 @@ export default function ChatDashboard() {
                               )}
                               
                               <button 
+                                onClick={(e) => { e.stopPropagation(); setContactToEdit(contact); setActiveDropdown(null); }}
+                                className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
+                              >
+                                <Edit2 size={14} className="text-[#00a884]" />
+                                Editar contato
+                              </button>
+                              
+                              <button 
                                 onClick={(e) => { e.stopPropagation(); setContactToDelete({id: contact.id, name: contact.name}); setActiveDropdown(null); }}
                                 className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors flex items-center gap-2 border-t border-gray-100 dark:border-[#304046]"
                               >
@@ -2363,18 +2739,41 @@ export default function ChatDashboard() {
                         </div>
                       </div>
                     </div>
+                    {/* Segunda linha: Preview da última mensagem e Badge de não lidas */}
+                    <div className="flex justify-between items-center mt-1">
+                      <p className="text-[13px] text-gray-500 dark:text-[#8696a0] truncate flex-1 pr-2 flex items-center">
+                        {isMe && (
+                          <span className="inline-flex mr-1 align-middle text-[#00a884] dark:text-[#53bdeb] shrink-0">
+                            {lastMsg.status === 'read' ? (
+                              <CheckCheck size={15} className="text-[#00a884] dark:text-[#53bdeb]" />
+                            ) : lastMsg.status === 'delivered' ? (
+                              <CheckCheck size={15} className="text-[#8696a0]" />
+                            ) : (
+                              <Check size={15} className="text-[#8696a0]" />
+                            )}
+                          </span>
+                        )}
+                        <span className="truncate">{lastMsgText}</span>
+                      </p>
+                      
+                      {contact.unread > 0 && (
+                        <span className="min-w-[20px] h-[20px] px-1.5 rounded-full bg-[#00a884] text-white text-[11px] font-bold flex items-center justify-center animate-in zoom-in-50 duration-200 shadow-sm shrink-0">
+                          {contact.unread}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
+                </motion.div>
               );
-            });
-          })()}
+            })}
+          </AnimatePresence>
         </div>
       </div>
 
       {/* Resizer Handle */}
       <div 
         className={cn(
-          "hidden md:flex w-1.5 cursor-col-resize z-50 shrink-0 transition-colors relative group border-l border-r border-[#d1d7db] dark:border-[#222d34] bg-[#f0f2f5] dark:bg-[#202c33]",
+          "hidden md:flex w-1.5 cursor-col-resize z-20 shrink-0 transition-colors relative group border-l border-r border-[#d1d7db] dark:border-[#222d34] bg-[#f0f2f5] dark:bg-[#202c33]",
           isDragging ? "bg-[#00a884]/30 border-[#00a884]" : "hover:bg-[#00a884]/20 hover:border-[#00a884]/50"
         )}
         onMouseDown={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -2610,7 +3009,7 @@ export default function ChatDashboard() {
 
                     <button 
                       onClick={async () => {
-                        const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+                        const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
                         if (properTargetInstance) {
                           await loadHistoricalMessages(activeChat.id, properTargetInstance, true);
                         }
@@ -2647,64 +3046,65 @@ export default function ChatDashboard() {
                </div>
             )}
             
-            {activeChat.messages?.filter(m => m.text || m.mediaUrl).map((msg, index, arr) => {
-               const isMe = msg.sender === 'human' || msg.sender === 'bot';
-               
-               let showDateSeparator = false;
-               let dateSeparatorText = '';
-               
-               if (index === 0) {
-                  showDateSeparator = true;
-               } else {
-                  const prevMsg = arr[index - 1];
-                  const currentDay = format(new Date(msg.timestamp), 'yyyy-MM-dd');
-                  const prevDay = format(new Date(prevMsg.timestamp), 'yyyy-MM-dd');
-                  if (currentDay !== prevDay) {
-                     showDateSeparator = true;
-                  }
-               }
-               
-               if (showDateSeparator) {
-                  const date = new Date(msg.timestamp);
-                  const daysOfWeek = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-                  if (isToday(date)) dateSeparatorText = 'HOJE';
-                  else if (isYesterday(date)) dateSeparatorText = 'ONTEM';
-                  else dateSeparatorText = `${daysOfWeek[date.getDay()]}, ${format(date, "dd/MM/yyyy")}`;
-               }
-               
-               const separatorNode = showDateSeparator ? (
-                  <div className="flex justify-center my-4 w-full">
-                     <span className="bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 text-[#54656f] dark:text-[#8696a0] text-[11px] px-3 py-1 rounded-lg border border-black/5 dark:border-white/5 font-medium shadow-sm uppercase tracking-wider">
-                       {dateSeparatorText}
-                     </span>
-                  </div>
-               ) : null;
-               
-               return (
-                 <MessageBubble 
-                   key={msg.id}
-                   msg={msg}
-                   index={index}
-                   totalMessages={arr.length}
-                   activeChat={activeChat}
-                   activeMsgDropdown={activeMsgDropdown}
-                   setActiveMsgDropdown={setActiveMsgDropdown}
-                   setReplyMessage={setReplyMessage}
-                   textareaRef={textareaRef}
-                   handleAiReplySuggestion={handleAiReplySuggestion}
-                   setMessageToForward={setMessageToForward}
-                   setEditingMessage={setEditingMessage}
-                   setMessageToDelete={setMessageToDelete}
-                   setFullscreenImage={setFullscreenImage}
-                   handleTranscribeAudio={handleTranscribeAudio}
-                   transcribingIds={transcribingIds}
-                   handleOpenVCardContact={handleOpenVCardContact}
-                   renderMessageText={renderMessageText}
-                   showDateSeparator={showDateSeparator}
-                   dateSeparatorText={dateSeparatorText}
-                 />
-               )
-            })}
+            {(() => {
+              const rawMsgs = activeChat.messages?.filter(m => m.text || m.mediaUrl) || [];
+              const dedupedMsgs = rawMsgs.filter((msg, idx) => {
+                if (msg.sender !== 'system') return true;
+                const nextMsg = rawMsgs[idx + 1];
+                return !nextMsg || nextMsg.sender !== 'system';
+              });
+              
+              return dedupedMsgs.map((msg, index, arr) => {
+                const isMe = msg.sender === 'human' || msg.sender === 'bot';
+                
+                let showDateSeparator = false;
+                let dateSeparatorText = '';
+                
+                if (index === 0) {
+                   showDateSeparator = true;
+                } else {
+                   const prevMsg = arr[index - 1];
+                   const currentDay = format(new Date(msg.timestamp), 'yyyy-MM-dd');
+                   const prevDay = format(new Date(prevMsg.timestamp), 'yyyy-MM-dd');
+                   if (currentDay !== prevDay) {
+                      showDateSeparator = true;
+                   }
+                }
+                
+                if (showDateSeparator) {
+                   const date = new Date(msg.timestamp);
+                   const daysOfWeek = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+                   if (isToday(date)) dateSeparatorText = 'HOJE';
+                   else if (isYesterday(date)) dateSeparatorText = 'ONTEM';
+                   else dateSeparatorText = `${daysOfWeek[date.getDay()]}, ${format(date, "dd/MM/yyyy")}`;
+                }
+                
+                return (
+                  <MessageBubble 
+                    key={msg.id}
+                    msg={msg}
+                    index={index}
+                    totalMessages={arr.length}
+                    activeChat={activeChat}
+                    activeMsgDropdown={activeMsgDropdown}
+                    setActiveMsgDropdown={setActiveMsgDropdown}
+                    setReplyMessage={setReplyMessage}
+                    textareaRef={textareaRef}
+                    handleAiReplySuggestion={handleAiReplySuggestion}
+                    setMessageToForward={setMessageToForward}
+                    setEditingMessage={setEditingMessage}
+                    setMessageToDelete={setMessageToDelete}
+                    setFullscreenImage={setFullscreenImage}
+                    handleTranscribeAudio={handleTranscribeAudio}
+                    transcribingIds={transcribingIds}
+                    handleOpenVCardContact={handleOpenVCardContact}
+                    renderMessageText={renderMessageText}
+                    showDateSeparator={showDateSeparator}
+                    dateSeparatorText={dateSeparatorText}
+                  />
+                );
+              });
+            })()}
             <div ref={messagesEndRef} />
           </div>
 
@@ -3033,7 +3433,7 @@ export default function ChatDashboard() {
                                 setShowQuickReplies(false);
                                 if (qr.media_url) {
                                   try {
-                                    const properTargetInstance = activeChannelFilter || activeChat?.instance_id || connectedInstanceName;
+                                    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
                                     if (activeChat && properTargetInstance) {
                                       await useChatStore.getState().sendMediaFromUrl(
                                         activeChat.id, 
@@ -3078,54 +3478,122 @@ export default function ChatDashboard() {
                       </div>
                     )}
                     
-                    <textarea 
-                      ref={textareaRef}
-                      value={inputText}
-                      spellCheck={true}
-                      lang="pt-BR"
-                      onChange={e => {
-                        const val = e.target.value;
-                        setInputText(val);
-                        if (val.startsWith('/')) {
-                          setShowQuickReplies(true);
-                          setQuickReplyFilter(val.substring(1).toLowerCase());
-                        } else {
-                          setShowQuickReplies(false);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          const isCompactMobile = window.innerWidth < 500;
-                          if (isCompactMobile) {
-                            // Pular linha se a largura da tela for menor que 500px
-                            return; // Deixa o comportamento default da textarea
+                    {/* Barra de Sugestões Ortográficas do Corretor (Sob demanda ao clicar na lâmpada) */}
+                    {showSuggestionsPopover && activeWordUnderCursor && suggestions.length > 0 && (
+                      <div className="absolute bottom-full left-4 mb-3 flex items-center gap-2 p-2 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl rounded-2xl border border-black/5 dark:border-white/10 shadow-2xl text-xs z-[101] animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-200">
+                        <span className="text-gray-500 dark:text-gray-400 font-medium pl-1">Sugestões para "{activeWordUnderCursor}":</span>
+                        <div className="flex flex-wrap gap-1.5 items-center">
+                          {suggestions.map((sugg, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => replaceWordInText(activeWordUnderCursor, sugg)}
+                              className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-[#00a884] font-bold rounded-xl transition-all active:scale-95"
+                            >
+                              {sugg}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => addToPersonalDict(activeWordUnderCursor)}
+                            className="px-2.5 py-1 bg-gray-100 dark:bg-white/10 hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-300 font-semibold rounded-xl flex items-center gap-1 transition-all active:scale-95 border border-transparent dark:border-white/5"
+                          >
+                            <Plus size={12} /> Adicionar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="relative flex-1 min-w-0 min-h-[20px] flex items-end">
+                      {/* Div de Highlight por trás (grifa as palavras em vermelho) */}
+                      <div 
+                        className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none select-none whitespace-pre-wrap break-words text-transparent text-sm resize-none pb-0.5 overflow-hidden leading-relaxed px-0 py-0"
+                        style={{ 
+                          font: 'inherit',
+                          lineHeight: 'inherit',
+                          maxHeight: '250px',
+                          transform: `translateY(-${scrollTop}px)`
+                        }}
+                      >
+                        {renderHighlightedText()}
+                      </div>
+
+                      <textarea 
+                        ref={textareaRef}
+                        value={inputText}
+                        spellCheck={false}
+                        lang="pt-BR"
+                        onChange={e => {
+                          const val = e.target.value;
+                          setInputText(val);
+                          if (val.startsWith('/')) {
+                            setShowQuickReplies(true);
+                            setQuickReplyFilter(val.substring(1).toLowerCase());
+                          } else {
+                            setShowQuickReplies(false);
                           }
-                          e.preventDefault();
-                          if (inputText.trim()) {
-                            handleSendHuman(e as any);
-                          }
-                        }
-                      }}
-                      onPaste={(e) => {
-                        const items = e.clipboardData?.items;
-                        if (!items) return;
-                        for (let i = 0; i < items.length; i++) {
-                          if (items[i].type.indexOf('image') !== -1) {
-                            e.preventDefault();
-                            const file = items[i].getAsFile();
-                            if (file) {
-                              setPastedImage(file);
-                              setPastedImagePreview(URL.createObjectURL(file));
-                              setPastedImageCaption('');
+                          setScrollTop(e.currentTarget.scrollTop);
+                        }}
+                        onSelect={handleTextareaSelection}
+                        onClick={handleTextareaSelection}
+                        onKeyUp={handleTextareaSelection}
+                        onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            const isCompactMobile = window.innerWidth < 500;
+                            if (isCompactMobile) {
+                              return;
                             }
-                            break;
+                            e.preventDefault();
+                            if (inputText.trim()) {
+                              handleSendHuman(e as any);
+                            }
                           }
-                        }
-                      }}
-                      rows={1}
-                      placeholder="Responda como humano e a IA sera pausada automaticamente..."
-                      className="bg-transparent border-none outline-none w-full text-sm text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin"
-                    />
+                        }}
+                        onPaste={(e) => {
+                          const items = e.clipboardData?.items;
+                          if (!items) return;
+                          for (let i = 0; i < items.length; i++) {
+                            if (items[i].type.indexOf('image') !== -1) {
+                              e.preventDefault();
+                              const file = items[i].getAsFile();
+                              if (file) {
+                                setPastedImage(file);
+                                setPastedImagePreview(URL.createObjectURL(file));
+                                setPastedImageCaption('');
+                              }
+                              break;
+                            }
+                          }
+                        }}
+                        rows={1}
+                        placeholder="Responda como humano e a IA sera pausada automaticamente..."
+                        className="bg-transparent border-none outline-none w-full text-sm text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin relative z-10"
+                      />
+                    </div>
+                    {/* Botão de Sugestão Ortográfica Discreto */}
+                    {activeWordUnderCursor && suggestions.length > 0 && (
+                      <button 
+                        type="button" 
+                        onClick={() => setShowSuggestionsPopover(!showSuggestionsPopover)}
+                        className={cn(
+                          "mb-0.5 p-1.5 rounded-full transition-colors flex-shrink-0 relative active:scale-95 ml-1",
+                          showSuggestionsPopover 
+                            ? "text-[#00a884] bg-[#00a884]/10" 
+                            : "text-amber-500 hover:bg-amber-500/10 dark:text-amber-400 dark:hover:bg-amber-400/10"
+                        )}
+                        title={`Ver sugestões de correção para "${activeWordUnderCursor}"`}
+                      >
+                        <Lightbulb size={20} className={cn(!showSuggestionsPopover && "animate-pulse")} />
+                        {!showSuggestionsPopover && (
+                          <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                          </span>
+                        )}
+                      </button>
+                    )}
+
                     <button 
                       type="button" 
                       onClick={() => setIsGeminiPopoverOpen(!isGeminiPopoverOpen)}

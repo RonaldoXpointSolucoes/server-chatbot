@@ -25,8 +25,9 @@ export function useScheduleMonitor() {
             // Reabrir
             await state.updateConversationField(c.id, { 
               status: 'open', 
-              snoozed_until: null 
-            });
+              snoozed_until: null,
+              snoozed_by_system: true
+            } as any);
 
             // Dispara um som/alerta no browser (Opcional, apenas visual via API de Notification)
             if (Notification.permission === 'granted') {
@@ -74,7 +75,11 @@ export function useScheduleMonitor() {
       const now = new Date().getTime();
       state.contacts.forEach(async (c) => {
         if (c.conv_status === 'snoozed' && c.snoozed_until && now >= new Date(c.snoozed_until).getTime()) {
-           await state.updateConversationField(c.id, { status: 'open', snoozed_until: null });
+           await state.updateConversationField(c.id, { 
+             status: 'open', 
+             snoozed_until: null,
+             snoozed_by_system: true
+           } as any);
         }
       });
     }, 5000);

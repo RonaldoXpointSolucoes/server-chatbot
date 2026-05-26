@@ -49,6 +49,8 @@ export function MainSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const isAppEmbedded = location.pathname.startsWith('/apps/');
+  const reopenedTicketToast = useChatStore(state => state.reopenedTicketToast);
+  const setReopenedTicketToast = useChatStore(state => state.setReopenedTicketToast);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     conversations: true,
     teams: true,
@@ -487,7 +489,7 @@ export function MainSidebar() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto w-full styled-scrollbar pb-20">
+      <div className={cn("flex-1 overflow-y-auto w-full styled-scrollbar", reopenedTicketToast ? "pb-32" : "pb-20")}>
         
         {/* Search */}
         <div className="px-3 py-3">
@@ -785,7 +787,47 @@ export function MainSidebar() {
         </div>
       </div>
 
-         {/* User Footer Profile */}
+      {/* Toast Integrado de Reabertura de Ticket */}
+      {reopenedTicketToast && (
+        <div 
+          className={cn(
+            "absolute bottom-[66px] left-3 right-3 bg-[#202c33] dark:bg-[#111b21] border border-emerald-500/20 dark:border-emerald-500/30 rounded-2xl p-3 shadow-lg z-40 transition-all duration-300 animate-in slide-in-from-bottom-2 duration-300",
+            "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:pointer-events-none group-hover/sidebar:!opacity-100 group-hover/sidebar:!pointer-events-auto"
+          )}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="p-2 bg-emerald-500/10 dark:bg-emerald-500/20 rounded-xl text-emerald-500 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20">
+                <MessageCircle size={15} className="animate-pulse" />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-bold text-gray-200 dark:text-white truncate">
+                  {reopenedTicketToast.reason === 'snooze' ? 'Adiantamento Expirado' : 'Ticket Reaberto'}
+                </span>
+                <span className="text-[10px] text-[#8696a0] leading-tight truncate">
+                  {reopenedTicketToast.reason === 'snooze' ? (
+                    <>Cliente <b>{reopenedTicketToast.contactName}</b> voltou</>
+                  ) : (
+                    <>Cliente <b>{reopenedTicketToast.contactName}</b> enviou msg</>
+                  )}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setReopenedTicketToast(null);
+              }}
+              className="p-1 hover:bg-[#2a3942] rounded-full text-[#8696a0] hover:text-white transition-colors shrink-0"
+              title="Fechar"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* User Footer Profile */}
       <div className="absolute bottom-0 w-full h-[60px] bg-[#202c33] border-t border-[#2a3942] flex items-center px-4 cursor-pointer hover:bg-[#2a3942] transition-colors group">
         <div className="relative">
           <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-500 p-[1px] shadow-sm">

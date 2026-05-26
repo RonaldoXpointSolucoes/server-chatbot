@@ -117,6 +117,7 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
     
     return result.response.text();
   }
+
   async transcribeAudio(mediaUrl: string): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
@@ -232,6 +233,78 @@ ATENÇÃO E REGRAS DE FORMATO CRÍTICAS:
     } catch (e) {
       console.error("Erro no parse do JSON do Gemini, fallback:", text);
       return [text.substring(0, 300).replace(/["\[\]]/g, '')];
+    }
+  }
+
+  async generateCannedResponse(promptUser: string, ragContext: string, tone: string = 'professional'): Promise<{ text: string, shortcut: string }> {
+    if (!this.isConfigured()) {
+      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+    }
+    const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+    let toneInstruction = "Mantenha um tom profissional, polido, formal e extremamente educado.";
+    switch (tone) {
+      case 'friendly':
+        toneInstruction = "Mantenha um tom amigável, acolhedor, caloroso, muito empático e humano.";
+        break;
+      case 'persuasive':
+        toneInstruction = "Mantenha um tom persuasivo de vendas, destacando benefícios, gerando urgência comercial suave e incentivando o cliente a tomar uma ação ou fechar negócio.";
+        break;
+      case 'technical':
+        toneInstruction = "Mantenha um tom técnico, claro e detalhado. Organize o conteúdo em passos lógicos, listas ou tópicos se necessário para facilitar a compreensão do suporte.";
+        break;
+      case 'direct':
+        toneInstruction = "Mantenha um tom extremamente direto, curto e conciso. Vá direto ao ponto em poucas palavras ou no máximo duas frases curtas.";
+        break;
+    }
+
+    const systemPrompt = `Você é uma Inteligência Artificial especialista em comunicação empresarial e atendimento ao cliente de altíssimo nível.
+Sua missão é criar uma "Resposta Rápida/Pronta" perfeita para um operador de chat de suporte ou vendas.
+
+A resposta deve ser baseada estritamente no prompt do usuário e complementarmente fundamentada no contexto da base de conhecimento (RAG) fornecido abaixo (se houver).
+
+ESTILO DE ESCRITA:
+${toneInstruction}
+
+Você deve retornar obrigatoriamente um objeto JSON com exatamente duas propriedades:
+1. "content": O texto final da resposta pronta criado de acordo com as instruções de estilo de escrita fornecidas, separando os assuntos em parágrafos pulando linha se necessário e usando emojis de forma muito moderada (1-2 no máximo).
+2. "shortcut": Uma sugestão de atalho perfeito, curto, intuitivo e em letras minúsculas sem acentos/caracteres especiais, que comece obrigatoriamente com barra "/" (ex: "/cobranca", "/prazo-entrega", "/reembolso-pix") baseado no assunto da resposta gerada.
+
+--- CONTEXTO RAG (BASE DE CONHECIMENTO DA EMPRESA) ---
+${ragContext || 'Nenhum contexto de base de conhecimento fornecido. Use seu conhecimento geral com foco em atendimento profissional de sucesso do cliente.'}
+-----------------------------------------------------
+
+--- PROMPT/DADOS DO USUÁRIO OPERADOR ---
+"${promptUser}"
+----------------------------------------
+
+REGRAS DE RETORNO CRÍTICAS:
+1. Retorne EXATAMENTE e APENAS o JSON contendo as chaves "content" e "shortcut". 
+2. NUNCA coloque blocos de marcação markdown (\`\`\`json ou \`\`\`) na resposta, nem saudações/explicações antes ou depois. Retorne apenas o objeto JSON cru e limpo para que possamos fazer JSON.parse imediatamente no frontend.`;
+
+    const result = await model.generateContent(systemPrompt);
+    const response = await result.response;
+    const text = response.text().trim();
+    
+    try {
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (parsed.content && parsed.shortcut) {
+        return {
+          text: String(parsed.content),
+          shortcut: String(parsed.shortcut)
+        };
+      }
+      throw new Error("JSON incompleto");
+    } catch (e) {
+      console.error("Erro no parse do JSON de resposta pronta do Gemini, fallback:", text);
+      const words = promptUser.split(' ');
+      const fallbackShortcut = '/' + (words[0] ? words[0].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "") : "resposta");
+      const cleanText = text.replace(/^{\s*"content"\s*:\s*"/gi, '').replace(/"\s*,\s*"shortcut"\s*:\s*".*"\s*}$/gi, '').replace(/\\n/g, '\n').trim();
+      return {
+        text: cleanText || text,
+        shortcut: fallbackShortcut
+      };
     }
   }
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink } from 'lucide-react';
+import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -171,7 +171,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-200">
       <div 
         className="bg-[#f0f2f5] dark:bg-[#111b21] border border-white/20 dark:border-white/5 rounded-3xl w-[95%] max-w-2xl shadow-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200 overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -541,7 +541,7 @@ export function DeleteModal({ isOpen, onClose, contactName, onConfirm }: DeleteM
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
       <div 
         className="bg-white dark:bg-[#202c33] border border-white/20 dark:border-white/5 rounded-3xl p-6 w-[90%] max-w-sm shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-200"
         onClick={e => e.stopPropagation()}
@@ -783,7 +783,7 @@ export function BlockModal({ isOpen, onClose, contactName, isBlocked, onConfirm 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
       <div 
         className="bg-white dark:bg-[#202c33] border border-white/20 dark:border-white/5 rounded-3xl p-6 w-[90%] max-w-sm shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-200"
         onClick={e => e.stopPropagation()}
@@ -849,10 +849,12 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
 
   const [activeLabels, setActiveLabels] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     if (isOpen) {
       setActiveLabels(contactLabels.map((l: any) => l.id));
+      setSearchQuery('');
     }
   }, [isOpen, contactId, contactLabels]);
 
@@ -861,6 +863,10 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
       prev.includes(labelId) ? prev.filter(id => id !== labelId) : [...prev, labelId]
     );
   };
+
+  const filteredLabels = tenantLabels.filter(label => 
+    label.name?.toLowerCase().includes(searchQuery.toLowerCase().trim())
+  );
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -900,9 +906,29 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
         </div>
         
         <h2 className="text-xl font-bold text-[#111b21] dark:text-white tracking-tight leading-tight">Atribuir Etiquetas</h2>
-        <p className="text-sm text-[#54656f] dark:text-[#8696a0] mt-1 mb-6">
+        <p className="text-sm text-[#54656f] dark:text-[#8696a0] mt-1 mb-4">
           Selecione as etiquetas para <strong className="text-[#111b21] dark:text-[#e9edef]">{contactName}</strong>
         </p>
+
+        {/* Barra de Pesquisa de Etiquetas */}
+        <div className="relative mb-4 w-full">
+          <Search size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-[#8696a0]" />
+          <input
+            type="text"
+            placeholder="Pesquisar etiquetas..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-11 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#202c33] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-xs text-[#111b21] dark:text-[#e9edef] transition-all placeholder:text-gray-400 dark:placeholder:text-[#8696a0] shadow-inner"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-500 transition-colors"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
 
         <div className="flex flex-col gap-2 max-h-60 overflow-y-auto styled-scrollbar pr-2 mb-6">
             {tenantLabels.length === 0 ? (
@@ -918,8 +944,18 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
                   <Edit2 size={12} /> Gerenciar Etiquetas
                 </a>
               </div>
+            ) : filteredLabels.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center animate-in fade-in zoom-in-95 duration-200">
+                <div className="w-12 h-12 mb-3 rounded-full bg-[#f0f2f5] dark:bg-white/5 flex items-center justify-center text-gray-400 dark:text-[#8696a0]">
+                  <Search size={18} />
+                </div>
+                <h3 className="text-sm font-semibold text-[#111b21] dark:text-[#e9edef]">Sem etiquetas</h3>
+                <p className="text-xs text-[#54656f] dark:text-[#8696a0] mt-1">
+                  Nenhuma etiqueta combina com "{searchQuery}".
+                </p>
+              </div>
             ) : (
-              tenantLabels.map(label => {
+              filteredLabels.map(label => {
                 const isActive = activeLabels.includes(label.id);
                 const isHex = label.color?.startsWith('#');
                 return (
@@ -1106,6 +1142,7 @@ export interface SnoozeModalProps extends BaseModalProps {
 
 export function SnoozeModal({ isOpen, onClose, contactId }: SnoozeModalProps) {
   const updateConversationField = useChatStore(state => state.updateConversationField);
+  const agents = useChatStore(state => state.agents);
   const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
@@ -1150,9 +1187,14 @@ export function SnoozeModal({ isOpen, onClose, contactId }: SnoozeModalProps) {
           break;
       }
 
+      const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+      const me = agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
+
       await updateConversationField(contactId, { 
         status: 'snoozed', 
-        snoozed_until: targetDate.toISOString() 
+        snoozed_until: targetDate.toISOString(),
+        snoozed_at: new Date().toISOString(),
+        snoozed_by: me?.id || null
       });
       onClose();
     } catch (error) {
@@ -1175,8 +1217,8 @@ export function SnoozeModal({ isOpen, onClose, contactId }: SnoozeModalProps) {
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-[#111b21] rounded-2xl w-full max-w-[400px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-black/5 dark:border-white/5 flex flex-col">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
+      <div className="bg-white dark:bg-[#111b21] rounded-2xl w-full max-w-[400px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-black/5 dark:border-white/5 flex flex-col" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-black/5 dark:border-white/5 bg-[#f0f2f5] dark:bg-[#202c33]">
           <div className="flex items-center gap-3">
@@ -1214,6 +1256,204 @@ export function SnoozeModal({ isOpen, onClose, contactId }: SnoozeModalProps) {
   );
 }
 
+export function SnoozedListModal({ isOpen, onClose }: SnoozedListModalProps) {
+  const contacts = useChatStore(state => state.contacts);
+  const agents = useChatStore(state => state.agents);
+  const updateConversationField = useChatStore(state => state.updateConversationField);
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isProcessingId, setIsProcessingId] = useState<string | null>(null);
+
+  if (!isOpen) return null;
+
+  // Filtrar contatos adiados (snoozed) do store local
+  const snoozedList = contacts.filter(c => c.conv_status === 'snoozed');
+
+  const handleReopen = async (contactId: string) => {
+    setIsProcessingId(contactId);
+    try {
+      await updateConversationField(contactId, { 
+        status: 'open', 
+        snoozed_until: null,
+        snoozed_at: null,
+        snoozed_by: null
+      });
+    } catch (e) {
+      console.error(e);
+      alert('Erro ao reabrir conversa.');
+    } finally {
+      setIsProcessingId(null);
+    }
+  };
+
+  const getAgentName = (agentId: string | null | undefined) => {
+    if (!agentId) return 'Sistema / Desconhecido';
+    const agent = agents.find(a => a.id === agentId);
+    return agent ? agent.full_name || agent.email : 'Agente Removido';
+  };
+
+  const formatDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    return d.toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const getRemainingTimeText = (dateStr: string) => {
+    const diff = new Date(dateStr).getTime() - Date.now();
+    if (diff <= 0) return 'Reabrendo...';
+    
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 60) return `Reabre em ${minutes}m`;
+    
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `Reabre em ${hours}h ${minutes % 60}m`;
+    
+    const days = Math.floor(hours / 24);
+    return `Reabre em ${days}d ${hours % 24}h`;
+  };
+
+  // Filtrar conversas que combinam com o termo de busca
+  const filteredSnoozed = snoozedList.filter(c => {
+    const name = (c.custom_name || c.name || c.push_name || c.phone || '').toLowerCase();
+    return name.includes(searchTerm.toLowerCase());
+  });
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 dark:bg-black/85 backdrop-blur-sm transition-opacity" />
+      
+      <div 
+        className="relative w-full max-w-2xl bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl border border-black/5 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col max-h-[85vh] animate-in zoom-in-95 slide-in-from-bottom-4 duration-300"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between pb-4 border-b border-black/5 dark:border-white/5 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-500 shadow-inner">
+              <CalendarClock size={24} className="animate-pulse" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef] leading-tight">
+                Conversas Adiadas
+              </h2>
+              <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-0.5">
+                Total de {filteredSnoozed.length} {filteredSnoozed.length === 1 ? 'conversa aguardando' : 'conversas aguardando'} reabertura automática.
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2.5 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Busca */}
+        <div className="my-4 relative shrink-0">
+          <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input 
+            type="text" 
+            placeholder="Pesquisar por contato..." 
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-11 pr-4 py-3 bg-[#f0f2f5] dark:bg-[#202c33] border border-transparent focus:border-amber-500/30 focus:bg-white dark:focus:bg-[#2a3942] rounded-2xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all text-sm shadow-inner"
+          />
+        </div>
+
+        {/* Lista */}
+        <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
+          {filteredSnoozed.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center animate-in fade-in duration-300">
+              <div className="w-20 h-20 bg-amber-500/5 rounded-full flex items-center justify-center mb-4">
+                <Clock size={36} className="text-amber-500/50" />
+              </div>
+              <h3 className="text-base font-bold text-[#111b21] dark:text-white">Nenhuma conversa adiada</h3>
+              <p className="text-xs text-[#54656f] dark:text-[#8696a0] mt-1 max-w-[280px]">
+                {searchTerm ? 'Nenhum resultado corresponde à sua pesquisa.' : 'Todos os seus contatos estão ativos ou foram atendidos!'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredSnoozed.map(item => {
+                const displayName = item.custom_name || item.name || item.push_name || item.phone;
+                const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random&color=fff`;
+
+                return (
+                  <div 
+                    key={item.id}
+                    className="p-4 rounded-3xl border border-black/5 dark:border-white/5 bg-[#f0f2f5]/50 dark:bg-black/25 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all hover:bg-[#f0f2f5]/80 dark:hover:bg-black/40 group relative overflow-hidden"
+                  >
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <img 
+                        src={item.profile_picture_url || avatarFallback} 
+                        alt={displayName} 
+                        className="w-12 h-12 rounded-full object-cover shadow-sm bg-gray-200 dark:bg-gray-800 ring-2 ring-transparent group-hover:ring-amber-500/20 transition-all shrink-0" 
+                        onError={(e) => {
+                          e.currentTarget.src = avatarFallback;
+                        }}
+                      />
+                      <div className="flex flex-col min-w-0">
+                        <span className="font-bold text-[#111b21] dark:text-[#e9edef] truncate text-[14px]">
+                          {displayName}
+                        </span>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[11px] text-[#54656f] dark:text-[#8696a0]">
+                          <span className="flex items-center gap-1">
+                            <User size={12} className="text-violet-500" />
+                            <span>Adiado por: <strong className="text-gray-700 dark:text-gray-300">{getAgentName(item.snoozed_by)}</strong></span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Informações de datas com visual premium */}
+                    <div className="flex flex-wrap items-center gap-4 text-[11px]">
+                      <div className="flex flex-col gap-0.5 bg-white/40 dark:bg-[#182229]/50 border border-black/5 dark:border-white/5 rounded-2xl p-2 min-w-[125px]">
+                        <span className="text-[9px] uppercase font-bold tracking-wider text-gray-400">Adiado em</span>
+                        <span className="font-semibold text-gray-700 dark:text-[#d1d7db]">{formatDate(item.snoozed_at)}</span>
+                      </div>
+
+                      <div className="flex flex-col gap-0.5 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/10 rounded-2xl p-2 min-w-[125px]">
+                        <span className="text-[9px] uppercase font-bold tracking-wider text-amber-500">Reabertura</span>
+                        <span className="font-semibold text-amber-600 dark:text-amber-400">{formatDate(item.snoozed_until)}</span>
+                      </div>
+
+                      {/* Badge de tempo restante */}
+                      {item.snoozed_until && (
+                        <div className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 font-bold rounded-full text-[10px] shrink-0">
+                          {getRemainingTimeText(item.snoozed_until)}
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => handleReopen(item.id)}
+                      disabled={isProcessingId === item.id}
+                      className="self-end md:self-center px-4 py-2.5 bg-gradient-to-tr from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 text-white rounded-2xl text-[12px] font-bold shadow-md shadow-violet-500/20 transition-all flex items-center justify-center gap-2 group/btn shrink-0"
+                    >
+                      {isProcessingId === item.id ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <>
+                          <RefreshCw size={13} className="group-hover/btn:rotate-180 transition-transform duration-500 text-violet-200" />
+                          <span>Reabrir</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export interface AssociatedCompaniesModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -1232,7 +1472,7 @@ export function AssociatedCompaniesModal({ isOpen, onClose, companies }: Associa
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
       
       <div className="relative w-full max-w-md bg-white dark:bg-[#111b21] rounded-[24px] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">

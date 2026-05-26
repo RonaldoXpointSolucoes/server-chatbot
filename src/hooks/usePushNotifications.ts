@@ -56,6 +56,8 @@ export function usePushNotifications() {
         // Parse subscription to save in DB
         const subData = JSON.parse(JSON.stringify(subscription));
 
+        const userEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+
         // Save to Supabase (upsert logic based on endpoint)
         const { error } = await supabase
           .from('push_subscriptions')
@@ -64,7 +66,8 @@ export function usePushNotifications() {
             endpoint: subData.endpoint,
             p256dh: subData.keys.p256dh,
             auth: subData.keys.auth,
-            user_agent: navigator.userAgent
+            user_agent: navigator.userAgent,
+            email: userEmail ? userEmail.trim().toLowerCase() : null
           }, { onConflict: 'endpoint' });
 
         if (error) { 

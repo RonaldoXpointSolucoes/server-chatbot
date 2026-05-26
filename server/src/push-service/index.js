@@ -60,6 +60,47 @@ class PushService {
                 if (conv) instanceId = conv.instance_id;
             }
 
+            // Fetch all agents/users for this tenant to check permissions
+            const { data: agents } = await supabase
+                .from("tenant_users")
+                .select("email, allowed_instances, role")
+                .eq("tenant_id", tenantId);
+
+            const agentsList = agents || [];
+
+            // Filter subscriptions based on strict inbox permissions
+            const filteredSubscriptions = subscriptions.filter((sub) => {
+                if (!sub.email) {
+                    // Por compatibilidade com assinaturas antigas sem email, deixamos passar
+                    return true;
+                }
+                
+                const userEmail = sub.email.trim().toLowerCase();
+                const agent = agentsList.find(a => a.email && a.email.trim().toLowerCase() === userEmail);
+                
+                if (!agent) {
+                    // Se o agente correspondente ao email não existe mais no tenant, bloqueamos
+                    return false;
+                }
+                
+                const role = agent.role?.toLowerCase() || '';
+                const isGlobalAdmin = role === 'owner' || role === 'admin';
+                
+                if (isGlobalAdmin) {
+                    // Proprietários e Administradores têm acesso ilimitado a todas as caixas
+                    return true;
+                }
+                
+                // Agentes normais: validamos se a instanceId da conversa está nas caixas permitidas (allowed_instances)
+                const allowed = agent.allowed_instances || [];
+                if (instanceId && allowed.includes(instanceId)) {
+                    return true;
+                }
+                
+                console.log(`[PushService] Notificação bloqueada para ${sub.email}. Agente comum não tem acesso à caixa/instância: ${instanceId}`);
+                return false;
+            });
+
             let messageBody = message.text_content 
                 ? `${message.text_content.substring(0, 100)}${message.text_content.length > 100 ? '...' : ''}` 
                 : 'Nova mídia recebida';
@@ -79,8 +120,8 @@ class PushService {
                 }
             });
 
-            // Send to all endpoints
-            const sendPromises = subscriptions.map((sub) => {
+            // Send to filtered endpoints only
+            const sendPromises = filteredSubscriptions.map((sub) => {
                 const pushSubscription = {
                     endpoint: sub.endpoint,
                     keys: {
@@ -100,7 +141,7 @@ class PushService {
             });
 
             await Promise.all(sendPromises);
-            console.log(`[PushService] Enviadas ${sendPromises.length} notificações push para o Tenant ${tenantId}`);
+            console.log(`[PushService] Enviadas ${sendPromises.length} de ${subscriptions.length} notificações push para o Tenant ${tenantId}`);
 
         } catch (err) {
             console.error("[PushService] Falha crítica:", err);

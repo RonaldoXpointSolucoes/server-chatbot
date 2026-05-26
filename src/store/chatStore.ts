@@ -35,6 +35,8 @@ export type ContactType = ContactRow & {
   is_favorite?: boolean;
   conv_status?: string;
   snoozed_until?: string | null;
+  snoozed_at?: string | null;
+  snoozed_by?: string | null;
   priority?: string | null;
   assigned_to?: string | null;
   conv_labels?: any[];
@@ -45,6 +47,33 @@ export type ContactType = ContactRow & {
 
 export const getRealContactId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
 export const getInstanceIdFromContact = (id: string) => id.includes('_') ? id.split('_')[1] : null;
+
+export function stringToDeterministicUUID(str: string): string {
+  const hashString = (s: string, seed: number) => {
+    let hash = seed + 5381;
+    for (let i = 0; i < s.length; i++) {
+      hash = ((hash << 5) + hash) + s.charCodeAt(i);
+      hash = hash & hash;
+    }
+    return Math.abs(hash);
+  };
+
+  const padZeroHex = (num: number) => {
+    let hex = num.toString(16);
+    while (hex.length < 8) {
+      hex = '0' + hex;
+    }
+    return hex.substring(0, 8);
+  };
+
+  const h1 = hashString(str, 1);
+  const h2 = hashString(str, 2);
+  const h3 = hashString(str, 3);
+  const h4 = hashString(str, 4);
+
+  const rawHex = padZeroHex(h1) + padZeroHex(h2) + padZeroHex(h3) + padZeroHex(h4);
+  return `${rawHex.substring(0, 8)}-${rawHex.substring(8, 12)}-${rawHex.substring(12, 16)}-${rawHex.substring(16, 20)}-${rawHex.substring(20, 32)}`;
+}
 
 export interface AgentType {
   id: string;
@@ -1009,9 +1038,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
        return;
     }
     
+    // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato
+    const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
+    const expectedInstance = compositeInstance || contact.instance_id;
+    const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
+
+    // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
+    if (expectedInstance && finalTargetInstance !== expectedInstance) {
+       console.warn(`[Security Guard] Bloqueada tentativa de envio por canal incorreto! Esperado: ${expectedInstance}, Recebido: ${finalTargetInstance}. Forçando canal da conversa.`);
+    }
+    
     // Verifica a conexão da instância específica da conversa
-    const targetInstance = instanceName || contact.instance_id || state.connectedInstanceName;
-    if (targetInstance && state.instancesStatus[targetInstance] && state.instancesStatus[targetInstance] !== 'connected') {
+    if (finalTargetInstance && state.instancesStatus[finalTargetInstance] && state.instancesStatus[finalTargetInstance] !== 'connected') {
        set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar mensagens.' });
        return;
     }
@@ -1070,10 +1108,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // 1. Manda pra Baileys Engine Local
       if (!state.tenantInfo) return;
       
-      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', finalTargetInstance).single();
       const apiKey = instDataDB?.api_key || '';
 
-      await sendTextMessage(state.tenantInfo.id, instanceName, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), finalMessageText, apiKey);
+      await sendTextMessage(state.tenantInfo.id, finalTargetInstance, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), finalMessageText, apiKey);
       
     } catch(err: any) {
       console.error(err);
@@ -1167,7 +1205,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!contact || !state.tenantInfo) return;
     
     const msgToDelete = contact.messages.find(m => m.id === messageId);
-    if (!msgToDelete || !msgToDelete.whatsapp_id) {
+    if (!msgToDelete) return;
+
+    if (String(messageId).startsWith('optimistic-')) {
+       // Mensagem otimista: apenas define status deletado localmente sem tentar DB
+       set((s) => ({
+         contacts: s.contacts.map(c => {
+           if (c.id === contactId) {
+             return {
+                ...c, 
+                messages: c.messages.map(m => m.id === messageId ? {
+                   ...m, 
+                   status: 'deleted'
+                } : m)
+             };
+           }
+           return c;
+         })
+       }));
+       return;
+    }
+
+    if (!msgToDelete.whatsapp_id) {
        alert('Não é possível apagar remotamente esta mensagem (chave ausente). Ela será apagada apenas localmente.');
        // Still proceed to delete locally/DB if desired, but user expectation is remote delete.
     }
@@ -1222,12 +1281,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   uploadAndSendMedia: async (contactId, file, mediaType, instanceName, isPtt, caption) => {
     const state = get();
-    if (!instanceName || !state.instancesStatus[instanceName] || state.instancesStatus[instanceName] !== 'connected') {
-       set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar arquivos.' });
-       return;
-    }
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
+
+    // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato
+    const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
+    const expectedInstance = compositeInstance || contact.instance_id;
+    const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
+
+    // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
+    if (expectedInstance && finalTargetInstance !== expectedInstance) {
+       console.warn(`[Security Guard - Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${expectedInstance}, Recebido: ${finalTargetInstance}. Forçando canal da conversa.`);
+    }
+
+    if (!finalTargetInstance || !state.instancesStatus[finalTargetInstance] || state.instancesStatus[finalTargetInstance] !== 'connected') {
+        set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar arquivos.' });
+        return;
+    }
 
     // Injeção Mágica de Assinatura Síncrona na mídia para evitar atrasos na UI
     let finalCaption = caption?.trim() ? caption.trim() : (mediaType === 'image' || mediaType === 'video' ? '' : (file.name || ''));
@@ -1302,10 +1372,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Chamada HTTP pro Node (único dono do upload Supabase e Baileys)
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', finalTargetInstance).single();
       const apiKey = instDataDB?.api_key || '';
 
-      const res = await fetch(`${API_URL}/api/v1/instances/${instanceName}/send-media`, {
+      const res = await fetch(`${API_URL}/api/v1/instances/${finalTargetInstance}/send-media`, {
         method: 'POST',
         headers: {
           'x-tenant-id': state.tenantInfo.id,
@@ -1376,6 +1446,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
 
+    // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato
+    const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
+    const expectedInstance = compositeInstance || contact.instance_id;
+    const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
+
+    // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
+    if (expectedInstance && finalTargetInstance !== expectedInstance) {
+       console.warn(`[Security Guard - Canned Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${expectedInstance}, Recebido: ${finalTargetInstance}. Forçando canal da conversa.`);
+    }
+
     // Injeção Mágica de Assinatura Síncrona na mídia para evitar atrasos na UI
     let finalCaption = caption?.trim() ? caption.trim() : '';
     
@@ -1437,7 +1517,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', finalTargetInstance).single();
       const apiKey = instDataDB?.api_key || '';
 
       let mimetype = 'application/octet-stream';
@@ -1450,7 +1530,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       console.log(`[sendMediaFromUrl] Disparando webhook para URL: ${mediaUrl}`);
 
-      const res = await fetch(`${API_URL}/api/v1/instances/${instanceName}/send-media-url`, {
+      const res = await fetch(`${API_URL}/api/v1/instances/${finalTargetInstance}/send-media-url`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1561,21 +1641,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (options?.isIgnored) msg.isIgnored = true;
     if (options?.isIgnoredSilent) msg.isIgnoredSilent = true;
 
+    // 1. Avalia se precisa acordar (Wake Up) a conversa antes do set
+    const currentState = get();
+    const targetContact = currentState.contacts.find(c => c.id === contactId);
+    let shouldWakeUp = false;
+
+    if (targetContact && msg.sender === 'client' && targetContact.conv_status !== 'open') {
+        shouldWakeUp = true;
+    }
+
+    // 2. Dispara a atualização no banco (se necessário) fora do escopo do set síncrono
+    if (shouldWakeUp) {
+        setTimeout(() => {
+           get().updateConversationField(contactId, { status: 'open', snoozed_until: null });
+        }, 100);
+    }
+
+    // 3. Executa a atualização de estado puramente síncrona
     set((state) => ({
       contacts: state.contacts.map((c) => {
         if (c.id === contactId) {
-          // Acorda (Wake Up) se for mensagem de cliente e o status for diferente de 'open'
           let updatedStatus = c.conv_status;
           let updatedSnooze = c.snoozed_until;
-          if (msg.sender === 'client' && c.conv_status !== 'open') {
+          if (shouldWakeUp) {
               updatedStatus = 'open';
-              if (c.conv_status === 'snoozed') {
-                  updatedSnooze = undefined; // trigger null cleanup
-              }
-              // Atualiza o DB assincronamente em background sem bloquear
-              setTimeout(() => {
-                 get().updateConversationField(contactId, { status: 'open', snoozed_until: null });
-              }, 100);
+              updatedSnooze = undefined;
           }
 
           // Previne duplicados por ID do DB ou whatsapp_id
@@ -1634,7 +1724,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // VALIDAÇÃO INTELIGENTE APPWEB (Realtime Barreira)
     if (contact.whatsapp_jid && contact.whatsapp_jid.includes('@lid')) return;
-    if (contact.phone && contact.phone.length > 15 && !contact.phone.includes('+')) return;
+    const isGroup = contact.whatsapp_jid?.endsWith('@g.us');
+    if (contact.phone && contact.phone.length > 15 && !contact.phone.includes('+') && !isGroup) return;
 
     // BARREIRA DE INSTÂNCIA: Impede contatos vazando entre caixas via realtime
     const currentActiveFilter = get().activeChannelFilter;
@@ -1656,8 +1747,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
          c.id === compositeId ||
          c.id === contact.id ||
          (((c.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) || 
-         (c.phone && c.phone === contactPhoneMatch)) && c.instance_id === (contact.instance_id || null))
+         (c.phone && c.phone === contactPhoneMatch)) && 
+         (c.instance_id === contact.instance_id || (!c.instance_id && !contact.instance_id)))
       );
+
+      let newContacts = [...state.contacts];
 
       if (targetIndex !== -1) {
         // Encontrou existente! Vamos preservar o ID real do banco caso um deles seja temporário
@@ -1685,9 +1779,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           avatar: (contact as any).profile_picture_url || (contact as any).avatar || existing.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contactPhoneMatch || 'U')}&background=random&color=fff`,
         };
 
-        const newContacts = [...state.contacts];
         newContacts[targetIndex] = updatedContact;
-        return { contacts: newContacts };
       } else {
         // Contato novinho folha
         const tname = get().tenantInfo?.name || '';
@@ -1705,8 +1797,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // usa lastMsgTimestamp para a sidebar saber quem eh primeiro
           lastMsgTimestamp: new Date(contact.created_at || Date.now()).getTime()
         };
-        return { contacts: [...state.contacts, newContact] };
+        newContacts.push(newContact);
       }
+
+      // DEDUPLICAÇÃO RÍGIDA DE SEGURANÇA: Garante que NUNCA existam dois contatos com o mesmo ID
+      const seen = new Set();
+      const deduped: any[] = [];
+      
+      newContacts.forEach(c => {
+         const key = c.id;
+         if (!seen.has(key)) {
+            seen.add(key);
+            deduped.push(c);
+         } else {
+            console.warn(`[upsertContactLocally] Removendo duplicata rígida de contato detectada no state:`, c.id);
+         }
+      });
+
+      return { contacts: deduped };
     });
   },
 
@@ -1774,7 +1882,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const instId = getInstanceIdFromContact(contactId);
         let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenantInfo.id);
         if (instId && instId !== 'default') query = query.eq('instance_id', instId);
-        const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
+        const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
 
         if (!conv) {
             console.warn('Conversa não encontrada para resolver o ticket.');
@@ -1809,9 +1917,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // 2. Remove o assignment direto na tabela certa (conversations)
         await supabase.from('conversations').update({ assigned_to: null, status: 'resolved' }).eq('id', conv.id);
 
-        // 3. Atualização local do estado para sumir da lista
+        // 3. Atualização local do estado para sumir da lista e fechar o chat ativo
         set((state) => ({
-            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, assigned_to: null, conv_status: 'resolved' } : c)
+            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, assigned_to: null, conv_status: 'resolved' } : c),
+            activeChatId: state.activeChatId === contactId ? null : state.activeChatId
         }));
 
     } catch (e) {
@@ -1923,7 +2032,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const instId = getInstanceIdFromContact(contactId);
         let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
         if (instId && instId !== 'default') query = query.eq('instance_id', instId);
-        const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
+        const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
         if(conv) {
           await supabase.from('conversations').update({ is_favorite: newStatus }).eq('id', conv.id);
         }
@@ -2088,7 +2197,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const instId = getInstanceIdFromContact(contactId);
       let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
       if (instId && instId !== 'default') query = query.eq('instance_id', instId);
-      const { data: convRecord } = await query.single();
+      const { data: convRecord } = await query.maybeSingle();
       if (!convRecord) return;
 
       const { error } = await supabase.from('conversation_labels').insert({
@@ -2110,7 +2219,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const instId = getInstanceIdFromContact(contactId);
       let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
       if (instId && instId !== 'default') query = query.eq('instance_id', instId);
-      const { data: convRecord } = await query.single();
+      const { data: convRecord } = await query.maybeSingle();
       if (!convRecord) return;
 
       const { error } = await supabase.from('conversation_labels').delete()
@@ -2177,7 +2286,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const jid = c.whatsapp_jid || '';
             const phone = c.phone || '';
             if (jid.includes('@lid')) return false;
-            if (phone.length > 15 && !phone.includes('+')) return false;
+            const isGroup = jid.endsWith('@g.us');
+            if (phone.length > 15 && !phone.includes('+') && !isGroup) return false;
             return true;
         });
 
@@ -2204,6 +2314,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 is_favorite: conv?.is_favorite || false,
                 conv_status: conv?.status || 'pending',
                 snoozed_until: conv?.snoozed_until,
+                snoozed_at: conv?.snoozed_at,
+                snoozed_by: conv?.snoozed_by,
                 priority: conv?.priority,
                 assigned_to: conv?.assigned_to,
                 conv_labels: conv?.conversation_labels || [],
@@ -2239,77 +2351,90 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!tenant) return;
 
     try {
-       // Buscar Automacoes
-       await get().fetchAutomations();
-       // Buscar Labels
-       await get().fetchTenantLabels();
-       // Buscar Quick Replies
-       await get().fetchQuickReplies();
+        // Disparar buscas auxiliares de forma concorrente em background
+        const supportPromises = Promise.all([
+          get().fetchAutomations(),
+          get().fetchTenantLabels(),
+          get().fetchQuickReplies(),
+          (async () => {
+            try {
+              const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+              if (email) {
+                const { data: userData } = await supabase.from('tenant_users')
+                  .select('settings')
+                  .eq('email', email)
+                  .eq('tenant_id', tenant.id)
+                  .maybeSingle();
+                  
+                if (userData && userData.settings) {
+                  set({ userSettings: userData.settings });
+                }
+              }
+            } catch (err) {
+              console.warn('Erro ao carregar settings do usuario:', err);
+            }
+          })(),
+          (async () => {
+            try {
+              const { data: appVersionData } = await supabase.from('app_version').select('*').order('deploy_date', { ascending: false }).limit(1).maybeSingle();
+              if (appVersionData) {
+                set({ appVersion: { version: appVersionData.version, deploy_date: appVersionData.deploy_date } });
+              }
+            } catch (err) {
+              console.warn('Erro ao carregar versao do app:', err);
+            }
+          })()
+        ]);
 
-       // Buscar settings do usuário logado
-       try {
-         const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-         if (email && tenant) {
-           const { data: userData } = await supabase.from('tenant_users')
-             .select('settings')
-             .eq('email', email)
-             .eq('tenant_id', tenant.id)
-             .maybeSingle();
-             
-           if (userData && userData.settings) {
-             set({ userSettings: userData.settings });
-             // Removida a restauracao forçada do filterType para evitar race condition
-           }
-         }
-       } catch (err) {
-          console.warn('Erro ao carregar settings do usuario:', err);
-       }
+        // 1. Puxa as conversas recentes, garantindo a mesma ordem do WhatsApp Web
+        let convQuery = supabase.from('conversations')
+           .select('*, conversation_labels(tenant_labels(*))')
+           .eq('tenant_id', tenant.id);
+           
+        const activeChannel = get().activeChannelFilter;
+        if (activeChannel) {
+           convQuery = convQuery.or(`instance_id.eq.${activeChannel},unread_count.gt.0`);
+        }
 
-       // Opcional: Buscar versão atual do app a partir do banco (tabela app_version)
-       const { data: appVersionData } = await supabase.from('app_version').select('*').order('deploy_date', { ascending: false }).limit(1).maybeSingle();
-       if (appVersionData) {
-         set({ appVersion: { version: appVersionData.version, deploy_date: appVersionData.deploy_date } });
-       }
+        // Otimizado: Limite de 300 conversas para carregamento inicial instantâneo
+        const { data: dbConvs } = await convQuery
+           .order('is_pinned', { ascending: false })
+           .order('last_message_at', { ascending: false, nullsFirst: false })
+           .limit(300);
+           
+        if (!dbConvs || dbConvs.length === 0) {
+           await supportPromises;
+           return;
+        }
 
-       // Fetch labels
-       await get().fetchTenantLabels();
+        const contactIds = dbConvs.map(cv => cv.contact_id);
 
-       // 1. Puxa as conversas recentes, garantindo a mesma ordem do WhatsApp Web
-       let convQuery = supabase.from('conversations')
-          .select('*, conversation_labels(tenant_labels(*))')
-          .eq('tenant_id', tenant.id);
-          
-       const activeChannel = get().activeChannelFilter;
-       if (activeChannel) {
-          convQuery = convQuery.or(`instance_id.eq.${activeChannel},unread_count.gt.0`);
-       }
+        // 2. Puxa os contatos em Lotes (Chunks) PARALELIZADOS com Promise.all para máxima performance
+        const chunkSize = 150;
+        const chunkPromises = [];
+        for (let i = 0; i < contactIds.length; i += chunkSize) {
+            const chunk = contactIds.slice(i, i + chunkSize);
+            chunkPromises.push(
+                supabase.from('contacts')
+                    .select('*')
+                    .eq('tenant_id', tenant.id)
+                    .in('id', chunk)
+            );
+        }
 
-       const { data: dbConvs } = await convQuery
-          .order('is_pinned', { ascending: false })
-          .order('last_message_at', { ascending: false, nullsFirst: false })
-          .limit(800);
-          
-       if (!dbConvs || dbConvs.length === 0) return;
+        const chunkResults = await Promise.all(chunkPromises);
+        let dbContacts: any[] = [];
+        for (const res of chunkResults) {
+            if (res.data) {
+                dbContacts = dbContacts.concat(res.data);
+            }
+            if (res.error) {
+               console.warn('Erro ao buscar dbContacts chunk', res.error);
+            }
+        }
 
-       const contactIds = dbConvs.map(cv => cv.contact_id);
-
-       // 2. Puxa os contatos em Lotes (Chunks) para evitar erro HTTP 400 URI Too Long na API Supabase
-       const chunkSize = 150;
-       let dbContacts: any[] = [];
-       for (let i = 0; i < contactIds.length; i += chunkSize) {
-           const chunk = contactIds.slice(i, i + chunkSize);
-           const { data: chunkData, error } = await supabase.from('contacts')
-               .select('*')
-               .eq('tenant_id', tenant.id)
-               .in('id', chunk);
-               
-           if (chunkData) {
-               dbContacts = dbContacts.concat(chunkData);
-           }
-           if (error) {
-              console.warn('Erro ao buscar dbContacts chunk', error);
-           }
-       }
+        // Aguarda a conclusão das buscas auxiliares de apoio
+        await supportPromises;
 
        if (dbContacts && dbContacts.length > 0) {
            // RBAC: Se for agente, só carrega contatos de instâncias permitidas
@@ -2325,7 +2450,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                const jid = c.whatsapp_jid || '';
                const phone = c.phone || '';
                if (jid.includes('@lid')) return false; // Bloqueia LIDs
-               if (phone.length > 15 && !phone.includes('+')) return false; // Provável ID mascarado
+               const isGroup = jid.endsWith('@g.us');
+               if (phone.length > 15 && !phone.includes('+') && !isGroup) return false; // Provável ID mascarado
                return true;
            });
 
@@ -2408,6 +2534,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         messages: existing.messages || [],
                         conv_status: conv.status,
                         snoozed_until: conv.snoozed_until,
+                        snoozed_at: conv.snoozed_at,
+                        snoozed_by: conv.snoozed_by,
                         priority: conv.priority,
                         assigned_to: conv.assigned_to,
                         conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.tenant_labels).filter(Boolean) : [],
@@ -2443,6 +2571,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         timestamp: ts,
                         conv_status: conv.status,
                         snoozed_until: conv.snoozed_until,
+                        snoozed_at: conv.snoozed_at,
+                        snoozed_by: conv.snoozed_by,
                         priority: conv.priority,
                         assigned_to: conv.assigned_to,
                         instance_id: conv.instance_id || dbC.instance_id || null,
@@ -2966,13 +3096,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const tenant = get().tenantInfo;
     if (!tenant) return;
     
-    // UI Otimista
+    // UI Otimista (Separa flags internas que não pertencem ao schema de conversations)
+    const { snoozed_by_system, ...dbPayload } = payload as any;
+
     set((state) => ({
        contacts: state.contacts.map((c) => {
          if (c.id === contactId) {
             const stateUpdates: any = {};
             if ('status' in payload) stateUpdates.conv_status = payload.status;
             if ('snoozed_until' in payload) stateUpdates.snoozed_until = payload.snoozed_until;
+            if ('snoozed_at' in payload) stateUpdates.snoozed_at = payload.snoozed_at;
+            if ('snoozed_by' in payload) stateUpdates.snoozed_by = payload.snoozed_by;
             if ('priority' in payload) stateUpdates.priority = payload.priority;
             if ('assigned_to' in payload) stateUpdates.assigned_to = payload.assigned_to;
             return { ...c, ...stateUpdates };
@@ -2989,9 +3123,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
       if (!conv) return;
 
-      const { error } = await supabase.from('conversations').update(payload).eq('id', conv.id);
+      const { error } = await supabase.from('conversations').update(dbPayload).eq('id', conv.id);
       if (error) throw error;
 
+      // 1. Identificar se foi uma reabertura de atendimento reagendado/adiado (snoozed -> open)
+      const currentContacts = get().contacts;
+      const contact = currentContacts.find(c => c.id === contactId);
+
+      if (contact && contact.conv_status === 'snoozed' && payload.status === 'open') {
+         const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+         const me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
+         const operatorName = me?.full_name || me?.email || 'Sistema';
+
+         const formatDateSystem = (dateInput: any) => {
+           if (!dateInput) return 'Data Indisponível';
+           const d = new Date(dateInput);
+           return d.toLocaleString('pt-BR', {
+             day: '2-digit',
+             month: '2-digit',
+             year: 'numeric',
+             hour: '2-digit',
+             minute: '2-digit'
+           });
+         };
+
+         const dateSnoozeStr = formatDateSystem(contact.snoozed_at || contact.created_at);
+         const dateReopenStr = formatDateSystem(new Date());
+         const rebuilderName = snoozed_by_system ? 'Sistema (Prazo Expirado)' : operatorName;
+         
+         const msgText = `🔄 Esta conversa foi reagendada dia ${dateSnoozeStr} e reaberta hoje, ${dateReopenStr} por ${rebuilderName}`;
+
+         const dbMsg = {
+            conversation_id: conv.id,
+            tenant_id: tenant.id,
+            text_content: msgText,
+            sender_type: 'system',
+            direction: 'outgoing',
+            timestamp: new Date().toISOString(),
+            status: 'sent',
+            instance_id: instId && instId !== 'default' ? instId : null
+         };
+         
+         await supabase.from('messages').insert(dbMsg);
+         
+         const pseudoId = 'system-reopen-' + Date.now();
+         get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
+      }
+
+      // 2. Identificar se foi uma atribuição de agente
       if ('assigned_to' in payload && payload.assigned_to) {
           let agentName = 'Agente';
           const agent = get().agents.find(a => a.id === payload.assigned_to);
@@ -3009,16 +3188,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
              instance_id: instId && instId !== 'default' ? instId : null
           };
           
-          // Inserir silenciosamente (sem throw, erro de log não quebra update)
           await supabase.from('messages').insert(dbMsg);
           
-          // Refletir na UI
           const pseudoId = 'system-assign-' + Date.now();
           get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
       }
     } catch (e) {
       console.error('Erro ao atualizar campo da conversa:', e);
-      // Aqui no mundo real adicionariamos reversão otimista
     }
   },
 
@@ -3304,34 +3480,55 @@ export const useChatStore = create<ChatState>((set, get) => ({
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
          const conv = payload.new as any;
          console.log('[Realtime] Conversation UPDATE:', conv);
+         
+         // 1. Coleta e avalia o status antes do update, fora do set, para decidir se deve disparar o toast
+         const currentContacts = get().contacts;
+         let shouldToast = false;
+         let toastType: 'reopen' | 'snooze' | null = null;
+         let contactName = '';
+
+         for (const c of currentContacts) {
+            const realId = getRealContactId(c.id);
+            if (realId === conv.contact_id) {
+               contactName = c.custom_name || c.name || c.phone;
+               if ((c.conv_status === 'resolved' || c.conv_status === 'closed') && conv.status === 'open') {
+                  shouldToast = true;
+                  toastType = 'reopen';
+                  break; // Achou o contato correspondente
+               } else if (c.conv_status === 'snoozed' && conv.status === 'open') {
+                  shouldToast = true;
+                  toastType = 'snooze';
+                  break;
+               }
+            }
+         }
+
+         // 2. Dispara o toast e o log de auditoria de reabertura (fora do set síncrono da store)
+         if (shouldToast && contactName && toastType) {
+            const nameToUse = contactName;
+            const typeToUse = toastType;
+            
+            // Disparar o Toast informativo do cabeçalho
+            setTimeout(() => {
+               get().setReopenedTicketToast({ 
+                  contactName: nameToUse, 
+                  ...(typeToUse === 'snooze' && { reason: 'snooze' }) 
+               });
+               // Fecha o toast automaticamente após 4 segundos
+               setTimeout(() => {
+                  get().setReopenedTicketToast(null);
+               }, 4000);
+            }, 100);
+
+            // PERSISTÊNCIA DO LOG DE AUDITORIA DE REABERTURA AUTOMÁTICA - REMOVIDO A PEDIDO DO USUÁRIO PARA EVITAR POLUIÇÃO NO CHAT
+            console.log('[Realtime] Conversa reaberta automaticamente, omitindo geração de mensagem de sistema a pedido do usuário.');
+         }
+
+         // 3. Agora atualiza o estado síncrono dos contatos sem disparar efeitos colaterais
          set((s: any) => {
-            let foundContactName = '';
             const updatedContacts = s.contacts.map((c: any) => {
                const realId = getRealContactId(c.id);
                if (realId === conv.contact_id) {
-                  foundContactName = c.custom_name || c.name || c.phone;
-                  
-                  // Se o status anterior era resolved ou closed e mudou para open
-                  if ((c.conv_status === 'resolved' || c.conv_status === 'closed') && conv.status === 'open') {
-                     // Dispara o toast informando a reabertura!
-                     setTimeout(() => {
-                        get().setReopenedTicketToast({ contactName: foundContactName });
-                        // Fecha o toast automaticamente após 4 segundos
-                        setTimeout(() => {
-                           get().setReopenedTicketToast(null);
-                        }, 4000);
-                     }, 100);
-                  } else if (c.conv_status === 'snoozed' && conv.status === 'open') {
-                     // Dispara o toast informando a reabertura de snooze!
-                     setTimeout(() => {
-                        get().setReopenedTicketToast({ contactName: foundContactName, reason: 'snooze' });
-                        // Fecha o toast automaticamente após 4 segundos
-                        setTimeout(() => {
-                           get().setReopenedTicketToast(null);
-                        }, 4000);
-                     }, 100);
-                  }
-                  
                   return {
                      ...c,
                      conv_status: conv.status,
@@ -3340,6 +3537,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      is_pinned: conv.is_pinned,
                      is_favorite: conv.is_favorite,
                      snoozed_until: conv.snoozed_until,
+                     snoozed_at: conv.snoozed_at,
+                     snoozed_by: conv.snoozed_by,
                      instance_id: conv.instance_id || c.instance_id
                   };
                }

@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
+import { useDevStore } from "../store/devStore";
 
 interface Props {
   children?: ReactNode;
@@ -24,6 +25,22 @@ export class ErrorBoundary extends Component<Props, State> {
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Uncaught error:", error, errorInfo);
     this.setState({ error, errorInfo });
+
+    try {
+      useDevStore.getState().addLog({
+        type: 'error',
+        message: `Erro de Renderização: ${error.message || String(error)}`,
+        source: 'React ErrorBoundary',
+        details: {
+          errorName: error.name,
+          errorMessage: error.message,
+          errorStack: error.stack,
+          componentStack: errorInfo.componentStack
+        }
+      });
+    } catch (err) {
+      console.warn("Erro ao registrar log no devStore a partir do ErrorBoundary:", err);
+    }
   }
 
   public render() {

@@ -397,6 +397,16 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
                 await new Promise((resolve, reject) => {
                     ffmpeg(tempInput)
                         .audioCodec('libopus')
+                        .audioChannels(1)
+                        .audioFrequency(16000)
+                        .outputOptions([
+                            '-avoid_negative_ts make_zero',
+                            '-map_metadata -1',
+                            '-b:a 24k',
+                            '-vbr on',
+                            '-compression_level 10',
+                            '-application voip'
+                        ])
                         .format('ogg')
                         .on('end', resolve)
                         .on('error', reject)

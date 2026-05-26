@@ -1269,6 +1269,16 @@ export default function EvolutionModal({
 
                                           if (existingContact) {
                                             contactData = existingContact;
+                                            // Garante que o contato aponte para a instância ativa em que o grupo foi habilitado
+                                            if (existingContact.instance_id !== targetInstObj.id) {
+                                              const { data: updatedContact } = await supabase
+                                                .from("contacts")
+                                                .update({ instance_id: targetInstObj.id })
+                                                .eq("id", existingContact.id)
+                                                .select()
+                                                .maybeSingle();
+                                              if (updatedContact) contactData = updatedContact;
+                                            }
                                           } else {
                                             const { data: newContact } = await supabase
                                               .from("contacts")
@@ -1277,6 +1287,7 @@ export default function EvolutionModal({
                                                 name: groupSubject,
                                                 phone: num,
                                                 whatsapp_jid: selectedGroup.id,
+                                                instance_id: targetInstObj.id,
                                                 profile_picture_url: groupMetadata?.pictureUrl || ""
                                               })
                                               .select()
@@ -1288,7 +1299,7 @@ export default function EvolutionModal({
                                           if (contactData) {
                                             const { data: existingConv } = await supabase
                                               .from("conversations")
-                                              .select("id")
+                                              .select("id, instance_id")
                                               .eq("contact_id", contactData.id)
                                               .eq("tenant_id", cId)
                                               .maybeSingle();
@@ -1301,6 +1312,12 @@ export default function EvolutionModal({
                                                 status: "open",
                                                 unread_count: 0
                                               });
+                                            } else if (existingConv.instance_id !== targetInstObj.id) {
+                                              // Atualiza a conversa para apontar para a instância ativa onde o grupo foi habilitado
+                                              await supabase
+                                                .from("conversations")
+                                                .update({ instance_id: targetInstObj.id, status: "open" })
+                                                .eq("id", existingConv.id);
                                             }
                                             
                                             // Atualizar estado global para a conversa aparecer na lista na hora

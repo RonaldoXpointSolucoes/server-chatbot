@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
-import { Plus, Search, Edit2, Trash2, MessageSquareText, Zap, ChevronLeft, Save, Building, Paperclip, Image as ImageIcon, Video, X, Loader2, Copy, Mic, Square } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, MessageSquareText, Zap, ChevronLeft, Save, Building, Paperclip, Image as ImageIcon, Video, X, Loader2, Copy, Mic, Square, Wand2, CheckCircle2, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import { uploadResumableFile } from '../services/tusUploader';
+import { geminiService } from '../services/geminiService';
+
+const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
 const ExpandableText = ({ content }: { content: string }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -46,6 +49,18 @@ export function CannedResponses() {
   const [uploadProgress, setUploadProgress] = useState<string>('');
   const [previewMedia, setPreviewMedia] = useState<{ url: string, type: 'video' | 'image' | 'audio' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Estados locais adicionais para o Assistente I.A. & RAG pgvector
+  const [ragDocuments, setRagDocuments] = useState<any[]>([]);
+  const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [aiGeneratedResult, setAiGeneratedResult] = useState<{ text: string, shortcut: string } | null>(null);
+
+  // Novos estados locais premium de I.A. & RAG
+  const [selectedRagDocIds, setSelectedRagDocIds] = useState<string[]>([]);
+  const [aiTone, setAiTone] = useState<string>('professional');
+  const [ragMatches, setRagMatches] = useState<any[]>([]);
 
   // Audio Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -112,6 +127,96 @@ export function CannedResponses() {
   useEffect(() => {
     fetchQuickReplies();
   }, [fetchQuickReplies]);
+
+  // Efeito para carregar as bases de conhecimento RAG vetorizadas ativas no Supabase
+  useEffect(() => {
+    const fetchRagDocs = async () => {
+      try {
+        const tId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+        const { data } = await supabase
+          .from('knowledge_documents')
+          .select('id, name, status')
+          .eq('tenant_id', tId);
+        setRagDocuments(data || []);
+      } catch (err) {
+        console.warn("Erro ao buscar documentos RAG:", err);
+      }
+    };
+    if (isModalOpen) {
+      fetchRagDocs();
+    }
+  }, [isModalOpen, tenantInfo]);
+
+  // Função para pesquisar similaridade semântica e redigir resposta pronta via Gemini
+  const handleGenerateWithAi = async () => {
+    if (!aiPrompt.trim()) return;
+    setIsGenerating(true);
+    setAiGeneratedResult(null);
+    setRagMatches([]);
+
+    let ragContext = '';
+    
+    try {
+      const tId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+      
+      // 1. Pesquisa similaridade semântica no banco pgvector se houver documentos cadastrados
+      if (ragDocuments.length > 0) {
+         try {
+           const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/match`, {
+               method: 'POST',
+               headers: {
+                   'x-tenant-id': tId,
+                   'Content-Type': 'application/json'
+               },
+               body: JSON.stringify({ 
+                 query: aiPrompt,
+                 documentIds: selectedRagDocIds.length > 0 ? selectedRagDocIds : undefined
+               })
+           });
+           
+           if (response.ok) {
+              const data = await response.json();
+              if (data.matches && data.matches.length > 0) {
+                 // Filtrar os matches do RAG de acordo com os IDs selecionados (garantia frontend)
+                 let matches = data.matches;
+                 if (selectedRagDocIds.length > 0) {
+                   matches = matches.filter((m: any) => selectedRagDocIds.includes(m.documentId || m.document_id));
+                 }
+                 
+                 setRagMatches(matches);
+
+                 if (matches.length > 0) {
+                   ragContext = matches
+                      .slice(0, 4)
+                      .map((r: any) => `[Arquivo: ${r.docName || r.documentName || 'Base RAG'}] ...${r.content}...`)
+                      .join('\n\n');
+                 }
+              }
+           }
+         } catch (err) {
+           console.warn("Falha ao buscar similaridade semântica RAG (servidor offline):", err);
+         }
+      }
+
+      // 2. Chama o Gemini passando o Prompt, o Contexto RAG filtrado e o Tom de escrita
+      const result = await geminiService.generateCannedResponse(aiPrompt, ragContext, aiTone);
+      setAiGeneratedResult(result);
+    } catch (err: any) {
+      alert(`Falha ao gerar resposta pronta com I.A.: ${err.message || 'Tente novamente.'}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // Função para aplicar os dados sugeridos pela I.A. no formulário nativo do modal
+  const handleApplyAiResult = () => {
+    if (!aiGeneratedResult) return;
+    setShortcut(aiGeneratedResult.shortcut);
+    setContent(aiGeneratedResult.text);
+    setIsAiDrawerOpen(false);
+    setAiPrompt('');
+    setAiGeneratedResult(null);
+  };
 
   const filteredReplies = quickReplies?.filter(reply => 
     reply.shortcut.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -206,6 +311,12 @@ export function CannedResponses() {
     setMediaUrl(undefined);
     setMediaType(undefined);
     setUploadProgress('');
+    setIsAiDrawerOpen(false);
+    setAiPrompt('');
+    setAiGeneratedResult(null);
+    setSelectedRagDocIds([]);
+    setAiTone('professional');
+    setRagMatches([]);
   };
 
   const openNewModal = () => {
@@ -382,7 +493,17 @@ export function CannedResponses() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-[#d1d7db] mb-1">Conteúdo da Mensagem</label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-[#d1d7db]">Conteúdo da Mensagem</label>
+                  <button
+                    type="button"
+                    onClick={() => setIsAiDrawerOpen(!isAiDrawerOpen)}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-md shadow-indigo-500/10 transition-all hover:scale-[1.03] active:scale-[0.98] duration-200 group relative overflow-hidden"
+                  >
+                    <Sparkles size={11} className="text-white animate-pulse" />
+                    <span>I.A. Assistente RAG</span>
+                  </button>
+                </div>
                 <textarea
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
@@ -391,6 +512,200 @@ export function CannedResponses() {
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-white/10 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all resize-none bg-white dark:bg-[#202C33] text-gray-900 dark:text-[#e9edef] placeholder-gray-400 dark:placeholder-[#8696a0]"
                 />
               </div>
+
+              {/* Interface Premium de I.A. & RAG (Gaveta Expansível) */}
+              {isAiDrawerOpen && (
+                <div className="p-5 bg-gradient-to-br from-blue-500/10 via-indigo-500/5 to-purple-500/5 border border-blue-500/20 dark:border-blue-500/35 rounded-3xl animate-in slide-in-from-top-4 fade-in duration-300 relative overflow-hidden backdrop-blur-md shadow-lg dark:shadow-black/40">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                  <div className="absolute -bottom-6 -left-6 w-24 h-24 bg-purple-500/10 rounded-full blur-xl pointer-events-none"></div>
+                  
+                  {/* Status do RAG */}
+                  <div className="flex items-center justify-between mb-4 pb-2.5 border-b border-gray-200/50 dark:border-white/5">
+                     <span className="text-[11px] uppercase tracking-wider font-extrabold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+                       <Sparkles size={13} className="animate-pulse text-indigo-500" /> Redigir com I.A.
+                     </span>
+                     {ragDocuments.length > 0 ? (
+                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-extrabold border border-emerald-500/20 shadow-sm animate-pulse" title="Sua base de conhecimento pgvector está ativa">
+                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                         RAG Conectado ({ragDocuments.length} bases)
+                       </span>
+                     ) : (
+                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] font-extrabold border border-amber-500/20 shadow-sm" title="Nenhuma base de conhecimento cadastrada. A I.A. usará conhecimento global.">
+                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                         Gemini Global Ativo
+                       </span>
+                     )}
+                  </div>
+
+                  {/* 1. Seleção Inteligente de Bases de RAG */}
+                  {ragDocuments.length > 0 && (
+                    <div className="mb-4">
+                      <label className="text-[10px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wide flex items-center gap-1 mb-2">
+                        <Building className="w-3.5 h-3.5 text-blue-500" />
+                        <span>Focar em Bases de Conhecimento específicas</span>
+                      </label>
+                      <div className="flex flex-wrap gap-1.5 max-h-[100px] overflow-y-auto pr-1">
+                        {ragDocuments.map(doc => {
+                          const isSelected = selectedRagDocIds.includes(doc.id);
+                          return (
+                            <button
+                              key={doc.id}
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setSelectedRagDocIds(selectedRagDocIds.filter(id => id !== doc.id));
+                                } else {
+                                  setSelectedRagDocIds([...selectedRagDocIds, doc.id]);
+                                }
+                              }}
+                              className={`inline-flex items-center gap-1 px-3 py-1 rounded-xl text-[11px] font-semibold border backdrop-blur-md active:scale-95 transition-all duration-300 ${
+                                isSelected 
+                                  ? 'bg-blue-600 border-blue-500 text-white shadow-md shadow-blue-500/20' 
+                                  : 'bg-white/40 dark:bg-white/5 border-gray-200/50 dark:border-white/10 text-gray-600 dark:text-[#d1d7db] hover:bg-white/80 dark:hover:bg-white/10'
+                              }`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-blue-500/70 animate-pulse'}`}></span>
+                              <span className="truncate max-w-[125px]">{doc.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 2. Seleção Premium de Tom de Voz */}
+                  <div className="mb-4">
+                    <label className="text-[10px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wide flex items-center gap-1 mb-2">
+                      <Wand2 className="w-3.5 h-3.5 text-purple-500" />
+                      <span>Estilo / Tom de Voz da Resposta</span>
+                    </label>
+                    <div className="grid grid-cols-5 gap-1 bg-gray-100/50 dark:bg-black/30 p-1 rounded-2xl border border-gray-200/40 dark:border-white/5 backdrop-blur-md">
+                      {[
+                        { id: 'professional', label: 'Polido', icon: '👔' },
+                        { id: 'friendly', label: 'Amigável', icon: '😊' },
+                        { id: 'persuasive', label: 'Vendas', icon: '🚀' },
+                        { id: 'technical', label: 'Técnico', icon: '🔧' },
+                        { id: 'direct', label: 'Direto', icon: '⚡' }
+                      ].map(t => {
+                        const isSelected = aiTone === t.id;
+                        return (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => setAiTone(t.id)}
+                            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[10px] font-extrabold transition-all duration-300 active:scale-95 ${
+                              isSelected 
+                                ? 'bg-white dark:bg-[#202C33] text-blue-600 dark:text-blue-400 shadow-md border border-gray-200/20 scale-[1.03]' 
+                                : 'text-gray-500 dark:text-[#8696a0] hover:text-gray-700 dark:hover:text-[#d1d7db]'
+                            }`}
+                          >
+                            <span className="text-xs mb-0.5">{t.icon}</span>
+                            <span>{t.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Input do Prompt */}
+                  <div className="flex flex-col gap-1.5">
+                     <label className="text-[10px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wide flex items-center gap-1">O que a I.A. deve responder?</label>
+                     <div className="flex gap-2">
+                       <input 
+                         type="text"
+                         value={aiPrompt}
+                         onChange={(e) => setAiPrompt(e.target.value)}
+                         onKeyDown={(e) => e.key === 'Enter' && handleGenerateWithAi()}
+                         placeholder="Ex: Explique as regras de troca e frete grátis..."
+                         className="flex-1 px-4 py-2.5 text-xs rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#202C33] text-gray-900 dark:text-[#e9edef] focus:outline-none focus:ring-2 focus:ring-blue-500/50 placeholder-gray-400 dark:placeholder-[#8696a0]"
+                       />
+                       <button
+                         type="button"
+                         disabled={isGenerating || !aiPrompt.trim()}
+                         onClick={handleGenerateWithAi}
+                         className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl px-4 py-2.5 text-xs font-bold transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5"
+                       >
+                         {isGenerating ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+                         <span>Gerar</span>
+                       </button>
+                     </div>
+                  </div>
+
+                  {/* 3. Painel de Matches do pgvector */}
+                  {ragMatches.length > 0 && (
+                    <div className="mt-4 p-3 bg-white/40 dark:bg-black/20 border border-blue-500/10 rounded-2xl animate-in slide-in-from-top-3 duration-300">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-[10px] font-extrabold text-blue-600 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <Sparkles size={11} className="text-amber-500 animate-pulse" />
+                          <span>Trechos Semânticos Extraídos (RAG)</span>
+                        </label>
+                        <span className="text-[9px] font-bold bg-blue-500/10 text-blue-500 dark:text-blue-400 px-2 py-0.5 rounded-full">
+                          {ragMatches.length} fragmentos encontrados
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-2 max-h-[140px] overflow-y-auto pr-1">
+                        {ragMatches.map((match, idx) => {
+                          const similarityPct = match.similarity ? Math.round(match.similarity * 100) : 90;
+                          return (
+                            <div key={idx} className="p-2.5 bg-white/70 dark:bg-white/5 border border-gray-200/50 dark:border-white/5 rounded-xl text-[11px] relative overflow-hidden group shadow-sm hover:shadow-md transition-all">
+                              <div className="absolute top-0 right-0 h-full w-1 bg-gradient-to-b from-blue-500 to-indigo-500"></div>
+                              
+                              <div className="flex justify-between items-center mb-1">
+                                <span className="font-bold text-gray-800 dark:text-[#e9edef] truncate max-w-[200px]" title={match.docName || match.documentName || 'Documento RAG'}>
+                                  📄 {match.docName || match.documentName || 'Documento RAG'}
+                                </span>
+                                <span className="text-[9px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                                  Relevância: {similarityPct}%
+                                </span>
+                              </div>
+                              
+                              <p className="text-gray-600 dark:text-[#8696a0] italic line-clamp-2 leading-relaxed">
+                                "{match.content}"
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Preview do Resultado Gerado */}
+                  {aiGeneratedResult && (
+                     <div className="mt-4 p-4 bg-white/80 dark:bg-[#111B21] border border-blue-500/10 dark:border-white/5 rounded-2xl animate-in zoom-in-95 duration-200 relative shadow-sm">
+                        <div className="flex justify-between items-center mb-2.5 pb-2 border-b border-gray-100 dark:border-white/5">
+                           <span className="text-[10px] uppercase font-extrabold text-gray-500 dark:text-[#8696a0] flex items-center gap-1.5">
+                             Sugestão de Atalho: 
+                             <span className="font-mono text-blue-600 dark:text-blue-400 font-bold bg-blue-500/5 dark:bg-blue-500/10 px-2 py-0.5 rounded-lg border border-blue-500/10">
+                               {aiGeneratedResult.shortcut}
+                             </span>
+                           </span>
+                        </div>
+                        <p className="text-[12px] text-gray-700 dark:text-[#d1d7db] whitespace-pre-wrap leading-relaxed max-h-[140px] overflow-y-auto pr-1 font-medium bg-gray-50/50 dark:bg-[#202C33]/50 p-3 rounded-xl border border-gray-100 dark:border-white/5">
+                           {aiGeneratedResult.text}
+                        </p>
+                        
+                        <div className="flex gap-2 mt-4 pt-2">
+                           <button
+                             type="button"
+                             onClick={handleApplyAiResult}
+                             className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white py-2.5 rounded-xl text-xs font-bold shadow-md shadow-emerald-500/10 transition-all flex items-center justify-center gap-1.5 hover:scale-[1.02] active:scale-95 duration-200"
+                           >
+                             <CheckCircle2 size={14} />
+                             <span>Aplicar no Formulário</span>
+                           </button>
+                           <button
+                             type="button"
+                             onClick={() => setAiGeneratedResult(null)}
+                             className="px-4 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 text-gray-600 dark:text-[#d1d7db] py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center active:scale-95"
+                           >
+                             <span>Descartar</span>
+                           </button>
+                        </div>
+                     </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-[#d1d7db] mb-1">Mídia Anexada (Opcional)</label>
