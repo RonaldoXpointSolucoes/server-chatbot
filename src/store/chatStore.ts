@@ -214,6 +214,8 @@ interface ChatState {
   clearStore: () => void;
   reopenedTicketToast: { contactName: string; reason?: string } | null;
   setReopenedTicketToast: (toast: { contactName: string; reason?: string } | null) => void;
+  historySyncError: { title: string; message: string; details?: string } | null;
+  setHistorySyncError: (error: { title: string; message: string; details?: string } | null) => void;
 }
 
 export interface QuickReply {
@@ -435,6 +437,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   lastBatchResolvedConversations: null,
   reopenedTicketToast: null,
   setReopenedTicketToast: (toast) => set({ reopenedTicketToast: toast }),
+  historySyncError: null,
+  setHistorySyncError: (error) => set({ historySyncError: error }),
 
   clearStore: () => {
     if (get().isSubscribed) {
@@ -452,6 +456,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       modalReason: null,
       isSubscribed: false,
       isSyncingHistory: {},
+      historySyncError: null,
       pictureFetchLocks: {},
       activeChannelFilter: null,
       activeChannelName: null,
@@ -2875,7 +2880,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
                             source: 'ChatStore',
                             details: result
                         });
-                        alert('Falha técnica ao solicitar histórico. Uma notificação detalhada foi salva no Antigravity Dev Logger.');
+                        
+                        let errorMessage = 'Falha técnica ao solicitar histórico. Verifique se o servidor está online.';
+                        let errorTitle = 'Falha na Sincronização';
+                        
+                        if (result?.error && (result.error.includes('Nenhuma mensagem inicial') || result.error.includes('anchor point') || result.error.includes('mensagem âncora'))) {
+                            errorTitle = 'Mensagem Âncora Necessária';
+                            errorMessage = 'Para buscar conversas anteriores com este contato na Meta/WhatsApp, é necessário ter pelo menos uma mensagem recente salva localmente como ponto de partida.\n\nEnvie uma mensagem ou aguarde o recebimento de uma primeira mensagem para habilitar o carregamento do histórico.';
+                        } else if (result?.error) {
+                            errorMessage = result.error;
+                        }
+
+                        set({
+                            historySyncError: {
+                                title: errorTitle,
+                                message: errorMessage,
+                                details: JSON.stringify(result)
+                            }
+                        });
                     } else {
                         // O gateway do Node despacha a History Sync que entra numa fila assíncrona.
                         // Vamos aguardar 5 segundos para que as mensagens cheguem e sejam atualizadas pelo Realtime (no on('postgres_changes')).

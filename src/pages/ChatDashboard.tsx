@@ -503,6 +503,8 @@ export default function ChatDashboard() {
     undoLastBatchResolve,
     reopenedTicketToast,
     setReopenedTicketToast,
+    historySyncError,
+    setHistorySyncError,
     realtimeStatus,
     tenantLabels,
     fetchTenantLabels
@@ -556,6 +558,8 @@ export default function ChatDashboard() {
     undoLastBatchResolve: state.undoLastBatchResolve,
     reopenedTicketToast: state.reopenedTicketToast,
     setReopenedTicketToast: state.setReopenedTicketToast,
+    historySyncError: state.historySyncError,
+    setHistorySyncError: state.setHistorySyncError,
     tenantLabels: state.tenantLabels,
     fetchTenantLabels: state.fetchTenantLabels
   })));
@@ -3869,6 +3873,34 @@ export default function ChatDashboard() {
                   className="flex-1 py-3 rounded-xl font-medium text-white bg-red-600 hover:bg-red-700 shadow-md hover:shadow-lg transition-all active:scale-95"
                 >
                   Apagar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Erro Premium para Sincronização de Histórico */}
+      {historySyncError && (
+        <div className="fixed inset-0 z-[99999] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-md w-full max-w-md rounded-[28px] shadow-2xl overflow-hidden border border-black/5 dark:border-white/10 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
+            <div className="p-6 bg-gradient-to-br from-amber-500/10 to-transparent dark:from-amber-500/5 flex flex-col items-center text-center">
+              <div className="w-16 h-16 rounded-3xl bg-amber-500/15 dark:bg-amber-500/10 flex items-center justify-center mb-4 border border-amber-500/20 shadow-inner animate-pulse">
+                <History size={32} className="text-amber-500" />
+              </div>
+              <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-2.5">
+                {historySyncError.title}
+              </h2>
+              <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed mb-6 whitespace-pre-line px-2">
+                {historySyncError.message}
+              </p>
+              
+              <div className="flex w-full gap-3">
+                <button
+                  onClick={() => setHistorySyncError(null)}
+                  className="flex-1 py-3.5 rounded-2xl font-semibold text-white bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-md hover:shadow-amber-500/25 transition-all hover:scale-[1.02] active:scale-95 duration-200"
+                >
+                  Entendi
                 </button>
               </div>
             </div>

@@ -36,7 +36,10 @@ export const sendNativeMessage = async (tenantId: string, instanceId: string, nu
   }
 
   if (!res.ok || resJson.ok === false) {
-     const errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
+     let errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
+     if (errorDetail && typeof errorDetail === 'object') {
+        errorDetail = errorDetail.message || errorDetail.error || JSON.stringify(errorDetail);
+     }
      throw new Error(`Falha ao injetar mensagem nativa: ${errorDetail}`);
   }
   
@@ -64,7 +67,10 @@ export const editNativeMessage = async (tenantId: string, instanceId: string, nu
   }
 
   if (!res.ok || resJson.ok === false) {
-     const errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
+     let errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
+     if (errorDetail && typeof errorDetail === 'object') {
+        errorDetail = errorDetail.message || errorDetail.error || JSON.stringify(errorDetail);
+     }
      throw new Error(`Falha ao editar mensagem nativa: ${errorDetail}`);
   }
   
@@ -90,7 +96,10 @@ export const deleteNativeMessage = async (tenantId: string, instanceId: string, 
   }
 
   if (!res.ok || resJson.ok === false) {
-     const errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
+     let errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
+     if (errorDetail && typeof errorDetail === 'object') {
+        errorDetail = errorDetail.message || errorDetail.error || JSON.stringify(errorDetail);
+     }
      throw new Error(`Falha ao apagar mensagem nativa: ${errorDetail}`);
   }
   

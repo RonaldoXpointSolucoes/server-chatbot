@@ -142,7 +142,8 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
         } catch (sockError) {
             // Se o Baileys disparar um erro (ex: not-authorized ao buscar avatar protegido)
             // Retornamos 200 com ok: false para não estourar 400/500 no DevLogger do frontend para erros esperados
-            return res.status(200).json({ ok: false, error: sockError.message || typeof sockError === 'string' ? sockError : 'Engine instruction failed' });
+            const errorMsg = sockError?.message || (typeof sockError === 'string' ? sockError : 'Engine instruction failed');
+            return res.status(200).json({ ok: false, error: errorMsg });
         }
     } catch(e) {
         res.status(500).json({ error: e.message });
