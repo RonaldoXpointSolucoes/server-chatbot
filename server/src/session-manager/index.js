@@ -192,7 +192,18 @@ class SessionManager {
     }
 
     getSocket(instanceId) {
-        return this.sessions.get(instanceId)?.sock;
+        const data = this.sessions.get(instanceId);
+        if (!data || !data.sock) return null;
+
+        const sock = data.sock;
+        // Valida se o WebSocket está saudável (não está CLOSING nem CLOSED)
+        if (sock.ws && (sock.ws.readyState === 2 || sock.ws.readyState === 3)) {
+            console.warn(`[SessionManager] Detectado socket zumbi para ${instanceId} com WebSocket fechado/fechando (readyState: ${sock.ws.readyState}). Descartando.`);
+            this.sessions.delete(instanceId);
+            return null;
+        }
+
+        return sock;
     }
 
     async getSocketOrWake(tenantId, instanceId) {
