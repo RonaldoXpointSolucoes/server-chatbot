@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.8.3] - 2026-05-27
+
+### Adicionado
+- **Deploy em Produção (v2.8.3)**: Nova build estável do frontend de atendimento distribuída com suporte total ao Escudo de LIDs do backend e auditoria central de versionamento de banco.
+
 ## [2.8.2] - 2026-05-27
 
 ### Corrigido
