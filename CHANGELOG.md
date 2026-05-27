@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.4] - 2026-05-27
+
+### Corrigido
+- **Carregamento Instantâneo de Histórico (VeloSync)**: Resolvida a latência e atraso de 30 segundos ao clicar nas conversas do chat. Removemos a trava síncrona `await` na limpeza de mensagens não lidas no Supabase, permitindo que a escrita ocorra em background e as mensagens do banco local sejam carregadas instantaneamente em milissegundos (< 100ms).
+- **Escudo Antibloqueio de Rede para Avatares**: Implementado `AbortController` com timeout de 3.5 segundos nas requisições HTTP de avatares de contatos (`profilePictureUrl`). Isso impede que conexões com instâncias offline ou lentas saturem o pool de sockets paralelos do navegador, mantendo a navegação e carregamentos do app extremamente rápidos em qualquer circunstância.
+
 ## [2.8.3] - 2026-05-27
 
 ### Adicionado

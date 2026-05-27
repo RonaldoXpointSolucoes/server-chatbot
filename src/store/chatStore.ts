@@ -1586,11 +1586,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const apiKey = instDataDB?.api_key || '';
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
       
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+
       const res = await fetch(`${API_URL}/api/v1/instances/${instanceName}/invoke`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-tenant-id': state.tenantInfo.id, 'apikey': apiKey },
-        body: JSON.stringify({ method: 'profilePictureUrl', args: [jid, 'image'] })
+        body: JSON.stringify({ method: 'profilePictureUrl', args: [jid, 'image'] }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       const data = await res.json();
       if (res.ok && data.ok && data.result) {
         const baileysUrl = data.result;
@@ -2781,8 +2786,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
              return;
         }
 
-        // Limpar unread 
-        await supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id);
+        // Limpar unread em background (sem bloquear o carregamento das mensagens locais!)
+        supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id).then(({ error }) => {
+            if (error) console.error("[loadHistoricalMessages] Erro ao limpar unread_count:", error);
+        });
         
         const { data: msgs } = await supabase.from('messages')
                .select('*')

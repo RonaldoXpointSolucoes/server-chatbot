@@ -307,6 +307,52 @@ REGRAS DE RETORNO CRÍTICAS:
       };
     }
   }
+
+  async compareFaces(photoBase64_1: string, photoBase64_2: string): Promise<{ verified: boolean, confidence: number }> {
+    if (!this.isConfigured()) {
+      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+    }
+
+    try {
+      const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      const prompt = `Aja como um sistema biométrico de reconhecimento facial de alta precisão.
+Compare as duas fotos de rosto enviadas. A pessoa na Foto 1 é a mesma pessoa física na Foto 2?
+Responda EXATAMENTE com um objeto JSON com as chaves:
+1. "verified" (boolean): true se for a mesma pessoa física, false caso contrário.
+2. "confidence" (number): valor de 0 a 100 indicando a similaridade/certeza de que se trata do mesmo rosto.
+Leve em consideração óculos, barba, iluminação diferente e pequenos ângulos do rosto.
+ATENÇÃO: Retorne APENAS o JSON cru sem blocos de código markdown ou texto explicativo. Ex: {"verified": true, "confidence": 95}`;
+
+      const result = await model.generateContent([
+        prompt,
+        {
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: photoBase64_1
+          }
+        },
+        {
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: photoBase64_2
+          }
+        }
+      ]);
+
+      const text = result.response.text().trim();
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+
+      return {
+        verified: !!parsed.verified,
+        confidence: Number(parsed.confidence || 0)
+      };
+    } catch (err) {
+      console.error("Erro no reconhecimento facial com Gemini:", err);
+      throw new Error("Falha no reconhecimento facial.");
+    }
+  }
 }
 
 export const geminiService = new GeminiService();

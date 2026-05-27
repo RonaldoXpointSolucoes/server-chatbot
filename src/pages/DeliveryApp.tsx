@@ -1,14 +1,35 @@
-import React from 'react';
+import { useEffect } from 'react';
 
 export default function DeliveryApp() {
+  const url = "https://portalappmotoboy.vercel.app";
+
+  useEffect(() => {
+    // Redireciona na mesma aba caso o usuário caia aqui diretamente
+    window.location.href = url;
+  }, []);
+
   return (
-    <div className="flex-1 w-full h-full bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden">
-      <iframe
-        src="https://portalappmotoboy.vercel.app"
-        title="Gestor Delivery"
-        className="w-full h-full border-none"
-        sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-      />
+    <div className="flex-1 w-full h-full bg-[#f0f2f5] dark:bg-[#111b21] flex flex-col overflow-hidden items-center justify-center p-6">
+      <div className="text-center animate-in fade-in zoom-in duration-500">
+        {/* Container Premium em Glassmorphism */}
+        <div className="bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-md max-w-md w-full rounded-3xl border border-[#d1d7db]/40 dark:border-[#222d34]/40 p-10 flex flex-col items-center shadow-2xl">
+          <div className="w-20 h-20 bg-emerald-50 dark:bg-emerald-500/10 rounded-full flex items-center justify-center mb-6 shadow-inner animate-pulse">
+            <div className="w-10 h-10 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin"></div>
+          </div>
+          
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-3 tracking-tight">
+            Redirecionando
+          </h1>
+          
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-2 leading-relaxed">
+            Estamos abrindo o Gestor Delivery com segurança.
+          </p>
+          
+          <span className="text-xs text-emerald-500 dark:text-emerald-400 font-medium">
+            Se não for redirecionado automaticamente, <a href={url} className="underline hover:text-emerald-600">clique aqui</a>.
+          </span>
+        </div>
+      </div>
     </div>
   );
 }

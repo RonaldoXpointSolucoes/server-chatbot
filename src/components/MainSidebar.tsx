@@ -659,15 +659,15 @@ export function MainSidebar() {
             <NavItem 
               title="Portal / Cadastros" 
               isSub 
-              onClick={() => navigate('/apps/portal')}
-              isActive={window.location.pathname === '/apps/portal'}
+              onClick={() => window.open('https://portalgastrofood.vercel.app', '_blank', 'noopener,noreferrer')}
+              isActive={false}
             />
             
             <NavItem 
               title="Gestor Delivery" 
               isSub 
-              onClick={() => navigate('/apps/delivery')}
-              isActive={window.location.pathname === '/apps/delivery'}
+              onClick={() => window.open('https://portalappmotoboy.vercel.app', '_blank', 'noopener,noreferrer')}
+              isActive={false}
             />
             <NavItem 
               title="KDS" 
