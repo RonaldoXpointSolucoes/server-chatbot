@@ -199,8 +199,20 @@ class EventProcessor {
             // Multi-device connections (WhatsApp Web/Desktop or linked phones) send outgoing 'fromMe' 
             // messages tagged with '@lid' in remoteJid, but they include the actual target phone in remoteJidAlt.
             // By extracting it here, we rescue the sync message and map it perfectly to the real contact.
-            if (jid && jid.includes('@lid') && msg.key.remoteJidAlt && msg.key.remoteJidAlt.includes('@s.whatsapp.net')) {
-                jid = msg.key.remoteJidAlt;
+            if (jid && jid.includes('@lid')) {
+                if (msg.key.remoteJidAlt && msg.key.remoteJidAlt.includes('@s.whatsapp.net')) {
+                    jid = msg.key.remoteJidAlt;
+                } else if (sock?.signalRepository?.lidMapping) {
+                    try {
+                        const resolvedPn = await sock.signalRepository.lidMapping.getPNForLID(jid);
+                        if (resolvedPn && resolvedPn.includes('@s.whatsapp.net')) {
+                            jid = resolvedPn;
+                            console.log(`[EventProcessor] LID Resgatado via SignalRepository: ${msg.key.remoteJid} -> ${jid}`);
+                        }
+                    } catch (err) {
+                        console.error('[EventProcessor] Erro ao buscar mapeamento de LID no SignalRepository:', err);
+                    }
+                }
             }
 
             if (!jid) continue;

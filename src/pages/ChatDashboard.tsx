@@ -69,6 +69,40 @@ export function formatPhoneNumber(phone: string | undefined | null): string {
 export function renderMessageText(text: string) {
   if (!text) return null;
   
+  // Função auxiliar de renderização de menções
+  const formatTextWithMentions = (textString: string) => {
+    const mentionRegex = /(@\d{8,15})/g;
+    const mParts = textString.split(mentionRegex);
+    
+    return mParts.map((mp, mIdx) => {
+      if (mp.match(mentionRegex)) {
+        const phone = mp.substring(1); // remove o '@'
+        const contacts = useChatStore.getState().contacts;
+        const contact = contacts.find(c => c.phone === phone || c.whatsapp_jid?.startsWith(phone));
+        
+        const displayName = contact 
+          ? (contact.custom_name || contact.name || contact.push_name || phone) 
+          : phone;
+          
+        return (
+          <span 
+            key={mIdx} 
+            className="text-emerald-500 dark:text-emerald-400 font-bold cursor-pointer hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (contact) {
+                useChatStore.setState({ activeChatId: contact.id });
+              }
+            }}
+          >
+            @{displayName}
+          </span>
+        );
+      }
+      return mp;
+    });
+  };
+
   // Detecção de mensagem citada na string (padrão de envio)
   const quoteMatch = text.match(/^> \*Mensagem Citada:\* "(.*?)"\n\n([\s\S]*)$/);
   
@@ -96,7 +130,7 @@ export function renderMessageText(text: string) {
           }}
         >
            <div className="font-bold text-emerald-600 dark:text-emerald-400 text-xs mb-1 opacity-90 drop-shadow-sm flex items-center gap-1">Mensagem Citada</div>
-           <div className="line-clamp-3 italic opacity-90">{quotedText}</div>
+           <div className="line-clamp-3 italic opacity-90">{formatTextWithMentions(quotedText)}</div>
         </div>
         <div>
            {renderMessageText(actualMessage)}
@@ -135,9 +169,13 @@ export function renderMessageText(text: string) {
               <React.Fragment key={j}>
                  {boldParts.map((bp, k) => {
                     if (bp.startsWith('*') && bp.endsWith('*') && bp.length > 2) {
-                      return <strong key={k} className="font-bold tracking-tight text-inherit">{bp.substring(1, bp.length - 1)}</strong>;
+                      return (
+                        <strong key={k} className="font-bold tracking-tight text-inherit">
+                          {formatTextWithMentions(bp.substring(1, bp.length - 1))}
+                        </strong>
+                      );
                     }
-                    return bp;
+                    return <React.Fragment key={k}>{formatTextWithMentions(bp)}</React.Fragment>;
                  })}
                  {j < lines.length - 1 && <br />}
               </React.Fragment>
@@ -1926,7 +1964,7 @@ export default function ChatDashboard() {
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
           {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.7.6'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '25/05/2026, 22:24'}`}</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.8.2'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '27/05/2026, 09:30'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 

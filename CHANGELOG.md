@@ -1,5 +1,42 @@
 # Changelog
 
+## [2.8.2] - 2026-05-27
+
+### Corrigido
+- **Escudo contra LIDs e Contatos Fantasmas (LID Shield)**: Corrigido o bug onde mensagens legítimas enviadas por contatos sob identificadores LID (Linked Device) eram descartadas silenciosamente pelo servidor backend. Implementado o resgate ativo via `LIDMappingStore` (`sock.signalRepository.lidMapping.getPNForLID`) antes de descartes, garantindo que as mensagens DMs e de grupos de contatos em múltiplos aparelhos sejam unificadas sob o Phone Number original e integradas perfeitamente ao CRM, sem duplicar contatos.
+
+## [2.8.1] - 2026-05-27
+
+### Corrigido
+- **Câmera no Windows (Fix Tela Preta)**: Corrigida a inicialização de vídeo no Windows implementando um `useEffect` observador que ativa a mídia automaticamente. Inclusão de chamada explícita `.play()` para destravar o stream em navegadores desktop do Windows e impedir telas pretas.
+
+## [2.8.0] - 2026-05-27
+
+### Adicionado
+- **Face ID Biométrico Premium (Multimodal Gemini)**: Sistema inteligente e premium de autenticação facial usando a câmera do PC, Android ou iPhone para acesso à conta de forma moderna e instantânea.
+- **Comparação por Inteligência Artificial**: Dispensa bibliotecas pesadas locais de processamento neural utilizando diretamente a API Vision do Gemini (modelo `gemini-2.5-flash`) para determinar a similaridade entre rostos cadastrados e capturados com taxa de confiança $\ge 80\%$.
+- **Cifragem Frontend e Registro Automático**: Senhas são criptografadas simetricamente no frontend (usando uma chave de cifra XOR ofuscada atrelada ao e-mail corporativo) e salvas no banco de dados. Ao logar tradicionalmente com sucesso pela primeira vez, o sistema detecta a ausência de biometria e convida o operador a se registrar através de modais interativos.
+- **Interface e Scanner de Face ID**: Scanner facial circular interativo com moldura neon de carregamento, linha laser móvel simulando escaneamento digital e feedbacks visuais em tempo real por meio de um Antigravity Dev Logger em glassmorphism.
+
+## [2.7.9] - 2026-05-26
+
+### Adicionado
+- **Formatação de Menções em Grupos (Semelhante ao Celular)**: Implementada detecção inteligente de tags de menções em grupos do WhatsApp (padrão `@telefone`), traduzindo automaticamente para o nome ou apelido real do contato se presente na lista global do Zustand.
+- **Destaque Visual Premium**: Menções são estilizadas na cor verde-esmeralda brilhante do WhatsApp nativo, em negrito e com suporte a interações (clique para alternar de chat), funcionando tanto em mensagens normais quanto citadas ou formatações especiais em negrito.
+
+## [2.7.8] - 2026-05-26
+
+### Melhorado
+- **Abertura Direta do Gestor Delivery**: Configurado o item de menu "Gestor Delivery" na barra lateral para abrir a aplicação externa (`https://portalappmotoboy.vercel.app`) diretamente em uma nova guia segura (`_blank`).
+- **Remoção de Iframe no App**: Removido o iframe interno obsoleto e adicionada tela de redirecionamento automático premium com visual glassmorphism esmeralda e transições animadas.
+
+## [2.7.7] - 2026-05-26
+
+### Melhorado
+- **Abertura Direta do Portal GastroFood**: Configurado o item de menu "Portal / Cadastros" na barra lateral para abrir a aplicação externa (`https://portalgastrofood.vercel.app/`) diretamente em uma nova guia segura (`_blank`).
+- **Remoção de Tela Intermediária**: A tela intermediária antiga e redundante de aviso de cookies foi removida.
+- **Redirecionador Automático Premium**: Em caso de acesso direto à rota antiga `/apps/portal`, adicionado redirecionamento imediato em glassmorphism com animações fluidas de entrada e spinner de carregamento elegante da marca.
+
 ## [2.7.6] - 2026-05-25
 
 ### Adicionado
