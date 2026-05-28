@@ -794,11 +794,11 @@ export default function CrmDashboard() {
                     <select 
                       value={selectedAgentFilter}
                       onChange={(e) => setSelectedAgentFilter(e.target.value)}
-                      className="bg-transparent dark:text-gray-100 border-none outline-none px-2 py-1 rounded-xl text-xs font-semibold focus:ring-1 focus:ring-amber-500/50 w-36 text-right sm:text-left"
+                      className="bg-transparent dark:text-gray-100 border-none outline-none px-2 py-1 rounded-xl text-xs font-semibold focus:ring-1 focus:ring-amber-500/50 w-36 text-right sm:text-left cursor-pointer"
                     >
-                      <option value="all">Todos</option>
+                      <option value="all" className="bg-white dark:bg-[#202c33] text-gray-900 dark:text-gray-100">Todos</option>
                       {agents.map(a => (
-                        <option key={a.id} value={a.id}>{a.full_name}</option>
+                        <option key={a.id} value={a.id} className="bg-white dark:bg-[#202c33] text-gray-900 dark:text-gray-100">{a.full_name}</option>
                       ))}
                     </select>
                   </div>
@@ -810,12 +810,12 @@ export default function CrmDashboard() {
                   <select 
                     value={selectedStatusFilter}
                     onChange={(e) => setSelectedStatusFilter(e.target.value as any)}
-                    className="bg-transparent dark:text-gray-100 border-none outline-none px-2 py-1 rounded-xl text-xs font-semibold focus:ring-1 focus:ring-amber-500/50 w-32 text-right sm:text-left"
+                    className="bg-transparent dark:text-gray-100 border-none outline-none px-2 py-1 rounded-xl text-xs font-semibold focus:ring-1 focus:ring-amber-500/50 w-32 text-right sm:text-left cursor-pointer"
                   >
-                    <option value="all">Todos</option>
-                    <option value="pending">Pendentes</option>
-                    <option value="completed">Concluídos</option>
-                    <option value="overdue">Atrasados</option>
+                    <option value="all" className="bg-white dark:bg-[#202c33] text-gray-900 dark:text-gray-100">Todos</option>
+                    <option value="pending" className="bg-white dark:bg-[#202c33] text-gray-900 dark:text-gray-100">Pendentes</option>
+                    <option value="completed" className="bg-white dark:bg-[#202c33] text-gray-900 dark:text-gray-100">Concluídos</option>
+                    <option value="overdue" className="bg-white dark:bg-[#202c33] text-gray-900 dark:text-gray-100">Atrasados</option>
                   </select>
                 </div>
 
@@ -1142,13 +1142,13 @@ export default function CrmDashboard() {
                     disabled={!isAdministrative}
                     onChange={(e) => setNewAgentId(e.target.value)}
                     className={cn(
-                      "w-full bg-[#f0f2f5] dark:bg-[#111b21] dark:text-gray-100 border-none outline-none px-4 py-3 rounded-2xl text-xs font-semibold focus:ring-1 focus:ring-amber-500/50 shadow-inner",
+                      "w-full bg-[#f0f2f5] dark:bg-[#111b21] dark:text-gray-100 border-none outline-none px-4 py-3 rounded-2xl text-xs font-semibold focus:ring-1 focus:ring-amber-500/50 shadow-inner cursor-pointer",
                       !isAdministrative && "opacity-80 bg-gray-100 dark:bg-[#182229] cursor-not-allowed"
                     )}
                   >
-                    <option value="">Nenhum Agente</option>
+                    <option value="" className="bg-white dark:bg-[#202c33] text-gray-900 dark:text-gray-100">Nenhum Agente</option>
                     {agents.map(a => (
-                      <option key={a.id} value={a.id}>{a.full_name}</option>
+                      <option key={a.id} value={a.id} className="bg-white dark:bg-[#202c33] text-gray-900 dark:text-gray-100">{a.full_name}</option>
                     ))}
                   </select>
                 </div>

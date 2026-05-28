@@ -1,6 +1,12 @@
 # Changelog
 
+## [2.8.17] - 2026-05-28
+
+### Corrigido
+- **Contraste de Legibilidade nos Filtros do CRM**: Corrigido o bug visual nos elementos `<select>` nativos do CRM (`CrmDashboard.tsx`). Anteriormente, o texto das `<option>` no tema escuro herda a cor clara, ficando invisível sobre o fundo branco padrão do dropdown do Windows e Google Chrome. Adicionamos classes de cor e fundo explícitas (`text-gray-900 dark:text-gray-100 bg-white dark:bg-[#202c33]`) a todas as opções nativas de filtro de colaborador e status de forma a garantir uma leitura nítida e de alto contraste.
+
 ## [2.8.16] - 2026-05-28
+
 
 ### Corrigido
 - **Resolução de Desaparecimento de Legendas no Chat**: Corrigido o bug na função `extractTextFromMessage` do `event-processor` no backend (Webhook). A extração do `documentMessage` priorizava o nome do arquivo, gravando-o incorretamente na coluna de legenda e fazendo a legenda sumir após 4 segundos. Agora a legenda real (`caption`) é priorizada, mantendo a visualização idêntica ao celular.
