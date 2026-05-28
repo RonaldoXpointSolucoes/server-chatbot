@@ -4,6 +4,7 @@ import {
   Search, 
   Inbox, 
   MessageCircle, 
+  CheckSquare,
   AtSign, 
   Clock, 
   Users, 
@@ -39,7 +40,8 @@ import {
   LogOut,
   Store,
   X,
-  QrCode
+  QrCode,
+  ClipboardList
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
@@ -103,10 +105,13 @@ export function MainSidebar() {
       console.error('Erro ao sair:', error);
     }
   };
+  const [localAgentName, setLocalAgentName] = useState<string>(
+    typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name') || '') : ''
+  );
 
   const storedName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
   const storeNameFallback = useChatStore(state => state.tenantInfo?.users?.find(u => u.user_id === state.currentUser?.id)?.full_name);
-  const agentName = storedName || storeNameFallback || 'Agente';
+  const agentName = localAgentName || storedName || storeNameFallback || 'Agente';
   const agentInitial = agentName ? agentName.substring(0, 1).toUpperCase() : 'A';
   
   const currentUserRole = typeof window !== 'undefined' ? (localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role')) || 'admin' : 'admin';
@@ -117,7 +122,7 @@ export function MainSidebar() {
     return state.tenantInfo?.users?.find((u: any) => u.full_name === agentName)?.email;
   });
   
-  const agentEmail = storedEmail || storeEmailFallback || `${agentName.toLowerCase().replace(/\\s/g, '')}@xpoint.com`;
+  const agentEmail = storedEmail || storeEmailFallback || `${agentName.toLowerCase().replace(/\s/g, '')}@xpoint.com`;
 
   const activeChannelFilter = useChatStore(state => state.activeChannelFilter);
   const setActiveChannelFilter = useChatStore(state => state.setActiveChannelFilter);
@@ -129,6 +134,15 @@ export function MainSidebar() {
   const tenantLabels = useChatStore(state => state.tenantLabels);
   const currentAgent = agents.find(a => a.email === agentEmail);
   const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to === currentAgent.id && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
+  
+  const myTasksCount = React.useMemo(() => {
+    if (!currentAgent) return 0;
+    return contacts.filter(c => 
+      c.messages && c.messages.some(m => 
+        m.isTask && !m.taskCompleted && m.assignedTo === currentAgent.id
+      )
+    ).length;
+  }, [contacts, currentAgent]);
   
   const [userCompanies, setUserCompanies] = useState<any[]>([]);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
@@ -154,16 +168,23 @@ export function MainSidebar() {
        const userRole = storage ? storage.getItem('current_user_role') : null;
        const userEmail = storage ? storage.getItem('current_user_email') : null;
        
-       if ((userRole === 'agent' || userRole === 'Agente') && userEmail) {
-           const { data: agentData } = await supabase
+       if (userEmail && storage) {
+           const { data: userData } = await supabase
              .from('tenant_users')
-             .select('allowed_companies, allowed_instances')
+             .select('full_name, allowed_companies, allowed_instances')
              .ilike('email', userEmail)
              .maybeSingle();
              
-           if (agentData && storage) {
-              storage.setItem('allowed_companies', JSON.stringify(agentData.allowed_companies || []));
-              storage.setItem('allowed_instances', JSON.stringify(agentData.allowed_instances || []));
+           if (userData) {
+              if (userRole === 'agent' || userRole === 'Agente') {
+                 storage.setItem('allowed_companies', JSON.stringify(userData.allowed_companies || []));
+                 storage.setItem('allowed_instances', JSON.stringify(userData.allowed_instances || []));
+              }
+              
+              if (userData.full_name && userData.full_name !== storage.getItem('current_user_name')) {
+                 storage.setItem('current_user_name', userData.full_name);
+                 setLocalAgentName(userData.full_name);
+              }
            }
        }
        
@@ -579,6 +600,25 @@ export function MainSidebar() {
                 navigate('/chat');
               }} 
             />
+            <NavItem 
+              title={
+                <div className="flex items-center gap-2">
+                  Minhas Tarefas
+                  {myTasksCount > 0 && (
+                    <span className="bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center animate-pulse">
+                      {myTasksCount}
+                    </span>
+                  )}
+                </div>
+              } 
+              icon={<CheckSquare size={16} className={filterType === 'tasks' ? "text-amber-400" : ""} />} 
+              isActive={filterType === 'tasks'} 
+              onClick={() => {
+                setActiveChannelFilter(null, null);
+                setFilterType('tasks');
+                navigate('/chat');
+              }} 
+            />
             {instances.length !== 1 && (
               <NavItem title="Todas as conversas" isActive={filterType !== 'mine' && filterType !== 'blocked'} onClick={() => {
                 setActiveChannelFilter(null, null);
@@ -640,6 +680,12 @@ export function MainSidebar() {
 
             <NavItem title="Não atendidas" />
             <NavItem icon={<Contact size={16} />} title="Contatos" onClick={() => navigate('/contacts')} />
+            <NavItem 
+              icon={<ClipboardList size={16} className="text-amber-500" />} 
+              title="CRM" 
+              onClick={() => navigate('/crm')}
+              isActive={window.location.pathname === '/crm'} 
+            />
             <NavItem 
               icon={<Network size={16} className="text-emerald-500" />} 
               title="Central de Usuários RAG" 

@@ -9,6 +9,30 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Interceptador global de ciclo de vida de autenticação para evitar sessões zumbis
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_OUT') {
+    console.warn("[Supabase Auth] Session invalidated or signed out. Clearing local session state...");
+    
+    // Limpeza de credenciais do Tenant e Usuário
+    localStorage.removeItem('current_tenant_id');
+    localStorage.removeItem('current_tenant_name');
+    sessionStorage.removeItem('current_tenant_id');
+    sessionStorage.removeItem('current_tenant_name');
+    sessionStorage.removeItem('current_user_email');
+    sessionStorage.removeItem('current_user_role');
+    sessionStorage.removeItem('admin_token');
+    
+    // Se estiver em uma rota restrita, força redirecionamento instantâneo para o login corporativo
+    if (typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      if (path !== '/' && path !== '/admin/login' && path !== '/features') {
+        window.location.href = '/';
+      }
+    }
+  }
+});
+
 export type MessageRow = {
   id: string;
   contact_id: string;

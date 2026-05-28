@@ -7,7 +7,7 @@ export type MessageType = {
   id: string;
   whatsapp_id?: string;
   text: string;
-  sender: 'client' | 'bot' | 'human' | 'system';
+  sender: 'client' | 'bot' | 'human' | 'system' | 'internal_note';
   mediaUrl?: string;
   mediaType?: 'image' | 'video' | 'audio' | 'document' | 'contact' | 'location' | 'interactive' | string;
   status?: string; // PENDING, SENT, DELIVERY_ACK, READ
@@ -23,6 +23,14 @@ export type MessageType = {
   isIgnoredSilent?: boolean; // Flag para não atualizar posição no chat
   vcardWaid?: string; // WAID (Telefone) extraído de VCard
   payload?: any; // Rastreio de leitura interno e outros metadados
+
+  // Metadados CRM para Tarefas e Checklists
+  isTask?: boolean;
+  assignedTo?: string | null;
+  checklistItems?: Array<{ id: string; text: string; completed: boolean; completed_at?: string | null; completed_by?: string | null }>;
+  taskCompleted?: boolean;
+  created_by_name?: string;
+  mediaMetadata?: any;
 };
 
 
@@ -122,6 +130,8 @@ interface ChatState {
   appVersion: { version: string, deploy_date: string } | null;
   isSearchingGlobally: boolean;
   realtimeStatus: 'connected' | 'connecting' | 'disconnected';
+  isOffline: boolean;
+  setOfflineStatus: (status: boolean) => void;
   
   searchGlobalContacts: (term: string) => Promise<void>;
   openQRModal: (instanceId?: string | null) => void;
@@ -150,7 +160,7 @@ interface ChatState {
   editHumanMessage: (contactId: string, messageId: string, newText: string, instanceName: string) => Promise<void>;
   deleteHumanMessage: (contactId: string, messageId: string, instanceName: string) => Promise<void>;
   forwardMessage: (contactId: string, message: MessageType, instanceName: string) => Promise<void>;
-  sendMediaFromUrl: (contactId: string, mediaUrl: string, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, caption?: string) => Promise<void>;
+  sendMediaFromUrl: (contactId: string, mediaUrl: string, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, caption?: string, fileName?: string) => Promise<void>;
   uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean, caption?: string) => Promise<void>;
   updateContactCRM: (contactId: string, payload: Partial<ContactRow>) => Promise<void>;
   deleteContact: (contactId: string) => Promise<void>;
@@ -186,8 +196,8 @@ interface ChatState {
   // Quick Replies
   quickReplies: QuickReply[];
   fetchQuickReplies: () => Promise<void>;
-  addQuickReply: (shortcut: string, content: string) => Promise<void>;
-  updateQuickReply: (id: string, shortcut: string, content: string) => Promise<void>;
+  addQuickReply: (shortcut: string, content: string, mediaUrl?: string, mediaType?: string) => Promise<void>;
+  updateQuickReply: (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string) => Promise<void>;
   deleteQuickReply: (id: string) => Promise<void>;
   
   // Contact Groups (Grupos Empresariais)
@@ -216,6 +226,37 @@ interface ChatState {
   setReopenedTicketToast: (toast: { contactName: string; reason?: string } | null) => void;
   historySyncError: { title: string; message: string; details?: string } | null;
   setHistorySyncError: (error: { title: string; message: string; details?: string } | null) => void;
+
+  // Ações de Anotações Internas e CRM
+  createInternalNote: (
+    contactId: string, 
+    text: string, 
+    mediaUrl?: string, 
+    mediaType?: string, 
+    mediaMetadata?: any, 
+    isTask?: boolean, 
+    assignedTo?: string | null, 
+    checklistItems?: any[]
+  ) => Promise<void>;
+  
+  editInternalNote: (
+    noteId: string, 
+    text: string, 
+    isTask?: boolean, 
+    assignedTo?: string | null, 
+    checklistItems?: any[]
+  ) => Promise<void>;
+  
+  deleteInternalNote: (
+    noteId: string,
+    contactId: string
+  ) => Promise<void>;
+  
+  toggleChecklistItem: (
+    noteId: string, 
+    itemId: string, 
+    completed: boolean
+  ) => Promise<void>;
 }
 
 export interface QuickReply {
@@ -439,6 +480,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setReopenedTicketToast: (toast) => set({ reopenedTicketToast: toast }),
   historySyncError: null,
   setHistorySyncError: (error) => set({ historySyncError: error }),
+  isOffline: typeof navigator !== 'undefined' ? !navigator.onLine : false,
+  setOfflineStatus: (status) => set({ isOffline: status }),
 
   clearStore: () => {
     if (get().isSubscribed) {
@@ -842,13 +885,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  addQuickReply: async (shortcut: string, content: string) => {
+  addQuickReply: async (shortcut: string, content: string, mediaUrl?: string, mediaType?: string) => {
       const state = get();
       if (!state.tenantInfo) throw new Error('Tenant não encontrado');
       const { data, error } = await supabase.from('quick_replies').insert({
          tenant_id: state.tenantInfo.id,
          shortcut,
-         content
+         content,
+         media_url: mediaUrl,
+         media_type: mediaType
       }).select().single();
       
       if (error) throw error;
@@ -857,14 +902,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
   },
 
-  updateQuickReply: async (id: string, shortcut: string, content: string) => {
+  updateQuickReply: async (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string) => {
       const { error } = await supabase.from('quick_replies').update({
-         shortcut, content
+         shortcut,
+         content,
+         media_url: mediaUrl,
+         media_type: mediaType
       }).eq('id', id);
       
       if (error) throw error;
       set(s => ({
-         quickReplies: s.quickReplies.map(q => q.id === id ? { ...q, shortcut, content } : q)
+         quickReplies: s.quickReplies.map(q => q.id === id ? { ...q, shortcut, content, media_url: mediaUrl, media_type: mediaType } : q)
       }));
   },
 
@@ -1446,7 +1494,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  sendMediaFromUrl: async (contactId, mediaUrl, mediaType, instanceName, caption) => {
+  sendMediaFromUrl: async (contactId, mediaUrl, mediaType, instanceName, caption, fileName) => {
     const state = get();
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
@@ -1531,9 +1579,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       else if (mediaType === 'audio') mimetype = 'audio/ogg';
       else if (mediaType === 'document') mimetype = 'application/pdf';
 
-      const fileName = `canned_media_${Date.now()}`;
+      // Preserva o nome do arquivo original se enviado, higienizando-o de caracteres especiais
+      const cleanFileName = fileName 
+        ? fileName.replace(/[^a-zA-Z0-9.\-_]/g, '_') 
+        : `canned_media_${Date.now()}`;
 
-      console.log(`[sendMediaFromUrl] Disparando webhook para URL: ${mediaUrl}`);
+      console.log(`[sendMediaFromUrl] Disparando webhook para URL: ${mediaUrl} com nome: ${cleanFileName}`);
 
       const res = await fetch(`${API_URL}/api/v1/instances/${finalTargetInstance}/send-media-url`, {
         method: 'POST',
@@ -1548,7 +1599,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           mimetype: mimetype,
           caption: finalCaption,
           mediaUrl: mediaUrl,
-          fileName: fileName,
+          fileName: cleanFileName,
           ptt: false
         })
       });
@@ -2443,10 +2494,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
         }
 
-        // Aguarda a conclusão das buscas auxiliares de apoio
-        await supportPromises;
+        // Puxar tarefas CRM ativas para popular reativamente os contatos de imediato
+         let dbActiveTasks: any[] = [];
+         try {
+           const { data } = await supabase.from('contact_notes')
+              .select('*')
+              .eq('tenant_id', tenant.id)
+              .eq('is_task', true)
+              .eq('task_completed', false);
+           if (data) dbActiveTasks = data;
+         } catch (e) {
+           console.warn('Erro ao carregar active CRM tasks:', e);
+         }
 
-       if (dbContacts && dbContacts.length > 0) {
+         // Aguarda a conclusão das buscas auxiliares de apoio
+         await supportPromises;
+
+        if (dbContacts && dbContacts.length > 0) {
            // RBAC: Se for agente, só carrega contatos de instâncias permitidas
            let allowedInstances: string[] = [];
            const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
@@ -2587,9 +2651,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         assigned_to: conv.assigned_to,
                         instance_id: conv.instance_id || dbC.instance_id || null,
                         conv_id: conv.id
-                     });
-                  }
+                      });
+                   }
+                });
+
+                // CRM: Injeta mensagens das tarefas ativas carregadas no início para manter as badges da sidebar reativas de imediato
+               newContacts.forEach(c => {
+                  const rawContactId = getRealContactId(c.id);
+                  const contactTasks = dbActiveTasks.filter(t => t.contact_id === rawContactId);
+                  
+                  contactTasks.forEach(task => {
+                     const alreadyHasTask = c.messages.some(m => m.id === task.id);
+                     if (!alreadyHasTask) {
+                        c.messages.push({
+                           id: task.id,
+                           text: task.text || '',
+                           sender: 'internal_note',
+                           mediaUrl: task.media_url || undefined,
+                           mediaType: task.media_type || undefined,
+                           mediaMetadata: task.media_metadata || undefined,
+                           isTask: true,
+                           assignedTo: task.assigned_to || undefined,
+                           checklistItems: task.checklist_items || [],
+                           taskCompleted: task.task_completed || false,
+                           timestamp: new Date(task.created_at)
+                        });
+                     }
+                  });
                });
+
                const deduplicated: any[] = [];
                const seenIds = new Set();
                
@@ -2665,22 +2755,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
            const apiKey = instDataDB?.api_key || '';
            
            if (instDataDB?.status === 'connected') {
-             try {
-                await fetchEngineStatus(currentTenantId, tenantData.evolution_api_instance, apiKey);
-                set({ evolutionConnected: true, modalReason: null });
-                get().fetchInitialData();
-             } catch (e) {
-                set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
-             }
+              try {
+                 await fetchEngineStatus(currentTenantId, tenantData.evolution_api_instance, apiKey);
+                 set({ evolutionConnected: true, modalReason: null, isOffline: false });
+                 get().fetchInitialData();
+              } catch (e: any) {
+                 if (e.message === 'Failed to fetch' || e.message?.includes('network') || e.message?.includes('fetch') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+                   set({ isOffline: true });
+                 } else {
+                   set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
+                 }
+              }
            } else if (instDataDB?.status === 'connecting') {
              set({ evolutionConnected: false });
            } else {
-             try {
-                await fetchEngineStatus(currentTenantId, tenantData.evolution_api_instance, apiKey);
-                set({ evolutionConnected: false });
-             } catch (e) {
-                set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
-             }
+              try {
+                 await fetchEngineStatus(currentTenantId, tenantData.evolution_api_instance, apiKey);
+                 set({ evolutionConnected: false, isOffline: false });
+              } catch (e: any) {
+                 if (e.message === 'Failed to fetch' || e.message?.includes('network') || e.message?.includes('fetch') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+                   set({ isOffline: true });
+                 } else {
+                   set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
+                 }
+              }
            }
         } else {
            set({ evolutionConnected: false });
@@ -2746,6 +2844,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const tenant = get().tenantInfo;
         if (!tenant) return;
         
+        // Puxar todas as anotações e tarefas históricas deste contato para a timeline!
+        let dbNotes: any[] = [];
+        try {
+           const { data } = await supabase.from('contact_notes')
+              .select('*')
+              .eq('tenant_id', tenant.id)
+              .eq('contact_id', getRealContactId(contactId))
+              .order('created_at', { ascending: true });
+           if (data) dbNotes = data;
+        } catch (e) {
+           console.error("[loadHistoricalMessages] Erro ao carregar notas do contato:", e);
+        }
+
+        const mappedNotes = dbNotes.map(n => ({
+           id: n.id,
+           whatsapp_id: undefined, // Garante que a propriedade existe para unificação dos tipos!
+           text: n.content || n.text || '', // Suporte a 'content' do banco e fallback 'text'
+           sender: 'internal_note' as const,
+           mediaUrl: n.media_url || undefined,
+           mediaType: n.media_type || undefined,
+           mediaMetadata: n.media_metadata || undefined,
+           isTask: n.is_task || false,
+           assignedTo: n.assigned_to || null,
+           checklistItems: n.checklist_items || [],
+           taskCompleted: n.task_completed || false,
+           created_by_name: n.created_by_name || null,
+           timestamp: new Date(n.created_at)
+        }));
+        
         // Puxa conversa pra este contato respeitando a instância!
         const localContact = get().contacts.find(c => c.id === contactId);
         const conv_id = localContact?.conv_id;
@@ -2768,25 +2895,64 @@ export const useChatStore = create<ChatState>((set, get) => ({
             conv = convs && convs.length > 0 ? convs[0] : null;
         }
 
+        const handleMapping = (messagesArray: any[]) => {
+            // 2. Ordenar cronologicamente ASCENDENTE e extrair timestamp real
+            // O array bruto pode vir fora de ordem. Convertendo para ms caso haja epoch.
+            const mappedMsgs = messagesArray.map(m => {
+                const advanced = parseAdvancedMsgMetadata(m);
+                const realTimestamp = new Date(m.timestamp);
+ 
+                return {
+                    id: m.id,
+                    whatsapp_id: m.whatsapp_message_id,
+                    text: advanced.text || m.text_content,
+                    sender: m.sender_type,
+                    mediaUrl: m.media_url,
+                    mediaType: advanced.mediaType,
+                    status: m.status,
+                    timestamp: realTimestamp,
+                    quoted: advanced.quoted,
+                    buttons: advanced.buttons,
+                    transcription: m.transcription,
+                    vcardWaid: advanced.vcardWaid,
+                    payload: m.payload
+                };
+            });
+ 
+            // CRM: Mescla cronologicamente com todas as anotações carregadas
+            const combinedMsgs = [...mappedMsgs, ...mappedNotes];
+            combinedMsgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+            
+            // 3. Deduplicar baseando-se no whatsapp_id ou id (para anotações)
+            const uniqueMsgs: any[] = [];
+            const seenIds = new Set();
+            for (const m of combinedMsgs) {
+                const checkId = m.whatsapp_id || m.id;
+                if (checkId) {
+                    if (seenIds.has(checkId)) continue;
+                    seenIds.add(checkId);
+                }
+                uniqueMsgs.push(m);
+            }
+ 
+            set((s) => {
+               const updated = [...s.contacts];
+               const idx = updated.findIndex(c => c.id === contactId);
+               if (idx !== -1) {
+                   updated[idx] = {
+                       ...updated[idx],
+                       unread: 0,
+                       messages: uniqueMsgs
+                   };
+               }
+               return { contacts: updated };
+            });
+        };
+
         if (!conv) {
              // Em vez de inserir uma conversa vazia no banco e poluir o DB,
              // inicializamos a UI com array vazio.
              // A conversa será criada organicamente pelo Webhook no 1º envio/recebimento.
-             const handleMapping = (messagesArray: any[]) => {
-                 set((s) => {
-                     const updated = [...s.contacts];
-                     const idx = updated.findIndex(c => c.id === contactId);
-                     if (idx !== -1) {
-                         updated[idx] = {
-                             ...updated[idx],
-                             messages: messagesArray,
-                             instance_id: instanceName,
-                             conv_id: undefined
-                         };
-                     }
-                     return { contacts: updated };
-                 });
-             };
              handleMapping([]);
              return;
         }
@@ -2803,57 +2969,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                .order('timestamp', { ascending: false })
                .limit(100);
                
-        const handleMapping = (messagesArray: any[]) => {
-           // 2. Ordenar cronologicamente ASCENDENTE e extrair timestamp real
-           // O array bruto pode vir fora de ordem. Convertendo para ms caso haja epoch.
-           const mappedMsgs = messagesArray.map(m => {
-               const advanced = parseAdvancedMsgMetadata(m);
-               const realTimestamp = new Date(m.timestamp);
+        
 
-               return {
-                   id: m.id,
-                   whatsapp_id: m.whatsapp_message_id,
-                   text: advanced.text || m.text_content,
-                   sender: m.sender_type,
-                   mediaUrl: m.media_url,
-                   mediaType: advanced.mediaType,
-                   status: m.status,
-                   timestamp: realTimestamp,
-                   quoted: advanced.quoted,
-                   buttons: advanced.buttons,
-                   transcription: m.transcription,
-                   vcardWaid: advanced.vcardWaid,
-                   payload: m.payload
-               };
-           });
-
-           // Garante a ordenação temporal estrita (a mais antiga primeiro, a mais nova por último)
-           mappedMsgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-           
-           // 3. Deduplicar baseando-se no whatsapp_message_id e limpar msgs com problemas temporais
-           const uniqueMsgs: any[] = [];
-           const seenWaIds = new Set();
-           for (const m of mappedMsgs) {
-               if (m.whatsapp_id) {
-                   if (seenWaIds.has(m.whatsapp_id)) continue;
-                   seenWaIds.add(m.whatsapp_id);
-               }
-               uniqueMsgs.push(m);
-           }
-
-           set((s) => {
-              const updated = [...s.contacts];
-              const idx = updated.findIndex(c => c.id === contactId);
-              if (idx !== -1) {
-                  updated[idx] = {
-                      ...updated[idx],
-                      unread: 0,
-                      messages: uniqueMsgs
-                  };
-              }
-              return { contacts: updated };
-           });
-        };
 
         if (forceSync) {
             // Conversa tem base, prossegue com o sync on demand
@@ -3651,5 +3768,294 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
          }
       });
-  }
+  },
+
+  createInternalNote: async (contactId, text, mediaUrl, mediaType, mediaMetadata, isTask = false, assignedTo = null, checklistItems = []) => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+
+    try {
+      const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+      let agentName = 'Agente';
+      if (currentUserEmail) {
+          const agent = get().agents.find(a => a.email === currentUserEmail);
+          if (agent && agent.full_name) agentName = agent.full_name;
+      }
+
+      const rawContactId = getRealContactId(contactId);
+
+      // 1. Inserir no Supabase (contact_notes)
+      const notePayload = {
+        tenant_id: tenant.id,
+        contact_id: rawContactId,
+        content: text,
+        created_by_name: agentName,
+        media_url: mediaUrl || null,
+        media_type: mediaType || null,
+        media_metadata: mediaMetadata || {},
+        is_task: isTask,
+        assigned_to: assignedTo || null,
+        checklist_items: checklistItems,
+        task_completed: false
+      };
+
+      const { data: dbNote, error } = await supabase
+        .from('contact_notes')
+        .insert(notePayload)
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (!dbNote) return;
+
+      // 2. Atualizar localmente de forma instantânea
+      const msgObj: MessageType = {
+        id: dbNote.id,
+        text: dbNote.content || '',
+        sender: 'internal_note',
+        mediaUrl: dbNote.media_url || undefined,
+        mediaType: dbNote.media_type || undefined,
+        mediaMetadata: dbNote.media_metadata || undefined,
+        isTask: dbNote.is_task,
+        assignedTo: dbNote.assigned_to,
+        checklistItems: dbNote.checklist_items || [],
+        taskCompleted: dbNote.task_completed,
+        created_by_name: dbNote.created_by_name,
+        timestamp: new Date(dbNote.created_at)
+      };
+
+      set((s) => ({
+        contacts: s.contacts.map(c => {
+          if (c.id === contactId) {
+             const alreadyHas = c.messages.some(m => m.id === msgObj.id);
+             if (alreadyHas) return c;
+             const newMsgs = [...c.messages, msgObj].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+             return { ...c, messages: newMsgs };
+          }
+          return c;
+        })
+      }));
+
+      if (typeof window !== 'undefined' && (window as any).refreshGlobalActiveTasks) {
+         (window as any).refreshGlobalActiveTasks();
+      }
+
+    } catch (e) {
+      console.error('[createInternalNote] Erro ao criar nota interna:', e);
+      alert('Erro ao salvar a anotação interna no banco de dados.');
+    }
+  },
+
+  editInternalNote: async (noteId, text, isTask = false, assignedTo = null, checklistItems = []) => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+
+    try {
+      const taskCompleted = isTask ? (checklistItems.length > 0 && checklistItems.every(i => i.completed)) : false;
+
+      const updatePayload = {
+        content: text,
+        is_task: isTask,
+        assigned_to: assignedTo,
+        checklist_items: checklistItems,
+        task_completed: taskCompleted
+      };
+
+      const { data: dbNote, error } = await supabase
+        .from('contact_notes')
+        .update(updatePayload)
+        .eq('id', noteId)
+        .eq('tenant_id', tenant.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (!dbNote) return;
+
+      set((s) => ({
+        contacts: s.contacts.map(c => {
+          const hasNote = c.messages.some(m => m.id === noteId);
+          if (hasNote) {
+             const newMsgs = c.messages.map(m => {
+                if (m.id === noteId) {
+                   return {
+                      ...m,
+                      text: dbNote.content || '',
+                      isTask: dbNote.is_task,
+                      assignedTo: dbNote.assigned_to,
+                      checklistItems: dbNote.checklist_items || [],
+                      taskCompleted: dbNote.task_completed
+                   };
+                }
+                return m;
+             });
+             return { ...c, messages: newMsgs };
+          }
+          return c;
+        })
+      }));
+
+      if (typeof window !== 'undefined' && (window as any).refreshGlobalActiveTasks) {
+         (window as any).refreshGlobalActiveTasks();
+      }
+
+    } catch (e) {
+      console.error('[editInternalNote] Erro ao editar nota interna:', e);
+      alert('Erro ao atualizar a anotação no banco de dados.');
+    }
+  },
+
+  toggleChecklistItem: async (noteId, itemId, completed) => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+
+    try {
+      let targetNote: MessageType | null = null;
+      let targetContactId: string | null = null;
+
+      const currentContacts = get().contacts;
+      for (const c of currentContacts) {
+         const note = c.messages.find(m => m.id === noteId);
+         if (note) {
+            targetNote = note;
+            targetContactId = c.id;
+            break;
+         }
+      }
+
+      if (!targetNote || !targetContactId) {
+         console.warn('[toggleChecklistItem] Nota não encontrada localmente.');
+         return;
+      }
+
+      const updatedChecklist = (targetNote.checklistItems || []).map(item => {
+         if (item.id === itemId) {
+            const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+            let agentName = 'Agente';
+            if (currentUserEmail) {
+                const agent = get().agents.find(a => a.email === currentUserEmail);
+                if (agent && agent.full_name) agentName = agent.full_name;
+            }
+            return {
+               ...item,
+               completed,
+               completed_at: completed ? new Date().toISOString() : null,
+               completed_by: completed ? agentName : null
+            };
+         }
+         return item;
+      });
+
+      const taskCompleted = updatedChecklist.length > 0 && updatedChecklist.every(i => i.completed);
+
+      set((s) => ({
+         contacts: s.contacts.map(c => {
+            if (c.id === targetContactId) {
+               const newMsgs = c.messages.map(m => {
+                  if (m.id === noteId) {
+                     return {
+                        ...m,
+                        checklistItems: updatedChecklist,
+                        taskCompleted
+                     };
+                  }
+                  return m;
+               });
+               return { ...c, messages: newMsgs };
+            }
+            return c;
+         })
+      }));
+
+      const { error } = await supabase
+         .from('contact_notes')
+         .update({
+            checklist_items: updatedChecklist,
+            task_completed: taskCompleted
+         })
+         .eq('id', noteId)
+         .eq('tenant_id', tenant.id);
+
+      if (error) throw error;
+
+      if (typeof window !== 'undefined' && (window as any).refreshGlobalActiveTasks) {
+         (window as any).refreshGlobalActiveTasks();
+      }
+
+    } catch (e) {
+      console.error('[toggleChecklistItem] Erro ao marcar checklist item:', e);
+      alert('Erro ao salvar alteração do checklist no banco de dados.');
+    }
+  },
+
+   deleteInternalNote: async (noteId, contactId) => {
+     const tenant = get().tenantInfo;
+     if (!tenant) return;
+
+     try {
+       const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+       let agentName = 'Agente';
+       if (currentUserEmail) {
+           const agent = get().agents.find(a => a.email === currentUserEmail);
+           if (agent && agent.full_name) agentName = agent.full_name;
+       }
+
+       const deletedMetadata = {
+         is_deleted: true,
+         deleted_by: agentName,
+         deleted_at: new Date().toISOString()
+       };
+
+       const { data: dbNote, error } = await supabase
+         .from('contact_notes')
+         .update({
+           content: '',
+           media_url: null,
+           media_type: null,
+           is_task: false,
+           checklist_items: [],
+           task_completed: false,
+           media_metadata: deletedMetadata
+         })
+         .eq('id', noteId)
+         .eq('tenant_id', tenant.id)
+         .select()
+         .single();
+
+       if (error) throw error;
+       if (!dbNote) return;
+
+       set((s) => ({
+         contacts: s.contacts.map(c => {
+           if (c.id === contactId) {
+              const newMsgs = c.messages.map(m => {
+                 if (m.id === noteId) {
+                    return {
+                       ...m,
+                       text: '',
+                       mediaUrl: undefined,
+                       mediaType: undefined,
+                       isTask: false,
+                       checklistItems: [],
+                       taskCompleted: false,
+                       mediaMetadata: deletedMetadata
+                    };
+                 }
+                 return m;
+              });
+              return { ...c, messages: newMsgs };
+           }
+           return c;
+         })
+       }));
+
+        if (typeof window !== 'undefined' && (window as any).refreshGlobalActiveTasks) {
+           (window as any).refreshGlobalActiveTasks();
+        }
+
+     } catch (e) {
+       console.error('[deleteInternalNote] Erro ao excluir nota interna:', e);
+       alert('Erro ao excluir a anotação interna no banco de dados.');
+     }
+   }
 }));

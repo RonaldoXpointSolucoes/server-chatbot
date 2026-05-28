@@ -959,7 +959,7 @@ class EventProcessor {
         else if (content.imageMessage) text = content.imageMessage.caption || '📸 Imagem / Foto';
         else if (content.audioMessage) text = '🎵 Áudio';
         else if (content.videoMessage) text = content.videoMessage.caption || '🎥 Vídeo';
-        else if (content.documentMessage) text = content.documentMessage.fileName || content.documentMessage.title || '📁 Documento';
+        else if (content.documentMessage) text = content.documentMessage.caption || '';
         else if (content.reactionMessage) text = '❤️ Reação: ' + content.reactionMessage.text;
         else if (content.contactMessage) text = '👤 Contato: ' + (content.contactMessage.displayName || '');
         else if (content.contactsArrayMessage) text = '👥 Múltiplos Contatos';

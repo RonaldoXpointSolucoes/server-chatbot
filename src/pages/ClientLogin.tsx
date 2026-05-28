@@ -180,6 +180,21 @@ export default function ClientLogin() {
            tenantData = authResult.user;
            userName = authResult.user.name;
            userRole = 'admin';
+           
+           // Busca o nome real do administrador na tabela tenant_users
+           try {
+              const { data: userProfile } = await supabase
+                .from('tenant_users')
+                .select('full_name')
+                .eq('email', authResult.user.email)
+                .maybeSingle();
+                
+              if (userProfile && userProfile.full_name) {
+                 userName = userProfile.full_name;
+              }
+           } catch (err) {
+              console.error("Erro ao buscar perfil real do admin no Face ID:", err);
+           }
         } else if (authResult.type === 'agent') {
            tenantData = authResult.parent;
            userName = authResult.user.full_name;

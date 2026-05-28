@@ -13,7 +13,7 @@ import { GeminiEditorModal } from '../components/GeminiEditorModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Flag, Clock, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb } from 'lucide-react'; // Adicionado lucide pro flag e lightbulb para corretor discreto
+import { Flag, Clock, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList } from 'lucide-react'; // Adicionado lucide pro flag e lightbulb para corretor discreto
 import { useShallow } from 'zustand/react/shallow';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import clsx from 'clsx';
@@ -580,6 +580,383 @@ export default function ChatDashboard() {
   // Execucao Incial Reativa
   // Efect removido (duplicado com o useEffect consolidado mais abaixo)
   
+  const [chatMode, setChatMode] = useState<'chat' | 'internal_note'>('chat');
+  const [isTaskMode, setIsTaskMode] = useState(false);
+  const [taskAssignedTo, setTaskAssignedTo] = useState<string | null>(null);
+  const [checklistDraft, setChecklistDraft] = useState<string[]>([]);
+  const [notePreviewMode, setNotePreviewMode] = useState(false);
+  const [noteAttachedFile, setNoteAttachedFile] = useState<File | null>(null);
+  const [noteAttachedPreview, setNoteAttachedPreview] = useState<string | null>(null);
+  const [noteAttachedType, setNoteAttachedType] = useState<'image' | 'video' | 'audio' | 'document' | null>(null);
+  const [showTemplatesDropdown, setShowTemplatesDropdown] = useState(false);
+
+  // Estados para o Modal Premium de Atribuição de Implantação Completa CRM
+  const [showImplantacaoModal, setShowImplantacaoModal] = useState(false);
+  const [implantacaoSelectedAgent, setImplantacaoSelectedAgent] = useState<string | null>(null);
+
+  // Estados locais independentes para o Modal de Edição de Notas/Tarefas CRM
+  const [editingNote, setEditingNote] = useState<any | null>(null);
+  const [editNoteText, setEditNoteText] = useState('');
+  const [editNoteChecklist, setEditNoteChecklist] = useState<any[]>([]);
+  const [selectedContactForTasks, setSelectedContactForTasks] = useState<any | null>(null);
+  const [editNoteAssignedTo, setEditNoteAssignedTo] = useState<string | null>(null);
+  const [editNoteIsTask, setEditNoteIsTask] = useState(false);
+  const [editNotePreviewMode, setEditNotePreviewMode] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Expor e expirar o método openEditNoteModal globalmente para a bolha MessageBubble
+  useEffect(() => {
+    (window as any).openEditNoteModal = (note: any) => {
+      setEditingNote(note);
+    };
+    return () => {
+      delete (window as any).openEditNoteModal;
+    };
+  }, []);
+
+  // Estado do menu suspenso (Dropdown) de tarefas do operador
+  const [isTasksDropdownOpen, setIsTasksDropdownOpen] = useState(false);
+
+  // Descobrir operador conectado para controle de tarefas acumuladas (CRM)
+  const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+  const currentAgent = agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
+
+  // Estado local para tarefas CRM ativas globais (independente de caixas)
+  const [globalActiveTasks, setGlobalActiveTasks] = useState<any[]>([]);
+
+  // Lógica computada para obter apenas as tarefas do atendente conectado a partir de globalActiveTasks
+  const myActiveTasks = React.useMemo(() => {
+    if (!currentAgent) return [];
+    return globalActiveTasks.filter(t => 
+      t.assignedTo === currentAgent.id || 
+      t.assignedTo === currentAgent.user_id
+    );
+  }, [globalActiveTasks, currentAgent]);
+
+  // Função para buscar do Supabase todas as tarefas ativas do operador logado
+  const fetchGlobalActiveTasks = React.useCallback(async () => {
+    if (!currentAgent) return;
+    try {
+      const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (!tenantId) return;
+
+      const { data: notes, error } = await supabase
+        .from('contact_notes')
+        .select(`
+          id,
+          content,
+          created_at,
+          contact_id,
+          assigned_to,
+          created_by_name,
+          checklist_items,
+          contacts (
+            id,
+            name,
+            custom_name,
+            phone,
+            instance_id
+          )
+        `)
+        .eq('tenant_id', tenantId)
+        .eq('is_task', true)
+        .eq('task_completed', false);
+
+      if (error) throw error;
+
+      if (notes) {
+        const formatted = notes.map((n: any) => {
+          const contactObj = n.contacts || {};
+          return {
+            noteId: n.id,
+            contactId: n.contact_id,
+            contactName: contactObj.custom_name || contactObj.name || contactObj.phone || 'Contato',
+            instanceId: contactObj.instance_id,
+            text: n.content || '',
+            timestamp: new Date(n.created_at),
+            createdByName: n.created_by_name || 'Agente',
+            assignedTo: n.assigned_to,
+            checklistItems: n.checklist_items || []
+          };
+        });
+        formatted.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+        setGlobalActiveTasks(formatted);
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar tarefas globais:', e);
+    }
+  }, [currentAgent, tenantInfo?.id]);
+
+  // Efeito 1: Buscar tarefas globais na carga do agente
+  useEffect(() => {
+    fetchGlobalActiveTasks();
+  }, [currentAgent, fetchGlobalActiveTasks]);
+
+  // Expor fetchGlobalActiveTasks globalmente para o chatStore para atualizações otimistas locais
+  useEffect(() => {
+    (window as any).refreshGlobalActiveTasks = () => {
+      fetchGlobalActiveTasks();
+    };
+    return () => {
+      delete (window as any).refreshGlobalActiveTasks;
+    };
+  }, [fetchGlobalActiveTasks]);
+
+  // Efeito 2: Realtime para manter as tarefas globais sincronizadas
+  useEffect(() => {
+    const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    if (!tenantId || !currentAgent) return;
+
+    const channel = supabase.channel(`public:contact_notes:tenant=${tenantId}`)
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'contact_notes', 
+        filter: `tenant_id=eq.${tenantId}` 
+      }, () => {
+        fetchGlobalActiveTasks();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [tenantInfo?.id, currentAgent, fetchGlobalActiveTasks]);
+
+  // Transição reativa e scroll de destaque visual para o card da timeline
+  const handleSelectTask = async (contactId: string, noteId: string, instanceId?: string) => {
+    // Fechar o dropdown de tarefas automaticamente
+    setIsTasksDropdownOpen(false);
+
+    // Encontrar o ID composto real correspondente a este contato no store
+    const stateContacts = useChatStore.getState().contacts;
+    const foundContact = stateContacts.find(c => 
+      c.id === `${contactId}_${instanceId}` || 
+      c.id.startsWith(`${contactId}_`) || 
+      c.id === contactId
+    );
+
+    const targetContactId = foundContact ? foundContact.id : (instanceId ? `${contactId}_${instanceId}` : `${contactId}_default`);
+
+    // Se o contato pertence a outra caixa (outro instanceId) que não a atual, mudar a caixa automaticamente
+    const targetInstanceId = foundContact?.instance_id || instanceId;
+    if (targetInstanceId && activeChannelFilter !== targetInstanceId) {
+      useChatStore.getState().setActiveChannelFilter(targetInstanceId, null);
+      useChatStore.getState().setFilterType('all');
+      await useChatStore.getState().fetchInitialData();
+    }
+
+    // 1. Abre a conversa no painel central com o ID composto correto
+    setActiveChat(targetContactId);
+
+    // 2. Tenta focar na tarefa com polling adaptativo robusto (tenta a cada 100ms, por até 2.5 segundos)
+    let attempts = 0;
+    const maxAttempts = 25;
+
+    const tryScrollAndHighlight = () => {
+      const element = document.getElementById(`message-note-${noteId}`);
+      if (element) {
+        // Encontrou! Rola suavemente até o elemento centralizado
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+        // Efeito de destaque premium piscante/borda com efeito glow
+        element.classList.add('ring-4', 'ring-amber-500/60', 'animate-pulse', 'scale-[1.01]', 'duration-300');
+        
+        setTimeout(() => {
+          element.classList.remove('ring-4', 'ring-amber-500/60', 'animate-pulse', 'scale-[1.01]');
+        }, 2500);
+        
+        return true; // Sucesso
+      }
+      return false; // Não encontrado ainda
+    };
+
+    // Primeira tentativa imediata com um micro delay para o estado inicial
+    setTimeout(() => {
+      if (tryScrollAndHighlight()) return;
+
+      // Se não achar de primeira, inicia o intervalo de tentativas
+      const interval = setInterval(() => {
+        attempts++;
+        const found = tryScrollAndHighlight();
+        if (found || attempts >= maxAttempts) {
+          clearInterval(interval);
+        }
+      }, 100);
+    }, 150);
+  };
+
+  const handleOpenContactTasks = (contactId: string) => {
+    const contactObj = contacts.find(c => c.id === contactId);
+    if (contactObj) {
+      setSelectedContactForTasks(contactObj);
+    }
+  };
+
+  // Monitorar abertura do modal para carregar os valores iniciais
+  useEffect(() => {
+    if (editingNote) {
+      setEditNoteText(editingNote.text || '');
+      setEditNoteChecklist(editingNote.checklistItems || []);
+      setEditNoteAssignedTo(editingNote.assignedTo || null);
+      setEditNoteIsTask(editingNote.isTask || false);
+      setEditNotePreviewMode(false);
+      setShowDeleteConfirm(false);
+    }
+  }, [editingNote]);
+
+  // Auxiliares do Editor do Modal de Edição
+  const insertMarkdownTagInEdit = (formatType: string, templateText?: string) => {
+    const textarea = document.getElementById('edit-note-textarea') as HTMLTextAreaElement;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const selectedText = text.substring(start, end);
+
+    let replacement = "";
+
+    if (templateText) {
+      replacement = templateText;
+    } else {
+      switch (formatType) {
+        case 'bold':
+          replacement = `**${selectedText || 'texto'}**`;
+          break;
+        case 'italic':
+          replacement = `*${selectedText || 'texto'}*`;
+          break;
+        case 'strikethrough':
+          replacement = `~~${selectedText || 'texto'}~~`;
+          break;
+        case 'code':
+          replacement = `\`${selectedText || 'código'}\``;
+          break;
+        case 'bullet_list':
+          replacement = `\n- ${selectedText || 'item'}`;
+          break;
+        default:
+          replacement = selectedText;
+      }
+    }
+
+    const val = text.substring(0, start) + replacement + text.substring(end);
+    setEditNoteText(val);
+
+    // Reprogramar foco
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start, start + replacement.length);
+    }, 50);
+  };
+
+  // Atalhos de Teclado Dinâmico para o Checklist do Modal de Edição
+  const handleEditChecklistKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, index: number) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const newItems = [...editNoteChecklist];
+      newItems.splice(index + 1, 0, { id: 'temp_' + Date.now(), text: '', completed: false });
+      setEditNoteChecklist(newItems);
+      setTimeout(() => {
+        const nextInput = document.getElementById(`edit-checklist-item-${index + 1}`) as HTMLInputElement;
+        if (nextInput) {
+          nextInput.focus();
+        }
+      }, 50);
+    } else if (e.key === 'Backspace' && editNoteChecklist[index].text === '') {
+      e.preventDefault();
+      if (editNoteChecklist.length > 1) {
+        const newItems = editNoteChecklist.filter((_, i) => i !== index);
+        setEditNoteChecklist(newItems);
+        setTimeout(() => {
+          const prevInput = document.getElementById(`edit-checklist-item-${index - 1 >= 0 ? index - 1 : 0}`) as HTMLInputElement;
+          if (prevInput) {
+            prevInput.focus();
+          }
+        }, 50);
+      }
+    }
+  };
+
+  // Auxiliares do Editor de Texto Poderoso (Markdown)
+  const insertMarkdownTag = (formatType: string, templateText?: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const selectedText = text.substring(start, end);
+
+    let replacement = "";
+
+    if (templateText) {
+      replacement = templateText;
+    } else {
+      switch (formatType) {
+        case 'bold':
+          replacement = `**${selectedText || 'texto'}**`;
+          break;
+        case 'italic':
+          replacement = `*${selectedText || 'texto'}*`;
+          break;
+        case 'strikethrough':
+          replacement = `~~${selectedText || 'texto'}~~`;
+          break;
+        case 'code':
+          replacement = `\`${selectedText || 'código'}\``;
+          break;
+        case 'bullet_list':
+          replacement = `\n- ${selectedText || 'item'}`;
+          break;
+        default:
+          replacement = selectedText;
+      }
+    }
+
+    const val = text.substring(0, start) + replacement + text.substring(end);
+    setInputText(val);
+
+    // Foca novamente no textarea e define a seleção de volta
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start, start + replacement.length);
+    }, 50);
+  };
+
+  const renderMarkdownPreview = (mdText: string) => {
+    if (!mdText) return <span className="text-gray-400 dark:text-gray-500 italic block py-4 text-center">Nenhuma anotação digitada. Use a barra superior para formatar ou digite abaixo...</span>;
+    
+    // Parser seguro e leve de Markdown
+    let html = mdText
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+      
+    // Headers ###
+    html = html.replace(/^### (.*$)/gim, '<h3 class="text-amber-600 dark:text-amber-400 font-extrabold text-sm tracking-wider uppercase mt-4 mb-2 flex items-center gap-1.5 border-b border-amber-500/10 pb-1">$1</h3>');
+    // Bold **
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="font-extrabold text-amber-800 dark:text-amber-400">$1</strong>');
+    // Italic *
+    html = html.replace(/\*(.*?)\*/g, '<em class="italic text-gray-700 dark:text-gray-300">$1</em>');
+    // Strikethrough ~~
+    html = html.replace(/~~(.*?)~~/g, '<del class="line-through opacity-55">$1</del>');
+    // Code block `
+    html = html.replace(/`(.*?)`/g, '<code class="bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded font-mono text-[11.5px] text-amber-600 dark:text-amber-400 border border-black/5 dark:border-white/5">$1</code>');
+    // Bullet list -
+    html = html.replace(/^\- (.*$)/gim, '<li class="ml-4 list-disc pl-1 py-0.5 text-[13px] text-gray-700 dark:text-gray-200">$1</li>');
+    // Quebras de linha
+    html = html.replace(/\n/g, '<br />');
+
+    return (
+      <div 
+        className="text-[13px] leading-relaxed text-gray-800 dark:text-gray-200 select-text max-h-[250px] overflow-y-auto pr-1 bg-black/5 dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5 shadow-inner"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  };
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
   const [isSnoozedListOpen, setIsSnoozedListOpen] = useState(false);
@@ -707,6 +1084,8 @@ export default function ChatDashboard() {
   // Estados para Fechamento em Lote de Tickets (Modo Ticket Ativo)
   const [isConfirmBatchResolveOpen, setIsConfirmBatchResolveOpen] = useState(false);
   const [isUndoToastVisible, setIsUndoToastVisible] = useState(false);
+  const [quickReplyToast, setQuickReplyToast] = useState<{ shortcut: string; type: 'sent' | 'applied' } | null>(null);
+  const [pendingMediaToSend, setPendingMediaToSend] = useState<{ url: string; type: 'image' | 'video' | 'audio' | 'document'; name?: string } | null>(null);
   const [batchResolvedCount, setBatchResolvedCount] = useState(0);
   const [isProcessingBatchResolve, setIsProcessingBatchResolve] = useState(false);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -1362,39 +1741,216 @@ export default function ChatDashboard() {
     }, 150);
   };
 
-  const handleSendHuman = (e: React.FormEvent) => {
+  const handleTriggerImplantacaoModel = () => {
+    if (!activeChatId) {
+      alert("Por favor, selecione um contato primeiro para aplicar o modelo de tarefas CRM.");
+      return;
+    }
+    // Fechar dropdown de templates
+    setShowTemplatesDropdown(false);
+    // Definir agente inicial (o operador logado ou o primeiro agente disponível)
+    const initialAgent = currentAgent ? currentAgent.id : (agents.length > 0 ? (agents[0].id || agents[0].user_id) : null);
+    setImplantacaoSelectedAgent(initialAgent);
+    // Abrir modal premium
+    setShowImplantacaoModal(true);
+  };
+
+  const handleConfirmImplantacaoModel = async () => {
+    setShowImplantacaoModal(false);
+
+    const dias = [
+      {
+        title: "Dia 01 - Setup Completo",
+        checklist: [
+          "Mapeamento de infraestrutura, PC, Celular, Rede, Totem, Caixa, Delivery, Cozinha, Bar, Etc...",
+          "Instalação de todo o sistema.",
+          "Instalação de impressoras com ip especifico.",
+          "Configurações de GastroFood, KDS, GestorDelivery, etc..."
+        ]
+      },
+      {
+        title: "Dia 02 - Cadastro de Produtos",
+        checklist: [
+          "Treinamento de cadastros básicos.",
+          "Cadastro de categorias= SubGrupos.",
+          "Cadastro de Produtos Básico.",
+          "Cadastro de Produtos avançado Passos.",
+          "Cadastro de Clientes, Colaboradores e Fornecedores.",
+          "Cadastro de Usuários e permissões de acesso."
+        ]
+      },
+      {
+        title: "Dia 03 - Treinamento Operacional / Vendas",
+        checklist: [
+          "Modulo Mesa Computador",
+          "App Garçom",
+          "Módulo Delivery",
+          "Módulo KDS",
+          "Módulo Gestor Delivery",
+          "Módulo AppMotoboy",
+          "Financeiro Mobile"
+        ]
+      },
+      {
+        title: "Dia 04 - Treinamento Caixa / Fechamento",
+        checklist: [
+          "Cancelamentos de itens",
+          "Impressão Cupom Fiscal",
+          "Transferências",
+          "Pagamento Nota Pendente.",
+          "Alteração pedido delivery",
+          "Todas as Mesas e Delivery precisam ser fechados antes de fechar o caixa.",
+          "Fechamento de caixa cego",
+          "Conferencia de caixa escritório."
+        ]
+      },
+      {
+        title: "Dia 05 - Revisão e teste pratico",
+        checklist: [
+          "Lançamento de pedidos em todos os modulos",
+          "Conferencia das vias de produção",
+          "Transferência de mesas",
+          "Alterações de pedidos",
+          "Impressão de cupom fiscal",
+          "Cancelamentos",
+          "Fechamento de caixa",
+          "Conferencia de caixa"
+        ]
+      }
+    ];
+
+    try {
+      for (let i = 0; i < dias.length; i++) {
+        const dia = dias[i];
+        const formattedChecklist = dia.checklist.map((item, idx) => ({
+          id: `item-${Date.now()}-${i}-${idx}`,
+          text: item,
+          completed: false
+        }));
+
+        await useChatStore.getState().createInternalNote(
+          activeChatId,
+          `📋 ${dia.title}`,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          implantacaoSelectedAgent,
+          formattedChecklist
+        );
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+    } catch (e) {
+      console.error("[handleConfirmImplantacaoModel] Erro ao aplicar modelo CRM:", e);
+      alert("Houve um erro técnico ao aplicar o modelo de tarefas CRM.");
+    }
+  };
+
+  const handleSendHuman = async (e: React.FormEvent) => {
     e.preventDefault();
     const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
     console.log("[handleSendHuman] Attempting to send. Values:", { inputText, activeChatId, activeChatInstance: activeChat?.instance_id, connectedInstanceName, properTargetInstance });
     
-    if (!inputText.trim() || !activeChatId || !properTargetInstance) {
+    const isChecklistFilled = isTaskMode && checklistDraft.filter(i => i.trim()).length > 0;
+    if ((!inputText.trim() && !isChecklistFilled) || !activeChatId || !properTargetInstance) {
        console.warn("[handleSendHuman] Blocked! One of the required values is missing.");
        return;
     }
     
-    // Se a instÇ｢ncia estiver offline, alerta e não envia
-    if (instancesStatus[properTargetInstance] && instancesStatus[properTargetInstance] !== 'connected') {
-       alert('Inst穗cia offline. Conecte-a para enviar mensagens.');
+    // Se a instância estiver offline, alerta e não envia (apenas para chats do WhatsApp)
+    if (chatMode !== 'internal_note' && instancesStatus[properTargetInstance] && instancesStatus[properTargetInstance] !== 'connected') {
+       alert('Instância offline. Conecte-a para enviar mensagens.');
        return;
     }
     
-    // Se a instÇ｢ncia estiver offline, alerta e não envia
-    if (instancesStatus[properTargetInstance] && instancesStatus[properTargetInstance] !== 'connected') {
-       alert('Inst穗cia offline. Conecte-a para enviar mensagens.');
-       return;
-    }
-    
-    let finalMessageText = inputText;
-    if (replyMessage) {
-        const shortQuote = replyMessage.text.length > 80 ? replyMessage.text.substring(0, 80) + '...' : replyMessage.text;
-        finalMessageText = `> *Mensagem Citada:* "${shortQuote}"\n\n${inputText}`;
-    }
+    if (chatMode === 'internal_note') {
+      const noteText = !inputText.trim() && isTaskMode ? "📋 Checklist de Tarefa CRM criado." : inputText;
+      const formattedChecklist = isTaskMode 
+        ? checklistDraft
+            .filter(item => item.trim() !== '')
+            .map((item, idx) => ({ id: `item-${Date.now()}-${idx}`, text: item, completed: false }))
+        : [];
 
-    // ATENÇグ: Numa versão final multi-tenant o instanceName deve vir do Login.
-    sendHumanMessage(activeChatId, finalMessageText, properTargetInstance as string);
-    setInputText('');
-    setReplyMessage(null);
-    if (activeChatId) draftsRef.current[activeChatId] = '';
+      let uploadedMediaUrl = null;
+      if (noteAttachedFile) {
+        try {
+          // Upload da mídia de anotação privada via bucket do Supabase
+          const fileExt = noteAttachedFile.name.split('.').pop();
+          const fileName = `${Date.now()}_note_attachment.${fileExt}`;
+          const filePath = `${activeChatId}/${fileName}`;
+          
+          const { data, error } = await supabase.storage
+            .from('chat-media')
+            .upload(filePath, noteAttachedFile);
+            
+          if (error) throw error;
+          
+          const { data: { publicUrl } } = supabase.storage
+            .from('chat-media')
+            .getPublicUrl(filePath);
+            
+          uploadedMediaUrl = publicUrl;
+        } catch (mediaError) {
+          console.error('[handleSendHuman] Erro ao fazer upload de anexo de nota:', mediaError);
+          alert('Erro ao fazer upload da mídia anexada.');
+          return;
+        }
+      }
+        
+      // Chamada ao backend para criar nota
+      await useChatStore.getState().createInternalNote(
+        activeChatId,
+        noteText,
+        uploadedMediaUrl || undefined,
+        noteAttachedType || undefined,
+        noteAttachedFile ? { name: noteAttachedFile.name, size: noteAttachedFile.size } : undefined,
+        isTaskMode,
+        taskAssignedTo,
+        formattedChecklist
+      );
+      
+      // Reseta estados locais
+      setInputText('');
+      setChecklistDraft([]);
+      setIsTaskMode(false);
+      setTaskAssignedTo(null);
+      setNoteAttachedFile(null);
+      setNoteAttachedPreview(null);
+      setNoteAttachedType(null);
+      setNotePreviewMode(false);
+    } else {
+      let finalMessageText = inputText;
+      if (replyMessage) {
+          const shortQuote = replyMessage.text.length > 80 ? replyMessage.text.substring(0, 80) + '...' : replyMessage.text;
+          finalMessageText = `> *Mensagem Citada:* "${shortQuote}"\n\n${inputText}`;
+      }
+
+      if (pendingMediaToSend) {
+        try {
+          await useChatStore.getState().sendMediaFromUrl(
+            activeChatId, 
+            pendingMediaToSend.url, 
+            pendingMediaToSend.type, 
+            properTargetInstance as string, 
+            finalMessageText,
+            pendingMediaToSend.name
+          );
+          setPendingMediaToSend(null);
+          setQuickReplyToast({ shortcut: 'Mídia', type: 'sent' });
+          setTimeout(() => setQuickReplyToast(null), 3500);
+        } catch (mediaError) {
+          console.error('[handleSendHuman] Erro ao enviar mídia engatilhada:', mediaError);
+          alert('Erro ao enviar a mídia anexada.');
+          return;
+        }
+      } else {
+        sendHumanMessage(activeChatId, finalMessageText, properTargetInstance as string);
+      }
+
+      setInputText('');
+      setReplyMessage(null);
+      if (activeChatId) draftsRef.current[activeChatId] = '';
+    }
     
     if (textareaRef.current) {
        textareaRef.current.style.height = 'auto';
@@ -1411,7 +1967,17 @@ export default function ChatDashboard() {
     else if (file.type.startsWith('video/')) mediaType = 'video';
     else if (file.type.startsWith('audio/')) mediaType = 'audio';
 
-    await useChatStore.getState().uploadAndSendMedia(activeChatId, file, mediaType, properTargetInstance as string);
+    if (chatMode === 'internal_note') {
+      setNoteAttachedFile(file);
+      setNoteAttachedType(mediaType);
+      if (mediaType === 'image') {
+        setNoteAttachedPreview(URL.createObjectURL(file));
+      } else {
+        setNoteAttachedPreview('attached');
+      }
+    } else {
+      await useChatStore.getState().uploadAndSendMedia(activeChatId, file, mediaType, properTargetInstance as string);
+    }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -1968,7 +2534,7 @@ export default function ChatDashboard() {
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
           {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.8.4'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '27/05/2026, 10:06'}`}</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.8.10'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '28/05/2026, 11:49'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
@@ -2250,6 +2816,90 @@ export default function ChatDashboard() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Painel Moderno de Tarefas Ativas do Operador Conectado (Sheila) em Menu Suspenso */}
+        {currentAgent && myActiveTasks.length > 0 && (
+          <div className="relative shrink-0 mx-3 my-1.5 z-40">
+            {/* Overlay invisível para fechamento automático ao clicar fora */}
+            {isTasksDropdownOpen && (
+              <div 
+                className="fixed inset-0 z-40 cursor-default" 
+                onClick={() => setIsTasksDropdownOpen(false)}
+              />
+            )}
+
+            {/* Botão de Disparo do Dropdown */}
+            <button
+              onClick={() => setIsTasksDropdownOpen(!isTasksDropdownOpen)}
+              className={cn(
+                "w-full p-3.5 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent dark:from-amber-500/15 dark:to-transparent border border-amber-500/20 hover:border-amber-500/30 rounded-[20px] shadow-sm flex items-center justify-between transition-all hover:scale-[1.01] active:scale-[0.99] select-none text-left relative overflow-hidden group z-50",
+                isTasksDropdownOpen && "ring-1 ring-amber-500/40 bg-amber-500/5 dark:bg-amber-500/10 border-amber-500/35"
+              )}
+            >
+              {/* Brilho decorativo de fundo glassmorphic */}
+              <div className="absolute -right-6 -bottom-6 w-16 h-16 bg-amber-500/10 group-hover:bg-amber-500/25 blur-xl rounded-full transition-colors pointer-events-none"></div>
+
+              <div className="flex items-center gap-2 z-10 min-w-0">
+                <ClipboardList size={16} className={cn("text-amber-500 shrink-0", isTasksDropdownOpen ? "animate-bounce" : "animate-pulse")} />
+                <span className="text-[11px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest truncate">
+                  Minhas Tarefas CRM
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 z-10 shrink-0">
+                <span className="px-2 py-0.5 bg-amber-500 text-white font-black text-[10px] rounded-full shadow-sm shadow-amber-500/20 font-sans">
+                  {myActiveTasks.length} {myActiveTasks.length === 1 ? 'pendente' : 'pendentes'}
+                </span>
+                <ChevronDown 
+                  size={14} 
+                  className={cn(
+                    "text-amber-600 dark:text-amber-400 transition-transform duration-300 shrink-0",
+                    isTasksDropdownOpen && "rotate-180"
+                  )} 
+                  />
+              </div>
+            </button>
+
+            {/* Menu Suspenso (Dropdown/Popover) Flutuante */}
+            {isTasksDropdownOpen && (
+              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 bg-white/95 dark:bg-[#1f2c34]/95 backdrop-blur-md border border-amber-500/25 dark:border-amber-500/20 rounded-[20px] shadow-[0_12px_40px_-12px_rgba(0,0,0,0.35)] p-3 animate-in fade-in slide-in-from-top-2 duration-200 flex flex-col gap-2">
+                {/* Indicador superior estético */}
+                <div className="text-[10px] font-black text-amber-600/80 dark:text-amber-400/80 uppercase tracking-wider pb-1.5 border-b border-amber-500/10 font-sans flex items-center justify-between">
+                  <span>Selecionar Tarefa Pendente</span>
+                  <span className="text-[9px] opacity-60 normal-case">Clique para focar</span>
+                </div>
+
+                <div className="flex flex-col gap-1.5 max-h-[190px] overflow-y-auto pr-0.5 custom-scrollbar">
+                  {myActiveTasks.map((task) => {
+                    const channelObj = availableInstancesList.find((inst: any) => inst.id === task.instanceId);
+                    const channelName = channelObj ? (channelObj.display_name || channelObj.name) : 'Sem Caixa';
+                    return (
+                      <button
+                        key={task.noteId}
+                        onClick={() => handleSelectTask(task.contactId, task.noteId, task.instanceId)}
+                        className="w-full text-left p-2.5 bg-[#f0f2f5]/60 dark:bg-[#202c33]/60 hover:bg-amber-500/10 dark:hover:bg-amber-500/10 border border-black/5 dark:border-white/5 hover:border-amber-500/30 rounded-xl flex items-center justify-between gap-3 transition-all hover:scale-[1.01] active:scale-[0.99] group/task-item font-sans"
+                        title={`Ir para a conversa de ${task.contactName} na caixa ${channelName}`}
+                      >
+                        <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                          <span className="text-[11px] font-bold text-gray-800 dark:text-gray-200 truncate group-hover/task-item:text-amber-600 dark:group-hover/task-item:text-amber-400 transition-colors">
+                            👤 {task.contactName}
+                          </span>
+                          <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate line-clamp-1">
+                            {task.text.replace(/###|#|\*\*|\*/g, '').trim()}
+                          </span>
+                          <span className="text-[9px] font-bold text-indigo-600/80 dark:text-indigo-400/80 bg-indigo-500/5 dark:bg-indigo-500/10 px-1.5 py-0.5 rounded-md mt-1 self-start flex items-center gap-1 transition-colors group-hover/task-item:bg-indigo-500/10 dark:group-hover/task-item:bg-indigo-500/20">
+                            📥 {channelName}
+                          </span>
+                        </div>
+                        <ChevronLeft size={14} className="text-gray-400 group-hover/task-item:text-amber-500 group-hover/task-item:-translate-x-0.5 transition-all shrink-0 rotate-180" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2554,6 +3204,29 @@ export default function ChatDashboard() {
                            <span className="font-semibold text-[#111b21] dark:text-[#e9edef] text-sm tracking-tight truncate flex items-center justify-between gap-1.5 w-full">
                              <span className="truncate">{getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone)}</span>
                              <div className="flex items-center gap-1 shrink-0">
+                               {(() => {
+                                 const getCleanId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
+                                 const contactTasks = globalActiveTasks.filter(t => 
+                                   getCleanId(t.contactId) === getCleanId(contact.id)
+                                 );
+                                 if (contactTasks.length > 0) {
+                                   return (
+                                     <button
+                                       type="button"
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         handleOpenContactTasks(contact.id);
+                                       }}
+                                       className="px-1.5 py-[2px] rounded-md text-[8px] font-black uppercase bg-amber-500/25 hover:bg-amber-500/35 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1 shadow-sm transition-all hover:scale-105 active:scale-95 animate-pulse shrink-0"
+                                       title={`${contactTasks.length} ${contactTasks.length === 1 ? 'tarefa pendente' : 'tarefas pendentes'} no CRM. Clique para visualizar.`}
+                                     >
+                                       <ClipboardList size={8} className="text-amber-500 shrink-0" />
+                                       CRM: {contactTasks.length}
+                                     </button>
+                                   );
+                                 }
+                                 return null;
+                               })()}
                                {contact.priority === 'urgent' && (
                                  <span className="px-1.5 py-[2px] rounded-md text-[8px] font-extrabold uppercase bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center gap-0.5 shadow-sm animate-pulse">
                                    <Flag size={8} className="fill-current" />
@@ -3442,23 +4115,401 @@ export default function ChatDashboard() {
                   </div>
                 )}
                 
-                <form onSubmit={handleSendHuman} className="min-h-[70px] flex items-end px-4 py-3 gap-3 relative">
-                  <button 
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-2 text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
-                  >
-                    <Paperclip size={20} />
-                  </button>
-                  <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    style={{ display: 'none' }} 
-                    onChange={handleFileUpload} 
-                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
-                  />
+                {/* Alternador de Modo de Chat Premium (WhatsApp vs Anotação Interna) */}
+                {activeChat && (
+                  <div className="flex items-center gap-2.5 px-4 pt-2.5 pb-1 border-t border-black/5 dark:border-white/5 bg-[#f0f2f5]/40 dark:bg-[#111b21]/40 backdrop-blur-md select-none shrink-0 animate-in fade-in duration-300">
+                    <button
+                      type="button"
+                      onClick={() => setChatMode('chat')}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all duration-300 active:scale-95 shadow-sm border",
+                        chatMode === 'chat'
+                          ? "bg-emerald-500/10 border-emerald-500/20 text-[#00a884] dark:text-[#00c298]"
+                          : "bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5"
+                      )}
+                    >
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" className="shrink-0">
+                        <path d="M12.004 2c-5.51 0-9.99 4.49-9.99 10 0 1.91.53 3.69 1.47 5.23L2.24 21.91c-.13.34-.04.73.23 1 .18.18.42.27.67.27.08 0 .17-.01.25-.03l4.89-1.25c1.47.8 3.12 1.25 4.88 1.25 5.51 0 9.99-4.49 9.99-10s-4.48-10-9.99-10zm.01 17.52c-1.63 0-3.17-.46-4.51-1.32-.15-.1-.34-.13-.51-.09l-3.08.79.82-3.08c.05-.18.01-.37-.1-.52-1.01-.1.44-2.48-1.51-4.09-1.51-1.61 0-3.15.46-4.51 1.32-.15.1-.34.13-.51.09l-3.08.79.82-3.08c.05-.18.01-.37-.1-.52-1.01-.1.44-2.48-1.51-4.09-1.51z" />
+                      </svg>
+                      Enviar via WhatsApp
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChatMode('internal_note')}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all duration-300 active:scale-95 shadow-sm border",
+                        chatMode === 'internal_note'
+                          ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                          : "bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5"
+                      )}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                      </svg>
+                      Anotação Interna
+                    </button>
+                  </div>
+                )}
+                
+                <form 
+                  onSubmit={handleSendHuman} 
+                  className={cn(
+                    "min-h-[70px] flex px-4 py-3 gap-3 relative",
+                    chatMode === 'internal_note'
+                      ? "flex-col items-stretch md:flex-row md:items-end md:gap-3"
+                      : "flex-row items-end gap-3"
+                  )}
+                >
+                  {chatMode === 'internal_note' && noteAttachedPreview && (
+                    <div className="absolute bottom-full left-4 mb-3.5 p-2 bg-amber-500/10 backdrop-blur-md rounded-2xl border border-amber-500/25 flex items-center gap-3 animate-in slide-in-from-bottom-2 duration-300 z-50 shadow-lg">
+                      {noteAttachedType === 'image' && (
+                        <img src={noteAttachedPreview} className="w-12 h-12 rounded-xl object-cover border border-amber-500/20 shadow-sm" />
+                      )}
+                      {noteAttachedType === 'video' && (
+                        <div className="w-12 h-12 rounded-xl bg-black/25 flex items-center justify-center border border-amber-500/20 text-amber-700 dark:text-amber-400">
+                          <Video size={16} />
+                        </div>
+                      )}
+                      {noteAttachedType === 'audio' && (
+                        <div className="w-12 h-12 rounded-xl bg-black/25 flex items-center justify-center border border-amber-500/20 text-amber-700 dark:text-amber-400">
+                          <Mic size={16} />
+                        </div>
+                      )}
+                      {noteAttachedType === 'document' && (
+                        <div className="w-12 h-12 rounded-xl bg-black/25 flex items-center justify-center border border-amber-500/20 text-amber-700 dark:text-amber-400">
+                          <FileText size={16} />
+                        </div>
+                      )}
+                      <div className="flex flex-col text-[11px] text-amber-900 dark:text-amber-100 pr-7">
+                        <span className="font-bold truncate max-w-[120px]">{noteAttachedFile?.name}</span>
+                        <span className="opacity-60 uppercase text-[9px] font-black tracking-wider mt-0.5">{noteAttachedType}</span>
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setNoteAttachedFile(null);
+                          setNoteAttachedPreview(null);
+                          setNoteAttachedType(null);
+                        }}
+                        className="absolute -top-1.5 -right-1.5 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 transition-colors shadow-md active:scale-90"
+                      >
+                        <X size={10} strokeWidth={3} />
+                      </button>
+                    </div>
+                  )}
 
-                  <div className="flex flex-1 items-end bg-white dark:bg-[#2a3942] rounded-xl px-4 py-2 border border-transparent focus-within:border-[#00a884]/50 transition-colors shadow-sm relative">
+                  {chatMode !== 'internal_note' && pendingMediaToSend && (
+                    <div className="absolute bottom-full left-4 mb-3.5 p-3.5 bg-white/80 dark:bg-[#111b21]/80 backdrop-blur-xl rounded-3xl border border-emerald-500/25 dark:border-emerald-500/35 flex items-center gap-3 animate-in slide-in-from-bottom-2 duration-300 z-50 shadow-2xl max-w-[280px]">
+                      {pendingMediaToSend.type === 'image' && (
+                        <img src={pendingMediaToSend.url} className="w-11 h-11 rounded-xl object-cover border border-emerald-500/20 shadow-sm shrink-0" />
+                      )}
+                      {pendingMediaToSend.type === 'video' && (
+                        <div className="w-11 h-11 rounded-xl bg-black/25 flex items-center justify-center border border-emerald-500/20 text-emerald-500 shrink-0">
+                          <Video size={16} />
+                        </div>
+                      )}
+                      {pendingMediaToSend.type === 'audio' && (
+                        <div className="w-11 h-11 rounded-xl bg-blue-500/15 flex items-center justify-center border border-blue-500/20 text-blue-500 shrink-0">
+                          <Mic size={16} />
+                        </div>
+                      )}
+                      {pendingMediaToSend.type === 'document' && (
+                        <div className="w-11 h-11 rounded-xl bg-emerald-500/15 flex items-center justify-center border border-emerald-500/20 text-emerald-500 shrink-0">
+                          <FileText size={16} />
+                        </div>
+                      )}
+                      
+                      <div className="flex-1 min-w-0 pr-2">
+                        <p className="text-[9px] uppercase font-extrabold tracking-wider text-emerald-600 dark:text-emerald-400">
+                          Mídia Pendente
+                        </p>
+                        <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mt-0.5 truncate" title={pendingMediaToSend.name}>
+                          {pendingMediaToSend.name}
+                        </p>
+                      </div>
+                      
+                      <button
+                        type="button"
+                        onClick={() => setPendingMediaToSend(null)}
+                        className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-full transition-colors shrink-0 active:scale-90"
+                        title="Remover anexo"
+                      >
+                        <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+                      </button>
+                    </div>
+                  )}
+
+                  {chatMode === 'internal_note' && isTaskMode && (
+                    <div className="absolute bottom-full left-4 right-4 mb-3.5 p-5 bg-white/90 dark:bg-[#111b21]/90 backdrop-blur-xl rounded-3xl border border-amber-500/35 shadow-[0_8px_32px_rgba(245,158,11,0.18)] flex flex-col gap-4 animate-in slide-in-from-bottom-2 duration-300 z-40 max-h-[300px] overflow-y-auto scrollbar-thin">
+                      <div className="flex items-center justify-between border-b border-amber-500/20 pb-2.5">
+                        <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-extrabold text-[11px] tracking-widest uppercase">
+                          <CheckSquare size={15} className="text-amber-500 animate-pulse" />
+                          Checklist de Tarefa CRM
+                          {checklistDraft.length > 0 && (
+                            <span className="ml-1.5 px-2 py-0.5 bg-amber-500/20 text-amber-700 dark:text-amber-400 rounded-full font-mono text-[9px] font-black">
+                              {checklistDraft.length} {checklistDraft.length === 1 ? 'item' : 'itens'}
+                            </span>
+                          )}
+                        </div>
+                        <button 
+                          type="button"
+                          onClick={() => setIsTaskMode(false)}
+                          className="text-gray-400 hover:text-red-500 transition-all p-1 hover:scale-110 active:scale-90"
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                      
+                      {/* Atribuir Responsável */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                          <span>👤</span> Operador Responsável
+                        </label>
+                        <select
+                          value={taskAssignedTo || ""}
+                          onChange={(e) => setTaskAssignedTo(e.target.value || null)}
+                          className="bg-gray-50 dark:bg-[#202c33] border border-amber-500/20 rounded-2xl px-3 py-2 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/10 transition-all cursor-pointer font-medium"
+                        >
+                          <option value="">(Nenhum - Atribuir a todos)</option>
+                          {agents.map((agent: any) => (
+                            <option key={agent.id} value={agent.id}>
+                              {agent.full_name || agent.email}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Itens do Checklist */}
+                      <div className="flex flex-col gap-2.5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                            <span>📋</span> Itens do Checklist
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setChecklistDraft([...checklistDraft, ""]);
+                              setTimeout(() => {
+                                const nextInput = document.getElementById(`checklist-item-${checklistDraft.length}`);
+                                if (nextInput) (nextInput as HTMLInputElement).focus();
+                              }, 50);
+                            }}
+                            className="text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 text-[10px] font-extrabold flex items-center gap-1 hover:underline transition-all hover:scale-105 active:scale-95 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/10 shrink-0"
+                          >
+                            + Adicionar Item
+                          </button>
+                        </div>
+                        
+                        <div className="flex flex-col gap-2">
+                          {checklistDraft.map((item, index) => (
+                            <div key={index} className="flex items-center gap-2.5 animate-in slide-in-from-left-2 duration-250">
+                              {/* Círculo de checkbox simulado */}
+                              <div className="w-4 h-4 rounded-full border border-dashed border-amber-500/40 hover:border-amber-500/70 transition-colors flex items-center justify-center shrink-0 cursor-pointer" title="Pronto para marcar na conclusão">
+                                <div className="w-1.5 h-1.5 rounded-full bg-amber-500/0 hover:bg-amber-500/30 transition-all" />
+                              </div>
+                              <input
+                                id={`checklist-item-${index}`}
+                                type="text"
+                                value={item}
+                                onChange={(e) => {
+                                  const next = [...checklistDraft];
+                                  next[index] = e.target.value;
+                                  setChecklistDraft(next);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    const next = [...checklistDraft];
+                                    next.splice(index + 1, 0, "");
+                                    setChecklistDraft(next);
+                                    
+                                    // Foca no novo input criado
+                                    setTimeout(() => {
+                                      const nextInput = document.getElementById(`checklist-item-${index + 1}`);
+                                      if (nextInput) {
+                                        (nextInput as HTMLInputElement).focus();
+                                      }
+                                    }, 50);
+                                  } else if (e.key === 'Backspace' && e.currentTarget.value === '' && checklistDraft.length > 1) {
+                                    e.preventDefault();
+                                    const next = checklistDraft.filter((_, idx) => idx !== index);
+                                    setChecklistDraft(next);
+                                    
+                                    // Foca no input anterior
+                                    setTimeout(() => {
+                                      const prevId = index > 0 ? index - 1 : 0;
+                                      const prevInput = document.getElementById(`checklist-item-${prevId}`);
+                                      if (prevInput) {
+                                        (prevInput as HTMLInputElement).focus();
+                                      }
+                                    }, 50);
+                                  }
+                                }}
+                                placeholder={`Item ${index + 1}`}
+                                className="flex-1 bg-gray-50/50 dark:bg-[#202c33]/50 border border-amber-500/15 rounded-xl px-3 py-1.5 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/10 transition-all font-medium placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                              />
+                              {checklistDraft.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = checklistDraft.filter((_, idx) => idx !== index);
+                                    setChecklistDraft(next);
+                                  }}
+                                  className="text-gray-400 hover:text-red-500 transition-colors p-1.5 hover:bg-red-500/10 rounded-lg active:scale-95"
+                                  title="Remover Item"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className={cn(
+                    "flex flex-1 rounded-2xl border transition-all duration-300 shadow-sm relative",
+                    chatMode === 'internal_note'
+                      ? "flex-col items-stretch px-4 py-3 bg-amber-500/5 dark:bg-amber-500/10 border-amber-500/30 focus-within:border-amber-500/60 shadow-[inset_0_1px_2px_rgba(245,158,11,0.05)] gap-3.5 order-first md:order-none"
+                      : "flex-row items-end px-4 py-2 bg-white dark:bg-[#2a3942] border-transparent focus-within:border-[#00a884]/50 gap-3"
+                  )}>
+                    
+                    {/* Barra de Ferramentas do Editor de Notas CRM */}
+                    {chatMode === 'internal_note' && (
+                      <div className="w-full flex items-center justify-between border-b border-amber-500/15 pb-2.5 select-none animate-in fade-in duration-300">
+                        {/* Botões de Formatação */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => insertMarkdownTag('bold')}
+                            className="p-1.5 rounded-xl hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10"
+                            title="Negrito (**)"
+                          >
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"></path>
+                              <path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"></path>
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => insertMarkdownTag('italic')}
+                            className="p-1.5 rounded-xl hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10"
+                            title="Itálico (*)"
+                          >
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="4" x2="10" y2="4"></line>
+                              <line x1="14" y1="20" x2="5" y2="20"></line>
+                              <line x1="15" y1="4" x2="9" y2="20"></line>
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => insertMarkdownTag('strikethrough')}
+                            className="p-1.5 rounded-xl hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10"
+                            title="Riscado (~~)"
+                          >
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="5" y1="12" x2="19" y2="12"></line>
+                              <path d="M16 6C16 6 14.5 4 12 4C9.5 4 7 6 7 8C7 10 9 11.5 12 12C15 12.5 17 14 17 16C17 18 14.5 20 12 20C9.5 20 8 18 8 18"></path>
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => insertMarkdownTag('code')}
+                            className="p-1.5 rounded-xl hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10"
+                            title="Bloco de Código (`)"
+                          >
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="16 18 22 12 16 6"></polyline>
+                              <polyline points="8 6 2 12 8 18"></polyline>
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => insertMarkdownTag('bullet_list')}
+                            className="p-1.5 rounded-xl hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10"
+                            title="Lista Bullet (-)"
+                          >
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="8" y1="6" x2="21" y2="6"></line>
+                              <line x1="8" y1="12" x2="21" y2="12"></line>
+                              <line x1="8" y1="18" x2="21" y2="18"></line>
+                              <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                              <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                              <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                            </svg>
+                          </button>
+
+                          <div className="w-[1px] h-4 bg-amber-500/20 mx-1.5 shrink-0" />
+
+                          {/* Seletor de Modelos Rápidos */}
+                          <div className="relative group/templates inline-block">
+                            <button
+                              type="button"
+                              className="px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider bg-amber-500/10 hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/15 transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer hover:scale-105 select-none font-bold"
+                            >
+                              💡 Modelos
+                              <ChevronDown size={11} />
+                            </button>
+                            
+                            <div className="absolute left-0 top-full mt-1.5 w-48 bg-white dark:bg-[#202c33] border border-amber-500/20 rounded-2xl shadow-xl hidden group-hover/templates:flex flex-col z-[110] py-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                              <button
+                                type="button"
+                                onClick={() => insertMarkdownTag('', '\n### 📅 Ata de Reunião\n- **Data/Hora**: \n- **Pautas Discutidas**:\n  - \n- **Decisões Tomadas**:\n  - \n- **Próximos Passos**:\n  - \n')}
+                                className="w-full text-left px-3.5 py-2 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-amber-500/10 transition-colors font-bold flex items-center gap-1.5"
+                              >
+                                <span>📅</span> Ata de Reunião
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => insertMarkdownTag('', '\n### 👤 Perfil do Lead / Cliente\n- **Dores/Necessidades**: \n- **Potencial de Compra**: \n- **Produtos de Interesse**: \n- **Observações**: \n')}
+                                className="w-full text-left px-3.5 py-2 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-amber-500/10 transition-colors font-bold flex items-center gap-1.5"
+                              >
+                                <span>👤</span> Perfil do Lead
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => insertMarkdownTag('', '\n### 🚨 TAREFA CRÍTICA / URGENTE\n- **Objetivo Principal**: \n- **Prazo Estimado**: \n- **Observação**: \n')}
+                                className="w-full text-left px-3.5 py-2 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-amber-500/10 transition-colors font-bold flex items-center gap-1.5"
+                              >
+                                <span>🚨</span> Tarefa Crítica
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Alternador de Modo de Escrita / Preview */}
+                        <div className="flex items-center bg-black/5 dark:bg-black/20 rounded-xl p-0.5 border border-black/5 dark:border-white/5 shadow-inner">
+                          <button
+                            type="button"
+                            onClick={() => setNotePreviewMode(false)}
+                            className={cn(
+                              "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none font-bold",
+                              !notePreviewMode
+                                ? "bg-amber-500 text-white shadow-sm font-black"
+                                : "text-gray-500 dark:text-gray-400 hover:text-amber-700 dark:hover:text-amber-400"
+                            )}
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNotePreviewMode(true)}
+                            className={cn(
+                              "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none font-bold",
+                              notePreviewMode
+                                ? "bg-amber-500 text-white shadow-sm font-black"
+                                : "text-gray-500 dark:text-gray-400 hover:text-amber-700 dark:hover:text-amber-400"
+                            )}
+                          >
+                            Visualizar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Quick Replies Popover */}
                     {showQuickReplies && quickReplies.length > 0 && (
                       <div className="absolute bottom-full left-0 mb-2 w-[350px] max-w-[90vw] bg-white dark:bg-[#202c33] rounded-2xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden z-[100] animate-in fade-in zoom-in-95 slide-in-from-bottom-4">
@@ -3471,39 +4522,32 @@ export default function ChatDashboard() {
                               key={qr.id}
                               type="button"
                               className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-[#2a3942] transition-colors border-b border-gray-50 dark:border-white/5 last:border-0 group"
-                              onClick={async () => {
+                              onClick={() => {
                                 setShowQuickReplies(false);
+                                setInputText(qr.content);
+                                
                                 if (qr.media_url) {
-                                  try {
-                                    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
-                                    if (activeChat && properTargetInstance) {
-                                      await useChatStore.getState().sendMediaFromUrl(
-                                        activeChat.id, 
-                                        qr.media_url, 
-                                        (qr.media_type as 'image'|'video'|'audio'|'document') || 'image', 
-                                        properTargetInstance, 
-                                        qr.content
-                                      );
-                                    }
-                                    setInputText('');
-                                    setTimeout(() => textareaRef.current?.focus(), 10);
-                                  } catch (e) {
-                                    console.error('Erro ao enviar mídia da resposta rápida:', e);
-                                    alert('Falha ao enviar mídia da resposta pronta.');
-                                    setInputText(qr.content);
-                                    setTimeout(() => textareaRef.current?.focus(), 10);
-                                  }
+                                  setPendingMediaToSend({
+                                    url: qr.media_url,
+                                    type: (qr.media_type as 'image'|'video'|'audio'|'document') || 'image',
+                                    name: qr.media_url.split('/').pop()?.split('_').slice(1).join('_') || 'Anexo da resposta rápida'
+                                  });
+                                  setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
+                                  setTimeout(() => setQuickReplyToast(null), 3500);
                                 } else {
-                                  setInputText(qr.content);
-                                  setTimeout(() => textareaRef.current?.focus(), 10);
+                                  setPendingMediaToSend(null);
+                                  setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
+                                  setTimeout(() => setQuickReplyToast(null), 3500);
                                 }
+                                
+                                setTimeout(() => textareaRef.current?.focus(), 10);
                               }}
                             >
                               <div className="font-semibold text-blue-600 dark:text-blue-400 text-[13px] mb-1 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors flex items-center gap-1.5">
                                 {qr.shortcut}
                                 {qr.media_url && (
                                    <span className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded-md">
-                                      {qr.media_type === 'video' ? <Video className="w-3 h-3" /> : qr.media_type === 'audio' ? <Mic className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
+                                      {qr.media_type === 'video' ? <Video className="w-3 h-3" /> : qr.media_type === 'audio' ? <Mic className="w-3 h-3" /> : qr.media_type === 'document' ? <FileText className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
                                       Mídia
                                    </span>
                                 )}
@@ -3548,70 +4592,82 @@ export default function ChatDashboard() {
 
                     <div className="relative flex-1 min-w-0 min-h-[20px] flex items-end">
                       {/* Div de Highlight por trás (grifa as palavras em vermelho) */}
-                      <div 
-                        className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none select-none whitespace-pre-wrap break-words text-transparent text-sm resize-none pb-0.5 overflow-hidden leading-relaxed px-0 py-0"
-                        style={{ 
-                          font: 'inherit',
-                          lineHeight: 'inherit',
-                          maxHeight: '250px',
-                          transform: `translateY(-${scrollTop}px)`
-                        }}
-                      >
-                        {renderHighlightedText()}
-                      </div>
+                      {!(chatMode === 'internal_note' && notePreviewMode) && (
+                        <div 
+                          className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none select-none whitespace-pre-wrap break-words text-transparent text-sm resize-none pb-0.5 overflow-hidden leading-relaxed px-0 py-0"
+                          style={{ 
+                            font: 'inherit',
+                            lineHeight: 'inherit',
+                            maxHeight: '250px',
+                            transform: `translateY(-${scrollTop}px)`
+                          }}
+                        >
+                          {renderHighlightedText()}
+                        </div>
+                      )}
 
-                      <textarea 
-                        ref={textareaRef}
-                        value={inputText}
-                        spellCheck={false}
-                        lang="pt-BR"
-                        onChange={e => {
-                          const val = e.target.value;
-                          setInputText(val);
-                          if (val.startsWith('/')) {
-                            setShowQuickReplies(true);
-                            setQuickReplyFilter(val.substring(1).toLowerCase());
-                          } else {
-                            setShowQuickReplies(false);
-                          }
-                          setScrollTop(e.currentTarget.scrollTop);
-                        }}
-                        onSelect={handleTextareaSelection}
-                        onClick={handleTextareaSelection}
-                        onKeyUp={handleTextareaSelection}
-                        onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            const isCompactMobile = window.innerWidth < 500;
-                            if (isCompactMobile) {
-                              return;
+                      {chatMode === 'internal_note' && notePreviewMode ? (
+                        <div className="w-full min-h-[36px] bg-transparent pb-0.5 overflow-y-auto max-h-[250px] relative z-10 animate-in fade-in duration-300 select-text">
+                          {renderMarkdownPreview(inputText)}
+                        </div>
+                      ) : (
+                        <textarea 
+                          ref={textareaRef}
+                          value={inputText}
+                          spellCheck={false}
+                          lang="pt-BR"
+                          onChange={e => {
+                            const val = e.target.value;
+                            setInputText(val);
+                            if (val.startsWith('/')) {
+                              setShowQuickReplies(true);
+                              setQuickReplyFilter(val.substring(1).toLowerCase());
+                            } else {
+                              setShowQuickReplies(false);
                             }
-                            e.preventDefault();
-                            if (inputText.trim()) {
-                              handleSendHuman(e as any);
-                            }
-                          }
-                        }}
-                        onPaste={(e) => {
-                          const items = e.clipboardData?.items;
-                          if (!items) return;
-                          for (let i = 0; i < items.length; i++) {
-                            if (items[i].type.indexOf('image') !== -1) {
-                              e.preventDefault();
-                              const file = items[i].getAsFile();
-                              if (file) {
-                                setPastedImage(file);
-                                setPastedImagePreview(URL.createObjectURL(file));
-                                setPastedImageCaption('');
+                            setScrollTop(e.currentTarget.scrollTop);
+                          }}
+                          onSelect={handleTextareaSelection}
+                          onClick={handleTextareaSelection}
+                          onKeyUp={handleTextareaSelection}
+                          onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              const isCompactMobile = window.innerWidth < 500;
+                              if (isCompactMobile) {
+                                return;
                               }
-                              break;
+                              e.preventDefault();
+                              if (inputText.trim()) {
+                                handleSendHuman(e as any);
+                              }
                             }
+                          }}
+                          onPaste={(e) => {
+                            const items = e.clipboardData?.items;
+                            if (!items) return;
+                            for (let i = 0; i < items.length; i++) {
+                              if (items[i].type.indexOf('image') !== -1) {
+                                e.preventDefault();
+                                const file = items[i].getAsFile();
+                                if (file) {
+                                  setPastedImage(file);
+                                  setPastedImagePreview(URL.createObjectURL(file));
+                                  setPastedImageCaption('');
+                                }
+                                break;
+                              }
+                            }
+                          }}
+                          rows={1}
+                          placeholder={
+                            chatMode === 'internal_note'
+                              ? "Escreva uma anotação interna sobre este contato (não será enviada ao cliente)..."
+                              : "Responda como humano e a IA sera pausada automaticamente..."
                           }
-                        }}
-                        rows={1}
-                        placeholder="Responda como humano e a IA sera pausada automaticamente..."
-                        className="bg-transparent border-none outline-none w-full text-sm text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin relative z-10"
-                      />
+                          className="bg-transparent border-none outline-none w-full text-sm text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin relative z-10"
+                        />
+                      )}
                     </div>
                     {/* Botão de Sugestão Ortográfica Discreto */}
                     {activeWordUnderCursor && suggestions.length > 0 && (
@@ -3686,26 +4742,139 @@ export default function ChatDashboard() {
                       </div>
                     )}
                   </div>
-                  
-                  {inputText.trim() ? (
-                    <button 
-                      type="submit"
-                      className="w-10 h-10 flex items-center justify-center bg-[#00a884] text-white rounded-full shadow-md hover:scale-105 transition-transform active:scale-95 shrink-0"
-                    >
-                      <Send size={16} className="translate-x-0.5" />
-                    </button>
-                  ) : (
-                    <button 
-                      type="button"
-                      onClick={handleMicClick}
-                      className={cn(
-                         "w-10 h-10 flex items-center justify-center rounded-full shadow-md hover:scale-105 transition-all active:scale-95 shrink-0",
-                         audioState === 'recording' ? "bg-red-500 text-white animate-pulse" : "bg-transparent text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 shadow-none"
+
+                  {/* Contêiner de Ações Inferior no Mobile / Contents no Desktop */}
+                  <div className={cn(
+                    chatMode === 'internal_note'
+                      ? "flex items-center justify-between w-full mt-2 md:mt-0 md:w-auto md:contents"
+                      : "contents"
+                  )}>
+                    {/* Botões de Ação da Esquerda */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button 
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="p-2 text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
+                      >
+                        <Paperclip size={20} />
+                      </button>
+                      <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        style={{ display: 'none' }} 
+                        onChange={handleFileUpload} 
+                        accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
+                      />
+
+                      {chatMode === 'internal_note' && (
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            const newMode = !isTaskMode;
+                            setIsTaskMode(newMode);
+                            if (newMode && checklistDraft.length === 0) {
+                              setChecklistDraft([""]);
+                            }
+                          }}
+                          className={cn(
+                            "p-2 rounded-full transition-all shrink-0 animate-in fade-in zoom-in-95 duration-250",
+                            isTaskMode
+                              ? "text-amber-600 bg-amber-500/25 hover:bg-amber-500/35 scale-105 border border-amber-500/35"
+                              : "text-amber-600 dark:text-amber-500 hover:bg-amber-500/10"
+                          )}
+                          title="Tornar Tarefa CRM / Checklist"
+                        >
+                          <CheckSquare size={20} />
+                        </button>
                       )}
-                    >
-                      <Mic size={20} />
-                    </button>
-                  )}
+
+                      {chatMode === 'internal_note' && (
+                        <div className="relative">
+                          <button 
+                            type="button"
+                            onClick={() => setShowTemplatesDropdown(!showTemplatesDropdown)}
+                            className={cn(
+                              "p-2 rounded-full transition-all shrink-0 animate-in fade-in zoom-in-95 duration-250",
+                              showTemplatesDropdown
+                                ? "text-emerald-600 bg-emerald-500/25 hover:bg-emerald-500/35 scale-105 border border-emerald-500/35"
+                                : "text-emerald-600 dark:text-emerald-500 hover:bg-emerald-500/10"
+                            )}
+                            title="Modelos de Tarefa CRM"
+                          >
+                            <Sparkles size={20} className={cn(showTemplatesDropdown ? "" : "animate-pulse")} />
+                          </button>
+
+                          {showTemplatesDropdown && (
+                            <div className="absolute bottom-full left-0 mb-3.5 p-4 bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl rounded-3xl border border-emerald-500/35 shadow-[0_8px_32px_rgba(16,185,129,0.18)] flex flex-col gap-3.5 w-72 z-50 animate-in slide-in-from-bottom-2 duration-300">
+                              <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
+                                <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-extrabold text-[10px] tracking-widest uppercase">
+                                  <Sparkles size={14} className="text-emerald-500 animate-spin duration-3000" />
+                                  Modelos de Tarefa CRM
+                                </div>
+                                <button 
+                                  type="button"
+                                  onClick={() => setShowTemplatesDropdown(false)}
+                                  className="text-gray-400 hover:text-red-500 transition-all p-1 hover:scale-110"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+
+                              <div className="flex flex-col gap-2">
+                                <button
+                                  type="button"
+                                  onClick={handleTriggerImplantacaoModel}
+                                  className="w-full text-left p-3 rounded-2xl border border-dashed border-emerald-500/25 hover:border-emerald-500/60 bg-emerald-500/5 hover:bg-emerald-500/10 transition-all group flex gap-3 items-start cursor-pointer active:scale-[0.98]"
+                                >
+                                  <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 shrink-0 group-hover:scale-110 transition-transform">
+                                    <Plus size={16} strokeWidth={3} />
+                                  </div>
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="font-extrabold text-[11px] text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">
+                                      Implantação Completa
+                                    </span>
+                                    <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-relaxed mt-0.5 font-medium">
+                                      Gera automaticamente as 5 tarefas diárias de implantação com seus respectivos checklists completos.
+                                    </p>
+                                  </div>
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Botão de Enviar da Direita */}
+                    <div className="flex items-center shrink-0">
+                      {(inputText.trim() || (chatMode === 'internal_note' && isTaskMode)) ? (
+                        <button 
+                          type="submit"
+                          className={cn(
+                            "w-10 h-10 flex items-center justify-center text-white rounded-full shadow-md hover:scale-105 transition-all active:scale-95 shrink-0 animate-in fade-in zoom-in-95 duration-200",
+                            chatMode === 'internal_note'
+                              ? "bg-amber-500 hover:bg-amber-600 shadow-amber-500/20"
+                              : "bg-[#00a884] hover:bg-[#00a884]/90 shadow-emerald-500/20"
+                          )}
+                        >
+                          <Send size={16} className="translate-x-0.5" />
+                        </button>
+                      ) : (
+                        chatMode !== 'internal_note' && (
+                          <button 
+                            type="button"
+                            onClick={handleMicClick}
+                            className={cn(
+                               "w-10 h-10 flex items-center justify-center rounded-full shadow-md hover:scale-105 transition-all active:scale-95 shrink-0 animate-in fade-in zoom-in-95 duration-200",
+                               audioState === 'recording' ? "bg-red-500 text-white animate-pulse" : "bg-transparent text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 shadow-none"
+                            )}
+                          >
+                            <Mic size={20} />
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
                 </form>
               </>
             )}
@@ -3904,6 +5073,669 @@ export default function ChatDashboard() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Premium de Confirmação e Atribuição de Implantação Completa CRM */}
+      {showImplantacaoModal && (
+        <div className="fixed inset-0 z-[99999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white/95 dark:bg-[#1e2b34]/95 backdrop-blur-2xl w-full max-w-md rounded-[32px] border border-emerald-500/20 dark:border-white/10 shadow-2xl overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 flex flex-col">
+            
+            {/* Header com gradiente sutil de emerald */}
+            <div className="p-6 border-b border-gray-100 dark:border-white/5 bg-gradient-to-r from-emerald-500/10 to-transparent flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-inner">
+                  <Sparkles size={20} className="animate-pulse" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">
+                    Implantação Completa
+                  </h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 font-sans">
+                    Geração automática de checklist de 5 dias
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowImplantacaoModal(false)}
+                className="text-gray-400 hover:text-red-500 transition-all p-1 hover:scale-110"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Conteúdo Central do Modal */}
+            <div className="p-6 flex flex-col gap-5">
+              <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed font-sans font-medium">
+                Deseja criar automaticamente as 5 tarefas do checklist de <b>'Implantação Completa'</b> para este cliente? As tarefas serão inseridas como anotações internas CRM.
+              </p>
+
+              {/* Seletor de Agentes Responsáveis */}
+              <div className="flex flex-col gap-2 w-full text-left font-sans">
+                <label className="text-xs font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">
+                  Atribuir tarefas ao agente:
+                </label>
+                <div className="relative flex items-center w-full">
+                  <select
+                    value={implantacaoSelectedAgent || ''}
+                    onChange={(e) => setImplantacaoSelectedAgent(e.target.value || null)}
+                    className="w-full bg-[#f0f2f5] dark:bg-[#202c33] border border-emerald-500/20 dark:border-white/5 rounded-2xl px-4 py-3.5 text-sm text-gray-800 dark:text-gray-100 outline-none focus:border-emerald-500 transition-all cursor-pointer font-bold appearance-none"
+                  >
+                    <option value="" className="font-bold text-gray-500 dark:bg-[#202c33]">Qualquer Operador</option>
+                    {agents.map((agent: any) => (
+                      <option key={agent.id} value={agent.id || agent.user_id} className="font-bold dark:bg-[#202c33]">
+                        👤 {agent.full_name || agent.email}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute right-4 pointer-events-none text-emerald-600 dark:text-emerald-400">
+                    <ChevronDown size={16} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Rodapé do Modal */}
+            <div className="px-6 py-5 bg-gray-50/50 dark:bg-black/20 border-t border-gray-100 dark:border-white/5 flex gap-3 justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowImplantacaoModal(false)}
+                className="px-5 py-3 rounded-2xl text-sm font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white bg-[#f0f2f5] dark:bg-[#202c33] border border-transparent hover:border-gray-200 dark:hover:border-white/10 transition-all active:scale-95"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmImplantacaoModel}
+                className="px-6 py-3 rounded-2xl text-sm font-extrabold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-md hover:shadow-emerald-500/20 transition-all active:scale-95 hover:scale-[1.01]"
+              >
+                Gerar e Atribuir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Edição de Notas Internas / Tarefas CRM (Design Ultra-Premium) */}
+      {editingNote && (
+        <div className="fixed inset-0 z-[99999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white/95 dark:bg-[#1e2b34]/95 backdrop-blur-2xl w-full max-w-2xl rounded-[32px] border border-amber-500/20 dark:border-white/10 shadow-2xl overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 flex flex-col max-h-[90vh]">
+            
+            {/* Header com gradiente sutil e design premium */}
+            <div className="p-6 border-b border-gray-100 dark:border-white/5 bg-gradient-to-r from-amber-500/10 to-transparent flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400 shadow-inner">
+                  <Edit2 size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">
+                    Editar Anotação Interna
+                  </h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Modifique o texto, checklist ou atribuição da tarefa CRM
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setEditingNote(null)}
+                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition-all"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Corpo do Modal - Scrollable se necessário */}
+            <div className="p-6 flex-1 overflow-y-auto space-y-5 custom-scrollbar bg-gray-50/30 dark:bg-[#0c1317]/30">
+              
+              {/* Seletor de Tipo de Nota (Anotação Simples vs Tarefa CRM) */}
+              <div className="flex items-center justify-between p-4 bg-white/50 dark:bg-[#111b21]/50 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/5 shadow-sm">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-500">
+                    <CheckSquare size={16} />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">Transformar em Tarefa CRM</span>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">Habilita checklist e operador responsável</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditNoteIsTask(!editNoteIsTask)}
+                  className={cn(
+                    "w-12 h-6 rounded-full p-0.5 transition-all duration-300 focus:outline-none",
+                    editNoteIsTask ? "bg-amber-500" : "bg-gray-300 dark:bg-gray-700"
+                  )}
+                >
+                  <div className={cn(
+                    "w-5 h-5 rounded-full bg-white shadow-md transform transition-all duration-300",
+                    editNoteIsTask ? "translate-x-6" : "translate-x-0"
+                  )} />
+                </button>
+              </div>
+
+              {/* Seletor de Operador (Apenas se for Tarefa CRM) */}
+              {editNoteIsTask && (
+                <div className="space-y-2 animate-in slide-in-from-top-3 duration-300">
+                  <label className="text-xs font-black uppercase tracking-wider text-gray-500 dark:text-gray-400">Atribuir a um Operador</label>
+                  <div className="relative">
+                    <select
+                      value={editNoteAssignedTo || ''}
+                      onChange={(e) => setEditNoteAssignedTo(e.target.value || null)}
+                      className="w-full p-3.5 pl-10 bg-white/70 dark:bg-[#202c33]/70 backdrop-blur-md border border-gray-200 dark:border-white/10 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-amber-500/30 text-gray-800 dark:text-gray-100 appearance-none shadow-sm transition-all font-bold"
+                    >
+                      <option value="" className="text-gray-500">Nenhum operador atribuído</option>
+                      {agents.map(agent => (
+                        <option key={agent.id} value={agent.id} className="text-gray-800 dark:text-gray-200 font-bold">
+                          {agent.full_name || agent.email}
+                        </option>
+                      ))}
+                    </select>
+                    <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <ChevronDown size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  </div>
+                </div>
+              )}
+
+              {/* Editor de Texto Poderoso (Markdown) para o Modal */}
+              <div className="space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label className="text-xs font-black uppercase tracking-wider text-gray-500 dark:text-gray-400">Anotação Interna (Markdown)</label>
+                  
+                  {/* Barra de Ferramentas e Alternador */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {!editNotePreviewMode && (
+                      <div className="flex items-center bg-black/5 dark:bg-black/20 rounded-xl p-0.5 border border-black/5 dark:border-white/5 shadow-inner">
+                        <button
+                          type="button"
+                          onClick={() => insertMarkdownTagInEdit('bold')}
+                          className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-amber-500 dark:hover:text-amber-400 transition-colors"
+                          title="Negrito"
+                        >
+                          <strong className="font-extrabold text-[13px] px-1">B</strong>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => insertMarkdownTagInEdit('italic')}
+                          className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-amber-500 dark:hover:text-amber-400 transition-colors"
+                          title="Itálico"
+                        >
+                          <em className="italic text-[13px] px-1">I</em>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => insertMarkdownTagInEdit('strikethrough')}
+                          className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-amber-500 dark:hover:text-amber-400 transition-colors"
+                          title="Tachado"
+                        >
+                          <span className="line-through text-[13px] px-0.5">S</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => insertMarkdownTagInEdit('code')}
+                          className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-amber-500 dark:hover:text-amber-400 transition-colors"
+                          title="Bloco de Código"
+                        >
+                          <Terminal size={14} className="mx-0.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => insertMarkdownTagInEdit('bullet_list')}
+                          className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-amber-500 dark:hover:text-amber-400 transition-colors"
+                          title="Lista com Marcadores"
+                        >
+                          <span className="font-black text-[13px] px-1">-</span>
+                        </button>
+                        
+                        <div className="w-px h-4 bg-black/10 dark:bg-white/10 mx-1"></div>
+                        
+                        {/* Templates rápidos no Modal */}
+                        <div className="relative group/edit-tmpl">
+                          <button
+                            type="button"
+                            className="p-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-amber-500 dark:hover:text-amber-400 flex items-center gap-0.5 font-bold px-2 select-none"
+                          >
+                            <CalendarClock size={12} /> Templates
+                          </button>
+                          <div className="absolute bottom-full right-0 mb-1 hidden group-hover/edit-tmpl:block bg-white dark:bg-[#202c33] border border-gray-100 dark:border-white/10 rounded-xl shadow-xl w-44 overflow-hidden z-[110] animate-in fade-in duration-150">
+                            <button
+                              type="button"
+                              onClick={() => insertMarkdownTagInEdit('', '\n### 📅 Ata de Reunião\n- **Data/Hora**: \n- **Pautas Discutidas**:\n  - \n- **Decisões Tomadas**:\n  - \n- **Próximos Passos**:\n  - \n')}
+                              className="w-full text-left px-3 py-2 text-[10px] text-gray-700 dark:text-gray-200 hover:bg-amber-500/10 transition-colors font-bold flex items-center gap-1.5"
+                            >
+                              <span>📅</span> Ata de Reunião
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => insertMarkdownTagInEdit('', '\n### 👤 Perfil do Lead / Cliente\n- **Dores/Necessidades**: \n- **Potencial de Compra**: \n- **Produtos de Interesse**: \n- **Observações**: \n')}
+                              className="w-full text-left px-3 py-2 text-[10px] text-gray-700 dark:text-gray-200 hover:bg-amber-500/10 transition-colors font-bold flex items-center gap-1.5"
+                            >
+                              <span>👤</span> Perfil do Lead
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => insertMarkdownTagInEdit('', '\n### 🚨 TAREFA CRÍTICA / URGENTE\n- **Objetivo Principal**: \n- **Prazo Estimado**: \n- **Observação**: \n')}
+                              className="w-full text-left px-3 py-2 text-[10px] text-gray-700 dark:text-gray-200 hover:bg-amber-500/10 transition-colors font-bold flex items-center gap-1.5"
+                            >
+                              <span>🚨</span> Tarefa Crítica
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="flex items-center bg-black/5 dark:bg-black/20 rounded-xl p-0.5 border border-black/5 dark:border-white/5 shadow-inner">
+                      <button
+                        type="button"
+                        onClick={() => setEditNotePreviewMode(false)}
+                        className={cn(
+                          "px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none font-bold",
+                          !editNotePreviewMode
+                            ? "bg-amber-500 text-white shadow-sm font-black"
+                            : "text-gray-500 dark:text-gray-400 hover:text-amber-700 dark:hover:text-amber-400"
+                        )}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditNotePreviewMode(true)}
+                        className={cn(
+                          "px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none font-bold",
+                          editNotePreviewMode
+                            ? "bg-amber-500 text-white shadow-sm font-black"
+                            : "text-gray-500 dark:text-gray-400 hover:text-amber-700 dark:hover:text-amber-400"
+                        )}
+                      >
+                        Visualizar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                
+                {editNotePreviewMode ? (
+                  <div className="w-full min-h-[140px] max-h-[250px] overflow-y-auto p-4 bg-white/50 dark:bg-[#111b21]/50 backdrop-blur-md rounded-2xl border border-gray-200 dark:border-white/10 shadow-inner select-text">
+                    {renderMarkdownPreview(editNoteText)}
+                  </div>
+                ) : (
+                  <textarea
+                    id="edit-note-textarea"
+                    rows={5}
+                    value={editNoteText}
+                    onChange={(e) => setEditNoteText(e.target.value)}
+                    placeholder="Escreva a anotação com formatação Markdown..."
+                    className="w-full p-4 bg-white/70 dark:bg-[#202c33]/70 backdrop-blur-md border border-gray-200 dark:border-white/10 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-amber-500/30 text-gray-800 dark:text-gray-100 shadow-sm transition-all resize-none leading-relaxed"
+                  />
+                )}
+              </div>
+
+              {/* Checklist da Tarefa CRM (Apenas se for Tarefa CRM) */}
+              {editNoteIsTask && (
+                <div className="space-y-3 animate-in slide-in-from-top-3 duration-300">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                      <CheckSquare size={14} className="text-amber-500" /> Itens do Checklist
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditNoteChecklist([
+                          ...editNoteChecklist,
+                          { id: 'temp_' + Date.now(), text: '', completed: false }
+                        ]);
+                        setTimeout(() => {
+                          const idx = editNoteChecklist.length;
+                          const input = document.getElementById(`edit-checklist-item-${idx}`) as HTMLInputElement;
+                          if (input) input.focus();
+                        }, 50);
+                      }}
+                      className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-extrabold rounded-lg flex items-center gap-1 transition-all active:scale-95 border border-amber-500/10"
+                    >
+                      <Plus size={12} /> Adicionar Item
+                    </button>
+                  </div>
+                  
+                  {editNoteChecklist.length === 0 ? (
+                    <div className="p-6 text-center text-gray-400 dark:text-gray-500 italic text-xs bg-white/30 dark:bg-[#111b21]/30 rounded-2xl border border-dashed border-gray-200 dark:border-white/5">
+                      Nenhum item no checklist. Clique em "+ Adicionar Item" ou pressione Enter no teclado.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 custom-scrollbar">
+                      {editNoteChecklist.map((item, idx) => (
+                        <div 
+                          key={item.id || idx} 
+                          className="flex items-center gap-3 p-2 bg-white/60 dark:bg-[#111b21]/60 backdrop-blur-md rounded-xl border border-black/5 dark:border-white/5 hover:border-amber-500/15 dark:hover:border-white/10 transition-all shadow-sm group"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newChecklist = [...editNoteChecklist];
+                              newChecklist[idx].completed = !newChecklist[idx].completed;
+                              setEditNoteChecklist(newChecklist);
+                            }}
+                            className={cn(
+                              "w-5 h-5 rounded-md flex items-center justify-center border transition-all active:scale-90",
+                              item.completed
+                                ? "bg-emerald-500 border-emerald-500 text-white"
+                                : "border-gray-300 dark:border-gray-600 hover:border-amber-500"
+                            )}
+                          >
+                            {item.completed && <Check size={12} strokeWidth={3} />}
+                          </button>
+                          
+                          <input
+                            id={`edit-checklist-item-${idx}`}
+                            type="text"
+                            value={item.text}
+                            onChange={(e) => {
+                              const newChecklist = [...editNoteChecklist];
+                              newChecklist[idx].text = e.target.value;
+                              setEditNoteChecklist(newChecklist);
+                            }}
+                            onKeyDown={(e) => handleEditChecklistKeyDown(e, idx)}
+                            placeholder="Descreva a sub-tarefa..."
+                            className={cn(
+                              "flex-1 bg-transparent border-none outline-none text-sm text-gray-800 dark:text-gray-100 placeholder:text-gray-400 transition-all font-semibold",
+                              item.completed && "line-through opacity-50"
+                            )}
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newChecklist = editNoteChecklist.filter((_, i) => i !== idx);
+                              setEditNoteChecklist(newChecklist);
+                            }}
+                            className="p-1.5 text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                            title="Remover Item"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+            </div>
+
+            {/* Base de Ação com Gradiente Sutil e Lixeira Vermelha */}
+            <div className="p-5 bg-gray-50/80 dark:bg-[#111b21]/80 backdrop-blur-md border-t border-gray-100 dark:border-white/5 flex items-center justify-between shrink-0">
+              
+              {/* Botão de Excluir Nota (Com Confirmação integrada e design de atenção) */}
+              {showDeleteConfirm ? (
+                <div className="flex items-center gap-2 bg-red-500/10 dark:bg-red-950/20 p-1.5 pl-3 rounded-2xl border border-red-500/20 animate-in slide-in-from-left-3 duration-200">
+                  <span className="text-[11px] font-bold text-red-600 dark:text-red-400">Excluir para sempre?</span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!editingNote || !activeChatId) return;
+                      await useChatStore.getState().deleteInternalNote(editingNote.id, activeChatId);
+                      setEditingNote(null);
+                      setShowDeleteConfirm(false);
+                    }}
+                    className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-bold text-[10px] uppercase rounded-xl transition-all shadow-sm"
+                  >
+                    Confirmar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="px-2.5 py-1 text-gray-500 dark:text-gray-400 font-bold text-[10px] uppercase hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-all"
+                  >
+                    Não
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 border border-transparent hover:border-red-200 dark:hover:border-red-900/40 rounded-2xl transition-all shadow-sm shrink-0 group"
+                  title="Excluir Nota Interna"
+                >
+                  <Trash2 size={18} className="group-hover:scale-110 transition-transform" />
+                </button>
+              )}
+
+              {/* Botões de Salvar / Cancelar */}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingNote(null)}
+                  className="px-5 py-2.5 rounded-2xl font-bold text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!editingNote) return;
+                    // Filtrar itens em branco de forma inteligente antes de salvar no banco
+                    const cleanChecklist = editNoteChecklist.filter(item => item.text.trim() !== '');
+                    await useChatStore.getState().editInternalNote(
+                      editingNote.id,
+                      editNoteText,
+                      editNoteIsTask,
+                      editNoteAssignedTo,
+                      cleanChecklist
+                    );
+                    setEditingNote(null);
+                  }}
+                  className="px-6 py-3 rounded-2xl font-bold text-xs text-white bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center gap-2"
+                >
+                  <Check size={14} /> Salvar Alterações
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Modal Premium de Visualização das Tarefas do Contato [CRM] */}
+      {selectedContactForTasks && (() => {
+        const contact = selectedContactForTasks;
+        const getCleanId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
+        const contactTasks = globalActiveTasks.filter(t => 
+          getCleanId(t.contactId) === getCleanId(contact.id)
+        );
+        
+        return (
+          <div className="fixed inset-0 z-[99999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="bg-white/95 dark:bg-[#1e2b34]/95 backdrop-blur-2xl w-full max-w-lg rounded-[32px] border border-amber-500/25 dark:border-white/10 shadow-2xl overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 flex flex-col max-h-[85vh]">
+              
+              {/* Header com gradiente sutil de âmbar */}
+              <div className="p-6 border-b border-gray-100 dark:border-white/5 bg-gradient-to-r from-amber-500/10 to-transparent flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400 shadow-inner">
+                    <ClipboardList size={20} className="animate-pulse" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 font-sans">
+                      Tarefas CRM do Contato
+                    </h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-sans">
+                      Lista de anotações internas ativas
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => setSelectedContactForTasks(null)}
+                  className="text-gray-400 hover:text-red-500 transition-all p-1 hover:scale-110"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Selo Identificador do Contato */}
+              <div className="px-6 pt-4 shrink-0">
+                <div className="flex items-center gap-3 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/15 p-3.5 rounded-2xl">
+                  <img 
+                    src={contact.avatar} 
+                    className="w-10 h-10 rounded-full object-cover shadow-sm border border-amber-500/10" 
+                    onError={(e) => {
+                      e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone))}&background=random&color=fff`;
+                    }}
+                  />
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-bold text-gray-800 dark:text-gray-100 text-sm truncate">
+                      {getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone)}
+                    </span>
+                    <span className="text-[9px] text-amber-700 dark:text-amber-400 font-black uppercase tracking-widest mt-0.5">
+                      {contactTasks.length} {contactTasks.length === 1 ? 'tarefa ativa pendente' : 'tarefas ativas pendentes'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Corpo com a listagem de tarefas ativas */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                {contactTasks.length === 0 ? (
+                  <div className="p-10 text-center text-gray-400 dark:text-gray-500 italic text-xs bg-gray-50/50 dark:bg-black/20 rounded-3xl border border-dashed border-gray-200 dark:border-white/5 flex flex-col items-center gap-3 animate-in fade-in duration-300">
+                    <span className="text-2xl animate-bounce">🎉</span>
+                    <span>Nenhuma tarefa ativa para este contato no momento.</span>
+                  </div>
+                ) : (
+                  contactTasks.map((task) => {
+                    return (
+                      <div 
+                        key={task.noteId} 
+                        className="p-4 bg-gray-50/70 dark:bg-[#202c33]/70 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/5 flex flex-col gap-3 shadow-sm hover:border-amber-500/15 dark:hover:border-white/10 transition-all group/task"
+                      >
+                        {/* Autor e data */}
+                        <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-2 text-[10px] text-gray-400 font-sans">
+                          <span className="font-bold flex items-center gap-1">
+                            👤 Criador: {task.createdByName || 'Agente'}
+                          </span>
+                          <span className="font-medium">
+                            {format(new Date(task.timestamp), 'dd/MM/yyyy HH:mm')}
+                          </span>
+                        </div>
+
+                        {/* Texto descritivo da tarefa */}
+                        <div className="text-xs text-gray-700 dark:text-gray-200 font-medium whitespace-pre-wrap leading-relaxed select-text font-sans">
+                          {renderMarkdownPreview(task.text)}
+                        </div>
+
+                        {/* Checklist da tarefa se houver */}
+                        {task.checklistItems && task.checklistItems.length > 0 && (
+                          <div className="mt-1 space-y-2 border-t border-black/5 dark:border-white/5 pt-2">
+                            <span className="text-[9px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5 select-none font-sans">
+                              <CheckSquare size={11} className="text-amber-500 animate-pulse" /> Checklist CRM ({task.checklistItems.filter((i: any) => i.completed).length}/{task.checklistItems.length})
+                            </span>
+                            
+                            <div className="space-y-1.5 pl-0.5">
+                              {task.checklistItems.map((item: any, idx: number) => {
+                                return (
+                                  <div 
+                                    key={idx} 
+                                    className="flex items-center gap-2 p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors select-none font-sans"
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        // Modifica o item localmente de forma instantânea para feedback reativo imediato
+                                        const updatedChecklist = [...task.checklistItems];
+                                        updatedChecklist[idx].completed = !updatedChecklist[idx].completed;
+                                        
+                                        // Chama a mutação do chatStore
+                                        await useChatStore.getState().toggleChecklistItem(
+                                          task.contactId,
+                                          task.noteId,
+                                          idx
+                                        );
+                                      }}
+                                      className={cn(
+                                        "w-4.5 h-4.5 rounded flex items-center justify-center border transition-all active:scale-90 shrink-0",
+                                        item.completed
+                                          ? "bg-emerald-500 border-emerald-500 text-white"
+                                          : "border-gray-300 dark:border-gray-600 hover:border-amber-500 bg-transparent"
+                                      )}
+                                    >
+                                      {item.completed && <Check size={10} strokeWidth={3} />}
+                                    </button>
+                                    <span className={cn(
+                                      "text-xs font-semibold text-gray-700 dark:text-gray-200 truncate",
+                                      item.completed && "line-through opacity-50 font-normal"
+                                    )}>
+                                      {item.text}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Botão de Ir para a conversa e focar na Timeline */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedContactForTasks(null);
+                            handleSelectTask(task.contactId, task.noteId, task.instanceId);
+                          }}
+                          className="mt-1 w-full py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 font-extrabold text-[10px] uppercase rounded-xl border border-amber-500/10 hover:border-amber-500/30 flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98] transition-all font-sans"
+                        >
+                          Ir Para a Conversa & Focar na Timeline 🔍
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Rodapé do Modal */}
+              <div className="px-6 py-5 bg-gray-50/50 dark:bg-black/20 border-t border-gray-100 dark:border-white/5 flex justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedContactForTasks(null)}
+                  className="px-6 py-2.5 rounded-2xl text-xs font-bold text-gray-600 dark:text-gray-300 bg-[#f0f2f5] dark:bg-[#202c33] hover:bg-gray-200 dark:hover:bg-white/10 active:scale-95 transition-all shadow-sm font-sans"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Toast Premium Flutuante para Feedback de Resposta Pronta */}
+      {quickReplyToast && (
+        <div className="fixed top-6 right-6 z-[999999] animate-in fade-in slide-in-from-top-4 slide-in-from-right-4 duration-300">
+          <div className="bg-white/80 dark:bg-[#111b21]/80 backdrop-blur-xl border border-emerald-500/20 dark:border-emerald-500/30 rounded-3xl p-5 shadow-2xl flex items-center gap-4 max-w-sm transition-all duration-300 hover:shadow-emerald-500/10">
+            {/* Ícone Pulsante */}
+            <div className="w-12 h-12 bg-emerald-500/10 dark:bg-emerald-500/20 rounded-2xl flex items-center justify-center text-emerald-500 shrink-0 shadow-sm border border-emerald-500/20 animate-pulse">
+              <Sparkles className="w-6 h-6 animate-spin" style={{ animationDuration: '3s' }} />
+            </div>
+            
+            {/* Texto Informativo */}
+            <div className="flex-1 min-w-0">
+              <h4 className="text-xs uppercase font-extrabold tracking-wider text-emerald-600 dark:text-emerald-400">
+                Resposta Pronta
+              </h4>
+              <p className="text-[13px] font-semibold text-gray-800 dark:text-gray-200 mt-1 truncate">
+                {quickReplyToast.type === 'sent' 
+                  ? `Atalho ${quickReplyToast.shortcut} enviado!` 
+                  : `Atalho ${quickReplyToast.shortcut} colado!`}
+              </p>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                {quickReplyToast.type === 'sent' 
+                  ? 'A mídia foi disparada com sucesso.' 
+                  : 'Texto inserido no campo de mensagem.'}
+              </p>
+            </div>
+            
+            {/* Botão de Fechar Rápido */}
+            <button
+              onClick={() => setQuickReplyToast(null)}
+              className="p-1 hover:bg-gray-100 dark:hover:bg-white/5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg transition-colors shrink-0"
+              title="Fechar"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}

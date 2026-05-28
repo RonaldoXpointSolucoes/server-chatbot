@@ -1,5 +1,84 @@
 # Changelog
 
+## [2.8.15] - 2026-05-28
+
+### Corrigido
+- **Exibição de Legendas de Documentos e PDFs no Chat**: Corrigido o bug visual no `MessageBubble.tsx` que omitia o bloco de texto (legenda) abaixo de cartões do tipo documento e comprimia a legenda inteira truncada no cabeçalho do arquivo. Agora, a legenda enviada junto com o PDF é exibida de forma completa e elegante logo abaixo do card de download no mesmo balão de conversa, sincronizando de forma idêntica ao WhatsApp oficial do celular.
+- **Nomes Limpos de Arquivos**: Adicionada a função auxiliar `getFriendlyDocumentName` que limpa hashes e timestamps das URLs do Supabase, exibindo o nome original do PDF (ex: `Desenhos_tecnicos_Totem.pdf`) no título do card.
+
+## [2.8.14] - 2026-05-28
+
+### Alterado
+- **Carregamento Prévio e Envio Manual de Respostas Rápidas com Mídia**: Removida a ação de envio automático imediato ao clicar em atalhos rápidos com `/` que contêm mídias (como PDFs). Agora, o texto preenche o input e a mídia correspondente é engatilhada em um contêiner de preview flutuante acima do campo de digitação, permitindo ao atendente conferir, alterar a legenda e enviar manualmente.
+- **Preview de Mídias Engatilhadas no Formulário**: Painel glassmorphic com suporte a remoção por botão `X` redondo, permitindo o cancelamento e envio exclusivo de texto se desejado.
+
+## [2.8.13] - 2026-05-28
+
+### Adicionado
+- **Toast Premium de Respostas Prontas**: Sistema de notificação flutuante em glassmorphism no canto superior direito para dar feedback em tempo real quando atalhos rápidos com `/` forem disparados ou colados na conversa.
+- **Design de Alto Padrão Visual**: Fundo translúcido com blur, contorno esmeralda reativo, sombra profunda e micro-animação lenta com o ícone `Sparkles` pulsante.
+
+## [2.8.12] - 2026-05-28
+
+### Corrigido
+- **Persistência de Mídia nas Respostas Prontas**: Resolvida a falha onde arquivos anexados às respostas prontas (incluindo PDFs) eram descartados silenciosamente pelo sistema. Atualizadas as assinaturas e queries do Supabase nos métodos `addQuickReply` e `updateQuickReply` da store Zustand (`chatStore.ts`) para incluir as colunas `media_url` e `media_type`.
+- **Upload Resiliente (Storage Nativo)**: Migrada a lógica de envio de arquivos das respostas prontas no `CannedResponses.tsx` do TUS resumível (que travava o progresso) para a API oficial de upload do Supabase, destravando o fechamento do modal e o salvamento em tempo real.
+- **Ícones de Documentos no Chat**: Adicionado suporte ao ícone `FileText` de documento no popover de seleção de atalhos rápidos do chat (`ChatDashboard.tsx`).
+
+## [2.8.11] - 2026-05-28
+
+### Adicionado
+- **Suporte a PDFs e Documentos nas Respostas Prontas (v2.8.11)**: Agora o sistema permite anexar arquivos em formato PDF, Word, Excel e outros formatos de texto corporativos nos atalhos rápidos.
+- **Tratamento de Tipo de Mídia Dinâmico**: O upload no Supabase agora identifica dinamicamente o tipo de arquivo baseado no seu MIME type, gerando e salvando a classificação `'document'` em conformidade com o WhatsApp.
+- **Visualização Integrada de PDFs**: Incorporado um leitor de documentos premium com `<iframe>` no modal de tela cheia que abre os arquivos PDF diretamente no app, com painel gerencial moderno e atalho de download "Abrir em Nova Aba".
+
+## [2.8.10] - 2026-05-28
+
+### Adicionado
+- **Deploy em Produção (v2.8.10)**: Nova versão estável do frontend de atendimento distribuída com suporte completo à segmentação inteligente de permissões de login.
+- **Segurança Granular de Login no CRM**: Sistema que limita o painel de CRM de tarefas de acordo com o nível do operador, permitindo visualização de negócios completa para administradores e restrita apenas às próprias tarefas de cada operador comum.
+- **Filtros e Travas de Edição**: Ocultação automática de filtros indevidos e trava de alteração de responsável em cards e no modal de criação para operadores comuns.
+
+## [2.8.9] - 2026-05-28
+
+### Corrigido
+- **Resolução de Corte Lateral Direito**: Sanado o estouro visual da viewport na tela de CRM substituindo a largura de tela estrita `w-screen` por `flex-1 w-full`.
+- **Correção da Rota e Menu do CRM**: Rota protegida `/crm` e navegação na barra lateral esquerda integradas com sucesso em produção.
+- **Busca Segura no Supabase (Mapeamento de Avatar)**: Resolvido o erro HTTP 400 mapeando a coluna correta de `profile_picture_url` em vez de `avatar`.
+
+## [2.8.8] - 2026-05-27
+
+### Adicionado
+- **Modelos Automatizados de Tarefas CRM**: Painel flutuante glassmorphic de seleção de modelos na barra de Notas Internas com o modelo padrão **"Implantação Completa" (5 Dias)** integrado, permitindo a geração instantânea em lote das 5 tarefas diárias e seus respectivos checklists estruturados para o cliente ativo.
+
+### Corrigido
+- **ReferenceError: useCallback is not defined**: Resolvida a falha de renderização que causava quebra em tempo de execução no `ChatDashboard.tsx` mapeando explicitamente `React.useCallback`.
+- **ReferenceError: instances is not defined**: Ajustado o mapeamento de instâncias na listagem de tarefas globais no painel superior esquerdo de `instances` para o estado de componente correto `availableInstancesList`.
+- **Supabase REST query (push_name) Error**: Removida a referência à coluna inexistente `push_name` na query select do Supabase à tabela `contacts` para evitar erro HTTP 400.
+- **Foco e Scroll de Tarefas Reativo**: Implementado sistema resiliente de scroll reativo por polling adaptativo (até 2.5 segundos) que aguarda a montagem assíncrona do DOM do chat selecionado antes de aplicar o scroll suave e o glow de destaque âmbar no card correspondente.
+
+## [2.8.7] - 2026-05-27
+
+### Adicionado
+- **Tarefas CRM Globais (Multi-Caixas)**: Reformulação completa na computação e busca de tarefas ativas do CRM. Em vez de limitar as tarefas aos contatos em cache do canal (inbox) ativo, a aplicação agora faz uma busca unificada e contínua diretamente no Supabase na tabela `contact_notes` para trazer **todas** as pendências do operador do tenant logado.
+- **Indicador Premium de Caixa de Entrada**: Inclusão de um badge glassmorphic azul (`📥 Nome da Caixa`) em cada tarefa do menu suspenso, indicando a qual caixa de entrada (inbox) aquele contato pertence.
+- **Redirecionamento Inteligente de Caixa no Clique**: Ao clicar em uma tarefa que pertence a uma caixa de entrada diferente da selecionada no momento, o sistema altera o canal ativo na store local automaticamente, carrega os respectivos contatos e direciona o foco com precisão na timeline da conversa, garantindo uma fluidez absoluta.
+
+## [2.8.6] - 2026-05-27
+
+### Corrigido
+- **Nome do Operador no CRM (Select de Criação)**: Corrigido o mapeamento de operadores disponíveis para atribuição de tarefas no formulário de criação de Notas Internas. Alteramos a referência incorreta da propriedade de `agent.name` para `agent.full_name`, garantindo que os nomes completos dos operadores (ex: "Ronaldo Clemente", "Arthur Santana", etc.) sejam exibidos de forma limpa e profissional em vez dos e-mails.
+
+## [2.8.5] - 2026-05-27
+
+### Adicionado
+- **Menu Suspenso (Dropdown) CRM de Tarefas**: Substituição do painel retrátil clássico na sidebar por um menu suspenso flutuante premium com forte Glassmorphism (`backdrop-blur-md`). Ao ser clicado, exibe as tarefas ativas do operador em formato popover suspenso de z-index elevado por cima do formulário de busca e lista de chats.
+- **Overlay de Fechamento por Clique Externo**: Inclusão de overlay de clique oculto (`fixed inset-0 z-40`) para captura e fechamento de forma fluida e reativa quando o atendente clica em qualquer área fora do menu ou seleciona uma tarefa.
+- **Micro-Animações e Chevron Rotativo**: Chevron interativo com giros em 180° dinâmicos sob transição contínua e animações de entrada refinadas para uma experiência premium de nível de produto.
+- **Teclado Dinâmico de Checklists (UX Pro)**: Integração avançada do teclado nos modais de edição com atalhos inteligentes (teclar `Enter` cria novo item e move o foco; teclar `Backspace` em campo em branco remove o item e retrocede o foco).
+- **Filtro de Salvamento Inteligente**: Remoção definitiva da trava síncrona de inputs vazios no botão de salvamento, processando a remoção silenciosa de checklists em branco no ato de submissão ao Supabase.
+- **Auditoria de Versionamento no Supabase**: Auditoria de versão automatizada e persistente com o registro da versão `2.8.5` gravado de forma redundante e segura no Supabase.
+
 ## [2.8.4] - 2026-05-27
 
 ### Corrigido

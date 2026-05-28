@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
-import { Plus, Search, Edit2, Trash2, MessageSquareText, Zap, ChevronLeft, Save, Building, Paperclip, Image as ImageIcon, Video, X, Loader2, Copy, Mic, Square, Wand2, CheckCircle2, Sparkles } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, MessageSquareText, Zap, ChevronLeft, Save, Building, Paperclip, Image as ImageIcon, Video, X, Loader2, Copy, Mic, Square, Wand2, CheckCircle2, Sparkles, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import { uploadResumableFile } from '../services/tusUploader';
@@ -47,7 +47,7 @@ export function CannedResponses() {
   const [mediaType, setMediaType] = useState<string | undefined>(undefined);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string>('');
-  const [previewMedia, setPreviewMedia] = useState<{ url: string, type: 'video' | 'image' | 'audio' } | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<{ url: string, type: 'video' | 'image' | 'audio' | 'document' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Estados locais adicionais para o Assistente I.A. & RAG pgvector
@@ -242,27 +242,36 @@ export function CannedResponses() {
         const fileExt = mediaFile.name.split('.').pop();
         const fileName = `${tenantInfo.id}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
         
-        await uploadResumableFile({
-          bucketName: 'chat_media',
-          fileName: fileName,
-          file: mediaFile,
-          onProgress: (_, __, percentage) => {
-            setUploadProgress(percentage);
-          },
-          onSuccess: (url) => {
-            finalMediaUrl = url;
-          }
-        });
+        setUploadProgress('30');
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('chat_media')
+          .upload(fileName, mediaFile, {
+            upsert: true,
+            contentType: mediaFile.type
+          });
+        setUploadProgress('75');
 
-        // Caso o onSuccess execute rápido, ou para assegurar a URL, tentamos buscar via getPublicUrl para fallback
-        if (!finalMediaUrl) {
-          const { data: publicUrlData } = supabase.storage
-            .from('chat_media')
-            .getPublicUrl(fileName);
-          finalMediaUrl = publicUrlData.publicUrl;
+        if (uploadError) {
+          throw uploadError;
         }
 
-        finalMediaType = mediaFile.type.startsWith('video/') ? 'video' : 'image';
+        const { data: publicUrlData } = supabase.storage
+          .from('chat_media')
+          .getPublicUrl(fileName);
+        
+        finalMediaUrl = publicUrlData.publicUrl;
+        setUploadProgress('100');
+
+        const fileType = mediaFile.type;
+        if (fileType.startsWith('video/')) {
+          finalMediaType = 'video';
+        } else if (fileType.startsWith('audio/')) {
+          finalMediaType = 'audio';
+        } else if (fileType === 'application/pdf' || fileType.startsWith('application/') || fileType.startsWith('text/')) {
+          finalMediaType = 'document';
+        } else {
+          finalMediaType = 'image';
+        }
       }
 
       if (editingId) {
@@ -401,7 +410,7 @@ export function CannedResponses() {
                             <div 
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setPreviewMedia({ url: reply.media_url, type: reply.media_type as 'video' | 'image' | 'audio' });
+                                setPreviewMedia({ url: reply.media_url, type: reply.media_type as 'video' | 'image' | 'audio' | 'document' });
                               }}
                               className="inline-flex items-center gap-3 px-3 py-2 rounded-2xl bg-white/50 dark:bg-white/5 text-gray-700 dark:text-[#8696a0] text-xs font-semibold border border-gray-200 dark:border-white/10 hover:bg-white dark:hover:bg-white/10 transition-all cursor-pointer group shadow-sm hover:shadow-md"
                               title="Ver Mídia"
@@ -416,6 +425,10 @@ export function CannedResponses() {
                               ) : reply.media_type === 'audio' ? (
                                 <div className="w-16 h-16 rounded-xl overflow-hidden bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
                                   <Mic className="w-6 h-6 text-blue-500" />
+                                </div>
+                              ) : reply.media_type === 'document' ? (
+                                <div className="w-16 h-16 rounded-xl overflow-hidden bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                                  <FileText className="w-6 h-6 text-emerald-500" />
                                 </div>
                               ) : (
                                 <div className="w-16 h-16 rounded-xl overflow-hidden bg-black/10">
@@ -715,14 +728,23 @@ export function CannedResponses() {
                     ref={fileInputRef}
                     onChange={(e) => {
                       if (e.target.files && e.target.files[0]) {
-                        setMediaFile(e.target.files[0]);
-                        setMediaUrl(URL.createObjectURL(e.target.files[0]));
-                        const fileType = e.target.files[0].type;
-                        setMediaType(fileType.startsWith('video/') ? 'video' : fileType.startsWith('audio/') ? 'audio' : 'image');
+                        const file = e.target.files[0];
+                        setMediaFile(file);
+                        setMediaUrl(URL.createObjectURL(file));
+                        const fileType = file.type;
+                        if (fileType.startsWith('video/')) {
+                          setMediaType('video');
+                        } else if (fileType.startsWith('audio/')) {
+                          setMediaType('audio');
+                        } else if (fileType === 'application/pdf' || fileType.startsWith('application/') || fileType.startsWith('text/')) {
+                          setMediaType('document');
+                        } else {
+                          setMediaType('image');
+                        }
                       }
                     }}
                     className="hidden"
-                    accept="image/*,video/*,audio/*"
+                    accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
                   />
                   
                   {!mediaUrl ? (
@@ -756,7 +778,7 @@ export function CannedResponses() {
                   ) : (
                     <div className="relative w-full border border-gray-200 dark:border-white/10 rounded-xl p-2 flex items-center gap-3 bg-gray-50 dark:bg-[#202C33]">
                       <div 
-                        onClick={() => setPreviewMedia({ url: mediaUrl, type: mediaType as 'video' | 'image' | 'audio' })}
+                        onClick={() => setPreviewMedia({ url: mediaUrl, type: mediaType as 'video' | 'image' | 'audio' | 'document' })}
                         className="w-12 h-12 bg-gray-200 dark:bg-[#111B21] rounded-lg flex items-center justify-center overflow-hidden shrink-0 cursor-pointer group/preview relative"
                         title="Ver em tela cheia"
                       >
@@ -770,6 +792,10 @@ export function CannedResponses() {
                         ) : mediaType === 'audio' ? (
                           <div className="flex items-center justify-center w-full h-full bg-blue-100 dark:bg-blue-900/30">
                              <Mic className="w-6 h-6 text-blue-500" />
+                          </div>
+                        ) : mediaType === 'document' ? (
+                          <div className="flex items-center justify-center w-full h-full bg-emerald-100 dark:bg-emerald-900/30">
+                             <FileText className="w-6 h-6 text-emerald-500" />
                           </div>
                         ) : (
                           <>
@@ -785,7 +811,7 @@ export function CannedResponses() {
                           {mediaFile ? mediaFile.name : 'Mídia salva'}
                         </p>
                         <p className="text-xs text-gray-500 dark:text-[#8696a0]">
-                          {mediaType === 'video' ? 'Vídeo' : mediaType === 'audio' ? 'Áudio' : 'Imagem'}
+                          {mediaType === 'video' ? 'Vídeo' : mediaType === 'audio' ? 'Áudio' : mediaType === 'document' ? 'Documento' : 'Imagem'}
                         </p>
                       </div>
                       <button
@@ -865,6 +891,42 @@ export function CannedResponses() {
                   <Mic className="w-10 h-10 text-blue-500" />
                 </div>
                 <audio src={previewMedia.url} controls autoPlay className="w-full max-w-sm" />
+              </div>
+            ) : previewMedia.type === 'document' ? (
+              <div className="bg-white dark:bg-[#111B21] p-6 rounded-3xl shadow-2xl flex flex-col items-center gap-4 w-full max-w-4xl h-[80vh] overflow-hidden border border-white/10" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between w-full pb-3 border-b border-gray-100 dark:border-white/5">
+                  <h3 className="text-lg font-semibold text-gray-800 dark:text-[#e9edef] flex items-center gap-2">
+                    <FileText className="w-6 h-6 text-emerald-500 animate-pulse" />
+                    Visualização do Documento
+                  </h3>
+                  <a 
+                    href={previewMedia.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-500/10 flex items-center gap-1.5 hover:scale-[1.02] active:scale-95 duration-200"
+                  >
+                    Abrir em Nova Aba
+                  </a>
+                </div>
+                {previewMedia.url.toLowerCase().endsWith('.pdf') || previewMedia.url.includes('pdf') || previewMedia.url.startsWith('blob:') ? (
+                  <iframe 
+                    src={previewMedia.url} 
+                    className="w-full flex-1 rounded-2xl border border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-[#202C33]"
+                    title="Visualização do PDF"
+                  />
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center py-12">
+                    <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center mb-4">
+                      <FileText className="w-10 h-10 text-emerald-500" />
+                    </div>
+                    <p className="text-sm font-medium text-gray-800 dark:text-[#e9edef] text-center mb-2">
+                      Este documento não suporta visualização direta.
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0] text-center mb-6 max-w-sm">
+                      Clique no botão acima para abrir e fazer o download do documento de forma nativa.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <img 

@@ -4,12 +4,14 @@ import {
   Bot, User, MoreVertical, Edit2, Trash2, Ban, 
   MessageSquareReply, Camera, Video, VideoOff, Mic, 
   FileText, MapPin, Sparkles, Check, CheckCheck, RefreshCw,
-  LayoutTemplate, Smartphone, Eye
+  LayoutTemplate, Smartphone, Eye, ClipboardList, CheckSquare,
+  UserCheck
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { cn, getContactDisplayName } from '../../pages/ChatDashboard';
 import { ImageIcon, Download } from 'lucide-react';
 import { VideoPlayerPremium } from './VideoPlayerPremium';
+import { useChatStore } from '../../store/chatStore';
 
 // Necessitamos tipagens básicas
 interface MessageBubbleProps {
@@ -55,6 +57,8 @@ export const MessageBubble = memo(({
   showDateSeparator,
   dateSeparatorText
 }: MessageBubbleProps) => {
+  const agents = useChatStore(state => state.agents);
+  const toggleChecklistItem = useChatStore(state => state.toggleChecklistItem);
   
   const isMe = msg.sender === 'human' || msg.sender === 'bot' || msg.sender === 'me';
   
@@ -89,6 +93,23 @@ export const MessageBubble = memo(({
       window.open(url, '_blank');
     }
   };
+
+  const getFriendlyDocumentName = (url: string) => {
+    if (!url) return 'Documento';
+    try {
+      const filename = url.split('/').pop()?.split('?')[0] || '';
+      if (filename.includes('_')) {
+        const parts = filename.split('_');
+        if (parts[0].length === 13 && !isNaN(Number(parts[0]))) {
+          return decodeURIComponent(parts.slice(1).join('_'));
+        }
+        return decodeURIComponent(parts.join('_'));
+      }
+      return decodeURIComponent(filename) || 'Documento PDF';
+    } catch (e) {
+      return 'Documento PDF';
+    }
+  };
   
   const separatorNode = showDateSeparator ? (
     <div className="flex justify-center my-4 w-full">
@@ -98,6 +119,219 @@ export const MessageBubble = memo(({
     </div>
   ) : null;
   
+  if (msg.sender === 'internal_note') {
+    if (msg.mediaMetadata?.is_deleted) {
+      const deletedBy = msg.mediaMetadata.deleted_by || 'Operador';
+      const deletedAt = msg.mediaMetadata.deleted_at 
+        ? format(new Date(msg.mediaMetadata.deleted_at), "dd/MM 'às' HH:mm") 
+        : '';
+      
+      return (
+        <div key={msg.id} className="flex flex-col w-full message-item-container animate-in fade-in duration-300">
+          {separatorNode}
+          <div className="flex justify-center my-2.5 px-4 w-full">
+            <div className="rounded-2xl p-3.5 max-w-[85%] md:max-w-[70%] w-full bg-red-500/5 dark:bg-red-500/10 text-red-950/60 dark:text-red-400/60 border border-red-500/20 shadow-sm flex items-center gap-2.5 select-none transition-all duration-300">
+              <span className="text-[12px] italic">
+                🚫 Anotação interna excluída por <strong>{deletedBy}</strong> {deletedAt && `em ${deletedAt}`}
+              </span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const targetAssigned = msg.assignedTo || msg.assigned_to || null;
+    const assignedAgent = targetAssigned 
+      ? agents.find((a: any) => a.id === targetAssigned || a.user_id === targetAssigned) 
+      : null;
+    const assignedName = assignedAgent ? assignedAgent.full_name : 'Qualquer Operador';
+
+    return (
+      <div 
+        key={msg.id} 
+        id={`message-note-${msg.id}`} 
+        className="flex flex-col w-full message-item-container animate-in fade-in duration-300 scroll-mt-20"
+      >
+        {separatorNode}
+        <div className="flex justify-center my-3.5 px-4 w-full">
+          <div className={cn(
+            "rounded-2xl p-4 max-w-[85%] md:max-w-[70%] w-full backdrop-blur-md relative group/note border transition-all duration-300",
+            msg.isTask
+              ? "bg-amber-500/10 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200 border-amber-500/40 ring-1 ring-amber-500/20 shadow-[0_8px_30px_rgba(245,158,11,0.15)]"
+              : "bg-amber-500/10 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200 border-amber-500/30 shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]"
+          )}>
+            
+            {/* Cabeçalho da Nota */}
+            <div className="flex items-center justify-between mb-2.5 text-[10px] text-amber-700 dark:text-amber-400 opacity-90 font-bold uppercase tracking-wider select-none border-b border-amber-500/20 pb-2 flex-wrap gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span>{msg.isTask ? "📌 Tarefa Interna CRM" : "📝 Anotação Interna"}</span>
+                {(msg.created_by_name || msg.payload?.created_by_name) && (
+                  <>
+                    <span className="opacity-40">•</span>
+                    <span>Criado por: {msg.created_by_name || msg.payload.created_by_name}</span>
+                  </>
+                )}
+              </div>
+              
+              <div className="flex items-center gap-2">
+                {/* Badges de Tarefa CRM (Status e Atribuído) */}
+                {msg.isTask && (
+                  <>
+                    {assignedAgent ? (
+                      <span className="flex items-center gap-1 bg-gradient-to-r from-amber-500 to-amber-600 text-white px-2.5 py-0.5 rounded-full text-[9px] font-black border border-amber-600/20 shrink-0 shadow-sm animate-in zoom-in duration-300 select-none">
+                        <UserCheck size={11} strokeWidth={3} /> {assignedName}
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 bg-amber-500/10 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded-full text-[9px] font-bold border border-amber-500/20 shrink-0">
+                        👤 {assignedName}
+                      </span>
+                    )}
+                    
+                    {msg.taskCompleted ? (
+                      <span className="flex items-center gap-1 bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full text-[9px] font-bold border border-emerald-500/30 shrink-0 shadow-sm animate-in zoom-in duration-300">
+                        <Check size={10} strokeWidth={3} /> Resolvida
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 bg-amber-500/20 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full text-[9px] font-bold border border-amber-500/30 shrink-0 shadow-sm relative overflow-hidden">
+                        <span className="w-1 h-1 rounded-full bg-amber-500 animate-ping absolute left-1.5 top-[5px]"></span>
+                        <span className="ml-1.5">Pendente</span>
+                      </span>
+                    )}
+                  </>
+                )}
+
+                {/* Botão de Edição (Somente quando passa o mouse) */}
+                <button 
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if ((window as any).openEditNoteModal) {
+                      (window as any).openEditNoteModal(msg);
+                    }
+                  }}
+                  className="opacity-0 group-hover/note:opacity-100 p-1 hover:bg-amber-500/20 active:scale-95 rounded-lg transition-all duration-300 flex items-center gap-1 text-[9px] lowercase font-bold shrink-0 text-amber-700 dark:text-amber-400 border border-amber-500/10 hover:border-amber-500/30"
+                >
+                  <Edit2 size={11} className="text-amber-700 dark:text-amber-400" />
+                  editar
+                </button>
+              </div>
+            </div>
+
+            {/* Mídias Anexadas na Nota */}
+            {msg.mediaUrl && (
+              <div className="mb-3 w-full">
+                {msg.mediaType === 'image' && (
+                  <div 
+                    className="relative group overflow-hidden rounded-xl border border-amber-500/20 mb-2 bg-black/5 dark:bg-black/20 cursor-pointer max-w-md animate-in fade-in zoom-in-95 duration-200"
+                    onClick={(e) => { e.stopPropagation(); setFullscreenImage(msg.mediaUrl || null); }}
+                  >
+                    <img src={msg.mediaUrl} alt="Imagem da Nota" className="max-w-full h-auto max-h-[250px] object-cover hover:scale-[1.02] transition-transform duration-300 pointer-events-none" />
+                  </div>
+                )}
+                
+                {msg.mediaType === 'video' && (
+                  <div className="max-w-md mb-2 rounded-xl overflow-hidden border border-amber-500/20 animate-in fade-in zoom-in-95 duration-200">
+                    <VideoPlayerPremium src={msg.mediaUrl} />
+                  </div>
+                )}
+                
+                {msg.mediaType === 'audio' && (
+                  <div className="flex items-center gap-2 bg-amber-500/5 dark:bg-amber-500/10 p-2 rounded-3xl border border-amber-500/20 max-w-sm mb-2 animate-in fade-in zoom-in-95 duration-200">
+                    <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] sm:max-w-[260px] h-10 custom-audio flex-1" />
+                  </div>
+                )}
+                
+                {msg.mediaType === 'document' && (
+                  <div className="flex items-center gap-3 bg-amber-500/5 dark:bg-amber-500/10 p-3 rounded-xl mb-2 border border-amber-500/20 max-w-md group animate-in fade-in zoom-in-95 duration-200">
+                    <FileText size={20} className="text-amber-700 dark:text-amber-400 shrink-0" />
+                    <div className="flex flex-col flex-1 overflow-hidden">
+                      <span className="text-[13px] font-medium truncate text-amber-900 dark:text-amber-200">Documento Anexado</span>
+                      <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-amber-700 dark:text-amber-400 hover:underline font-semibold mt-0.5">Baixar Documento</a>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Texto da Nota */}
+            {msg.text && (
+              <div className="text-[14px] leading-relaxed block whitespace-pre-wrap break-words select-text font-normal mb-1">
+                {renderMessageText(msg.text)}
+              </div>
+            )}
+
+            {/* Checklist de Tarefas Interativo */}
+            {msg.isTask && msg.checklistItems && msg.checklistItems.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-amber-500/20 flex flex-col gap-2 select-none">
+                <div className="flex items-center gap-1.5 text-[10px] text-amber-800 dark:text-amber-400 font-bold uppercase tracking-wider mb-1">
+                  <ClipboardList size={12} />
+                  <span>Checklist ({msg.checklistItems.filter((i: any) => i.completed).length}/{msg.checklistItems.length})</span>
+                </div>
+                
+                <div className="flex flex-col gap-1.5">
+                  {msg.checklistItems.map((item: any) => {
+                    return (
+                      <div 
+                        key={item.id} 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleChecklistItem(msg.id, item.id, !item.completed);
+                        }}
+                        className={cn(
+                          "flex items-start gap-2.5 p-2 rounded-xl border transition-all duration-300 cursor-pointer select-none",
+                          item.completed
+                            ? "bg-emerald-500/5 dark:bg-emerald-500/10 border-emerald-500/15 hover:bg-emerald-500/10 dark:hover:bg-emerald-500/15"
+                            : "bg-amber-500/5 dark:bg-amber-500/10 border-amber-500/10 hover:bg-amber-500/10 dark:hover:bg-amber-500/15 hover:border-amber-500/20"
+                        )}
+                      >
+                        {/* Checkbox Circular Premium Animado */}
+                        <div className="mt-0.5 shrink-0 select-none">
+                          {item.completed ? (
+                            <div className="w-[17px] h-[17px] rounded-full bg-emerald-500 text-white flex items-center justify-center animate-in zoom-in duration-300">
+                              <Check size={11} strokeWidth={3} />
+                            </div>
+                          ) : (
+                            <div className="w-[17px] h-[17px] rounded-full border-2 border-amber-500/40 hover:border-amber-500/80 transition-all duration-200" />
+                          )}
+                        </div>
+                        
+                        <div className="flex flex-col flex-1 overflow-hidden select-none">
+                          <span className={cn(
+                            "text-[13px] leading-relaxed break-words transition-all duration-300",
+                            item.completed 
+                              ? "line-through text-gray-400 dark:text-gray-500 font-semibold opacity-70" 
+                              : "text-amber-950 dark:text-amber-100 font-semibold"
+                          )}>
+                            {item.text}
+                          </span>
+                          
+                          {item.completed && item.completed_by && (
+                            <span className="text-[9px] text-emerald-600 dark:text-emerald-400/80 font-bold mt-0.5 select-none animate-in fade-in slide-in-from-top-1 duration-300">
+                              ✓ concluído por {item.completed_by} {item.completed_at && `em ${format(new Date(item.completed_at), "dd/MM 'às' HH:mm")}`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            
+            {/* Horário */}
+            <div className="flex justify-end items-center mt-3 text-[9px] text-amber-700/60 dark:text-amber-400/50 font-bold select-none border-t border-amber-500/10 pt-1.5">
+              {isToday(new Date(msg.timestamp)) 
+                ? format(new Date(msg.timestamp), "HH:mm'h'") 
+                : isYesterday(new Date(msg.timestamp)) 
+                  ? `Ontem ${format(new Date(msg.timestamp), "HH:mm'h'")}` 
+                  : format(new Date(msg.timestamp), "dd/MM HH:mm'h'")}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (msg.sender === 'system') {
     return (
      <div key={msg.id} className="flex flex-col w-full">
@@ -405,7 +639,7 @@ export const MessageBubble = memo(({
                        <FileText size={20} />
                      </div>
                      <div className="flex flex-col flex-1 overflow-hidden">
-                        <span className="text-[14px] font-medium truncate max-w-[180px] text-gray-700 dark:text-gray-200">{msg.text || 'Documento Anexado'}</span>
+                        <span className="text-[14px] font-medium truncate max-w-[180px] text-gray-700 dark:text-gray-200">{getFriendlyDocumentName(msg.mediaUrl)}</span>
                         {!msg.mediaUrl ? (
                            <span className="text-[11px] text-orange-500 dark:text-orange-400 font-medium">Download falhou no servidor</span>
                         ) : (
@@ -449,7 +683,7 @@ export const MessageBubble = memo(({
                   </div>
                )}
                
-               {(!msg.mediaType || (msg.mediaType !== 'document' && msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
+               {(!msg.mediaType || (msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
                   (() => {
                     const t = msg.text || '';
                     const isUnsupported = t.includes('Mensagem não suportada');
@@ -538,7 +772,11 @@ export const MessageBubble = memo(({
     prevProps.msg.payload?.read_receipt?.read_at === nextProps.msg.payload?.read_receipt?.read_at &&
     prevProps.activeMsgDropdown === nextProps.activeMsgDropdown &&
     prevProps.transcribingIds[prevProps.msg.id] === nextProps.transcribingIds[nextProps.msg.id] &&
-    prevProps.showDateSeparator === nextProps.showDateSeparator
+    prevProps.showDateSeparator === nextProps.showDateSeparator &&
+    prevProps.msg.taskCompleted === nextProps.msg.taskCompleted &&
+    JSON.stringify(prevProps.msg.checklistItems || []) === JSON.stringify(nextProps.msg.checklistItems || []) &&
+    prevProps.msg.created_by_name === nextProps.msg.created_by_name &&
+    JSON.stringify(prevProps.msg.mediaMetadata || {}) === JSON.stringify(nextProps.msg.mediaMetadata || {})
   );
 });
 
