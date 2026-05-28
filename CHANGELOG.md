@@ -1,6 +1,13 @@
 # Changelog
 
+## [2.8.16] - 2026-05-28
+
+### Corrigido
+- **Resolução de Desaparecimento de Legendas no Chat**: Corrigido o bug na função `extractTextFromMessage` do `event-processor` no backend (Webhook). A extração do `documentMessage` priorizava o nome do arquivo, gravando-o incorretamente na coluna de legenda e fazendo a legenda sumir após 4 segundos. Agora a legenda real (`caption`) é priorizada, mantendo a visualização idêntica ao celular.
+- **Preservação de Nome do Arquivo PDF Original**: Atualizada a lógica de envio no frontend (`chatStore.ts` e `ChatDashboard.tsx`) para receber e propagar o nome do arquivo original no payload de envio de mídias (`sendMediaFromUrl`). Os arquivos agora são transmitidos para o WhatsApp e salvos no Supabase mantendo o nome do arquivo original (ex: `Desenhos_Tecnicos.pdf`) em vez de timestamps genéricos.
+
 ## [2.8.15] - 2026-05-28
+
 
 ### Corrigido
 - **Exibição de Legendas de Documentos e PDFs no Chat**: Corrigido o bug visual no `MessageBubble.tsx` que omitia o bloco de texto (legenda) abaixo de cartões do tipo documento e comprimia a legenda inteira truncada no cabeçalho do arquivo. Agora, a legenda enviada junto com o PDF é exibida de forma completa e elegante logo abaixo do card de download no mesmo balão de conversa, sincronizando de forma idêntica ao WhatsApp oficial do celular.
