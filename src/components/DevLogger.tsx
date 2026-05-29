@@ -426,10 +426,11 @@ export default function DevLogger() {
         const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/realtime/') || urlStr.includes('system_logs');
         
         if (!isSpammyUrl && !isAstsTest) {
+          const isAbort = err.name === 'AbortError';
           addLog({
-            type: 'error',
-            message: err.message || 'Network Fetch Failed',
-            source: `Fetch Critical (${method})`,
+            type: isAbort ? 'info' : 'error',
+            message: isAbort ? `Requisição abortada de forma esperada: ${err.message}` : (err.message || 'Network Fetch Failed'),
+            source: isAbort ? `Fetch Aborted (${method})` : `Fetch Critical (${method})`,
             details: {
               name: err.name,
               message: err.message,

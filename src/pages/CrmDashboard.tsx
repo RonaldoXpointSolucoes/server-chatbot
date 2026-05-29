@@ -20,7 +20,8 @@ import {
   TrendingUp, 
   Trash2,
   Smile,
-  ShieldAlert
+  ShieldAlert,
+  Edit2
 } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { supabase } from '../services/supabase';
@@ -44,15 +45,23 @@ export default function CrmDashboard() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedAgentFilter, setSelectedAgentFilter] = useState<string>('all');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'pending' | 'completed' | 'overdue'>('all');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'pending' | 'completed' | 'overdue'>('pending');
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  
+  // Agrupamento Premium por Cliente
+  const [expandedContactId, setExpandedContactId] = useState<string | null>(null);
+
+  // Novos estados para edição inline premium no card e subtarefas inline
+  const [editingTextTaskId, setEditingTextTaskId] = useState<string | null>(null);
+  const [editingTextValue, setEditingTextValue] = useState('');
+  const [inlineChecklistInputs, setInlineChecklistInputs] = useState<{ [key: string]: string }>({});
 
   // Estados para o Modal de Nova Tarefa
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newContactId, setNewContactId] = useState('');
   const [newAgentId, setNewAgentId] = useState('');
   const [newContent, setNewContent] = useState('');
-  const [newDueDate, setNewDueDate] = useState(() => format(addDays(new Date(), 2), 'yyyy-MM-dd'));
+  const [newDueDate, setNewDueDate] = useState(() => format(addDays(new Date(), 2), "yyyy-MM-dd'T'18:00"));
   const [newChecklist, setNewChecklist] = useState<string[]>([]);
   const [checklistInput, setChecklistInput] = useState('');
   const [contactSearch, setContactSearch] = useState('');
@@ -112,7 +121,9 @@ export default function CrmDashboard() {
           // Se não houver, assume-se fallback padrão de 3 dias a partir da criação
           let dueDate = meta.due_date;
           if (!dueDate) {
-            dueDate = format(addDays(new Date(n.created_at), 3), 'yyyy-MM-dd');
+            dueDate = format(addDays(new Date(n.created_at), 3), "yyyy-MM-dd'T'18:00");
+          } else if (dueDate.length === 10) {
+            dueDate = `${dueDate}T18:00`;
           }
 
           return {
@@ -187,9 +198,9 @@ export default function CrmDashboard() {
     const completed = visibleTasks.filter(t => t.completed).length;
     const pendingTasks = visibleTasks.filter(t => !t.completed);
     
-    // Filtro dinâmico de tarefas vencidas (pendentes e com data inferior a hoje)
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const overdue = pendingTasks.filter(t => t.dueDate < todayStr).length;
+    // Filtro dinâmico de tarefas vencidas (pendentes e com data/hora inferior ao momento atual)
+    const nowStr = format(new Date(), "yyyy-MM-dd'T'HH:mm");
+    const overdue = pendingTasks.filter(t => t.dueDate < nowStr).length;
     const active = pendingTasks.length - overdue;
 
     // Taxa de entrega (conclusões sobre o total de tarefas)
@@ -231,7 +242,7 @@ export default function CrmDashboard() {
 
   // Filtragem Dinâmica das Tarefas para Renderização na Tabela/Cards
   const filteredTasks = React.useMemo(() => {
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const nowStr = format(new Date(), "yyyy-MM-dd'T'HH:mm");
     return visibleTasks.filter(t => {
       // 1. Filtro de pesquisa de contatos
       const matchesSearch = t.contactName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -243,16 +254,51 @@ export default function CrmDashboard() {
       // 3. Filtro por status de saúde
       let matchesStatus = true;
       if (selectedStatusFilter === 'pending') {
-        matchesStatus = !t.completed && t.dueDate >= todayStr;
+        matchesStatus = !t.completed && t.dueDate >= nowStr;
       } else if (selectedStatusFilter === 'completed') {
         matchesStatus = t.completed;
       } else if (selectedStatusFilter === 'overdue') {
-        matchesStatus = !t.completed && t.dueDate < todayStr;
+        matchesStatus = !t.completed && t.dueDate < nowStr;
       }
 
       return matchesSearch && matchesAgent && matchesStatus;
     });
   }, [visibleTasks, searchTerm, selectedAgentFilter, selectedStatusFilter]);
+
+  // Agrupamento reativo de tarefas por cliente (contato)
+  const groupedTasks = React.useMemo(() => {
+    const groups: { [key: string]: {
+      contactId: string;
+      contactName: string;
+      contactAvatar: string;
+      contactPhone: string;
+      instanceId: string;
+      tasks: any[];
+    }} = {};
+
+    filteredTasks.forEach(task => {
+      const key = task.contactId;
+      if (!groups[key]) {
+        groups[key] = {
+          contactId: task.contactId,
+          contactName: task.contactName,
+          contactAvatar: task.contactAvatar,
+          contactPhone: task.contactPhone,
+          instanceId: task.instanceId,
+          tasks: []
+        };
+      }
+      groups[key].tasks.push(task);
+    });
+
+    return Object.values(groups);
+  }, [filteredTasks]);
+
+  // Grupo de tarefas do contato atualmente aberto no modal
+  const activeGroup = React.useMemo(() => {
+    if (!expandedContactId) return null;
+    return groupedTasks.find(g => g.contactId === expandedContactId) || null;
+  }, [expandedContactId, groupedTasks]);
 
   // Mutação: Alternar Estado de Sub-Tarefa do Checklist
   const handleToggleChecklistItem = async (task: any, itemIdx: number) => {
@@ -337,6 +383,88 @@ export default function CrmDashboard() {
       }));
     } catch (e) {
       console.error('Erro ao atualizar data limite:', e);
+    }
+  };
+
+  // Mutação: Editar/Mudar Texto Descritivo da Tarefa (Inline)
+  const handleUpdateTaskText = async (taskId: string, newText: string) => {
+    if (!newText.trim()) return;
+    try {
+      const { error } = await supabase
+        .from('contact_notes')
+        .update({ content: newText.trim() })
+        .eq('id', taskId);
+
+      if (error) throw error;
+
+      setTasks(prev => prev.map(t => {
+        if (t.noteId === taskId) {
+          return { ...t, text: newText.trim() };
+        }
+        return t;
+      }));
+      setEditingTextTaskId(null);
+    } catch (e) {
+      console.error('Erro ao atualizar descrição da tarefa:', e);
+    }
+  };
+
+  // Mutação: Adicionar Subtarefa Inline no Card
+  const handleInlineAddChecklistItem = async (task: any) => {
+    const text = inlineChecklistInputs[task.noteId];
+    if (!text || !text.trim()) return;
+    
+    const newItem = { text: text.trim(), completed: false };
+    const updatedChecklist = [...(task.checklistItems || []), newItem];
+    const allCompleted = updatedChecklist.every((i: any) => i.completed);
+
+    try {
+      const { error } = await supabase
+        .from('contact_notes')
+        .update({
+          checklist_items: updatedChecklist,
+          task_completed: allCompleted
+        })
+        .eq('id', task.noteId);
+
+      if (error) throw error;
+
+      setTasks(prev => prev.map(t => {
+        if (t.noteId === task.noteId) {
+          return { ...t, checklistItems: updatedChecklist, completed: allCompleted };
+        }
+        return t;
+      }));
+      setInlineChecklistInputs(prev => ({ ...prev, [task.noteId]: '' }));
+    } catch (e) {
+      console.error('Erro ao adicionar subtarefa inline:', e);
+    }
+  };
+
+  // Mutação: Excluir Subtarefa Inline no Card
+  const handleInlineDeleteChecklistItem = async (task: any, itemIdx: number) => {
+    const updatedChecklist = task.checklistItems.filter((_: any, idx: number) => idx !== itemIdx);
+    const allCompleted = updatedChecklist.length > 0 && updatedChecklist.every((i: any) => i.completed);
+
+    try {
+      const { error } = await supabase
+        .from('contact_notes')
+        .update({
+          checklist_items: updatedChecklist,
+          task_completed: allCompleted
+        })
+        .eq('id', task.noteId);
+
+      if (error) throw error;
+
+      setTasks(prev => prev.map(t => {
+        if (t.noteId === task.noteId) {
+          return { ...t, checklistItems: updatedChecklist, completed: allCompleted };
+        }
+        return t;
+      }));
+    } catch (e) {
+      console.error('Erro ao excluir subtarefa inline:', e);
     }
   };
 
@@ -822,7 +950,7 @@ export default function CrmDashboard() {
               </div>
             </div>
 
-            {/* Listagem de Tarefas / Cards */}
+            {/* Listagem de Tarefas / Cards Agrupados por Cliente */}
             {loading ? (
               <div className="flex justify-center items-center py-20">
                 <Loader2 className="animate-spin text-amber-500" size={32} />
@@ -834,11 +962,164 @@ export default function CrmDashboard() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6 animate-in fade-in duration-500">
-                {filteredTasks.map((task) => {
-                  const todayStr = format(new Date(), 'yyyy-MM-dd');
-                  const isOverdue = !task.completed && task.dueDate < todayStr;
-                  const completedCount = task.checklistItems.filter((i: any) => i.completed).length;
-                  const totalChecklist = task.checklistItems.length;
+                {groupedTasks.map((group) => {
+                  const completedTasksCount = group.tasks.filter(t => t.completed).length;
+                  const totalTasksCount = group.tasks.length;
+                  
+                  const nowStr = format(new Date(), "yyyy-MM-dd'T'HH:mm");
+                  const overdueTasksCount = group.tasks.filter(t => !t.completed && t.dueDate < nowStr).length;
+                  const pendingTasksCount = totalTasksCount - completedTasksCount;
+
+                  // Métricas consolidadas de subtarefas/checklists de todo o grupo
+                  const totalChecklistGroup = group.tasks.reduce((acc, t) => acc + (t.checklistItems || []).length, 0);
+                  const completedChecklistGroup = group.tasks.reduce((acc, t) => acc + (t.checklistItems || []).filter((i: any) => i.completed).length, 0);
+                  
+                  const overallProgress = totalChecklistGroup > 0 
+                    ? Math.round((completedChecklistGroup / totalChecklistGroup) * 100) 
+                    : (totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0);
+
+                  return (
+                    <div 
+                      key={group.contactId} 
+                      className="bg-white/80 dark:bg-[#202c33]/85 backdrop-blur-md rounded-[32px] border border-black/5 dark:border-white/5 p-6 flex flex-col justify-between shadow-sm hover:shadow-lg hover:border-amber-500/30 hover:scale-[1.01] transition-all duration-300 relative group overflow-hidden"
+                    >
+                      {/* Círculo decorativo de fundo */}
+                      <div className="absolute -right-6 -bottom-6 w-16 h-16 bg-amber-500/5 group-hover:bg-amber-500/10 blur-xl rounded-full transition-colors pointer-events-none" />
+
+                      {/* Topo do Card: Identificação do Contato */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between gap-3 shrink-0 select-none">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <img 
+                              src={group.contactAvatar} 
+                              className="w-12 h-12 rounded-full object-cover shadow-sm border border-amber-500/10" 
+                              onError={(e) => {
+                                e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(group.contactName)}&background=random&color=fff`;
+                              }}
+                            />
+                            <div className="flex flex-col min-w-0">
+                              <span className="font-extrabold text-gray-800 dark:text-gray-100 text-sm tracking-tight truncate">
+                                {group.contactName}
+                              </span>
+                              <span className="text-[9px] font-bold text-gray-400 dark:text-gray-500 mt-0.5">
+                                {group.contactPhone}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-1 items-end shrink-0 select-none">
+                            {overdueTasksCount > 0 ? (
+                              <span className="px-2 py-0.5 bg-rose-500/10 text-rose-500 text-[8px] font-black uppercase rounded-md border border-rose-500/20 animate-pulse">
+                                {overdueTasksCount} {overdueTasksCount === 1 ? 'Atrasada' : 'Atrasadas'}
+                              </span>
+                            ) : pendingTasksCount > 0 ? (
+                              <span className="px-2 py-0.5 bg-amber-500/10 text-amber-500 text-[8px] font-black uppercase rounded-md border border-amber-500/20">
+                                {pendingTasksCount} {pendingTasksCount === 1 ? 'Pendente' : 'Pendentes'}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 text-[8px] font-black uppercase rounded-md border border-emerald-500/20">
+                                Concluído
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Barra de Progresso Consolidada de checklists */}
+                        <div className="space-y-1.5 pt-1.5 select-none">
+                          <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                            <span className="flex items-center gap-1">
+                              <CheckSquare size={11} className="text-amber-500" /> 
+                              Progresso Geral ({completedTasksCount}/{totalTasksCount} Tarefas)
+                            </span>
+                            <span>{overallProgress}%</span>
+                          </div>
+
+                          <div className="h-2 bg-gray-100 dark:bg-white/5 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-gradient-to-r from-amber-500 to-amber-600 rounded-full transition-all duration-500" 
+                              style={{ width: `${overallProgress}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Mini-Preview Discreto das Tarefas */}
+                        <div className="space-y-2 mt-4 pt-3 border-t border-black/5 dark:border-white/5 text-[11px] font-medium text-gray-500 dark:text-gray-400 font-sans">
+                          <div className="text-[9px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500 flex items-center gap-1"><ClipboardList size={10} /> Preview das Tarefas</div>
+                          {group.tasks.slice(0, 2).map((t, idx) => (
+                            <div key={idx} className="flex gap-2 items-start truncate opacity-85 hover:opacity-100 transition-opacity">
+                              <span className="text-amber-500 shrink-0">•</span>
+                              <span className="truncate flex-1 select-none" title={t.text}>{t.text}</span>
+                              {t.completed && <span className="text-emerald-500 text-[8px] font-black shrink-0 uppercase">[Concluída]</span>}
+                            </div>
+                          ))}
+                          {group.tasks.length > 2 && (
+                            <div className="text-[9px] italic text-gray-400 text-right pl-3 font-semibold">+ {group.tasks.length - 2} tarefas adicionais...</div>
+                          )}
+                        </div>
+
+                      </div>
+
+                      {/* Botão de Rodapé para Expandir */}
+                      <button
+                        type="button"
+                        onClick={() => setExpandedContactId(group.contactId)}
+                        className="w-full mt-5 py-2.5 bg-gradient-to-r from-amber-500/10 to-amber-600/10 hover:from-amber-500 hover:to-amber-600 hover:text-white border border-amber-500/20 text-amber-700 dark:text-amber-400 hover:border-transparent font-extrabold text-[10px] uppercase rounded-2xl flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all duration-300 font-sans"
+                      >
+                        <ClipboardList size={13} /> Gerenciar {group.tasks.length} {group.tasks.length === 1 ? 'Tarefa' : 'Tarefas'}
+                      </button>
+
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+        </div>
+      </main>
+
+      {/* Modal Premium de Visualização de Tarefas do Cliente Ativo (Explosão na Tela) */}
+      {activeGroup && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white/95 dark:bg-[#1e2b34]/95 backdrop-blur-2xl w-full max-w-6xl rounded-[40px] border border-amber-500/25 dark:border-white/10 shadow-2xl overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 flex flex-col max-h-[90vh]">
+            
+            {/* Header do Modal */}
+            <div className="p-6 border-b border-gray-150 dark:border-white/5 bg-gradient-to-r from-amber-500/10 to-transparent flex items-center justify-between shrink-0 select-none">
+              <div className="flex items-center gap-3">
+                <img 
+                  src={activeGroup.contactAvatar} 
+                  className="w-12 h-12 rounded-full object-cover shadow-sm border-2 border-amber-500/30" 
+                  onError={(e) => {
+                    e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(activeGroup.contactName)}&background=random&color=fff`;
+                  }}
+                />
+                <div>
+                  <h2 className="text-lg font-black text-gray-800 dark:text-gray-100 font-sans tracking-tight">
+                    Tarefas de {activeGroup.contactName}
+                  </h2>
+                  <p className="text-[10px] text-gray-400 dark:text-gray-500 font-sans font-bold uppercase tracking-wider mt-0.5">
+                    {activeGroup.contactPhone} • {activeGroup.tasks.length} {activeGroup.tasks.length === 1 ? 'tarefa ativa' : 'tarefas ativas'} no CRM
+                  </p>
+                </div>
+              </div>
+              
+              <button 
+                type="button"
+                onClick={() => setExpandedContactId(null)}
+                className="text-gray-400 hover:text-red-500 hover:bg-red-500/10 p-2 rounded-full transition-all hover:scale-110 active:scale-95 border border-transparent hover:border-red-500/20 shadow-sm flex items-center justify-center"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Corpo com Grid de Cards de Tarefas Individuais */}
+            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-gray-50/50 dark:bg-black/10 custom-scrollbar">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {activeGroup.tasks.map((task) => {
+                  const nowStr = format(new Date(), "yyyy-MM-dd'T'HH:mm");
+                  const isOverdue = !task.completed && task.dueDate < nowStr;
+                  const completedCount = (task.checklistItems || []).filter((i: any) => i.completed).length;
+                  const totalChecklist = (task.checklistItems || []).length;
                   
                   // Mapeamento do agente responsável
                   const assignedAgentObj = agents.find(a => a.id === task.assignedTo);
@@ -848,33 +1129,19 @@ export default function CrmDashboard() {
                     <div 
                       key={task.noteId} 
                       className={cn(
-                        "bg-white dark:bg-[#202c33] rounded-[32px] border p-6 flex flex-col justify-between shadow-sm transition-all hover:shadow-md hover:border-amber-500/20 duration-300 relative group/card",
+                        "bg-white dark:bg-[#202c33] rounded-[32px] border p-6 flex flex-col justify-between shadow-sm border-black/5 dark:border-white/5 transition-all hover:shadow-md hover:border-amber-500/20 duration-300 relative group/card animate-in fade-in duration-200",
                         task.completed && "opacity-75"
                       )}
                     >
                       {/* Círculo decorativo de fundo */}
                       <div className="absolute -right-6 -bottom-6 w-16 h-16 bg-amber-500/5 group-hover/card:bg-amber-500/10 blur-xl rounded-full transition-colors pointer-events-none" />
 
-                      {/* Topo do Card: Identificação do Contato e Status */}
+                      {/* Topo do Card: Identificação e Status */}
                       <div className="space-y-4">
                         <div className="flex items-center justify-between gap-3 shrink-0 select-none">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <img 
-                              src={task.contactAvatar} 
-                              className="w-10 h-10 rounded-full object-cover shadow-sm border border-black/5 dark:border-white/10" 
-                              onError={(e) => {
-                                e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(task.contactName)}&background=random&color=fff`;
-                              }}
-                            />
-                            <div className="flex flex-col min-w-0">
-                              <span className="font-bold text-gray-800 dark:text-gray-100 text-sm truncate">
-                                {task.contactName}
-                              </span>
-                              <span className="text-[9px] font-bold text-gray-400 dark:text-gray-500">
-                                {task.contactPhone}
-                              </span>
-                            </div>
-                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                            CRM ID: #{task.noteId.substring(0, 5)}
+                          </span>
 
                           <div className="flex flex-col gap-1 items-end shrink-0">
                             {task.completed ? (
@@ -893,56 +1160,127 @@ export default function CrmDashboard() {
                           </div>
                         </div>
 
-                        {/* Corpo do Card: Texto da tarefa */}
-                        <div className="text-xs text-gray-700 dark:text-gray-200 font-sans font-medium whitespace-pre-wrap leading-relaxed min-h-[50px] select-text">
-                          {task.text}
-                        </div>
-
-                        {/* Progresso do Checklist se houver */}
-                        {totalChecklist > 0 && (
-                          <div className="space-y-2 pt-2 border-t border-black/5 dark:border-white/5">
-                            <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 select-none">
-                              <span className="flex items-center gap-1"><CheckSquare size={11} className="text-amber-500 animate-pulse" /> Checklist ({completedCount}/{totalChecklist})</span>
-                              <span>{Math.round((completedCount / totalChecklist) * 100)}%</span>
-                            </div>
-
-                            <div className="h-1.5 bg-gray-100 dark:bg-white/5 rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-gradient-to-r from-amber-500 to-amber-600 rounded-full transition-all duration-300" 
-                                style={{ width: `${(completedCount / totalChecklist) * 100}%` }}
-                              />
-                            </div>
-
-                            {/* Sub-itens do Checklist Interativo */}
-                            <div className="space-y-1.5 pl-0.5 max-h-[130px] overflow-y-auto pr-0.5 custom-scrollbar font-sans select-none">
-                              {task.checklistItems.map((item: any, idx: number) => (
-                                <div 
-                                  key={idx} 
-                                  className="flex items-center gap-2 p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors"
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => handleToggleChecklistItem(task, idx)}
-                                    className={cn(
-                                      "w-4 h-4 rounded flex items-center justify-center border transition-all active:scale-90 shrink-0",
-                                      item.completed
-                                        ? "bg-emerald-500 border-emerald-500 text-white"
-                                        : "border-gray-300 dark:border-gray-600 hover:border-amber-500 bg-transparent"
-                                    )}
-                                  >
-                                    {item.completed && <CheckCircle2 size={10} strokeWidth={3} className="text-white" />}
-                                  </button>
-                                  <span className={cn(
-                                    "text-xs font-semibold text-gray-700 dark:text-gray-200 truncate",
-                                    item.completed && "line-through opacity-50 font-normal"
-                                  )}>
-                                    {item.text}
-                                  </span>
-                                </div>
-                              ))}
+                        {/* Texto da tarefa com Edição Inline */}
+                        {editingTextTaskId === task.noteId ? (
+                          <div className="space-y-2 font-sans">
+                            <textarea
+                              rows={3}
+                              value={editingTextValue}
+                              onChange={(e) => setEditingTextValue(e.target.value)}
+                              className="w-full text-xs text-gray-855 dark:text-gray-100 bg-[#f0f2f5] dark:bg-[#111b21] border border-amber-500/30 rounded-2xl p-3 outline-none focus:ring-1 focus:ring-amber-500 leading-relaxed resize-none font-medium"
+                              autoFocus
+                            />
+                            <div className="flex gap-2 justify-end">
+                              <button
+                                type="button"
+                                onClick={() => setEditingTextTaskId(null)}
+                                className="px-3 py-1 bg-gray-100 dark:bg-white/5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 rounded-xl text-[10px] font-bold transition-all active:scale-95"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateTaskText(task.noteId, editingTextValue)}
+                                className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[10px] font-bold transition-all active:scale-95"
+                              >
+                                Salvar
+                              </button>
                             </div>
                           </div>
+                        ) : (
+                          <div className="relative group/text">
+                            <div className="text-xs text-gray-750 dark:text-gray-200 font-sans font-medium whitespace-pre-wrap leading-relaxed min-h-[50px] select-text pr-6">
+                              {task.text}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingTextTaskId(task.noteId);
+                                setEditingTextValue(task.text);
+                              }}
+                              className="absolute right-0 top-0 p-1 text-gray-400 hover:text-amber-500 bg-transparent rounded-lg opacity-0 group-hover/text:opacity-100 transition-opacity"
+                              title="Editar Descrição"
+                            >
+                              <Edit2 size={12} />
+                            </button>
+                          </div>
                         )}
+
+                        {/* Checklist CRM */}
+                        <div className="space-y-2 pt-2 border-t border-black/5 dark:border-white/5">
+                          <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 select-none">
+                            <span className="flex items-center gap-1">
+                              <CheckSquare size={11} className="text-amber-500 animate-pulse" /> 
+                              Checklist ({completedCount}/{totalChecklist})
+                            </span>
+                            <span>{totalChecklist > 0 ? Math.round((completedCount / totalChecklist) * 100) : 0}%</span>
+                          </div>
+
+                       {totalChecklist > 0 && (
+                         <div className="h-1.5 bg-gray-100 dark:bg-white/5 rounded-full overflow-hidden">
+                           <div 
+                             className="h-full bg-gradient-to-r from-amber-500 to-amber-600 rounded-full transition-all duration-300" 
+                             style={{ width: `${(completedCount / totalChecklist) * 100}%` }}
+                           />
+                         </div>
+                       )}
+
+                          {/* Sub-itens do Checklist Interativo */}
+                          <div className="space-y-1.5 pl-0.5 max-h-[120px] overflow-y-auto pr-0.5 custom-scrollbar font-sans select-none">
+                            {(task.checklistItems || []).map((item: any, idx: number) => (
+                              <div 
+                                key={idx} 
+                                className="flex items-center gap-2 p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors group/item relative"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleChecklistItem(task, idx)}
+                                  className={cn(
+                                    "w-4 h-4 rounded flex items-center justify-center border transition-all active:scale-90 shrink-0",
+                                    item.completed
+                                      ? "bg-emerald-500 border-emerald-500 text-white"
+                                      : "border-gray-300 dark:border-gray-600 hover:border-amber-500 bg-transparent"
+                                  )}
+                                >
+                                  {item.completed && <CheckCircle2 size={10} strokeWidth={3} className="text-white" />}
+                                </button>
+                                <span className={cn(
+                                  "text-xs font-semibold text-gray-700 dark:text-gray-200 truncate flex-1",
+                                  item.completed && "line-through opacity-50 font-normal"
+                                )}>
+                                  {item.text}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleInlineDeleteChecklistItem(task, idx)}
+                                  className="p-0.5 text-slate-400 hover:text-red-500 rounded transition-all shrink-0 ml-auto opacity-0 group-hover/item:opacity-100"
+                                  title="Remover subtarefa"
+                                >
+                                  <X size={11} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Input de Adição de Checklist Inline no Card */}
+                          <div className="flex gap-1.5 pt-1.5 border-t border-dashed border-black/5 dark:border-white/5">
+                            <input 
+                              type="text"
+                              placeholder="Nova subtarefa..."
+                              value={inlineChecklistInputs[task.noteId] || ''}
+                              onChange={(e) => setInlineChecklistInputs(prev => ({ ...prev, [task.noteId]: e.target.value }))}
+                              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleInlineAddChecklistItem(task))}
+                              className="flex-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-gray-100 border border-transparent rounded-xl px-2.5 py-1.5 outline-none placeholder:text-gray-400 text-[10px] font-semibold focus:ring-1 focus:ring-amber-500/50 shadow-inner"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleInlineAddChecklistItem(task)}
+                              className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold active:scale-95 transition-all text-[9px]"
+                            >
+                              Adicionar
+                            </button>
+                          </div>
+                        </div>
 
                         {/* Informações de Controle: Agente Atribuído & Prazo */}
                         <div className="pt-3 border-t border-black/5 dark:border-white/5 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px] font-sans text-gray-500 dark:text-gray-400 select-none">
@@ -1000,25 +1338,23 @@ export default function CrmDashboard() {
                             )}
                           </div>
 
-                          {/* Data Limite / Due Date com Editor Rápido */}
+                          {/* Data Limite / Due Date */}
                           <div className="flex flex-col gap-1 relative">
                             <span className="font-bold flex items-center gap-0.5">📅 Data Limite</span>
                             <div className="relative">
                               <Calendar size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none z-10" />
                               <input 
-                                type="date"
+                                type="datetime-local"
                                 value={task.dueDate}
                                 onChange={(e) => handleUpdateDueDate(task, e.target.value)}
                                 className="w-full py-1.5 pl-7 pr-2 bg-gray-50 dark:bg-[#111b21] dark:text-white border border-black/5 dark:border-white/5 rounded-xl font-bold text-gray-700 outline-none focus:border-amber-500/30 transition-colors [color-scheme:dark]"
                               />
                             </div>
                           </div>
-
                         </div>
-
                       </div>
 
-                      {/* Rodapé do Card: Ações da Tarefa */}
+                      {/* Rodapé do Card: Ações */}
                       <div className="mt-5 pt-4 border-t border-black/5 dark:border-white/5 flex gap-2 shrink-0 select-none">
                         {!task.completed && (
                           <button
@@ -1031,7 +1367,10 @@ export default function CrmDashboard() {
                         )}
                         <button
                           type="button"
-                          onClick={() => handleViewInChat(task)}
+                          onClick={() => {
+                            setExpandedContactId(null); // Fechar modal de grupo ao redirecionar
+                            handleViewInChat(task);
+                          }}
                           className="flex-1 py-2 bg-[#f0f2f5] dark:bg-[#111b21] hover:bg-amber-500/10 dark:hover:bg-amber-500/15 text-gray-700 dark:text-gray-200 font-extrabold text-[10px] uppercase rounded-xl border border-black/5 dark:border-white/5 hover:border-amber-500/20 flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all font-sans"
                         >
                           <MessageSquare size={12} /> Chat
@@ -1045,16 +1384,26 @@ export default function CrmDashboard() {
                           <Trash2 size={14} />
                         </button>
                       </div>
-
                     </div>
                   );
                 })}
               </div>
-            )}
-          </div>
+            </div>
+            
+            {/* Footer do Modal */}
+            <div className="p-4 border-t border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-black/20 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setExpandedContactId(null)}
+                className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl font-bold text-xs shadow-md transition-all active:scale-95"
+              >
+                Fechar Painel
+              </button>
+            </div>
 
+          </div>
         </div>
-      </main>
+      )}
 
       {/* Modal Premium de Nova Tarefa CRM */}
       {showCreateModal && (
@@ -1161,7 +1510,7 @@ export default function CrmDashboard() {
                   <div className="relative">
                     <Calendar size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     <input 
-                      type="date"
+                      type="datetime-local"
                       value={newDueDate}
                       onChange={(e) => setNewDueDate(e.target.value)}
                       className="w-full bg-[#f0f2f5] dark:bg-[#111b21] dark:text-gray-100 border-none outline-none pl-10 pr-4 py-3 rounded-2xl text-xs font-semibold focus:ring-1 focus:ring-amber-500/50 shadow-inner [color-scheme:dark]"

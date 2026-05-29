@@ -1684,8 +1684,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           contacts: s.contacts.map(c => c.id === contactId ? { ...c, avatar: finalUrl } : c)
         }));
       }
-    } catch(err) {
-      console.error("[fetchContactPicture] Erro:", err);
+    } catch(err: any) {
+      if (err.name === 'AbortError') {
+        console.warn("[fetchContactPicture] Requisição cancelada por timeout de 3.5s (possível atraso na resposta ou contato sem avatar).");
+      } else {
+        console.error("[fetchContactPicture] Erro:", err);
+      }
     }
   },
 

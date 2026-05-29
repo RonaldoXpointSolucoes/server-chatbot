@@ -111,9 +111,9 @@ export function renderMessageText(text: string) {
     const actualMessage = quoteMatch[2];
     
     return (
-      <div className="flex flex-col gap-1.5 w-full">
+      <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-top-1 duration-300">
         <div 
-          className="relative pl-3 pr-2 py-2 mb-0.5 bg-black/5 dark:bg-black/20 border-l-4 border-emerald-500 rounded-lg text-[0.85rem] text-[#54656f] dark:text-[#8696a0] whitespace-normal overflow-hidden max-w-full cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+          className="relative pl-4 pr-3 py-2.5 bg-white/5 dark:bg-black/35 backdrop-blur-sm border border-white/10 dark:border-white/5 border-l-4 border-l-emerald-500/80 rounded-2xl text-[0.825rem] text-slate-600 dark:text-slate-300/90 whitespace-normal overflow-hidden max-w-full cursor-pointer hover:bg-white/10 dark:hover:bg-white/5 hover:border-white/25 hover:scale-[0.99] transition-all duration-300 group shadow-sm"
           onClick={(e) => {
             e.stopPropagation();
             if (quotedText) {
@@ -129,10 +129,24 @@ export function renderMessageText(text: string) {
             }
           }}
         >
-           <div className="font-bold text-emerald-600 dark:text-emerald-400 text-xs mb-1 opacity-90 drop-shadow-sm flex items-center gap-1">Mensagem Citada</div>
-           <div className="line-clamp-3 italic opacity-90">{formatTextWithMentions(quotedText)}</div>
+          {/* Ícone de Marca d'Água Elegante */}
+          <div className="absolute right-3 top-2.5 text-emerald-500 dark:text-emerald-400 opacity-[0.08] dark:opacity-[0.12] group-hover:opacity-20 group-hover:scale-110 transition-all duration-300 transform rotate-12 pointer-events-none select-none">
+            <MessageSquareReply size={36} className="stroke-[1.5]" />
+          </div>
+
+          <div className="font-bold text-emerald-600 dark:text-emerald-400 text-xs mb-1 opacity-90 drop-shadow-sm flex items-center gap-1.5">
+            <MessageSquareReply size={12} className="opacity-80" />
+            Mensagem Citada
+          </div>
+          <div className="line-clamp-2 italic opacity-85 leading-relaxed pl-1 pr-6 border-l border-white/5">
+            {formatTextWithMentions(quotedText)}
+          </div>
         </div>
-        <div>
+        
+        {/* Divisor Gradiente Elegante */}
+        <div className="h-px w-full bg-gradient-to-r from-emerald-500/20 via-emerald-500/5 to-transparent my-0.5 opacity-60" />
+        
+        <div className="pl-1 text-slate-800 dark:text-slate-100 leading-relaxed">
            {renderMessageText(actualMessage)}
         </div>
       </div>
@@ -1447,6 +1461,25 @@ export default function ChatDashboard() {
     }
   };
 
+  const handleResolveConversation = async (contactId: string) => {
+    // 1. Salva a posição de scroll atual da lista lateral de chats
+    const currentScrollTop = contactListRef.current ? contactListRef.current.scrollTop : 0;
+    
+    // 2. Dispara a ação de resolução
+    await resolveConversation(contactId);
+    
+    // 3. Estabilização absoluta em cascata de tempo para anular saltos enquanto o Framer-motion anima a saída
+    const restoreScroll = () => {
+      if (contactListRef.current) {
+        contactListRef.current.scrollTop = currentScrollTop;
+      }
+    };
+    
+    restoreScroll();
+    requestAnimationFrame(restoreScroll);
+    [10, 30, 50, 100, 180, 300, 500].forEach(ms => setTimeout(restoreScroll, ms));
+  };
+
   const handleStartChatWithSearchedNumber = async (phoneNumber: string) => {
     let cleanPhone = phoneNumber.replace(/\D/g, '');
     if (!cleanPhone) return;
@@ -2534,7 +2567,7 @@ export default function ChatDashboard() {
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
           {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.8.18'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '28/05/2026, 11:49'}`}</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.8.19'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '29/05/2026, 13:21'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
@@ -3160,7 +3193,6 @@ export default function ChatDashboard() {
 
               return (
                 <motion.div 
-                  layout
                   initial={{ opacity: 0, y: 15 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -15 }}
@@ -3426,7 +3458,7 @@ export default function ChatDashboard() {
                                 </button>
                               ) : (
                                 <button 
-                                  onClick={(e) => { e.stopPropagation(); resolveConversation(contact.id); setActiveDropdown(null); }}
+                                  onClick={(e) => { e.stopPropagation(); handleResolveConversation(contact.id); setActiveDropdown(null); }}
                                   className="w-full text-left px-4 py-2 text-sm text-[#3b4a54] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#182229] transition-colors flex items-center gap-2"
                                 >
                                   <CheckCircle2 size={14} className="text-emerald-500" />
@@ -3597,7 +3629,7 @@ export default function ChatDashboard() {
                 ) : (
                   <button 
                     onClick={() => {
-                      resolveConversation(activeChat.id);
+                      handleResolveConversation(activeChat.id);
                     }}
                     className="flex items-center gap-2 px-4 py-1.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-all duration-300 text-sm font-semibold border border-emerald-200 dark:border-emerald-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95"
                     title="Resolver Conversa"
@@ -3625,7 +3657,7 @@ export default function ChatDashboard() {
                   </button>
                 ) : (
                   <button 
-                    onClick={() => resolveConversation(activeChat.id)}
+                    onClick={() => handleResolveConversation(activeChat.id)}
                     className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-[#00a884] border border-emerald-200 dark:border-emerald-500/20 active:scale-95 transition-all shadow-sm relative group"
                     title="Resolver Conversa"
                   >
@@ -3666,7 +3698,7 @@ export default function ChatDashboard() {
                       ) : (
                         <button 
                           onClick={() => {
-                            resolveConversation(activeChat.id);
+                            handleResolveConversation(activeChat.id);
                             setMobileHeaderMenuOpen(false);
                           }}
                           className="flex items-center justify-center gap-2 px-3 py-2.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-xl transition-all text-sm font-semibold border border-emerald-200 dark:border-emerald-500/20 w-full shadow-sm hover:scale-[1.02]"

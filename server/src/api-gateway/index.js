@@ -3,12 +3,35 @@ import instanceRoutes from './instances.js';
 import messageRoutes from './messages.js';
 import knowledgeRoutes from './knowledge.js';
 import { supabase } from '../supabase.js';
+import { getUrlInfo } from '@whiskeysockets/baileys';
 
 const router = express.Router();
 
 router.use('/v1', instanceRoutes);
 router.use('/v1', messageRoutes);
 router.use('/v1/knowledge', knowledgeRoutes);
+
+// Rota de link preview para contornar CORS no frontend e expor o resolvedor do Baileys
+router.get('/v1/utils/link-preview', async (req, res) => {
+    try {
+        const { url } = req.query;
+        if (!url) return res.status(400).json({ error: 'Missing url parameter' });
+
+        const info = await getUrlInfo(url);
+        if (!info) return res.status(404).json({ error: 'No preview found for this URL' });
+
+        res.json({
+            title: info.title || null,
+            description: info.description || null,
+            url: info['canonical-url'] || url,
+            image: info.originalThumbnailUrl || null,
+            jpegThumbnail: info.jpegThumbnail ? info.jpegThumbnail.toString('base64') : null
+        });
+    } catch (e) {
+        console.error('[link-preview] Erro ao obter visualização da URL:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
 
 // Fallback bypass endpoint para carregar detalhes da Company via Admin Role
 router.get('/v1/companies/:id', async (req, res) => {

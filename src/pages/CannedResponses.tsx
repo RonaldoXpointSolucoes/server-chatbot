@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
-import { Plus, Search, Edit2, Trash2, MessageSquareText, Zap, ChevronLeft, Save, Building, Paperclip, Image as ImageIcon, Video, X, Loader2, Copy, Mic, Square, Wand2, CheckCircle2, Sparkles, FileText } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, MessageSquareText, Zap, ChevronLeft, Save, Building, Paperclip, Image as ImageIcon, Video, X, Loader2, Copy, Mic, Square, Wand2, CheckCircle2, Sparkles, FileText, ExternalLink, Globe } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import { uploadResumableFile } from '../services/tusUploader';
@@ -49,6 +49,17 @@ export function CannedResponses() {
   const [uploadProgress, setUploadProgress] = useState<string>('');
   const [previewMedia, setPreviewMedia] = useState<{ url: string, type: 'video' | 'image' | 'audio' | 'document' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Estados para Preview de Link Premium
+  const [detectedLink, setDetectedLink] = useState<string | null>(null);
+  const [linkPreviewData, setLinkPreviewData] = useState<{
+    title: string | null;
+    description: string | null;
+    url: string;
+    image: string | null;
+    jpegThumbnail: string | null;
+  } | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
   // Estados locais adicionais para o Assistente I.A. & RAG pgvector
   const [ragDocuments, setRagDocuments] = useState<any[]>([]);
@@ -127,6 +138,45 @@ export function CannedResponses() {
   useEffect(() => {
     fetchQuickReplies();
   }, [fetchQuickReplies]);
+
+  // Efeito assíncrono para detectar links no conteúdo e carregar metadados via API Gateway
+  useEffect(() => {
+    const extractUrlFromText = (text: string) => {
+      const urlRegex = /(https?:\/\/[^\s]+)/gi;
+      return text.match(urlRegex)?.[0];
+    };
+
+    const link = extractUrlFromText(content);
+    if (!link) {
+      setDetectedLink(null);
+      setLinkPreviewData(null);
+      return;
+    }
+
+    if (link === detectedLink) return; // evita loops se for o mesmo link
+
+    setDetectedLink(link);
+    setIsLoadingPreview(true);
+
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`${ENGINE_URL}/api/v1/utils/link-preview?url=${encodeURIComponent(link)}`);
+        if (response.ok) {
+          const data = await response.json();
+          setLinkPreviewData(data);
+        } else {
+          setLinkPreviewData(null);
+        }
+      } catch (err) {
+        console.warn('[CannedResponses] Erro ao obter preview do link:', err);
+        setLinkPreviewData(null);
+      } finally {
+        setIsLoadingPreview(false);
+      }
+    }, 800); // 800ms debounce
+
+    return () => clearTimeout(timer);
+  }, [content, detectedLink]);
 
   // Efeito para carregar as bases de conhecimento RAG vetorizadas ativas no Supabase
   useEffect(() => {
@@ -525,6 +575,66 @@ export function CannedResponses() {
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-white/10 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all resize-none bg-white dark:bg-[#202C33] text-gray-900 dark:text-[#e9edef] placeholder-gray-400 dark:placeholder-[#8696a0]"
                 />
               </div>
+
+              {/* Painel Premium de Visualização de Link Detectado */}
+              {(isLoadingPreview || linkPreviewData) && (
+                <div className="p-4 bg-gradient-to-r from-blue-500/10 to-indigo-500/10 border border-blue-500/20 dark:border-blue-500/35 rounded-3xl animate-in fade-in slide-in-from-top-4 duration-300 relative overflow-hidden backdrop-blur-md shadow-lg dark:shadow-black/40 flex gap-4">
+                  {isLoadingPreview ? (
+                    <div className="flex items-center justify-center w-full py-4 gap-3">
+                      <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 animate-spin shrink-0" />
+                      <span className="text-xs font-semibold text-gray-500 dark:text-[#8696a0] animate-pulse">Obtendo pré-visualização premium do link...</span>
+                    </div>
+                  ) : (
+                    linkPreviewData && (
+                      <>
+                        {linkPreviewData.image ? (
+                          <div className="w-20 h-20 rounded-2xl overflow-hidden bg-black/5 dark:bg-white/5 border dark:border-white/10 shrink-0 shadow-sm relative group">
+                            <img 
+                              src={linkPreviewData.image} 
+                              alt="Thumbnail do link" 
+                              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" 
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-20 h-20 rounded-2xl bg-blue-500/15 border border-blue-500/20 flex items-center justify-center text-blue-500 shrink-0">
+                            <Globe className="w-8 h-8 animate-pulse" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+                          <div>
+                            <div className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest flex items-center gap-1.5 mb-1">
+                              <span className="flex h-1.5 w-1.5 relative">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500"></span>
+                              </span>
+                              Link Detectado
+                            </div>
+                            <h4 className="text-xs font-black text-gray-800 dark:text-[#e9edef] truncate leading-tight mb-0.5">
+                              {linkPreviewData.title || "Visualizar Link"}
+                            </h4>
+                            <p className="text-[11px] text-gray-500 dark:text-[#8696a0] line-clamp-2 leading-snug">
+                              {linkPreviewData.description || "Sem descrição disponível."}
+                            </p>
+                          </div>
+                          
+                          <a 
+                            href={linkPreviewData.url} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="inline-flex items-center gap-1 text-[10px] font-extrabold text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 mt-2 hover:underline transition-all active:scale-95"
+                          >
+                            <span className="truncate max-w-[200px]">{linkPreviewData.url.replace(/^https?:\/\//, '')}</span>
+                            <ExternalLink size={10} />
+                          </a>
+                        </div>
+                      </>
+                    )
+                  )}
+                </div>
+              )}
 
               {/* Interface Premium de I.A. & RAG (Gaveta Expansível) */}
               {isAiDrawerOpen && (

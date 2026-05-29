@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.8.19] - 2026-05-29
+
+### Adicionado
+- **Melhoria Estética da Mensagem Citada (Chat)**: Visual premium com glassmorphism (`bg-white/5 dark:bg-black/35 backdrop-blur-sm`), borda de destaque esmeralda (`border-l-4 border-l-emerald-500/80`), marca d'água de citação (`MessageSquareReply` de opacidade e escala dinâmicas no hover) e divisor gradiente elegante.
+- **Agrupamento de Tarefas por Cliente no CRM**: Consolidação de tarefas no dashboard do CRM. Clientes com múltiplas tarefas agora ocupam um único card consolidado na listagem principal com barra de progresso consolidada de checklists e mini-preview discreto de tarefas.
+- **Painel de Explosão de Tarefas**: Modal central de alta fidelidade em glassmorphism (`backdrop-blur-md bg-black/75`) que exibe no grid as tarefas detalhadas e interativas do cliente selecionado sob demanda com efeito de zoom suave.
+
+### Corrigido
+- **Resolução de Loop e Sobreposição de Chats (Chat)**: Solucionado o bug visual de loop infinito de layout (efeito sanfona) e colisão de elementos de chats (como Jonathas sobre Natan) removendo a diretiva `layout` do `<motion.div>` dos contatos da barra lateral, restabelecendo o empilhamento em bloco CSS nativo e robusto do navegador.
+
 ## [2.8.18] - 2026-05-28
 
 ### Alterado
