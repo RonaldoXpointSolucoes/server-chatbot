@@ -803,6 +803,16 @@ class EventProcessor {
                                          if (!botData && b.convStatus === 'teste_robo') {
                                              botData = botsData.find(bot => bot.channels && bot.channels.includes(b.instanceId)) || botsData[0];
                                          }
+
+                                         // Se a caixa de entrada tiver o robô de autoatendimento ativado e não tiver bot específico vinculado,
+                                         // faz fallback para o bot ativo do tenant para que o atendimento ocorra.
+                                         if (!botData && instanceConfig.bot_active !== false) {
+                                             const activeBot = botsData.find(bot => bot.status === 'active') || botsData[0];
+                                             if (activeBot) {
+                                                 botData = { ...activeBot, autoReply: true };
+                                                 console.log(`[EventProcessor] Fallback: Utilizando o bot '${botData.name}' para a caixa de entrada ${b.instanceId} via ativação direta.`);
+                                             }
+                                         }
                                          
                                          if (botData) {
                                              // --- MODO SANDBOX / FILTRO DE TELEFONE DE TESTE ---
