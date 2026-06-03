@@ -9,6 +9,7 @@ class SessionManager {
     constructor() {
         this.sessions = new Map();
         this.connectingState = new Map();
+        this.reconnectAttempts = new Map();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -126,6 +127,10 @@ class SessionManager {
                 await eventProcessor.handleConnectionUpdate(tenantId, instanceId, update);
 
                 const { connection, lastDisconnect } = update;
+                if (connection === 'open') {
+                    this.reconnectAttempts.delete(instanceId);
+                }
+
                 if (connection === 'close') {
                     const status = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.message || '';
@@ -140,15 +145,37 @@ class SessionManager {
                         await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
                         await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
                         
+                        this.reconnectAttempts.delete(instanceId);
                         // Tentar reconectar limpo após 5s
                         setTimeout(() => this.createSession(tenantId, instanceId), 5000);
                     } else if (isConflict) {
                         console.warn(`[SessionManager] CONFLITO detectado na instância ${instanceId}. Outro dispositivo conectou? Aguardando 30s antes de tentar novamente...`);
+                        this.reconnectAttempts.delete(instanceId);
                         // Delay maior para conflitos (30s) para evitar ban ou loops infinitos
                         setTimeout(() => this.createSession(tenantId, instanceId), 30000);
                     } else {
-                        console.log(`[SessionManager] Instância ${instanceId} fechou. Motivo: ${status}. Tentando reconectar em 5s...`);
-                        setTimeout(() => this.createSession(tenantId, instanceId), 5000);
+                        const attempts = this.reconnectAttempts.get(instanceId) || 0;
+                        const nextAttempt = attempts + 1;
+                        this.reconnectAttempts.set(instanceId, nextAttempt);
+
+                        // Rastrear se é erro 503 da Meta (temporariamente indisponível ou rate limit)
+                        const is503 = status === 503 || reason.includes('503') || JSON.stringify(lastDisconnect?.error).includes('503');
+
+                        const baseDelay = is503 ? 15000 : 5000;
+                        const maxDelay = is503 ? 120000 : 60000;
+                        const delay = Math.min(baseDelay * Math.pow(2, attempts), maxDelay);
+
+                        console.log(`[SessionManager] Instância ${instanceId} fechou. Motivo: ${status} (Erro 503: ${is503}). Tentativa ${nextAttempt}. Reconectando em ${delay / 1000}s...`);
+
+                        if (is503) {
+                            await supabase.from('whatsapp_instances')
+                                .update({ 
+                                    last_error: `WhatsApp temporariamente indisponível (Erro 503). Próxima tentativa de reconexão em ${delay / 1000}s (Tentativa ${nextAttempt}).`
+                                })
+                                .eq('id', instanceId);
+                        }
+
+                        setTimeout(() => this.createSession(tenantId, instanceId), delay);
                     }
                 }
             });
