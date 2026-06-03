@@ -741,7 +741,7 @@ class EventProcessor {
 
                          // Responde apenas se a conversa estiver sob os cuidados do bot ('bot' ou 'teste_robo')
                         // E não seja um self-chat (evita auto-loop em envios pro próprio numero)
-                        if (!b.isSelfChat && !b.aiPaused && (b.convStatus === 'bot' || b.convStatus === 'teste_robo')) {
+                        if (!b.isSelfChat && !b.aiPaused && (b.convStatus === 'bot' || b.convStatus === 'teste_robo' || b.convStatus === 'open')) {
                              this.getInstanceConfig(b.instanceId).then((instanceConfig) => {
                                  // 1. Verifica se o robô está ativo para esta caixa de entrada (padrão true se undefined)
                                  const botActive = instanceConfig.bot_active !== false;
@@ -751,23 +751,36 @@ class EventProcessor {
                                  }
 
                                  // 2. Verifica Whitelist de números de teste (Ambiente de Teste Real)
-                                 if (instanceConfig.bot_test_numbers && String(instanceConfig.bot_test_numbers).trim().length > 0) {
-                                     const testNumbers = String(instanceConfig.bot_test_numbers)
+                                 const hasTestNumbers = instanceConfig.bot_test_numbers && String(instanceConfig.bot_test_numbers).trim().length > 0;
+                                 let isTestAllowed = false;
+                                 let testNumbers = [];
+
+                                 if (hasTestNumbers) {
+                                     testNumbers = String(instanceConfig.bot_test_numbers)
                                          .split(',')
                                          .map(n => n.replace(/\D/g, ''))
                                          .filter(n => n.length > 0);
                                      
                                      if (testNumbers.length > 0) {
                                          const clientPhoneClean = String(b.phone || '').replace(/\D/g, '');
-                                         const isAllowed = testNumbers.some(tn => {
+                                         isTestAllowed = testNumbers.some(tn => {
                                              return clientPhoneClean.endsWith(tn) || tn.endsWith(clientPhoneClean);
                                          });
-                                         
-                                         if (!isAllowed) {
-                                             console.log(`[EventProcessor] Sandbox da Instância Ativo: Mensagem do celular (${clientPhoneClean}) não está na whitelist de testes da instância. Silenciando robô.`);
-                                             return;
-                                         }
-                                         console.log(`[EventProcessor] Sandbox da Instância Ativo: Mensagem do celular homologado (${clientPhoneClean}) autorizada.`);
+                                     }
+                                 }
+
+                                 // Se a conversa for 'open' (operador humano), o robô só responde se o cliente estiver explicitamente na whitelist de testes
+                                 if (b.convStatus === 'open') {
+                                     if (!isTestAllowed) {
+                                         // Silencia o robô para clientes de produção normais em conversas abertas
+                                         return;
+                                     }
+                                     console.log(`[EventProcessor] Sandbox Ativo: Forçando resposta da IA em chat 'open' para o celular homologado (${b.phone}).`);
+                                 } else {
+                                     // Para status 'bot' ou 'teste_robo', se houver whitelist de testes configurada, o cliente precisa estar nela
+                                     if (testNumbers.length > 0 && !isTestAllowed) {
+                                         console.log(`[EventProcessor] Sandbox da Instância Ativo: Mensagem do celular (${b.phone}) não está na whitelist de testes da instância. Silenciando robô.`);
+                                         return;
                                      }
                                  }
 
