@@ -213,7 +213,22 @@ const formatDisplayPhone = (phoneNum: string) => {
     return `(${clean.substring(0, 2)}) ${clean.substring(2, 6)}-${clean.substring(6)}`;
   }
   return phoneNum;
-};
+};const PORTUGUESE_COMMON_WORDS = new Set([
+  'ok', 'vou', 'responder', 'olá', 'ola', 'sim', 'não', 'nao', 'tudo', 'bem', 'bom', 'boa', 'dia', 'tarde', 'noite',
+  'por', 'favor', 'obrigado', 'obrigada', 'de', 'do', 'da', 'em', 'um', 'uma', 'os', 'as', 'o', 'a',
+  'que', 'se', 'com', 'para', 'como', 'mais', 'mas', 'eu', 'você', 'voce', 'ele', 'ela', 'nós', 'nos', 'eles', 'elas',
+  'me', 'te', 'lhe', 'nos', 'se', 'este', 'esta', 'isto', 'esse', 'essa', 'isso', 'aquele', 'aquela', 'aquilo',
+  'ir', 'vai', 'vão', 'vamos', 'fui', 'foi', 'fomos', 'foram', 'iria', 'iriam', 'iremos',
+  'ter', 'tenho', 'tem', 'temos', 'têm', 'tinha', 'tinham', 'terá', 'terão', 'teria', 'teriam',
+  'ser', 'sou', 'é', 'e', 'somos', 'são', 'era', 'eram', 'será', 'serão', 'seria', 'seriam',
+  'estar', 'estou', 'está', 'estamos', 'estão', 'estava', 'estavam', 'estará', 'estarão', 'estaria', 'estariam',
+  'fazer', 'faço', 'faz', 'fazemos', 'fazem', 'fiz', 'fez', 'fizemos', 'fizeram', 'fará', 'farão', 'faria', 'fariam',
+  'dizer', 'digo', 'diz', 'dizemos', 'dizem', 'disse', 'dissemos', 'disseram', 'dirá', 'dirão', 'diria', 'diriam',
+  'poder', 'posso', 'pode', 'podemos', 'podem', 'pude', 'pôde', 'puderam', 'poderá', 'poderão', 'poderia', 'poderiam',
+  'ver', 'vejo', 'vê', 'vemos', 'vêem', 'vi', 'viu', 'vimos', 'viram', 'verá', 'verão', 'veria', 'veriam',
+  'dar', 'dou', 'dá', 'damos', 'dão', 'dei', 'deu', 'demos', 'deram', 'dará', 'darão', 'daria', 'dariam',
+  'aqui', 'ali', 'lá', 'onde', 'quando', 'como', 'porque', 'porquê', 'qual', 'quais', 'quem', 'cujo', 'cuja'
+]);
 
 export default function ChatDashboard() {
   const navigate = useNavigate();
@@ -226,6 +241,14 @@ export default function ChatDashboard() {
 
   // Estados do Corretor Ortográfico PT-BR (Ultra-Performance)
   const [validWords, setValidWords] = useState<Set<string>>(new Set());
+  const [isSpellcheckerActive, setIsSpellcheckerActive] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('chatboot_spellchecker_active');
+      return saved ? JSON.parse(saved) : true; // Ativo por padrão
+    } catch (e) {
+      return true;
+    }
+  });
   const [personalDict, setPersonalDict] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('chatboot_personal_dict');
@@ -252,6 +275,9 @@ export default function ChatDashboard() {
         
         const wordSet = new Set<string>();
         
+        // Adicionar palavras comuns iniciais para evitar falsos positivos do Hunspell
+        PORTUGUESE_COMMON_WORDS.forEach(w => wordSet.add(w));
+
         // Ignorar a primeira linha (contagem) e popular o Set
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
@@ -266,7 +292,7 @@ export default function ChatDashboard() {
         
         setValidWords(wordSet);
         setSpellcheckerLoaded(true);
-        console.log(`Corretor ortográfico PT-BR carregado localmente com ${wordSet.size} palavras!`);
+        console.log(`Corretor ortográfico PT-BR carregado localmente com ${wordSet.size} palavras (comuns inclusas)!`);
       } catch (e) {
         console.error('Erro ao carregar o corretor ortográfico:', e);
       }
@@ -318,6 +344,7 @@ export default function ChatDashboard() {
   };
 
   const isWordCorrect = (word: string) => {
+    if (!isSpellcheckerActive) return true; // Corretor desativado
     if (!spellcheckerLoaded) return true;
     
     // Ignorar siglas/acrônimos (ex: CTP, CRM, RH) - palavras todas em maiúsculas
@@ -335,6 +362,7 @@ export default function ChatDashboard() {
     if (cleanWord.length <= 1) return true;
     
     if (personalDict.includes(cleanWord)) return true;
+    if (PORTUGUESE_COMMON_WORDS.has(cleanWord)) return true;
     return validWords.has(cleanWord);
   };
 
@@ -1466,6 +1494,10 @@ export default function ChatDashboard() {
     intent: null
   });
 
+  const [geminiPopoverSubView, setGeminiPopoverSubView] = useState<'main' | 'analyze_period'>('main');
+  const [selectedAnalyzePeriod, setSelectedAnalyzePeriod] = useState<'2h' | '24h' | '3d' | '7d' | 'all'>('24h');
+  const [transcriptionProgressText, setTranscriptionProgressText] = useState<string | null>(null);
+
 
   // Estados de Paginação Local Virtual
   const [contactPageLimit, setContactPageLimit] = useState(20);
@@ -2238,26 +2270,143 @@ export default function ChatDashboard() {
 
     setIsGeminiProcessing(true);
     try {
-      const history = activeChat.messages
-        ? activeChat.messages.map(m => ({ 
-            role: m.sender === 'bot' ? 'IA' : m.sender === 'human' ? 'Atendente' : 'Cliente', 
-            text: m.text || '' 
-          }))
-        : [];
-      
-      const suggestion = await geminiService.enhanceMessage(type === 'analyze' ? '' : inputText, type, history);
-      
-      setGeminiModalState({
-        isOpen: true,
-        originalText: type === 'analyze' ? 'Análise interna da conversa atual. Esta mensagem não será enviada.' : inputText,
-        suggestedText: suggestion,
-        intent: type
-      });
+      if (type === 'analyze') {
+        const now = Date.now();
+        let cutoffTime = 0;
+        switch (selectedAnalyzePeriod) {
+          case '2h':
+            cutoffTime = now - 2 * 60 * 60 * 1000;
+            break;
+          case '24h':
+            cutoffTime = now - 24 * 60 * 60 * 1000;
+            break;
+          case '3d':
+            cutoffTime = now - 3 * 24 * 60 * 60 * 1000;
+            break;
+          case '7d':
+            cutoffTime = now - 7 * 24 * 60 * 60 * 1000;
+            break;
+          case 'all':
+          default:
+            cutoffTime = 0;
+            break;
+        }
+
+        let messagesToAnalyze = activeChat.messages || [];
+        if (cutoffTime > 0) {
+          messagesToAnalyze = messagesToAnalyze.filter(m => new Date(m.timestamp).getTime() >= cutoffTime);
+        }
+
+        // Transcrever áudios sem transcrição com mais de 10 segundos no intervalo
+        const audiosToTranscribe = messagesToAnalyze.filter(m => m.mediaType === 'audio' && m.mediaUrl && !m.transcription);
+        
+        if (audiosToTranscribe.length > 0) {
+          setTranscriptionProgressText("Verificando duração dos áudios...");
+          
+          // Função helper para obter duração do áudio no browser
+          const getAudioDuration = (url: string): Promise<number> => {
+            return new Promise((resolve) => {
+              const audio = new Audio(url);
+              audio.addEventListener('loadedmetadata', () => {
+                resolve(audio.duration);
+              });
+              audio.addEventListener('error', () => {
+                resolve(0);
+              });
+              setTimeout(() => resolve(0), 4000); // 4s timeout
+            });
+          };
+
+          // Obter durações em paralelo
+          const audiosWithDurations = await Promise.all(
+            audiosToTranscribe.map(async (msg) => {
+              const duration = await getAudioDuration(msg.mediaUrl!);
+              return { msg, duration };
+            })
+          );
+
+          const longAudios = audiosWithDurations.filter(item => item.duration > 10);
+
+          if (longAudios.length > 0) {
+            for (let i = 0; i < longAudios.length; i++) {
+              const { msg } = longAudios[i];
+              setTranscriptionProgressText(`Transcrevendo áudio ${i + 1} de ${longAudios.length} (duração > 10s)...`);
+              try {
+                await useChatStore.getState().requestTranscription(msg.id, msg.mediaUrl!);
+              } catch (err) {
+                console.error("Falha ao transcrever áudio na análise:", err);
+              }
+            }
+          }
+          
+          setTranscriptionProgressText(null);
+        }
+
+        // Atualizar mensagens com novas transcrições da store
+        const updatedChat = useChatStore.getState().contacts.find(c => c.id === activeChat.id);
+        if (updatedChat) {
+          messagesToAnalyze = updatedChat.messages || [];
+          if (cutoffTime > 0) {
+            messagesToAnalyze = messagesToAnalyze.filter(m => new Date(m.timestamp).getTime() >= cutoffTime);
+          }
+        }
+
+        // Formatar histórico para o Gemini
+        const formattedHistory = messagesToAnalyze.map(m => {
+          const senderName = m.sender === 'bot' ? 'IA (ChatBoot)' : m.sender === 'human' ? 'Atendente' : m.sender === 'system' ? 'Sistema' : 'Cliente';
+          
+          let textContent = m.text || '';
+          if (m.mediaType === 'audio') {
+            textContent = m.transcription ? `[Áudio Transcrito]: ${m.transcription}` : `[Áudio sem transcrição]`;
+          } else if (m.mediaType) {
+            textContent = `[Mídia do tipo: ${m.mediaType}] ${m.text || ''}`;
+          }
+          
+          return {
+            role: senderName,
+            text: textContent,
+            time: new Date(m.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+          };
+        });
+
+        if (formattedHistory.length === 0) {
+          alert('Não há mensagens no período selecionado para analisar.');
+          return;
+        }
+
+        const suggestion = await geminiService.analyzeConversationWithFeedback(formattedHistory);
+
+        setGeminiModalState({
+          isOpen: true,
+          originalText: `Período analisado: ${selectedAnalyzePeriod === '2h' ? 'Últimas 2 horas' : selectedAnalyzePeriod === '24h' ? 'Últimas 24 horas' : selectedAnalyzePeriod === '3d' ? 'Últimos 3 dias' : selectedAnalyzePeriod === '7d' ? 'Últimos 7 dias' : 'Conversa Completa'}`,
+          suggestedText: JSON.stringify(suggestion),
+          intent: 'analyze'
+        });
+
+      } else {
+        const history = activeChat.messages
+          ? activeChat.messages.map(m => ({ 
+              role: m.sender === 'bot' ? 'IA' : m.sender === 'human' ? 'Atendente' : 'Cliente', 
+              text: m.text || '' 
+            }))
+          : [];
+        
+        const suggestion = await geminiService.enhanceMessage(inputText, type, history);
+        
+        setGeminiModalState({
+          isOpen: true,
+          originalText: inputText,
+          suggestedText: suggestion,
+          intent: type
+        });
+      }
     } catch (error: any) {
       alert(error.message || 'Erro ao comunicar com a IA (Verifique a API Key).');
     } finally {
       setIsGeminiProcessing(false);
       setIsGeminiPopoverOpen(false);
+      setGeminiPopoverSubView('main');
+      setTranscriptionProgressText(null);
     }
   };
 
@@ -3835,6 +3984,34 @@ export default function ChatDashboard() {
                       )}
                     </div>
 
+                    {/* Spellchecker Toggle Control */}
+                    <div className="border-b border-gray-100 dark:border-[#304046] mb-1 pb-1">
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const nextState = !isSpellcheckerActive;
+                          setIsSpellcheckerActive(nextState);
+                          localStorage.setItem('chatboot_spellchecker_active', JSON.stringify(nextState));
+                          setActiveChatDropdown(false);
+                        }}
+                        className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center justify-between transition-colors cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3">
+                          <Lightbulb size={16} className={isSpellcheckerActive ? "text-amber-500" : "text-gray-400"} />
+                          <span className="text-[14px] text-[#3b4a54] dark:text-[#d1d7db] font-medium">Corretor Ortográfico</span>
+                        </div>
+                        <div className={cn(
+                          "w-8 h-4 rounded-full transition-all relative flex items-center px-0.5 shadow-inner",
+                          isSpellcheckerActive ? "bg-[#00a884]" : "bg-gray-300 dark:bg-gray-600"
+                        )}>
+                          <div className={cn(
+                            "w-3 h-3 rounded-full bg-white transition-all shadow-sm",
+                            isSpellcheckerActive ? "translate-x-4" : "translate-x-0"
+                          )} />
+                        </div>
+                      </button>
+                    </div>
+
                     <button 
                       onClick={async () => {
                         const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
@@ -4824,13 +5001,65 @@ export default function ChatDashboard() {
                             <Wand2 size={12} />
                           </div>
                           <span className="text-xs font-semibold text-[#111b21] dark:text-[#aebac1]">Magia da IA</span>
-                          <button onClick={() => setIsGeminiPopoverOpen(false)} className="ml-auto text-[#54656f] hover:text-red-500 p-1"><X size={14}/></button>
+                          <button 
+                            onClick={() => {
+                              setIsGeminiPopoverOpen(false);
+                              setGeminiPopoverSubView('main');
+                            }} 
+                            className="ml-auto text-[#54656f] hover:text-red-500 p-1"
+                          >
+                            <X size={14}/>
+                          </button>
                         </div>
                         
                         {isGeminiProcessing ? (
-                          <div className="flex flex-col items-center justify-center py-6 gap-3">
+                          <div className="flex flex-col items-center justify-center py-6 px-4 gap-3 text-center">
                               <RefreshCw size={24} className="text-[#00a884] animate-spin" />
-                              <span className="text-xs text-[#54656f] dark:text-[#aebac1] animate-pulse">A IA está processando...</span>
+                              <span className="text-xs text-[#111b21] dark:text-[#e9edef] font-medium leading-relaxed animate-pulse">
+                                {transcriptionProgressText || "A IA está processando..."}
+                              </span>
+                          </div>
+                        ) : geminiPopoverSubView === 'analyze_period' ? (
+                          <div className="flex flex-col gap-2 p-1">
+                            <button 
+                              onClick={() => setGeminiPopoverSubView('main')} 
+                              className="flex items-center gap-1 text-[11px] text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] transition-colors pb-1 border-b border-black/5 dark:border-white/5 mb-1"
+                            >
+                              <ChevronLeft size={12} /> Voltar para o menu
+                            </button>
+                            
+                            <span className="text-[10px] font-bold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider px-1 mb-1 block">Período de Análise</span>
+                            
+                            <div className="flex flex-col gap-0.5">
+                              {[
+                                { id: '2h', label: 'Últimas 2 horas' },
+                                { id: '24h', label: 'Últimas 24 horas' },
+                                { id: '3d', label: 'Últimos 3 dias' },
+                                { id: '7d', label: 'Últimos 7 dias' },
+                                { id: 'all', label: 'Conversa Toda' }
+                              ].map(item => (
+                                <button
+                                  key={item.id}
+                                  onClick={() => setSelectedAnalyzePeriod(item.id as any)}
+                                  className={cn(
+                                    "flex items-center justify-between w-full px-2.5 py-1.5 text-xs text-left rounded-lg transition-all",
+                                    selectedAnalyzePeriod === item.id 
+                                      ? "bg-[#00a884]/15 text-[#00a884] font-bold" 
+                                      : "hover:bg-black/5 dark:hover:bg-white/5 text-[#111b21] dark:text-[#e9edef]"
+                                  )}
+                                >
+                                  {item.label}
+                                  {selectedAnalyzePeriod === item.id && <Check size={12} className="stroke-[3]" />}
+                                </button>
+                              ))}
+                            </div>
+                            
+                            <button 
+                              onClick={() => handleGeminiAction('analyze')} 
+                              className="mt-2 flex items-center justify-center gap-2 w-full py-2 bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-700 hover:to-fuchsia-700 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98]"
+                            >
+                              <BrainCircuit size={14} /> Iniciar Análise
+                            </button>
                           </div>
                         ) : (
                           <div className="flex flex-col gap-1">
@@ -4849,7 +5078,7 @@ export default function ChatDashboard() {
                             
                             <div className="my-1 border-t border-black/5 dark:border-white/5"></div>
                             
-                            <button onClick={() => handleGeminiAction('analyze')} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors text-[#111b21] dark:text-[#e9edef] group">
+                            <button onClick={() => setGeminiPopoverSubView('analyze_period')} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors text-[#111b21] dark:text-[#e9edef] group">
                               <BrainCircuit size={16} className="text-purple-500 group-hover:scale-110 transition-transform" /> Analisar Conversa / Dar Feedback
                             </button>
                           </div>

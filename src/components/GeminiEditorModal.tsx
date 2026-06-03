@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Sparkles, Send, RefreshCcw, CheckCircle2, MessageSquare, Wand2 } from 'lucide-react';
+import { X, Sparkles, Send, RefreshCcw, CheckCircle2, MessageSquare, Wand2, History, ShieldAlert, ClipboardList } from 'lucide-react';
 import { cn } from '../pages/ChatDashboard'; // Utilizando className helper do ChatDashboard
 
 interface GeminiEditorModalProps {
@@ -13,11 +13,15 @@ interface GeminiEditorModalProps {
 
 export function GeminiEditorModal({ isOpen, onClose, originalText, suggestedText, intent, onSend }: GeminiEditorModalProps) {
   const [editedText, setEditedText] = useState(suggestedText);
+  const [activeTab, setActiveTab] = useState<'summary' | 'feedback'>('summary');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setEditedText(suggestedText);
-  }, [suggestedText]);
+    if (intent === 'analyze') {
+      setActiveTab('summary');
+    }
+  }, [suggestedText, intent]);
 
   // Adjust height automatically
   useEffect(() => {
@@ -50,6 +54,68 @@ export function GeminiEditorModal({ isOpen, onClose, originalText, suggestedText
       default: return "from-[#00a884] to-teal-500";
     }
   };
+
+  const renderMarkdown = (text: string) => {
+    if (!text) return null;
+    return text.split('\n').map((line, idx) => {
+      // Bold text formatting **bold**
+      const boldParts = line.split(/(\*\*[^*]+\*\*)/g);
+      const content = boldParts.map((part, pIdx) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={pIdx} className="font-extrabold text-[#111b21] dark:text-white">{part.slice(2, -2)}</strong>;
+        }
+        return part;
+      });
+
+      // List item formatting
+      if (line.trim().startsWith('- ')) {
+        return (
+          <li key={idx} className="ml-4 list-disc pl-1 text-sm text-slate-700 dark:text-slate-200 leading-relaxed my-1">
+            {content}
+          </li>
+        );
+      }
+      if (line.trim().startsWith('* ')) {
+        return (
+          <li key={idx} className="ml-4 list-disc pl-1 text-sm text-slate-700 dark:text-slate-200 leading-relaxed my-1">
+            {content}
+          </li>
+        );
+      }
+
+      return (
+        <p key={idx} className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed my-1.5 min-h-[1em]">
+          {content}
+        </p>
+      );
+    });
+  };
+
+  let summaryText = "";
+  let feedbackText = "";
+  if (intent === 'analyze') {
+    const formatValue = (val: any): string => {
+      if (val === null || val === undefined) return '';
+      if (Array.isArray(val)) {
+        return val.map(item => `- ${formatValue(item)}`).join('\n');
+      }
+      if (typeof val === 'object') {
+        return Object.entries(val)
+          .map(([key, value]) => `**${key}**: ${formatValue(value)}`)
+          .join('\n');
+      }
+      return String(val);
+    };
+
+    try {
+      const parsed = JSON.parse(suggestedText);
+      summaryText = parsed.summary ? formatValue(parsed.summary) : "";
+      feedbackText = parsed.feedback ? formatValue(parsed.feedback) : "";
+    } catch (e) {
+      summaryText = suggestedText;
+      feedbackText = "Não foi possível extrair a análise de feedback estruturada. Consulte o resumo da conversa.";
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
@@ -85,47 +151,104 @@ export function GeminiEditorModal({ isOpen, onClose, originalText, suggestedText
           
           <div className="flex flex-col">
             <h2 className="text-xl sm:text-2xl font-bold text-[#111b21] dark:text-[#e9edef] flex items-center gap-2">
-              Sugestão de Resposta
+              {intent === 'analyze' ? "Análise e Feedback de IA" : "Sugestão de Resposta"}
             </h2>
             <p className="text-sm text-[#54656f] dark:text-[#aebac1]">
-              A IA analisou sua intenção de <strong>{getIntentTitle()}</strong> considerando o histórico da conversa.
+              {intent === 'analyze' 
+                ? "A IA realizou uma auditoria no histórico da conversa correspondente ao período selecionado."
+                : `A IA analisou sua intenção de ${getIntentTitle()} considerando o histórico da conversa.`}
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Mensagem Original */}
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-bold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider flex items-center gap-1.5">
-                <MessageSquare size={14} /> Sua Mensagem
-              </label>
-              <div className="bg-[#f0f2f5]/50 dark:bg-[#202c33]/50 p-4 rounded-2xl text-sm text-[#54656f] dark:text-[#8696a0] w-full min-h-[120px] max-h-[300px] overflow-y-auto custom-scrollbar border border-black/5 dark:border-white/5 whitespace-pre-wrap opacity-80 cursor-not-allowed">
-                {originalText}
+          {intent === 'analyze' ? (
+            <div className="flex flex-col gap-4">
+              {/* Abas Premium */}
+              <div className="flex items-center gap-2 p-1 bg-[#f0f2f5] dark:bg-[#202c33]/70 rounded-2xl border border-black/5 dark:border-white/5 select-none w-max">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('summary')}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95",
+                    activeTab === 'summary'
+                      ? "bg-white dark:bg-[#111b21] text-[#00a884] shadow-md shadow-black/5"
+                      : "text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5"
+                  )}
+                >
+                  <ClipboardList size={14} /> Histórico Resumido
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('feedback')}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95",
+                    activeTab === 'feedback'
+                      ? "bg-white dark:bg-[#111b21] text-purple-600 dark:text-purple-400 shadow-md shadow-black/5"
+                      : "text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5"
+                  )}
+                >
+                  <ShieldAlert size={14} /> Diagnóstico & Falhas
+                </button>
               </div>
-            </div>
 
-            {/* Texto Sugerido / Editável */}
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-bold text-[#00a884] uppercase tracking-wider flex items-center gap-1.5">
-                <Sparkles size={14} /> Mensagem Otimizada
-              </label>
-              <div className="relative group border-2 border-transparent focus-within:border-[#00a884]/30 rounded-2xl bg-white dark:bg-[#202c33] shadow-inner transition-colors">
-                <textarea
-                  ref={textareaRef}
-                  value={editedText}
-                  onChange={(e) => setEditedText(e.target.value)}
-                  className="w-full bg-transparent p-4 min-h-[120px] max-h-[300px] text-sm text-[#111b21] dark:text-[#e9edef] resize-none outline-none custom-scrollbar rounded-2xl font-medium"
-                  placeholder="A IA não conseguiu gerar uma sugestão..."
-                />
+              {/* Conteúdo da Aba Ativa */}
+              <div className="bg-[#f0f2f5]/40 dark:bg-[#202c33]/40 p-5 rounded-3xl border border-black/5 dark:border-white/5 w-full min-h-[220px] max-h-[350px] overflow-y-auto custom-scrollbar select-text">
+                {activeTab === 'summary' ? (
+                  <div className="animate-in fade-in duration-300">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-[#00a884] mb-3 flex items-center gap-1.5">
+                      <History size={14} /> Resumo Cronológico
+                    </h3>
+                    <div className="pl-1">
+                      {renderMarkdown(summaryText)}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="animate-in fade-in duration-300">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-3 flex items-center gap-1.5">
+                      <ShieldAlert size={14} /> Auditoria e Falhas da Empresa
+                    </h3>
+                    <div className="pl-1">
+                      {renderMarkdown(feedbackText)}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Mensagem Original */}
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider flex items-center gap-1.5">
+                  <MessageSquare size={14} /> Sua Mensagem
+                </label>
+                <div className="bg-[#f0f2f5]/50 dark:bg-[#202c33]/50 p-4 rounded-2xl text-sm text-[#54656f] dark:text-[#8696a0] w-full min-h-[120px] max-h-[300px] overflow-y-auto custom-scrollbar border border-black/5 dark:border-white/5 whitespace-pre-wrap opacity-80 cursor-not-allowed">
+                  {originalText}
+                </div>
+              </div>
+
+              {/* Texto Sugerido / Editável */}
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold text-[#00a884] uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles size={14} /> Mensagem Otimizada
+                </label>
+                <div className="relative group border-2 border-transparent focus-within:border-[#00a884]/30 rounded-2xl bg-white dark:bg-[#202c33] shadow-inner transition-colors">
+                  <textarea
+                    ref={textareaRef}
+                    value={editedText}
+                    onChange={(e) => setEditedText(e.target.value)}
+                    className="w-full bg-transparent p-4 min-h-[120px] max-h-[300px] text-sm text-[#111b21] dark:text-[#e9edef] resize-none outline-none custom-scrollbar rounded-2xl font-medium"
+                    placeholder="A IA não conseguiu gerar uma sugestão..."
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-col sm:flex-row items-center justify-end gap-3 mt-4 pt-4 border-t border-black/5 dark:border-white/5">
             <button 
               onClick={onClose}
               className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-medium text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
             >
-              {intent === 'analyze' ? 'Fechar Feedback' : 'Cancelar'}
+              {intent === 'analyze' ? 'Fechar Relatório' : 'Cancelar'}
             </button>
             {intent !== 'analyze' && (
               <button 
@@ -156,3 +279,4 @@ export function GeminiEditorModal({ isOpen, onClose, originalText, suggestedText
     </div>
   );
 }
+

@@ -45,6 +45,12 @@ export default function InboxSettings() {
   const [instanceColor, setInstanceColor] = useState('#10b981');
   const [notificationSound, setNotificationSound] = useState('default');
 
+  // Bot states
+  const [botActive, setBotActive] = useState(false);
+  const [botTestNumbers, setBotTestNumbers] = useState('');
+  const [previousSettings, setPreviousSettings] = useState<any>(null);
+  const [toast, setToast] = useState<{ message: string; isSuccess: boolean; showUndo?: boolean } | null>(null);
+
   const INSTANCE_COLORS = [
     { value: '#10b981', label: 'Esmeralda' },
     { value: '#3b82f6', label: 'Azul' },
@@ -57,6 +63,13 @@ export default function InboxSettings() {
   // Assigned Agents
   const [assignedAgents, setAssignedAgents] = useState<string[]>([]);
   const [autoAssignment, setAutoAssignment] = useState(false);
+
+  const showToast = (message: string, isSuccess: boolean, showUndo: boolean = true) => {
+    setToast({ message, isSuccess, showUndo });
+    setTimeout(() => {
+      setToast(null);
+    }, 8000);
+  };
 
   useEffect(() => {
     if (!id || !tenantId) return;
@@ -80,6 +93,8 @@ export default function InboxSettings() {
           setAutoAssignment(data.settings?.auto_assignment || false);
           setInstanceColor(data.color || '#10b981');
           setNotificationSound(data.notification_sound || 'default');
+          setBotActive(data.settings?.bot_active !== false);
+          setBotTestNumbers(data.settings?.bot_test_numbers || '');
         }
       } catch (err) {
         console.error('Falha ao buscar instância:', err);
@@ -94,13 +109,25 @@ export default function InboxSettings() {
   const handleSaveSettings = async () => {
     if (!instance) return;
     setSaving(true);
+
+    const oldSettings = {
+      display_name: instance.display_name,
+      api_key: instance.api_key,
+      color: instance.color,
+      notification_sound: instance.notification_sound,
+      settings: { ...(instance.settings || {}) }
+    };
+    setPreviousSettings(oldSettings);
+
     try {
       const updatedSettings = {
         ...(instance.settings || {}),
         engine_url: engineUrl,
         read_messages: readReceipts,
         assigned_agents: assignedAgents,
-        auto_assignment: autoAssignment
+        auto_assignment: autoAssignment,
+        bot_active: botActive,
+        bot_test_numbers: botTestNumbers
       };
 
       const { error } = await supabase.from('whatsapp_instances')
@@ -116,10 +143,56 @@ export default function InboxSettings() {
       if (error) throw error;
       
       setInstance({ ...instance, display_name: displayName, api_key: apiKey, color: instanceColor, notification_sound: notificationSound, settings: updatedSettings });
-      alert('Configurações salvas sucesso!');
+      showToast('Configurações salvas com sucesso!', true);
     } catch (e) {
       console.error(e);
-      alert('Erro ao salvar as configurações.');
+      showToast('Erro ao salvar as configurações.', false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUndo = async () => {
+    if (!instance || !previousSettings) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('whatsapp_instances')
+        .update({ 
+           display_name: previousSettings.display_name,
+           api_key: previousSettings.api_key,
+           color: previousSettings.color,
+           notification_sound: previousSettings.notification_sound,
+           settings: previousSettings.settings
+         })
+        .eq('id', instance.id);
+
+      if (error) throw error;
+      
+      setDisplayName(previousSettings.display_name);
+      setApiKey(previousSettings.api_key || '');
+      setInstanceColor(previousSettings.color || '#10b981');
+      setNotificationSound(previousSettings.notification_sound || 'default');
+      setEngineUrl(previousSettings.settings.engine_url || '');
+      setReadReceipts(previousSettings.settings.read_messages || false);
+      setAssignedAgents(previousSettings.settings.assigned_agents || []);
+      setAutoAssignment(previousSettings.settings.auto_assignment || false);
+      setBotActive(previousSettings.settings.bot_active !== false);
+      setBotTestNumbers(previousSettings.settings.bot_test_numbers || '');
+      
+      setInstance({ 
+        ...instance, 
+        display_name: previousSettings.display_name, 
+        api_key: previousSettings.api_key, 
+        color: previousSettings.color, 
+        notification_sound: previousSettings.notification_sound, 
+        settings: previousSettings.settings 
+      });
+      
+      setPreviousSettings(null);
+      showToast('Alteração desfeita com sucesso!', true, false);
+    } catch (e) {
+      console.error(e);
+      showToast('Erro ao desfazer alteração.', false);
     } finally {
       setSaving(false);
     }
@@ -502,15 +575,96 @@ export default function InboxSettings() {
              )}
 
              {/* TABELAS EM CONSTRUÇÃO */}
-             {['hours', 'csat', 'bot'].includes(activeTab) && (
+             {['hours', 'csat'].includes(activeTab) && (
                 <div className="p-16 flex flex-col items-center justify-center text-center bg-[#182229]/50 rounded-[2rem] border border-white/5 mt-8">
                    <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-4">
                       {activeTab === 'hours' && <Clock className="text-gray-400" size={32} />}
                       {activeTab === 'csat' && <Star className="text-amber-500" size={32} />}
-                      {activeTab === 'bot' && <Bot className="text-blue-500" size={32} />}
                    </div>
                    <h3 className="text-xl font-bold text-white mb-2">Em Desenvolvimento</h3>
                    <p className="text-gray-400 max-w-sm">Esta funcionalidade ficará disponível nas próximas atualizações do painel administrativo.</p>
+                </div>
+             )}
+
+             {/* CONFIGURAÇÃO DO BOT TAB */}
+             {activeTab === 'bot' && (
+                <div className="flex flex-col gap-8 max-w-4xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+                   
+                   {/* Card de introdução com Glassmorphism */}
+                   <div className="relative overflow-hidden bg-white/[0.03] backdrop-blur-xl border border-white/10 p-6 rounded-[2rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] flex flex-col sm:flex-row items-center gap-6">
+                      <div className="w-16 h-16 bg-blue-500/10 rounded-2xl flex items-center justify-center shrink-0 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.2)]">
+                         <Bot className="text-blue-500" size={32} />
+                      </div>
+                      <div className="flex flex-col gap-1 text-center sm:text-left">
+                         <h3 className="text-xl font-bold text-white tracking-wide">Robô de Autoatendimento (Luna AI)</h3>
+                         <p className="text-gray-400 text-sm leading-relaxed">
+                            Gerencie o comportamento do assistente virtual de inteligência artificial para esta caixa de entrada.
+                         </p>
+                      </div>
+                   </div>
+
+                   {/* Toggle Ativar Robô */}
+                   <div className="bg-[#182229] border border-white/5 p-6 rounded-[2rem] flex justify-between items-center transition-all hover:bg-white/[0.04]">
+                      <div className="flex flex-col max-w-2xl gap-1">
+                         <span className="font-bold text-white text-base">Ativar Robô de Autoatendimento</span>
+                         <p className="text-xs text-gray-400 leading-relaxed font-medium">
+                            Quando ativado, a inteligência artificial responderá automaticamente aos clientes que entrarem em contato por este canal.
+                         </p>
+                      </div>
+                      <button onClick={() => setBotActive(!botActive)} className="relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none">
+                         <span className={`${botActive ? 'bg-blue-600' : 'bg-gray-600'} absolute inset-0 w-full h-full rounded-full transition-colors`} />
+                         <span className={`${botActive ? 'translate-x-6' : 'translate-x-1'} inline-block h-5 w-5 transform rounded-full bg-white transition-transform z-10 shadow-sm`} />
+                      </button>
+                   </div>
+
+                   {/* Card de Configuração de Ambiente de Teste */}
+                   <div className="bg-[#182229] border border-white/5 p-6 rounded-[2rem] flex flex-col gap-5 transition-all hover:bg-white/[0.04]">
+                      <div className="flex items-center gap-3">
+                         <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center border border-amber-500/20 shadow-[0_0_10px_rgba(245,158,11,0.15)]">
+                            <Server className="text-amber-500" size={20} />
+                         </div>
+                         <div className="flex flex-col gap-0.5">
+                            <span className="font-bold text-white text-base">Ambiente de Teste Real</span>
+                            <span className="text-xs text-amber-500 font-semibold">Controle de Whitelist e Homologação</span>
+                         </div>
+                      </div>
+                      
+                      <div className="flex flex-col gap-2">
+                         <p className="text-xs text-gray-400 leading-relaxed font-medium">
+                            Insira os números de telefone autorizados para testes (separados por vírgula). Se houver números configurados aqui, <strong>o robô responderá apenas a esses números</strong> e ignorará/silenciará todas as outras mensagens de clientes.
+                         </p>
+                         <p className="text-xs text-gray-500 font-medium">
+                            Deixe este campo em branco para que o robô responda a todos os clientes normalmente em ambiente de produção.
+                         </p>
+                      </div>
+
+                      <div className="flex flex-col gap-2 mt-2">
+                         <label className="text-xs font-bold text-gray-300">Números de Teste Autorizados</label>
+                         <textarea
+                            value={botTestNumbers}
+                            onChange={e => setBotTestNumbers(e.target.value)}
+                            placeholder="Ex: 5511975960999, 5511975960997"
+                            className="w-full h-24 bg-[#111b21] border border-white/10 rounded-2xl p-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-medium resize-none text-sm placeholder-gray-600"
+                         />
+                      </div>
+                      
+                      {botTestNumbers.trim().length > 0 && (
+                         <div className="bg-amber-500/5 border border-amber-500/20 p-4 rounded-2xl flex items-start gap-3">
+                            <div className="text-amber-500 mt-0.5">⚠️</div>
+                            <p className="text-xs text-amber-500/90 leading-relaxed font-medium">
+                               <strong>Ambiente de Teste Ativo!</strong> O robô de autoatendimento está rodando em modo sandbox nesta caixa. Ele responderá <strong>apenas</strong> aos contatos que baterem com os números cadastrados acima.
+                            </p>
+                         </div>
+                      )}
+                   </div>
+                   
+                   {/* Botão de Salvar Rápido na própria aba */}
+                   <div className="flex justify-end mt-2">
+                      <button onClick={handleSaveSettings} disabled={saving} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-xl transition-all shadow-[0_5px_15px_-5px_rgba(37,99,235,0.5)] flex items-center gap-2">
+                        {saving ? <Loader2 size={18} className="animate-spin" /> : <><Save size={18} /> Salvar Configurações</>}
+                      </button>
+                   </div>
+
                 </div>
              )}
              
@@ -518,11 +672,32 @@ export default function InboxSettings() {
        </div>
 
        {/* Botão de Salvar Global se não for aba de agentes/config que tem botao proprio */}
-       {activeTab === 'settings' && (
+       {['settings', 'bot'].includes(activeTab) && (
           <div className="fixed bottom-0 left-[260px] right-0 bg-[#111b21]/80 backdrop-blur-xl border-t border-white/5 p-4 flex justify-end px-12 z-40">
               <button onClick={handleSaveSettings} disabled={saving} className="bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-2.5 px-8 rounded-xl transition-all shadow-[0_5px_15px_-5px_rgba(16,185,129,0.5)] flex items-center gap-2">
                  {saving ? <Loader2 size={18} className="animate-spin" /> : <><Save size={18} /> Salvar Configurações</>}
               </button>
+          </div>
+       )}
+
+       {/* Toast Premium com Recurso de Undo */}
+       {toast && (
+          <div className="fixed top-6 right-6 z-50 animate-in slide-in-from-top-4 duration-300">
+             <div className="bg-[#182229]/90 backdrop-blur-xl border border-white/10 px-5 py-4 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex items-center gap-4 text-white">
+                <div className={`w-2.5 h-2.5 rounded-full ${toast.isSuccess ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                <span className="font-semibold text-sm">{toast.message}</span>
+                {toast.showUndo && previousSettings && (
+                   <button 
+                     onClick={handleUndo} 
+                     className="ml-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-xs font-bold py-1.5 px-3 rounded-lg border border-blue-500/20 hover:border-blue-500/50 transition-all uppercase tracking-wider"
+                   >
+                      Desfazer
+                   </button>
+                )}
+                <button onClick={() => setToast(null)} className="ml-2 text-gray-400 hover:text-white transition-colors">
+                   <X size={16} />
+                </button>
+             </div>
           </div>
        )}
     </div>

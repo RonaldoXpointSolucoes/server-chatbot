@@ -742,68 +742,97 @@ class EventProcessor {
                          // Responde apenas se a conversa estiver sob os cuidados do bot ('bot' ou 'teste_robo')
                         // E não seja um self-chat (evita auto-loop em envios pro próprio numero)
                         if (!b.isSelfChat && !b.aiPaused && (b.convStatus === 'bot' || b.convStatus === 'teste_robo')) {
-                             
-                             supabase.from('companies').select('global_ai_enabled').eq('id', b.tenantId).single()
-                                 .then(({ data: companyData }) => {
-                                     // Se o IA estiver desativado globalmente e NÃO for um teste, aborta o processamento.
-                                     if (companyData && companyData.global_ai_enabled === false && b.convStatus !== 'teste_robo') {
-                                         console.log(`[BatchProcessor] IA e Automações Globais estão DESATIVADAS para o tenant ${b.tenantId}`);
-                                         return;
-                                     }
+                             this.getInstanceConfig(b.instanceId).then((instanceConfig) => {
+                                 // 1. Verifica se o robô está ativo para esta caixa de entrada (padrão true se undefined)
+                                 const botActive = instanceConfig.bot_active !== false;
+                                 if (!botActive) {
+                                     console.log(`[EventProcessor] Robô desativado nas configurações da caixa de entrada (${b.instanceId}). Silenciando robô.`);
+                                     return;
+                                 }
 
-                                     // Busca TODOS os bots do tenant para evitar fallback indevido ao FlowEngine
-                                     supabase.from('bots').select('*').eq('tenant_id', b.tenantId)
-                                         .then(({ data: allBotsData }) => {
-                                     const botsData = allBotsData || [];
-                                     // Encontra bot ativo e com autoReply ligado para esta instância
-                                     let botData = botsData.find(bot => bot.status === 'active' && bot.autoReply === true && bot.channels && bot.channels.includes(b.instanceId));
+                                 // 2. Verifica Whitelist de números de teste (Ambiente de Teste Real)
+                                 if (instanceConfig.bot_test_numbers && String(instanceConfig.bot_test_numbers).trim().length > 0) {
+                                     const testNumbers = String(instanceConfig.bot_test_numbers)
+                                         .split(',')
+                                         .map(n => n.replace(/\D/g, ''))
+                                         .filter(n => n.length > 0);
                                      
-                                     // Se for teste_robo, ignora as validações de ativação para testes e tenta capturar a configuração base
-                                     if (!botData && b.convStatus === 'teste_robo') {
-                                         botData = botsData.find(bot => bot.channels && bot.channels.includes(b.instanceId)) || botsData[0];
+                                     if (testNumbers.length > 0) {
+                                         const clientPhoneClean = String(b.phone || '').replace(/\D/g, '');
+                                         const isAllowed = testNumbers.some(tn => {
+                                             return clientPhoneClean.endsWith(tn) || tn.endsWith(clientPhoneClean);
+                                         });
+                                         
+                                         if (!isAllowed) {
+                                             console.log(`[EventProcessor] Sandbox da Instância Ativo: Mensagem do celular (${clientPhoneClean}) não está na whitelist de testes da instância. Silenciando robô.`);
+                                             return;
+                                         }
+                                         console.log(`[EventProcessor] Sandbox da Instância Ativo: Mensagem do celular homologado (${clientPhoneClean}) autorizada.`);
                                      }
-                                     
-                                     if (botData) {
-                                         // --- MODO SANDBOX / FILTRO DE TELEFONE DE TESTE ---
-                                         // Se o bot estiver em modo de teste (test_mode), ele responde estritamente
-                                         // apenas ao número de telefone definido em test_phone.
-                                         if (botData.test_mode === true) {
-                                             const testPhoneClean = String(botData.test_phone || '').replace(/\D/g, '');
-                                             const clientPhoneClean = String(b.phone || '').replace(/\D/g, '');
-                                             
-                                             if (clientPhoneClean !== testPhoneClean) {
-                                                 console.log(`[EventProcessor] Sandbox Ativo: O bot ${botData.name} está em Modo de Teste e o celular recebido (${clientPhoneClean}) é diferente do celular sandbox (${testPhoneClean}). Silenciando robô.`);
-                                                 return;
-                                             }
-                                             console.log(`[EventProcessor] Sandbox Ativo: Mensagem do celular homologado (${clientPhoneClean}) autorizada para o bot ${botData.name}.`);
+                                 }
+
+                                 supabase.from('companies').select('global_ai_enabled').eq('id', b.tenantId).single()
+                                     .then(({ data: companyData }) => {
+                                         // Se o IA estiver desativado globalmente e NÃO for um teste, aborta o processamento.
+                                         if (companyData && companyData.global_ai_enabled === false && b.convStatus !== 'teste_robo') {
+                                             console.log(`[BatchProcessor] IA e Automações Globais estão DESATIVADAS para o tenant ${b.tenantId}`);
+                                             return;
                                          }
 
-                                         // Roteia para a Luna (AI Agent)
-                                         AutomationWorker.processMessage({
-                                             tenantId: b.tenantId,
-                                             instanceId: b.instanceId,
-                                             conversationId: b.conversationId,
-                                             contactId: contactIdMap.get(`${b.tenantId}_${b.phone}`),
-                                             jid: b.jid,
-                                             textMessage: b.textMessage,
-                                             botId: botData.id,
-                                             botSettings: botData,
-                                             sock: b.sock
-                                         });
-                                     } else if (botsData.length === 0) {
-                                         // Fallback para o Runtime do Flow Builder APENAS se o tenant não tiver nenhuma configuração de bot (evita double-talk)
-                                         FlowEngine.processIncomingMessage({
-                                             tenantId: b.tenantId,
-                                             instanceId: b.instanceId,
-                                             conversationId: b.conversationId,
-                                             jid: b.jid,
-                                             textMessage: b.textMessage,
-                                             rawPayload: b.rawMsg,
-                                             sock: b.sock
-                                         }).catch(e => console.error("[BatchProcessor] Erro no FlowEngine:", e));
-                                     }
-                                 }).catch(e => console.error("[BatchProcessor] Erro ao checar bots:", e));
-                             }).catch(e => console.error("[BatchProcessor] Erro ao checar companies global flag:", e));
+                                         // Busca TODOS os bots do tenant para evitar fallback indevido ao FlowEngine
+                                         supabase.from('bots').select('*').eq('tenant_id', b.tenantId)
+                                             .then(({ data: allBotsData }) => {
+                                         const botsData = allBotsData || [];
+                                         // Encontra bot ativo e com autoReply ligado para esta instância
+                                         let botData = botsData.find(bot => bot.status === 'active' && bot.autoReply === true && bot.channels && bot.channels.includes(b.instanceId));
+                                         
+                                         // Se for teste_robo, ignora as validações de ativação para testes e tenta capturar a configuração base
+                                         if (!botData && b.convStatus === 'teste_robo') {
+                                             botData = botsData.find(bot => bot.channels && bot.channels.includes(b.instanceId)) || botsData[0];
+                                         }
+                                         
+                                         if (botData) {
+                                             // --- MODO SANDBOX / FILTRO DE TELEFONE DE TESTE ---
+                                             // Se o bot estiver em modo de teste (test_mode), ele responde estritamente
+                                             // apenas ao número de telefone definido em test_phone.
+                                             if (botData.test_mode === true) {
+                                                 const testPhoneClean = String(botData.test_phone || '').replace(/\D/g, '');
+                                                 const clientPhoneClean = String(b.phone || '').replace(/\D/g, '');
+                                                 
+                                                 if (clientPhoneClean !== testPhoneClean) {
+                                                     console.log(`[EventProcessor] Sandbox Ativo: O bot ${botData.name} está em Modo de Teste e o celular recebido (${clientPhoneClean}) é diferente do celular sandbox (${testPhoneClean}). Silenciando robô.`);
+                                                     return;
+                                                 }
+                                                 console.log(`[EventProcessor] Sandbox Ativo: Mensagem do celular homologado (${clientPhoneClean}) autorizada para o bot ${botData.name}.`);
+                                             }
+
+                                             // Roteia para a Luna (AI Agent)
+                                             AutomationWorker.processMessage({
+                                                 tenantId: b.tenantId,
+                                                 instanceId: b.instanceId,
+                                                 conversationId: b.conversationId,
+                                                 contactId: contactIdMap.get(`${b.tenantId}_${b.phone}`),
+                                                 jid: b.jid,
+                                                 textMessage: b.textMessage,
+                                                 botId: botData.id,
+                                                 botSettings: botData,
+                                                 sock: b.sock
+                                             });
+                                         } else if (botsData.length === 0) {
+                                             // Fallback para o Runtime do Flow Builder APENAS se o tenant não tiver nenhuma configuração de bot (evita double-talk)
+                                             FlowEngine.processIncomingMessage({
+                                                 tenantId: b.tenantId,
+                                                 instanceId: b.instanceId,
+                                                 conversationId: b.conversationId,
+                                                 jid: b.jid,
+                                                 textMessage: b.textMessage,
+                                                 rawPayload: b.rawMsg,
+                                                 sock: b.sock
+                                             }).catch(e => console.error("[BatchProcessor] Erro no FlowEngine:", e));
+                                         }
+                                     }).catch(e => console.error("[BatchProcessor] Erro ao checar bots:", e));
+                                 }).catch(e => console.error("[BatchProcessor] Erro ao checar companies global flag:", e));
+                             }).catch(e => console.error("[BatchProcessor] Erro ao buscar config da instância:", e));
                          }
                      }
                  }

@@ -3,6 +3,19 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 // Ensure there is a way to handle missing keys gracefully in UI
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
 
+const formatValueToString = (val: any): string => {
+  if (val === null || val === undefined) return '';
+  if (Array.isArray(val)) {
+    return val.map(item => `- ${formatValueToString(item)}`).join('\n');
+  }
+  if (typeof val === 'object') {
+    return Object.entries(val)
+      .map(([key, value]) => `**${key}**: ${formatValueToString(value)}`)
+      .join('\n');
+  }
+  return String(val);
+};
+
 class GeminiService {
   private genAI: GoogleGenerativeAI;
   
@@ -363,6 +376,79 @@ Retorne APENAS o JSON cru, sem marcações markdown ou blocos de código.`;
     } catch (err) {
       console.error("Erro no reconhecimento facial com Gemini:", err);
       throw new Error("Falha no reconhecimento facial.");
+    }
+  }
+
+  async analyzeConversationWithFeedback(history: {role: string, text: string, time: string}[]): Promise<{ summary: string, feedback: string }> {
+    if (!this.isConfigured()) {
+      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+    }
+    const model = this.genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            summary: {
+              type: "string",
+              description: "Resumo cronológico e amigável da conversa em português (com uso de tópicos e emojis)."
+            },
+            feedback: {
+              type: "string",
+              description: "Auditoria interna detalhada identificando falhas na empresa, nível de frustração do cliente e gravidade do problema."
+            }
+          },
+          required: ["summary", "feedback"]
+        }
+      }
+    });
+
+    const historyText = history.map(m => `[${m.time}] ${m.role}: ${m.text}`).join('\n');
+
+    const prompt = `Você é um supervisor de qualidade e especialista em Customer Experience (CX) de altíssimo nível.
+Analise o histórico da conversa abaixo entre o Cliente, o Atendente (ou IA) e o Sistema de forma detalhada e gere dois relatórios estruturados.
+
+Histórico de mensagens a analisar:
+${historyText}
+
+O retorno DEVE ser obrigatoriamente no formato JSON cru, contendo exatamente duas chaves:
+1. "summary": Um resumo cronológico e amigável da conversa em português (com uso sutil de emojis e tópicos para fácil visualização pelo atendente). Esse resumo deve resumir o que aconteceu de forma fluida.
+2. "feedback": Uma análise diagnóstica interna e honesta da conversa. Indique se o caso é um problema grave ou não, se o cliente demonstrou frustração, e PRINCIPALMENTE avalie criticamente se houve alguma falha da nossa parte como empresa (ex: demora no atendimento, respostas erradas da IA, falta de empatia do atendente, problemas técnicos, etc.). Use tópicos e emojis.
+
+Regras importantes de retorno:
+- Retorne EXATAMENTE e APENAS o JSON contendo as chaves "summary" e "feedback".
+- NUNCA coloque blocos de marcação markdown (\`\`\`json ou \`\`\$) na resposta, nem saudações/explicações antes ou depois. Retorne apenas o objeto JSON cru e limpo para que possamos fazer JSON.parse imediatamente.
+- Não deixe nenhuma chave do JSON vazia.`;
+
+    try {
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text().trim();
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (parsed.summary && parsed.feedback) {
+        return {
+          summary: formatValueToString(parsed.summary),
+          feedback: formatValueToString(parsed.feedback)
+        };
+      }
+      throw new Error("JSON incompleto");
+    } catch (e) {
+      console.error("Erro ao analisar conversa com Gemini, retornando fallback:", e);
+      try {
+        const textResult = await model.generateContent(`Gere um resumo da conversa a seguir e uma análise de falhas em português.\nConversa:\n${historyText}`);
+        const rawText = textResult.response.text();
+        return {
+          summary: "Resumo da Conversa:\n\n" + rawText,
+          feedback: "Análise e Diagnóstico:\n\nNão foi possível estruturar o JSON de feedback automaticamente. Veja a análise geral acima."
+        };
+      } catch (err: any) {
+        return {
+          summary: "Erro ao carregar análise de conversa.",
+          feedback: err.message || "Erro desconhecido."
+        };
+      }
     }
   }
 }
