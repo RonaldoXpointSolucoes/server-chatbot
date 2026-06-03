@@ -271,6 +271,11 @@ export default function BotsList() {
                                <span className="w-1.5 h-1.5 rounded-full bg-slate-500" /> Inativo
                              </span>
                            )}
+                           {bot.test_mode && (
+                             <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold uppercase tracking-widest shadow-[0_0_10px_rgba(245,158,11,0.1)] animate-pulse" title={`Homologando exclusivamente no número: ${bot.test_phone}`}>
+                               <Sparkles className="w-3 h-3 text-amber-400" /> Sandbox
+                             </span>
+                           )}
                            <span className="flex items-center gap-1.5 bg-white/5 px-2 py-0.5 rounded-md border border-white/5">
                               <Network className="w-3.5 h-3.5 text-blue-400" />
                               {bot.model}

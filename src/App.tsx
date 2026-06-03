@@ -37,6 +37,10 @@ import CardapioApp from './pages/CardapioApp';
 import FinanceiroApp from './pages/FinanceiroApp';
 import AccountSettings from './pages/settings/AccountSettings';
 import { ScheduleManager } from './pages/ScheduleManager';
+import ChecklistDashboard from './pages/checklist/ChecklistDashboard';
+import ChecklistBuilder from './pages/checklist/ChecklistBuilder';
+import ChecklistTablet from './pages/checklist/ChecklistTablet';
+import ChecklistSettings from './pages/checklist/ChecklistSettings';
 
 // Inicializa o tema globalmente no boot
 const savedTheme = localStorage.getItem('theme') || 'light';
@@ -91,6 +95,11 @@ export default function App() {
             <Route path="/settings/logs" element={<OperationLogs />} />
             <Route path="/settings/account" element={<AccountSettings />} />
 
+            {/* Rotas Nativas do Módulo de Checklists Operacionais (Tema Administrativo) */}
+            <Route path="/checklist/dashboard" element={<ErrorBoundary><ChecklistDashboard /></ErrorBoundary>} />
+            <Route path="/checklist/builder" element={<ErrorBoundary><ChecklistBuilder /></ErrorBoundary>} />
+            <Route path="/checklist/settings" element={<ErrorBoundary><ChecklistSettings /></ErrorBoundary>} />
+
             {/* Apps Embedados */}
             <Route path="/apps/portal" element={<PortalApp />} />
             <Route path="/apps/delivery" element={<DeliveryApp />} />
@@ -99,6 +108,9 @@ export default function App() {
             <Route path="/apps/financeiro" element={<FinanceiroApp />} />
             <Route path="/apps/agenda" element={<ScheduleManager />} />
           </Route>
+
+          {/* Rota Blindada de Operador (Sem Sidebar para tablets de cozinha compartilhados) */}
+          <Route path="/checklist/tablet" element={<ErrorBoundary><ChecklistTablet /></ErrorBoundary>} />
 
           {/* Settings do Modulo Flow (Typebot UI) */}
           <Route path="/flows/settings" element={<SettingsLayout />}>

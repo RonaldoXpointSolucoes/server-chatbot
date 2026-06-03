@@ -260,7 +260,7 @@ export default function ChatDashboard() {
           const parts = line.split('/');
           const word = parts[0].trim();
           if (word) {
-            wordSet.add(word.toLowerCase());
+            wordSet.add(word.toLowerCase().normalize('NFC'));
           }
         }
         
@@ -319,8 +319,21 @@ export default function ChatDashboard() {
 
   const isWordCorrect = (word: string) => {
     if (!spellcheckerLoaded) return true;
-    const cleanWord = word.replace(/^[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+|[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+$/g, '').trim().toLowerCase();
-    if (!cleanWord || /^\d+$/.test(cleanWord)) return true;
+    
+    // Ignorar siglas/acrônimos (ex: CTP, CRM, RH) - palavras todas em maiúsculas
+    const isAcronym = word === word.toUpperCase() && word !== word.toLowerCase();
+    if (isAcronym) return true;
+
+    // Normalizar unicode (NFC) para evitar discrepâncias de acentuação do teclado
+    const cleanWord = word.replace(/^[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+|[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘”’]+$/g, '').trim().toLowerCase().normalize('NFC');
+    if (!cleanWord) return true;
+    
+    // Ignorar qualquer palavra que contenha números (ex: 9h, 15h, 2.700,00)
+    if (/\d/.test(cleanWord)) return true;
+    
+    // Ignorar caracteres avulsos ou de tamanho 1
+    if (cleanWord.length <= 1) return true;
+    
     if (personalDict.includes(cleanWord)) return true;
     return validWords.has(cleanWord);
   };
@@ -590,6 +603,11 @@ export default function ChatDashboard() {
       }
     }
   }, [activeChatId, contacts]);
+
+  // Limpa o termo de pesquisa (input e filtro) sempre que a caixa comercial/instância (activeChannelFilter) ou o tipo de filtro (filterType) for alterado
+  useEffect(() => {
+    setSearchTerm('');
+  }, [activeChannelFilter, filterType]);
 
   // Execucao Incial Reativa
   // Efect removido (duplicado com o useEffect consolidado mais abaixo)
@@ -3475,6 +3493,27 @@ export default function ChatDashboard() {
                               </button>
                               
                               <button 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setContactToBlock({ id: contact.id, name: contact.name, isBlocked: contact.is_blocked || false }); 
+                                  setActiveDropdown(null); 
+                                }}
+                                className="w-full text-left px-4 py-2 text-sm text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-colors flex items-center gap-2 border-t border-gray-100 dark:border-[#304046]"
+                              >
+                                {contact.is_blocked ? (
+                                  <>
+                                    <ShieldCheck size={14} className="text-emerald-500" />
+                                    Desbloquear Contato
+                                  </>
+                                ) : (
+                                  <>
+                                    <Ban size={14} className="text-red-500" />
+                                    Bloquear Contato
+                                  </>
+                                )}
+                              </button>
+                              
+                              <button 
                                 onClick={(e) => { e.stopPropagation(); setContactToDelete({id: contact.id, name: contact.name}); setActiveDropdown(null); }}
                                 className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors flex items-center gap-2 border-t border-gray-100 dark:border-[#304046]"
                               >
@@ -3615,6 +3654,31 @@ export default function ChatDashboard() {
             <div className="flex items-center gap-2 sm:gap-4">
               
               <div className="hidden lg:flex items-center gap-2">
+                {/* Botão Premium de Controle da I.A (Desktop) */}
+                <button 
+                  onClick={() => {
+                    useChatStore.getState().updateConversationField(activeChat.id, { ai_paused: !activeChat.ai_paused });
+                  }}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-semibold border shadow-sm hover:scale-105 active:scale-95",
+                    !activeChat.ai_paused 
+                      ? "bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.1)]"
+                      : "bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                  )}
+                  title={!activeChat.ai_paused ? "Pausar Inteligência Artificial" : "Retomar Inteligência Artificial"}
+                >
+                  <div className="relative flex items-center justify-center">
+                    <BrainCircuit size={16} className={cn(!activeChat.ai_paused && "animate-pulse")} />
+                    {!activeChat.ai_paused && (
+                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                      </span>
+                    )}
+                  </div>
+                  <span>{!activeChat.ai_paused ? "I.A Ativa" : "I.A Pausada"}</span>
+                </button>
+
                 {activeChat.conv_status === 'resolved' ? (
                   <button 
                     onClick={() => {
@@ -3708,6 +3772,23 @@ export default function ChatDashboard() {
                         </button>
                       )}
                       
+                      {/* Botão de Controle da I.A (Mobile) */}
+                      <button 
+                        onClick={() => {
+                          useChatStore.getState().updateConversationField(activeChat.id, { ai_paused: !activeChat.ai_paused });
+                          setMobileHeaderMenuOpen(false);
+                        }}
+                        className={cn(
+                          "flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl transition-all text-sm font-semibold border w-full shadow-sm hover:scale-[1.02]",
+                          !activeChat.ai_paused 
+                            ? "bg-indigo-500/10 border-indigo-500/20 text-indigo-600 dark:text-indigo-400"
+                            : "bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400"
+                        )}
+                      >
+                        <BrainCircuit size={16} className={cn(!activeChat.ai_paused && "animate-pulse")} />
+                        <span>{!activeChat.ai_paused ? "Pausar Inteligência" : "Ativar Inteligência"}</span>
+                      </button>
+
                       <div className="flex flex-col gap-2 bg-gray-50 dark:bg-[#111b21] p-2 rounded-lg border border-black/5 dark:border-white/5">
                         <span className="text-[11px] text-gray-500 text-center font-bold uppercase tracking-wider">Status & Atribuição</span>
                         <div className="flex justify-center w-full">
@@ -4626,10 +4707,12 @@ export default function ChatDashboard() {
                       {/* Div de Highlight por trás (grifa as palavras em vermelho) */}
                       {!(chatMode === 'internal_note' && notePreviewMode) && (
                         <div 
-                          className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none select-none whitespace-pre-wrap break-words text-transparent text-sm resize-none pb-0.5 overflow-hidden leading-relaxed px-0 py-0"
+                          className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none select-none whitespace-pre-wrap break-words text-transparent text-sm font-sans leading-relaxed resize-none p-0 pb-0.5 overflow-hidden"
                           style={{ 
-                            font: 'inherit',
-                            lineHeight: 'inherit',
+                            fontFamily: 'inherit',
+                            fontSize: 'inherit',
+                            fontWeight: 'inherit',
+                            lineHeight: '1.625', // Equivalente a leading-relaxed
                             maxHeight: '250px',
                             transform: `translateY(-${scrollTop}px)`
                           }}
@@ -4697,7 +4780,7 @@ export default function ChatDashboard() {
                               ? "Escreva uma anotação interna sobre este contato (não será enviada ao cliente)..."
                               : "Responda como humano e a IA sera pausada automaticamente..."
                           }
-                          className="bg-transparent border-none outline-none w-full text-sm text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin relative z-10"
+                          className="bg-transparent border-none outline-none w-full text-sm font-sans leading-relaxed text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none p-0 pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin relative z-10"
                         />
                       )}
                     </div>

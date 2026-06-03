@@ -314,12 +314,11 @@ export default function DevLogger() {
     const interval = setInterval(checkEngineStatus, 10000);
     return () => clearInterval(interval);
   }, []);
-
   // Hook globally to capture fetch API errors and console.error
   useEffect(() => {
-
     const originalConsoleError = console.error;
     const originalConsoleWarn = console.warn;
+    let lastSupabaseErrorTime = 0;
 
     console.error = (...args: any[]) => {
       // Evitar spam do vite-plugin-react
@@ -397,6 +396,17 @@ export default function DevLogger() {
           const isExpectedOfflineError = url.includes('/invoke') && response.status === 400;
           
           if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/realtime/') && !isExpectedOfflineError && !isAstsTest) {
+             
+             // Desduplicação de erros do Supabase
+             if (url.includes('supabase.co')) {
+               const now = Date.now();
+               if (now - lastSupabaseErrorTime < 5000) {
+                 // Ignorar spam de erros repetidos do Supabase
+                 return response;
+               }
+               lastSupabaseErrorTime = now;
+             }
+
              let detailsStr = '';
              try {
                detailsStr = await response.clone().text();
@@ -427,17 +437,30 @@ export default function DevLogger() {
         
         if (!isSpammyUrl && !isAstsTest) {
           const isAbort = err.name === 'AbortError';
-          addLog({
-            type: isAbort ? 'info' : 'error',
-            message: isAbort ? `Requisição abortada de forma esperada: ${err.message}` : (err.message || 'Network Fetch Failed'),
-            source: isAbort ? `Fetch Aborted (${method})` : `Fetch Critical (${method})`,
-            details: {
-              name: err.name,
-              message: err.message,
-              url: urlStr,
-              payload: requestOptions?.body
+          
+          // Desduplicação de erros críticos do Supabase na rede
+          let skipLog = false;
+          if (urlStr.includes('supabase.co')) {
+            const now = Date.now();
+            if (now - lastSupabaseErrorTime < 5000) {
+              skipLog = true;
             }
-          });
+            lastSupabaseErrorTime = now;
+          }
+
+          if (!skipLog) {
+            addLog({
+              type: isAbort ? 'info' : 'error',
+              message: isAbort ? `Requisição abortada de forma esperada: ${err.message}` : (err.message || 'Network Fetch Failed'),
+              source: isAbort ? `Fetch Aborted (${method})` : `Fetch Critical (${method})`,
+              details: {
+                name: err.name,
+                message: err.message,
+                url: urlStr,
+                payload: requestOptions?.body
+              }
+            });
+          }
         }
         throw err;
       }

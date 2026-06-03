@@ -36,6 +36,13 @@ export default function ClientLogin() {
   const [showFaceSuccess, setShowFaceSuccess] = useState(false);
   const [faceVerifyError, setFaceVerifyError] = useState('');
 
+  // Novos estados para fluxo de vínculo inteligente (Zero Cliques)
+  const [faceLinkingStep, setFaceLinkingStep] = useState(false);
+  const [capturedPhotoForLink, setCapturedPhotoForLink] = useState<string | null>(null);
+  const [faceLinkEmail, setFaceLinkEmail] = useState('');
+  const [faceLinkPassword, setFaceLinkPassword] = useState('');
+  const [showFaceLinkPassword, setShowFaceLinkPassword] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -105,6 +112,7 @@ export default function ClientLogin() {
     if (!videoRef.current || !canvasRef.current) return;
     setFaceScanning(true);
     setFaceVerifyError('');
+    setCapturedPhotoForLink(null);
 
     try {
       const video = videoRef.current;
@@ -121,38 +129,54 @@ export default function ClientLogin() {
 
       const capPhotoBase64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
 
-      addDevLog('FACE_AUTH_FETCH', `Buscando biometria de Face ID para o e-mail: ${faceEmail.trim().toLowerCase()}`, 'info');
-      const { data: faceRecord, error: fetchError } = await supabase
+      addDevLog('FACE_AUTH_FETCH_ALL', 'Buscando todas as biometrias cadastradas no banco de dados para identificação direta...', 'info');
+      const { data: faceRecords, error: fetchError } = await supabase
         .from('face_auth')
-        .select('*')
-        .eq('email', faceEmail.trim().toLowerCase())
-        .maybeSingle();
+        .select('*');
 
-      if (fetchError || !faceRecord) {
-        addDevLog('FACE_AUTH_NOT_FOUND', `Nenhuma biometria cadastrada para: ${faceEmail.trim()}`, 'error');
-        setFaceVerifyError("Nenhuma biometria facial encontrada para este e-mail.");
+      if (fetchError || !faceRecords || faceRecords.length === 0) {
+        addDevLog('FACE_AUTH_NOT_FOUND', 'Nenhuma biometria cadastrada no sistema.', 'error');
+        setFaceVerifyError("Nenhuma biometria facial cadastrada no sistema.");
+        setCapturedPhotoForLink(capPhotoBase64); // Salva para vínculo
         setFaceScanning(false);
         return;
       }
 
-      addDevLog('GEMINI_FACE_COMPARE', "Enviando biometria para a IA validar similaridade de face...", 'info');
-      const compareResult = await geminiService.compareFaces(capPhotoBase64, faceRecord.face_photo_base64);
+      addDevLog('GEMINI_FACE_COMPARE_PARALLEL', `Comparando contra ${faceRecords.length} assinatura(s) biométrica(s) em paralelo...`, 'info');
+      
+      const comparePromises = faceRecords.map(async (record) => {
+        try {
+          const res = await geminiService.compareFaces(capPhotoBase64, record.face_photo_base64);
+          return { record, verified: res.verified, confidence: res.confidence };
+        } catch (e) {
+          console.error(`Erro ao comparar rosto com ${record.email}:`, e);
+          return { record, verified: false, confidence: 0 };
+        }
+      });
 
-      addDevLog('GEMINI_FACE_RESULT', compareResult, 'info');
+      const compareResults = await Promise.all(comparePromises);
+      
+      // Encontra a melhor correspondência verificada com confiança >= 80
+      const successfulMatch = compareResults
+        .filter(res => res.verified && res.confidence >= 80)
+        .sort((a, b) => b.confidence - a.confidence)[0];
 
-      if (compareResult.verified && compareResult.confidence >= 80) {
-        addDevLog('FACE_AUTH_SUCCESS', `Face ID Verificado com ${compareResult.confidence}% de certeza!`, 'success');
+      if (successfulMatch) {
+        const faceRecord = successfulMatch.record;
+        const matchedEmail = faceRecord.email;
+
+        addDevLog('FACE_AUTH_SUCCESS', `Face ID Verificado para ${matchedEmail} com ${successfulMatch.confidence}% de certeza!`, 'success');
         stopCamera();
         setFaceIdActive(false);
 
-        const decryptedPwd = decryptPassword(faceRecord.encrypted_password, faceEmail.trim().toLowerCase());
+        const decryptedPwd = decryptPassword(faceRecord.encrypted_password, matchedEmail.trim().toLowerCase());
         
         if (!decryptedPwd) {
            setErrorMsg("Erro de segurança ao decifrar a biometria cadastrada.");
            return;
         }
 
-        setEmail(faceEmail.trim().toLowerCase());
+        setEmail(matchedEmail.trim().toLowerCase());
         setPassword(decryptedPwd);
         
         setIsLoading(true);
@@ -160,7 +184,7 @@ export default function ClientLogin() {
         useChatStore.getState().clearStore();
 
         const { data: authResult, error: authError } = await supabase.rpc('check_login', {
-          p_email: faceEmail.trim().toLowerCase(),
+          p_email: matchedEmail.trim().toLowerCase(),
           p_password: decryptedPwd
         });
 
@@ -204,7 +228,7 @@ export default function ClientLogin() {
         }
 
         const { error: signInError } = await supabase.auth.signInWithPassword({
-           email: faceEmail.trim().toLowerCase(),
+           email: matchedEmail.trim().toLowerCase(),
            password: decryptedPwd
         });
 
@@ -219,14 +243,18 @@ export default function ClientLogin() {
         storage.setItem('current_tenant_name', tenantData.name);
         storage.setItem('current_user_name', userName);
         storage.setItem('current_user_role', userRole);
-        storage.setItem('current_user_email', faceEmail.trim().toLowerCase());
+        storage.setItem('current_user_email', matchedEmail.trim().toLowerCase());
         storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
         storage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
 
         navigate('/chat', { replace: true });
       } else {
-        addDevLog('FACE_AUTH_FAILED', `Reconhecimento falhou. Similaridade de apenas ${compareResult.confidence}%.`, 'error');
+        // Pega a melhor similaridade para fins de log
+        const bestConfidence = compareResults.length > 0 ? Math.max(...compareResults.map(r => r.confidence)) : 0;
+        addDevLog('FACE_AUTH_FAILED', `Nenhum rosto correspondente encontrado. Melhor similaridade foi de ${bestConfidence}%.`, 'error');
+        
         setFaceVerifyError("Rosto não reconhecido. Aproxime mais da câmera e tente novamente.");
+        setCapturedPhotoForLink(capPhotoBase64); // Salva a foto para habilitar o vínculo!
         setFaceScanning(false);
       }
     } catch (e: any) {
@@ -284,6 +312,120 @@ export default function ClientLogin() {
     } catch (e: any) {
       console.error(e);
       setFaceVerifyError("Falha ao registrar biometria facial.");
+      setFaceScanning(false);
+    }
+  };
+
+  const handleLinkFaceAndLogin = async () => {
+    if (!faceLinkEmail.trim() || !faceLinkPassword.trim() || !capturedPhotoForLink) return;
+    setFaceScanning(true);
+    setFaceVerifyError('');
+
+    try {
+      addDevLog('LINK_FACE_INIT', `Iniciando login de vínculo para: ${faceLinkEmail.trim()}`, 'info');
+
+      // 1. Valida as credenciais via procedure segura
+      const { data: authResult, error: authError } = await supabase.rpc('check_login', {
+        p_email: faceLinkEmail.trim().toLowerCase(),
+        p_password: faceLinkPassword.trim()
+      });
+
+      if (authError || !authResult) {
+        addDevLog('LINK_FACE_AUTH_ERROR', 'Credenciais inválidas no banco de dados para vínculo.', 'error');
+        setFaceVerifyError("E-mail ou senha inválidos.");
+        setFaceScanning(false);
+        return;
+      }
+
+      addDevLog('LINK_FACE_AUTH_SUCCESS', 'Credenciais confirmadas! Salvando biometria facial...', 'success');
+
+      // 2. Criptografa a senha e salva a foto no Supabase
+      const encryptedPwd = encryptPassword(faceLinkPassword.trim(), faceLinkEmail.trim().toLowerCase());
+      
+      const { error: insertError } = await supabase.from('face_auth').upsert({
+        email: faceLinkEmail.trim().toLowerCase(),
+        face_photo_base64: capturedPhotoForLink,
+        encrypted_password: encryptedPwd
+      }, { onConflict: 'email' });
+
+      if (insertError) {
+        addDevLog('LINK_FACE_SAVE_ERROR', insertError.message || JSON.stringify(insertError), 'error');
+        setFaceVerifyError("Erro ao salvar biometria facial na sua conta.");
+        setFaceScanning(false);
+        return;
+      }
+
+      addDevLog('LINK_FACE_SAVE_SUCCESS', 'Biometria vinculada com absoluto sucesso!', 'success');
+
+      // 3. Efetua a autenticação oficial no Supabase Auth
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+         email: faceLinkEmail.trim().toLowerCase(),
+         password: faceLinkPassword.trim()
+      });
+
+      if (signInError) {
+         addDevLog('LINK_SUPABASE_AUTH_ERROR', signInError.message, 'error');
+         setFaceVerifyError("Erro de sincronia de sessão corporativa.");
+         setFaceScanning(false);
+         return;
+      }
+
+      // 4. Salva a sessão localmente
+      let tenantData = null;
+      let userRole = 'admin';
+      let allowedInstances = null;
+      let allowedCompanies = null;
+      let userName = '';
+
+      if (authResult.type === 'admin') {
+         tenantData = authResult.user;
+         userName = authResult.user.name;
+         userRole = 'admin';
+
+         try {
+            const { data: userProfile } = await supabase
+              .from('tenant_users')
+              .select('full_name')
+              .eq('email', authResult.user.email)
+              .maybeSingle();
+              
+            if (userProfile && userProfile.full_name) {
+               userName = userProfile.full_name;
+            }
+         } catch (err) {
+            console.error("Erro ao buscar perfil real do admin no Face ID:", err);
+         }
+      } else if (authResult.type === 'agent') {
+         tenantData = authResult.parent;
+         userName = authResult.user.full_name;
+         userRole = authResult.user.role;
+         allowedInstances = authResult.user.allowed_instances || [];
+         allowedCompanies = authResult.user.allowed_companies || [];
+      }
+
+      stopCamera();
+      setShowFaceSuccess(true);
+
+      const storage = localStorage;
+      storage.setItem('current_tenant_id', tenantData.id);
+      storage.setItem('current_tenant_name', tenantData.name);
+      storage.setItem('current_user_name', userName);
+      storage.setItem('current_user_role', userRole);
+      storage.setItem('current_user_email', faceLinkEmail.trim().toLowerCase());
+      storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
+      storage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
+
+      setTimeout(() => {
+        setFaceIdActive(false);
+        setFaceLinkingStep(false);
+        setCapturedPhotoForLink(null);
+        setShowFaceSuccess(false);
+        navigate('/chat', { replace: true });
+      }, 2000);
+
+    } catch (e: any) {
+      console.error(e);
+      setFaceVerifyError("Falha temporária ao vincular Face ID.");
       setFaceScanning(false);
     }
   };
@@ -544,9 +686,11 @@ export default function ClientLogin() {
             type="button"
             onClick={() => {
               setFaceIdActive(true);
-              setFaceEmailStep(true);
-              setFaceEmail('');
+              setFaceEmailStep(false);
+              setCameraActive(true);
               setFaceVerifyError('');
+              setFaceLinkingStep(false);
+              setCapturedPhotoForLink(null);
             }}
             className="w-full bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 font-semibold py-3 px-4 rounded-xl border border-emerald-500/20 hover:border-emerald-500/30 transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2"
           >
@@ -617,113 +761,60 @@ export default function ClientLogin() {
               onClick={() => {
                 stopCamera();
                 setFaceIdActive(false);
+                setFaceLinkingStep(false);
+                setCapturedPhotoForLink(null);
               }}
               className="absolute top-4 right-4 p-2 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
             >
               <X size={20} />
             </button>
 
-            {faceEmailStep ? (
-              <div className="w-full space-y-6">
+            {faceLinkingStep ? (
+              <div className="w-full space-y-6 animate-in fade-in zoom-in-95 duration-300">
                 <div className="flex flex-col items-center text-center">
                   <div className="w-16 h-16 bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-500 rounded-2xl flex items-center justify-center mb-4">
-                    <Camera size={32} />
+                    <UserCheck size={32} />
                   </div>
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-white">Acessar com Face ID</h2>
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white">Vincular Face ID</h2>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Insira seu e-mail corporativo cadastrado para iniciar a verificação facial biométrica.
+                    Insira suas credenciais corporativas tradicionais para vincular seu rosto à sua conta.
                   </p>
                 </div>
 
                 <div className="space-y-4">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Seu E-mail</label>
+                    <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Seu E-mail Corporativo</label>
                     <input
                       type="email"
-                      value={faceEmail}
-                      onChange={(e) => setFaceEmail(e.target.value)}
+                      value={faceLinkEmail}
+                      onChange={(e) => setFaceLinkEmail(e.target.value)}
                       className="w-full bg-gray-100 dark:bg-[#111b21] border border-transparent rounded-xl px-4 py-3 text-gray-950 dark:text-white placeholder:text-gray-400 dark:placeholder:text-[#8696a0] outline-none focus:border-emerald-500 transition-all"
                       placeholder="exemplo@suaempresa.com"
                       required
                     />
                   </div>
 
-                  {faceVerifyError && (
-                    <div className="flex items-start gap-2 text-red-500 text-sm font-medium bg-red-50 dark:bg-red-500/10 p-3 rounded-lg">
-                      <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                      <span>{faceVerifyError}</span>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Senha da Conta</label>
+                    <div className="relative">
+                      <input
+                        type={showFaceLinkPassword ? "text" : "password"}
+                        value={faceLinkPassword}
+                        onChange={(e) => setFaceLinkPassword(e.target.value)}
+                        className="w-full bg-gray-100 dark:bg-[#111b21] border border-transparent rounded-xl px-4 py-3 pr-12 text-gray-950 dark:text-white placeholder:text-gray-400 dark:placeholder:text-[#8696a0] outline-none focus:border-emerald-500 transition-all"
+                        placeholder="••••••••"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowFaceLinkPassword(!showFaceLinkPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-[#8696a0] hover:text-[#54656f] dark:hover:text-[#e9edef] transition-colors rounded-lg focus:outline-none"
+                      >
+                        {showFaceLinkPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
                     </div>
-                  )}
-
-                  <button
-                    onClick={async () => {
-                      if (!faceEmail.trim()) {
-                        setFaceVerifyError("Por favor, preencha o e-mail.");
-                        return;
-                      }
-                      setFaceVerifyError('');
-                      
-                      const { data, error } = await supabase
-                        .from('face_auth')
-                        .select('id')
-                        .eq('email', faceEmail.trim().toLowerCase())
-                        .maybeSingle();
-
-                      if (error || !data) {
-                        setFaceVerifyError("Nenhum cadastro de Face ID encontrado para este e-mail.");
-                      } else {
-                        setFaceEmailStep(false);
-                        setCameraActive(true);
-                      }
-                    }}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
-                  >
-                    Próximo <ArrowRight size={18} />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="w-full flex flex-col items-center">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Escaneamento Facial</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 text-center">
-                  Posicione seu rosto dentro da moldura verde.
-                </p>
-
-                {/* Scanner Circular Premium */}
-                <div className="w-56 h-56 relative flex items-center justify-center mb-6">
-                  {/* Círculo do Vídeo com bordas esmeralda e sombras futuristas */}
-                  <div className="w-48 h-48 rounded-full overflow-hidden relative border-4 border-emerald-500 shadow-[0_0_40px_rgba(16,185,129,0.4)] z-10 bg-black">
-                    <video
-                      ref={(el) => {
-                        videoRef.current = el;
-                        if (el && streamRef.current && el.srcObject !== streamRef.current) {
-                          el.srcObject = streamRef.current;
-                        }
-                      }}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover scale-x-[-1]"
-                    />
-                    
-                    {/* Linha laser de escaneamento facial com animação */}
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent shadow-[0_0_15px_rgba(16,185,129,1)] z-20" style={{
-                      animation: 'laser-scan 2.5s ease-in-out infinite'
-                    }} />
                   </div>
 
-                  {/* Anel Externo Giratório */}
-                  <div className="absolute inset-0 border-2 border-dashed border-emerald-500/30 rounded-full" style={{
-                    animation: 'spin-slow 15s linear infinite'
-                  }} />
-                  
-                  {/* Aura Pulsante Externa */}
-                  <div className="absolute -inset-2 border border-emerald-500/10 rounded-full" style={{
-                    animation: 'ring-pulse 2s ease-in-out infinite'
-                  }} />
-                </div>
-
-                <div className="w-full text-center space-y-4">
                   {faceVerifyError && (
                     <div className="flex items-start gap-2 text-red-500 text-sm font-medium bg-red-50 dark:bg-red-500/10 p-3 rounded-lg text-left">
                       <AlertCircle size={16} className="mt-0.5 shrink-0" />
@@ -731,32 +822,147 @@ export default function ClientLogin() {
                     </div>
                   )}
 
-                  {faceScanning ? (
-                    <div className="flex flex-col items-center gap-2">
-                      <Loader2 size={32} className="animate-spin text-emerald-500" />
-                      <span className="text-sm font-semibold text-emerald-500 animate-pulse">
-                        Analisando traços biométricos com a IA...
-                      </span>
-                    </div>
-                  ) : (
+                  <div className="flex flex-col gap-2 pt-2">
                     <button
-                      onClick={handleFaceLogin}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-emerald-500/30 transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2"
+                      onClick={handleLinkFaceAndLogin}
+                      disabled={faceScanning}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 px-4 rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-75"
                     >
-                      <ShieldCheck size={20} /> Autenticar Rosto
+                      {faceScanning ? (
+                        <>
+                          <Loader2 size={18} className="animate-spin" />
+                          Processando Vínculo...
+                        </>
+                      ) : (
+                        <>
+                          Vincular e Acessar <ArrowRight size={18} />
+                        </>
+                      )}
                     </button>
-                  )}
-
-                  <button
-                    onClick={() => {
-                      setFaceEmailStep(true);
-                      stopCamera();
-                    }}
-                    className="text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors"
-                  >
-                    Voltar ao e-mail
-                  </button>
+                    
+                    <button
+                      onClick={() => {
+                        setFaceLinkingStep(false);
+                        setCameraActive(true);
+                        setFaceVerifyError('');
+                      }}
+                      className="text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors py-2 text-center"
+                    >
+                      Voltar ao escaneamento
+                    </button>
+                  </div>
                 </div>
+              </div>
+            ) : (
+              <div className="w-full flex flex-col items-center animate-in fade-in duration-300">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Escaneamento Facial</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 text-center">
+                  Posicione seu rosto dentro da moldura verde.
+                </p>
+
+                {showFaceSuccess ? (
+                  <div className="flex flex-col items-center space-y-4 py-8 animate-in scale-in">
+                    <div className="w-20 h-20 bg-green-500/20 text-green-500 rounded-full flex items-center justify-center border-4 border-green-500 animate-pulse">
+                      <ShieldCheck size={48} className="text-green-500" />
+                    </div>
+                    <span className="text-lg font-bold text-green-600 dark:text-green-400">
+                      Face ID Cadastrado e Logado!
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      Redirecionando para o painel de chat...
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    {/* Scanner Circular Premium */}
+                    <div className="w-56 h-56 relative flex items-center justify-center mb-6">
+                      {/* Círculo do Vídeo com bordas esmeralda e sombras futuristas */}
+                      <div className="w-48 h-48 rounded-full overflow-hidden relative border-4 border-emerald-500 shadow-[0_0_40px_rgba(16,185,129,0.4)] z-10 bg-black">
+                        <video
+                          ref={(el) => {
+                            videoRef.current = el;
+                            if (el && streamRef.current && el.srcObject !== streamRef.current) {
+                              el.srcObject = streamRef.current;
+                            }
+                          }}
+                          autoPlay
+                          playsInline
+                          muted
+                          className="w-full h-full object-cover scale-x-[-1]"
+                        />
+                        
+                        {/* Linha laser de escaneamento facial com animação */}
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent shadow-[0_0_15px_rgba(16,185,129,1)] z-20" style={{
+                          animation: 'laser-scan 2.5s ease-in-out infinite'
+                        }} />
+                      </div>
+
+                      {/* Anel Externo Giratório */}
+                      <div className="absolute inset-0 border-2 border-dashed border-emerald-500/30 rounded-full" style={{
+                        animation: 'spin-slow 15s linear infinite'
+                      }} />
+                      
+                      {/* Aura Pulsante Externa */}
+                      <div className="absolute -inset-2 border border-emerald-500/10 rounded-full" style={{
+                        animation: 'ring-pulse 2s ease-in-out infinite'
+                      }} />
+                    </div>
+
+                    <div className="w-full text-center space-y-4">
+                      {faceVerifyError && (
+                        <div className="flex flex-col gap-2 animate-in slide-in-from-bottom-2">
+                          <div className="flex items-start gap-2 text-red-500 text-sm font-medium bg-red-50 dark:bg-red-500/10 p-3 rounded-lg text-left">
+                            <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                            <span>{faceVerifyError}</span>
+                          </div>
+                          
+                          {/* Botão de Vínculo Premium em caso de erro de reconhecimento */}
+                          {capturedPhotoForLink && (
+                            <button
+                              onClick={() => {
+                                stopCamera();
+                                setFaceLinkingStep(true);
+                                setFaceVerifyError('');
+                                setFaceLinkEmail('');
+                                setFaceLinkPassword('');
+                              }}
+                              className="w-full bg-[#111b21] hover:bg-[#202c33] dark:bg-white/5 dark:hover:bg-white/10 text-white font-semibold py-2.5 px-4 rounded-xl border border-white/10 transition-all flex items-center justify-center gap-2 text-sm shadow-md animate-in slide-in-from-bottom-2 duration-300"
+                            >
+                              <UserCheck size={16} className="text-emerald-400" />
+                              Vincular este rosto à minha conta
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {faceScanning ? (
+                        <div className="flex flex-col items-center gap-2">
+                          <Loader2 size={32} className="animate-spin text-emerald-500" />
+                          <span className="text-sm font-semibold text-emerald-500 animate-pulse">
+                            Analisando traços biométricos com a IA...
+                          </span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={handleFaceLogin}
+                          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 px-4 rounded-xl shadow-lg shadow-emerald-500/30 transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2"
+                        >
+                          <ShieldCheck size={20} /> Autenticar Rosto
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          stopCamera();
+                          setFaceIdActive(false);
+                        }}
+                        className="text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors"
+                      >
+                        Voltar ao login corporativo
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>

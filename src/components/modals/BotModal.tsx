@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bot, Save, X, Settings2, BrainCircuit, Network, Sparkles, UploadCloud, Database, FileText, CheckCircle2, Trash2, Waypoints, MessageSquareWarning, Zap, User } from 'lucide-react';
+import { Bot, Save, X, Settings2, BrainCircuit, Network, Sparkles, UploadCloud, Database, FileText, CheckCircle2, Trash2, Waypoints, MessageSquareWarning, Zap, User, Smartphone } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { BotTemplate, BOT_CATEGORIES, BOT_INDUSTRIES, BOT_TEMPLATES } from '../../lib/botTemplates';
 import { supabase } from '../../services/supabase';
@@ -25,6 +25,10 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
   const [model, setModel] = useState('gemini-1.5-pro');
   const [temperature, setTemperature] = useState(0.7);
   const [isActive, setIsActive] = useState(true);
+  
+  // Sandbox de Homologação
+  const [testMode, setTestMode] = useState(false);
+  const [testPhone, setTestPhone] = useState('');
 
   // Upload/Mock states para RAG
   const [isUploading, setIsUploading] = useState(false);
@@ -79,6 +83,8 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         setModel(botToEdit.model || 'gemini-1.5-pro');
         setTemperature(botToEdit.temperature || 0.7);
         setIsActive(botToEdit.status === 'active');
+        setTestMode(botToEdit.test_mode || false);
+        setTestPhone(botToEdit.test_phone || '');
         
         // mock the RAG files if it has knowledge documents
         setUploadedFiles(
@@ -103,6 +109,8 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         setModel(initialTemplate.model || 'gemini-1.5-pro');
         setTemperature(initialTemplate.temperature || 0.7);
         setIsActive(true);
+        setTestMode(false);
+        setTestPhone('');
         setUploadedFiles([]);
         setSelectedChannels([]);
         setAutoReply(false);
@@ -117,6 +125,8 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         setModel('gemini-1.5-pro');
         setTemperature(0.7);
         setIsActive(true);
+        setTestMode(false);
+        setTestPhone('');
         setUploadedFiles([]);
         setSelectedChannels([]);
         setAutoReply(false);
@@ -142,6 +152,8 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         temperature,
         status: isActive ? 'active' : 'inactive',
         knowledgeDocuments: uploadedFiles.length,
+        test_mode: testMode,
+        test_phone: testPhone,
         channels: selectedChannels,
         autoReply,
         handoffKeyword,
@@ -442,6 +454,52 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
                       isActive ? "left-8" : "left-1"
                     )} />
                   </div>
+                </div>
+
+                {/* Seção Sandbox de Homologação e Testes */}
+                <div className="space-y-4 p-5 bg-gradient-to-r from-amber-500/5 via-transparent to-transparent border border-amber-500/10 rounded-2xl relative overflow-hidden">
+                   {/* Decoration Glow */}
+                   <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/[0.02] rounded-bl-full pointer-events-none" />
+
+                   <div className="flex items-center p-1 bg-white/[0.01] hover:bg-white/[0.02] transition-colors rounded-xl cursor-pointer" onClick={() => setTestMode(!testMode)}>
+                      <div className="flex-1">
+                         <h4 className="text-sm font-bold text-white/90 flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-amber-400 drop-shadow-[0_0_5px_rgba(251,191,36,0.5)]" />
+                            Modo de Teste / Sandbox Isolado
+                         </h4>
+                         <p className="text-xs font-medium text-white/40 mt-1 max-w-[90%] leading-relaxed">
+                            Quando ativado, o robô responderá **estritamente** a apenas um celular de teste selecionado. Outros clientes não receberão respostas do robô.
+                         </p>
+                      </div>
+                      <div className={cn(
+                        "w-14 h-7 rounded-full relative transition-colors duration-300 shadow-inner flex-shrink-0",
+                        testMode ? "bg-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.4)]" : "bg-[#2a2a30]"
+                      )}>
+                        <div className={cn(
+                          "absolute top-1 w-5 h-5 rounded-full bg-white transition-all duration-300 shadow-md",
+                          testMode ? "left-8" : "left-1"
+                        )} />
+                      </div>
+                   </div>
+
+                   {testMode && (
+                      <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300 pt-3 border-t border-white/5">
+                         <label className="text-xs font-bold text-amber-400 uppercase tracking-widest ml-1 block">Celular para Testes (Sandbox)</label>
+                         <div className="relative w-full max-w-md">
+                            <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-400 opacity-60" />
+                            <input
+                              type="text"
+                              placeholder="Ex: 5511999999999"
+                              value={testPhone}
+                              onChange={(e) => setTestPhone(e.target.value)}
+                              className="w-full bg-[#18181b] border border-amber-500/20 rounded-xl pl-11 pr-4 py-2.5 text-sm font-bold text-white placeholder-white/20 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all font-mono"
+                            />
+                         </div>
+                         <p className="text-[11px] font-medium text-amber-500/60 ml-1 leading-relaxed mt-1">
+                            Insira o número completo com DDI + DDD + Telefone (apenas números). O robô responderá de forma real e vetorizada a este número e a nenhum outro!
+                         </p>
+                      </div>
+                   )}
                 </div>
             </div>
 

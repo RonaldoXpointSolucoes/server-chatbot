@@ -55,6 +55,7 @@ export function MainSidebar() {
   const setReopenedTicketToast = useChatStore(state => state.setReopenedTicketToast);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     conversations: true,
+    checklists: true,
     teams: true,
     apps: false,
     channels: true,
@@ -150,6 +151,7 @@ export function MainSidebar() {
   const [currentCompanyContext, setCurrentCompanyContext] = useState<any>(null);
   const [globalAiEnabled, setGlobalAiEnabled] = useState(true);
   const [instanceContextMenu, setInstanceContextMenu] = useState<{ id: string, name: string, x: number, y: number } | null>(null);
+  const [myConversationsMenu, setMyConversationsMenu] = useState<{ x: number, y: number } | null>(null);
 
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
   const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
@@ -581,25 +583,33 @@ export function MainSidebar() {
         <div className="px-2 space-y-0.5">
 
           <CollapsibleSection title="Conversas" icon={<MessageCircle size={16} />} isOpen={expandedSections.conversations} onToggle={() => toggleSection('conversations')}>
-            <NavItem 
-              title={
-                <div className="flex items-center gap-2">
-                  Minhas conversas
-                  {myConversationsCount > 0 && (
-                    <span className="bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
-                      {myConversationsCount}
-                    </span>
-                  )}
-                </div>
-              } 
-              icon={<User size={16} className={filterType === 'mine' ? "text-indigo-400" : ""} />} 
-              isActive={filterType === 'mine'} 
-              onClick={() => {
-                setActiveChannelFilter(null, null);
-                setFilterType('mine');
-                navigate('/chat');
-              }} 
-            />
+            <div
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMyConversationsMenu({ x: e.clientX, y: e.clientY });
+              }}
+              className="relative w-full"
+            >
+              <NavItem 
+                title={
+                  <div className="flex items-center gap-2">
+                    Minhas conversas
+                    {myConversationsCount > 0 && (
+                      <span className="bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                        {myConversationsCount}
+                      </span>
+                    )}
+                  </div>
+                } 
+                icon={<User size={16} className={filterType === 'mine' ? "text-indigo-400" : ""} />} 
+                isActive={filterType === 'mine'} 
+                onClick={() => {
+                  setActiveChannelFilter(null, null);
+                  setFilterType('mine');
+                  navigate('/chat');
+                }} 
+              />
+            </div>
             <NavItem 
               title={
                 <div className="flex items-center gap-2">
@@ -653,7 +663,7 @@ export function MainSidebar() {
                           title={inst.display_name || 'Sem nome'} 
                           isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
                           onClick={() => {
-                            useChatStore.getState().setActiveChannelFilter(activeChannelFilter === inst.id ? null : inst.id, inst.display_name);
+                            useChatStore.getState().setActiveChannelFilter(inst.id, inst.display_name);
                             useChatStore.getState().setFilterType('all');
                             useChatStore.getState().fetchInitialData();
                             navigate('/chat');
@@ -698,7 +708,43 @@ export function MainSidebar() {
               onClick={() => navigate('/apps/agenda')}
               isActive={window.location.pathname === '/apps/agenda'}
             />
-            <NavItem icon={<LayoutDashboard size={16} />} title="Kanban" />
+             <NavItem icon={<LayoutDashboard size={16} />} title="Kanban" />
+          </CollapsibleSection>
+
+          <CollapsibleSection 
+            title="Checklists Operacionais" 
+            icon={<ClipboardList size={16} className="text-indigo-400" />} 
+            isOpen={expandedSections.checklists} 
+            onToggle={() => toggleSection('checklists')}
+          >
+            <NavItem 
+              icon={<LayoutDashboard size={16} className="text-indigo-400" />} 
+              title="Dashboard Geral" 
+              isSub
+              onClick={() => navigate('/checklist/dashboard')}
+              isActive={window.location.pathname === '/checklist/dashboard'}
+            />
+            <NavItem 
+              icon={<ScrollText size={16} className="text-indigo-400" />} 
+              title="Modelos & Rotinas" 
+              isSub
+              onClick={() => navigate('/checklist/builder')}
+              isActive={window.location.pathname === '/checklist/builder'}
+            />
+            <NavItem 
+              icon={<Smartphone size={16} className="text-indigo-400" />} 
+              title="Totem Cozinha (PWA)" 
+              isSub
+              onClick={() => navigate('/checklist/tablet')}
+              isActive={window.location.pathname === '/checklist/tablet'}
+            />
+            <NavItem 
+              icon={<Settings size={16} className="text-indigo-400" />} 
+              title="Configurações" 
+              isSub
+              onClick={() => navigate('/checklist/settings')}
+              isActive={window.location.pathname === '/checklist/settings'}
+            />
           </CollapsibleSection>
 
           <CollapsibleSection title="Apps" icon={<Puzzle size={16} />} isOpen={expandedSections.apps} onToggle={() => toggleSection('apps')}>
@@ -924,6 +970,48 @@ export function MainSidebar() {
             >
               <QrCode size={14} />
               Gerenciar Conexão
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Menu suspenso (Context Menu) para Minhas Conversas */}
+      {myConversationsMenu && (
+        <div 
+          className="fixed inset-0 z-[100]" 
+          onClick={(e) => { e.stopPropagation(); setMyConversationsMenu(null); }}
+          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMyConversationsMenu(null); }}
+        >
+          <div 
+            className="absolute bg-[#202c33] border border-[#2a3942] rounded-lg shadow-xl py-1 min-w-[200px] animate-in fade-in zoom-in-95 duration-100"
+            style={{ 
+              top: Math.min(myConversationsMenu.y, window.innerHeight - 100), 
+              left: Math.min(myConversationsMenu.x, window.innerWidth - 200)
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-2 border-b border-[#2a3942] mb-1">
+              <span className="text-xs font-semibold text-[#8696a0] truncate block">Minhas Conversas</span>
+            </div>
+            <button 
+              className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-[#2a3942] hover:text-red-500 transition-colors flex items-center gap-2"
+              onClick={async (e) => {
+                 e.stopPropagation();
+                 setMyConversationsMenu(null);
+                 
+                 const confirmed = window.confirm("Tem certeza que deseja marcar TODAS as suas conversas atribuídas como resolvidas?");
+                 if (confirmed) {
+                    try {
+                       const res = await useChatStore.getState().resolveAllConversations(true);
+                       alert(`${res?.count || 0} conversas foram resolvidas com sucesso.`);
+                    } catch (err) {
+                       console.error("Erro ao resolver conversas:", err);
+                    }
+                 }
+              }}
+            >
+              <CheckCircle2 size={14} />
+              Fechar Todas as Conversas
             </button>
           </div>
         </div>

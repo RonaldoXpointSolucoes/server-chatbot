@@ -11,6 +11,7 @@ import systemLogger from './system-logger.js';
 import { supabase } from './supabase.js';
 import sessionManager from './session-manager/index.js';
 import snoozeManager from './snooze-manager.js';
+import autoRagTrainer from './automation-worker/auto-rag-trainer.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -110,6 +111,18 @@ app.use('/', publicRestRoutes);
 app.use('/api', apiGateway);
 app.use('/api/v1/system/logs', systemLogger);
 
+// Middleware global de tratamento de erros (ex: Multer LIMIT_FILE_SIZE)
+app.use((err, req, res, next) => {
+    if (err.name === 'MulterError' || err.code === 'LIMIT_FILE_SIZE') {
+        const limitMB = err.field === 'file' ? '50MB' : '100MB';
+        return res.status(413).json({
+            error: `O arquivo enviado é muito grande. O limite máximo permitido para este recurso é de ${limitMB}.`
+        });
+    }
+    console.error('Erro interno do servidor:', err);
+    return res.status(500).json({ error: err.message || 'Erro interno no servidor' });
+});
+
 app.listen(PORT, '0.0.0.0', async () => {
     console.log(`[Antigravity V2] Node.js Server online na porta ${PORT}`);
     
@@ -161,5 +174,26 @@ app.listen(PORT, '0.0.0.0', async () => {
         snoozeManager.start();
     } catch(err) {
         console.error("[Worker Boot] Erro ao iniciar SnoozeManager:", err.message);
+    }
+
+    try {
+        console.log("[Worker Boot] Inicializando Realtime Auto-RAG Trainer...");
+        supabase.channel('backend_conversations_changes')
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations' }, async (payload) => {
+              const oldConv = payload.old;
+              const newConv = payload.new;
+              
+              if (newConv && newConv.status === 'resolved' && (!oldConv || oldConv.status !== 'resolved')) {
+                  console.log(`[AutoRagTrainer] Conversa ${newConv.id} marcada como RESOLVIDA. Iniciando análise assíncrona.`);
+                  autoRagTrainer.trainFromResolvedConversation(newConv.tenant_id, newConv.id).catch(err => {
+                      console.error(`[AutoRagTrainer] Erro ao treinar conversa ${newConv.id}:`, err);
+                  });
+              }
+          })
+          .subscribe((status) => {
+              console.log(`[AutoRagTrainer] Assinatura Realtime de conversas resolvidas: ${status}`);
+          });
+    } catch(err) {
+        console.error("[Worker Boot] Erro ao assinar realtime conversations:", err.message);
     }
 });

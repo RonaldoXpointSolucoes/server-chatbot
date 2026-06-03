@@ -39,20 +39,28 @@ export const useDevStore = create<DevStore>()(
         if (state.isEnabled) {
             const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId');
             
-            // Background async save to db
-            supabase.from('system_logs').insert([{
-               type: log.source || 'Frontend',
-               message: log.message,
-               level: log.type,
-               payload: log.details ? JSON.stringify(log.details) : null,
-               company_id: tenantId || null,
-            }]).then(({ error }) => {
-               if (error && log.source !== 'Fetch API: undefined') {
-                   // Ignore to prevent loop
-               }
-            }).catch(() => {
-                // Ignore silent network errors
-            });
+            // Evitar loops recursivos: não envia ao banco erros gerados pelo próprio Supabase ou falhas de rede com o banco
+            const isSupabaseCall = 
+              (log.source && log.source.toLowerCase().includes('supabase')) ||
+              (log.message && log.message.toLowerCase().includes('supabase.co')) ||
+              (log.details && JSON.stringify(log.details).toLowerCase().includes('supabase.co'));
+
+            if (!isSupabaseCall) {
+              // Background async save to db
+              supabase.from('system_logs').insert([{
+                 type: log.source || 'Frontend',
+                 message: log.message,
+                 level: log.type,
+                 payload: log.details ? JSON.stringify(log.details) : null,
+                 company_id: tenantId || null,
+              }]).then(({ error }) => {
+                 if (error && log.source !== 'Fetch API: undefined') {
+                     // Ignore to prevent loop
+                 }
+              }).catch(() => {
+                  // Ignore silent network errors
+              });
+            }
         }
         
         set((state) => ({ logs: [newLog, ...state.logs].slice(0, 100) }));

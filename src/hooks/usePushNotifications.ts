@@ -58,23 +58,39 @@ export function usePushNotifications() {
 
         const userEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
 
-        // Save to Supabase (upsert logic based on endpoint)
-        const { error } = await supabase
-          .from('push_subscriptions')
-          .upsert({
-            tenant_id: tenantId,
-            endpoint: subData.endpoint,
-            p256dh: subData.keys.p256dh,
-            auth: subData.keys.auth,
-            user_agent: navigator.userAgent,
-            email: userEmail ? userEmail.trim().toLowerCase() : null
-          }, { onConflict: 'endpoint' });
+        // Função de gravação com retentativa e backoff exponencial para lidar com falhas de rede ou concorrência de locks
+        const saveSubscriptionWithRetry = async (retries = 3, delay = 1000): Promise<boolean> => {
+          try {
+            const { error } = await supabase
+              .from('push_subscriptions')
+              .upsert({
+                tenant_id: tenantId,
+                endpoint: subData.endpoint,
+                p256dh: subData.keys.p256dh,
+                auth: subData.keys.auth,
+                user_agent: navigator.userAgent,
+                email: userEmail ? userEmail.trim().toLowerCase() : null
+              }, { onConflict: 'endpoint' });
 
-        if (error) { 
-          console.error('Erro ao salvar push_subscription no Supabase:', error);
-        } else {
-          console.log('Push Subscription ativada com sucesso para o usuário!');
-        }
+            if (error) throw error;
+            console.log('Push Subscription ativada com sucesso para o usuário!');
+            return true;
+          } catch (err: any) {
+            const isAbortError = err?.name === 'AbortError' || err?.message?.includes('AbortError') || err?.message?.includes('Lock') || err?.message?.includes('steal');
+            const isNetworkError = err?.message?.includes('Failed to fetch') || !navigator.onLine;
+
+            if (retries > 0 && (isAbortError || isNetworkError)) {
+              console.warn(`[Push Notif Retry] Falha ao salvar subscription (${err.message || err.name}). Tentando novamente em ${delay}ms... (Tentativas restantes: ${retries})`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              return saveSubscriptionWithRetry(retries - 1, delay * 3);
+            } else {
+              console.error('Erro ao salvar push_subscription no Supabase após retentativas:', err);
+              return false;
+            }
+          }
+        };
+
+        await saveSubscriptionWithRetry();
 
         // --- INÍCIO SINCRONIZAÇÃO RBAC ---
         const syncConfigToSW = () => {

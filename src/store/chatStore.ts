@@ -51,6 +51,7 @@ export type ContactType = ContactRow & {
   instance_id?: string | null;
   is_blocked?: boolean;
   conv_id?: string;
+  ai_paused?: boolean;
 };
 
 export const getRealContactId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
@@ -219,7 +220,7 @@ interface ChatState {
   reopenConversation: (contactId: string) => Promise<void>;
   resolveConversation: (contactId: string) => Promise<void>;
   lastBatchResolvedConversations: { conversationId: string, contactId: string, previousStatus: string, assignedTo: string | null, instanceId?: string | null }[] | null;
-  resolveAllConversations: () => Promise<{ success: boolean, count: number }>;
+  resolveAllConversations: (onlyMine?: boolean) => Promise<{ success: boolean, count: number }>;
   undoLastBatchResolve: () => Promise<boolean>;
   clearStore: () => void;
   reopenedTicketToast: { contactName: string; reason?: string } | null;
@@ -558,7 +559,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ ticketMode: active });
   },
 
-  resolveAllConversations: async () => {
+  resolveAllConversations: async (onlyMine?: boolean) => {
     try {
       const state = get();
       const tenantInfo = state.tenantInfo;
@@ -566,9 +567,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
       let agentName = 'Agente';
+      let agentId: string | null = null;
       if (currentUserEmail) {
           const agent = state.agents.find(a => a.email === currentUserEmail);
-          if (agent && agent.full_name) agentName = agent.full_name;
+          if (agent) {
+             if (agent.full_name) agentName = agent.full_name;
+             agentId = agent.id;
+          }
       }
 
       const activeChannel = state.activeChannelFilter;
@@ -580,6 +585,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if (activeChannel) {
         query = query.eq('instance_id', activeChannel);
+      }
+
+      if (onlyMine && agentId) {
+        query = query.eq('assigned_to', agentId);
       }
 
       const { data: convsToResolve, error } = await query;
@@ -1711,7 +1720,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const targetContact = currentState.contacts.find(c => c.id === contactId);
     let shouldWakeUp = false;
 
-    if (targetContact && msg.sender === 'client' && targetContact.conv_status !== 'open') {
+    if (targetContact && msg.sender === 'client' && targetContact.conv_status !== 'open' && !targetContact.is_blocked) {
         shouldWakeUp = true;
     }
 
@@ -2115,6 +2124,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!contact) return;
     const newBlockedState = !contact.is_blocked;
 
+    // Recupera o estado original puro do banco para o log de auditoria
+    let rawBeforeState = null;
+    try {
+      const { data } = await supabase.from('contacts').select('*').eq('id', getRealContactId(contactId)).single();
+      if (data) rawBeforeState = data;
+    } catch (e) {}
+
     // Atualização otimista local
     set((state) => ({
       contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_blocked: newBlockedState } : c)
@@ -2123,6 +2139,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const { error } = await supabase.from('contacts').update({ is_blocked: newBlockedState }).eq('id', getRealContactId(contactId));
       if (error) throw error;
+
+      // Log Operation para auditoria
+      if (rawBeforeState) {
+        const rawAfterState = { ...rawBeforeState, is_blocked: newBlockedState };
+        await get().logOperation('UPDATE', 'contacts', getRealContactId(contactId), rawBeforeState, rawAfterState);
+      }
     } catch (e) {
       console.error('Erro ao bloquear contato:', e);
       // Reverter atualização otimista
@@ -2618,7 +2640,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         assigned_to: conv.assigned_to,
                         conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.tenant_labels).filter(Boolean) : [],
                         instance_id: conv.instance_id || dbC.instance_id || null,
-                        conv_id: conv.id
+                        conv_id: conv.id,
+                        ai_paused: conv.ai_paused || false
                      };
                      
                      // Injeta um preview fake se messages tiver vazio e tem preview no banco 
@@ -2654,7 +2677,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         priority: conv.priority,
                         assigned_to: conv.assigned_to,
                         instance_id: conv.instance_id || dbC.instance_id || null,
-                        conv_id: conv.id
+                        conv_id: conv.id,
+                        ai_paused: conv.ai_paused || false
                       });
                    }
                 });
@@ -3259,6 +3283,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if ('snoozed_by' in payload) stateUpdates.snoozed_by = payload.snoozed_by;
             if ('priority' in payload) stateUpdates.priority = payload.priority;
             if ('assigned_to' in payload) stateUpdates.assigned_to = payload.assigned_to;
+            if ('ai_paused' in payload) stateUpdates.ai_paused = payload.ai_paused;
             return { ...c, ...stateUpdates };
          }
          return c;
@@ -3556,7 +3581,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                  const isClient = (m.sender_type === 'client' || !m.sender_type);
                  
                  // Impede notificação/Unread em mensagens antigas de sincronismo de histórico
-                 if (isClient && !isHistorical) {
+                  if (isClient && !isHistorical && !updatedContact.is_blocked) {
                      if (s.activeChatId !== cid) {
                          updatedContact.unread = (updatedContact.unread || 0) + 1;
                      }

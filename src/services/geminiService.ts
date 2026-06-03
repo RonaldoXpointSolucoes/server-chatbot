@@ -316,13 +316,25 @@ REGRAS DE RETORNO CRÍTICAS:
     try {
       const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-      const prompt = `Aja como um sistema biométrico de reconhecimento facial de alta precisão.
-Compare as duas fotos de rosto enviadas. A pessoa na Foto 1 é a mesma pessoa física na Foto 2?
-Responda EXATAMENTE com um objeto JSON com as chaves:
-1. "verified" (boolean): true se for a mesma pessoa física, false caso contrário.
-2. "confidence" (number): valor de 0 a 100 indicando a similaridade/certeza de que se trata do mesmo rosto.
-Leve em consideração óculos, barba, iluminação diferente e pequenos ângulos do rosto.
-ATENÇÃO: Retorne APENAS o JSON cru sem blocos de código markdown ou texto explicativo. Ex: {"verified": true, "confidence": 95}`;
+      const prompt = `Você é um sistema biométrico de reconhecimento facial de alta segurança e precisão cirúrgica.
+Sua tarefa é comparar as duas imagens fornecidas e determinar se pertencem à mesma pessoa física.
+
+REGRAS DE SEGURANÇA E RIGOR BIOMÉTRICO EXTREMAS:
+1. Se qualquer uma das imagens (especialmente a foto capturada pela câmera) apresentar obstrução severa do rosto, como:
+   - Mãos cobrindo os olhos, testa, boca ou nariz (como no caso de tapar o rosto com as mãos).
+   - Máscaras, óculos escuros de sol (que cobrem os olhos), lenços ou panos.
+   - Ângulos tão extremos que impeçam a verificação de traços básicos.
+   - Rosto ausente, desfocado, cortado ou mal iluminado ao extremo.
+   Você DEVE marcar "verified" como false e "confidence" como 0 (zero), pois traços biométricos vitais estão ocultados e a validação é absolutamente impossível. NUNCA aprove rostos obstruídos!
+2. Apenas marque "verified": true se os traços faciais principais (olhos, nariz, boca, estrutura óssea do rosto, barba se aplicável) estiverem perfeitamente visíveis, claros nas duas imagens e corresponderem com altíssima certeza à mesma pessoa física.
+3. Se houver alguma dúvida ou obstrução parcial que reduza a clareza dos traços, a confiança deve ser reduzida drasticamente e o veredito verificado deve ser false.
+
+Responda EXATAMENTE no formato JSON com as chaves:
+{
+  "verified": boolean,
+  "confidence": number (de 0 a 100)
+}
+Retorne APENAS o JSON cru, sem marcações markdown ou blocos de código.`;
 
       const result = await model.generateContent([
         prompt,

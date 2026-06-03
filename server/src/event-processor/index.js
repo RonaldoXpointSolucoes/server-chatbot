@@ -472,7 +472,7 @@ class EventProcessor {
              // Verifica quais conversas já existem no banco
              const contactIds = Array.from(new Set(Array.from(convMap.values()).map(c => c.contact_id)));
              const { data: existingConvs, error: existError } = await supabase.from('conversations')
-                  .select('id, tenant_id, instance_id, contact_id, unread_count, status')
+                  .select('id, tenant_id, instance_id, contact_id, unread_count, status, ai_paused')
                   .in('contact_id', contactIds);
                   
              if(existError) throw new Error("Conversation Select Error: " + existError.message);
@@ -503,7 +503,8 @@ class EventProcessor {
                          last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
                          last_message_at: new Date(data.last_message_at).toISOString(),
                          updated_at: new Date().toISOString(),
-                         status: nextStatus
+                         status: nextStatus,
+                         ...(data.has_human_outbound && { ai_paused: true })
                      });
                  } else {
                      let initialStatus = 'resolved';
@@ -520,7 +521,8 @@ class EventProcessor {
                          status: initialStatus,
                          unread_count: data.unread_count,
                          last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
-                         last_message_at: data.last_message_at.toISOString()
+                         last_message_at: data.last_message_at.toISOString(),
+                         ...(data.has_human_outbound && { ai_paused: true })
                      });
                  }
              }
@@ -589,6 +591,7 @@ class EventProcessor {
                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
                  b.conversationId = finalConvIdMap.get(`${b.tenantId}_${b.instanceId}_${cid}`) || finalConvIdMap.get(`${b.tenantId}_null_instance_${cid}`);
                  b.convStatus = existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.status || existingConvMap.get(`${b.tenantId}_null_instance_${cid}`)?.status || 'bot';
+                 b.aiPaused = existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.ai_paused || false;
                  
                  if (!b.conversationId) return; // ignora falha bruta
                  
@@ -738,7 +741,7 @@ class EventProcessor {
 
                          // Responde apenas se a conversa estiver sob os cuidados do bot ('bot' ou 'teste_robo')
                         // E não seja um self-chat (evita auto-loop em envios pro próprio numero)
-                        if (!b.isSelfChat && (b.convStatus === 'bot' || b.convStatus === 'teste_robo')) {
+                        if (!b.isSelfChat && !b.aiPaused && (b.convStatus === 'bot' || b.convStatus === 'teste_robo')) {
                              
                              supabase.from('companies').select('global_ai_enabled').eq('id', b.tenantId).single()
                                  .then(({ data: companyData }) => {
@@ -761,6 +764,20 @@ class EventProcessor {
                                      }
                                      
                                      if (botData) {
+                                         // --- MODO SANDBOX / FILTRO DE TELEFONE DE TESTE ---
+                                         // Se o bot estiver em modo de teste (test_mode), ele responde estritamente
+                                         // apenas ao número de telefone definido em test_phone.
+                                         if (botData.test_mode === true) {
+                                             const testPhoneClean = String(botData.test_phone || '').replace(/\D/g, '');
+                                             const clientPhoneClean = String(b.phone || '').replace(/\D/g, '');
+                                             
+                                             if (clientPhoneClean !== testPhoneClean) {
+                                                 console.log(`[EventProcessor] Sandbox Ativo: O bot ${botData.name} está em Modo de Teste e o celular recebido (${clientPhoneClean}) é diferente do celular sandbox (${testPhoneClean}). Silenciando robô.`);
+                                                 return;
+                                             }
+                                             console.log(`[EventProcessor] Sandbox Ativo: Mensagem do celular homologado (${clientPhoneClean}) autorizada para o bot ${botData.name}.`);
+                                         }
+
                                          // Roteia para a Luna (AI Agent)
                                          AutomationWorker.processMessage({
                                              tenantId: b.tenantId,
