@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.9.2] - 2026-06-03
+
+### Corrigido
+- **Filtro de Dispositivo MD (Contacts/JID)**: Corrigido o parsing de JIDs do WhatsApp Multi-Device no backend (`event-processor/index.js`). O sistema agora remove de forma robusta o sufixo de dispositivo `:dispositivo` (ex: `:0`, `:1`) ao tratar eventos do Baileys (`handleMessageUpsert`, `handleMessagingHistorySet` e `handleChatsUpdate`). Isso impede a criação indesejada de contatos duplicados (com nomes baseados no número e finalizando em `:0`) e garante o reaproveitamento integral do histórico, contatos, logs de conversas e parâmetros de IA salvos no banco.
+- **Higienização de Banco de Dados**: Criado e executado com sucesso o script `clean_ghosts.mjs` para remover com segurança contatos duplicados acumulados pós-reconexão de aparelhos pareados, eliminando poluição de registros do painel de operador e restabelecendo o fluxo normal em cascata.
+
 ## [2.9.1] - 2026-06-03
 
 ### Corrigido

@@ -247,9 +247,11 @@ class EventProcessor {
                 const ownerJid = sock?.user?.id;
                 let ownerPhone = null;
                 if (ownerJid) {
-                     ownerPhone = ownerJid.split(':')[0].split('@')[0];
+                     ownerPhone = ownerJid.split('@')[0].split(':')[0];
                 }
-                const phone = jid.split('@')[0];
+                const phone = jid.split('@')[0].split(':')[0];
+                const cleanJid = phone + '@' + jid.split('@')[1];
+                jid = cleanJid; // Sobrescreve jid com o JID limpo sem o sufixo de device
                 
                 // Evita auto-respostas bot-loop, mas não deve bloquear a inserção da mensagem no BD
                 // para que a interface (CRM) possa mostrar conversas de 'self-chat' (testes do próprio usuário).
@@ -907,15 +909,18 @@ class EventProcessor {
         const ownerJid = sock?.user?.id;
         let ownerPhone = null;
         if (ownerJid) {
-             ownerPhone = ownerJid.split(':')[0].split('@')[0];
+             ownerPhone = ownerJid.split('@')[0].split(':')[0];
         }
 
         // Contacts (Fazemos um lote imediato pro Histórico base)
         const mappedContactsToHistory = {};
         for (const c of contacts) {
-            const jid = c.id;
-            if (this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
-            const phone = jid.split('@')[0];
+            let jid = c.id;
+            if (!jid || this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
+            
+            const phone = jid.split('@')[0].split(':')[0];
+            const cleanJid = phone + '@' + jid.split('@')[1];
+            jid = cleanJid; // Limpa o JID removendo sufixo de dispositivo
             
             // Pula o próprio número
             if (ownerPhone && phone === ownerPhone) continue;
@@ -988,7 +993,7 @@ class EventProcessor {
 
     async handleChatsUpdate(tenantId, instanceId, sock, updates) {
         // Envia para o banco numa bala se houver atualização.
-        const phones = updates.map(u => u.id?.split('@')[0]).filter(Boolean);
+        const phones = updates.map(u => u.id?.split('@')[0]?.split(':')[0]).filter(Boolean);
         if(phones.length === 0) return;
         
         const { data: contacts } = await supabase.from('contacts').select('id, phone').eq('tenant_id', tenantId).in('phone', phones);
@@ -998,7 +1003,7 @@ class EventProcessor {
         const { data: convs } = await supabase.from('conversations').select('id, contact_id').eq('tenant_id', tenantId).in('contact_id', contactIds);
         
         for (const update of updates) {
-            const phone = update.id?.split('@')[0];
+            const phone = update.id?.split('@')[0]?.split(':')[0];
             const contact = contacts.find(c => c.phone === phone);
             if(contact) {
                 const conv = convs?.find(c => c.contact_id === contact.id);
