@@ -24,6 +24,7 @@ class EventProcessor {
         this.lastGlobalMessageTimestamp = 0;
         
         this.pendingStatuses = new Map();
+        this.processedMessagesCache = new Map(); // Cache de deduplicação de mensagens recentes
         this.statusUpdateQueue = new Map(); // Fila assíncrona para status atrasados
         this.isFlushingStatus = false;
         
@@ -32,12 +33,19 @@ class EventProcessor {
         // Loop de reconciliation assíncrono para status (a cada 4s)
         setInterval(() => this.flushStatusQueue(), 4000);
         
-        // Cleanup loop para evitar memory leaks nos status pendentes
+        // Cleanup loop para evitar memory leaks nos status pendentes e cache de mensagens processadas
         setInterval(() => {
             const now = Date.now();
             for (const [key, value] of this.pendingStatuses.entries()) {
                 if (now - value.timestamp > 300000) { // 5 minutos de TTL
                     this.pendingStatuses.delete(key);
+                }
+            }
+            if (this.processedMessagesCache) {
+                for (const [key, timestamp] of this.processedMessagesCache.entries()) {
+                    if (now - timestamp > 120000) { // 2 minutos de TTL
+                        this.processedMessagesCache.delete(key);
+                    }
                 }
             }
         }, 60000);
@@ -187,8 +195,19 @@ class EventProcessor {
 
     async handleMessageUpsert(tenantId, instanceId, sock, m) {
         if (!m.messages || m.messages.length === 0) return;
-
+ 
         for (const msg of m.messages) {
+            const msgId = msg.key?.id;
+            if (msgId) {
+                const safeInstanceId = instanceId || 'null_instance';
+                const cacheKey = `${safeInstanceId}_${msgId}`;
+                if (this.processedMessagesCache.has(cacheKey)) {
+                    console.log(`[EventProcessor] Mensagem Duplicada Detectada em Cache de Memória (Ignorando). ID: ${msgId}`);
+                    continue;
+                }
+                this.processedMessagesCache.set(cacheKey, Date.now());
+            }
+
             try {
                 fs.appendFileSync('event_debug.log', new Date().toISOString() + ' QUEUED RAW PAYLOAD: ' + JSON.stringify(msg) + '\n');
             } catch(e){}

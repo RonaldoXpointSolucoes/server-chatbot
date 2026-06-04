@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.9.3] - 2026-06-03
+
+### Corrigido
+- **Deduplicação de Mensagens no Backend**: Implementado cache em memória (`Map`) com TTL de 2 minutos no construtor de `EventProcessor` (`server/src/event-processor/index.js`) para evitar que a IA Luna dispare respostas duplicadas às mensagens recebidas via Baileys/WhatsApp, neutralizando condições de corrida (race conditions) em processamentos em lote e latências de inserção do Supabase.
+
 ## [2.9.2] - 2026-06-03
 
 ### Corrigido
