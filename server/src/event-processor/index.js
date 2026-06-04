@@ -527,6 +527,11 @@ class EventProcessor {
                              nextStatus = 'open';
                          }
                      }
+
+                     // Transição automática de open para bot se receber inbound e a IA estiver ativa
+                     if (exist.status === 'open' && data.has_inbound && !exist.ai_paused) {
+                         nextStatus = 'bot';
+                     }
                      
                      if (data.has_human_outbound) {
                          nextAiPaused = true;

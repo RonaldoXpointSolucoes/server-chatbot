@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.9.6] - 2026-06-04
+
+### Corrigido
+- **Transição Automática de Status (open -> bot)**: Resolvido o silenciamento indesejado da IA Luna em conversas ativas no status `'open'`. O backend agora detecta quando o atendente religa a IA pelo painel (`ai_paused: false`) e o cliente envia uma nova mensagem inbound (`data.has_inbound`). Nesses casos, o status da conversa transita automaticamente para `'bot'`, garantindo que a IA passe nas validações de segurança e responda de imediato.
+
 ## [2.9.5] - 2026-06-03
 
 ### Corrigido
