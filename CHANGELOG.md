@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.9.5] - 2026-06-03
+
+### Corrigido
+- **Consolidação de IA por Lote**: Corrigido o envio de respostas duplicadas pela IA Luna quando o mesmo cliente envia múltiplas mensagens sequenciais que caem no mesmo lote de processamento de 2 segundos. O backend agora agrupa as mensagens pendentes por conversa e executa a IA Luna apenas para a mensagem mais recente de cada conversa no lote, assegurando uma resposta única e consolidada.
+
 ## [2.9.4] - 2026-06-03
 
 ### Corrigido
