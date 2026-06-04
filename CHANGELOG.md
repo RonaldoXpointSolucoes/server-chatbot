@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.9.7] - 2026-06-04
+
+### Adicionado
+- **Log de Pausa/Retomada da IA Luna**: Adicionado registro de log do tipo sistema no histórico de conversas do chat quando um operador ativa ou desativa o robô de inteligência artificial através do painel. A mensagem registra "⏸️ IA Luna Pausada por [Nome do Atendente]" ou "▶️ IA Luna Retomada por [Nome do Atendente]", salvando no banco de dados e atualizando a interface instantaneamente.
+
 ## [2.9.6] - 2026-06-04
 
 ### Corrigido

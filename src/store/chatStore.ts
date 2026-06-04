@@ -3326,6 +3326,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if ('ai_paused' in payload) {
         await supabase.from('contacts').update({ bot_status: payload.ai_paused ? 'paused' : 'active' }).eq('id', realContactId);
+
+        const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+        const me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
+        const operatorName = me?.full_name || me?.email || 'Atendente';
+
+        const statusText = payload.ai_paused ? '⏸️ IA Luna Pausada' : '▶️ IA Luna Retomada';
+        const msgText = `${statusText} por ${operatorName}`;
+
+        const dbMsg = {
+           conversation_id: conv.id,
+           tenant_id: tenant.id,
+           text_content: msgText,
+           sender_type: 'system',
+           direction: 'outgoing',
+           timestamp: new Date().toISOString(),
+           status: 'sent',
+           instance_id: instId && instId !== 'default' ? instId : null
+        };
+        
+        await supabase.from('messages').insert(dbMsg);
+        
+        const pseudoId = 'system-aipaused-' + Date.now();
+        get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
       }
 
       // 1. Identificar se foi uma reabertura de atendimento reagendado/adiado (snoozed -> open)
