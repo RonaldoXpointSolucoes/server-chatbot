@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.9.12] - 2026-06-04
+
+### Corrigido
+- **Importação de Categorias em BotsList**: Adicionada a importação ausente de `BOT_CATEGORIES` em `src/pages/settings/BotsList.tsx` para solucionar o erro em runtime `Uncaught ReferenceError: BOT_CATEGORIES is not defined` que impedia o carregamento do aplicativo na tela de robôs.
+
 ## [2.9.11] - 2026-06-04
 
 ### Adicionado

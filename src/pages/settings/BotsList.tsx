@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { BotModal } from '../../components/modals/BotModal';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
-import { BOT_INDUSTRIES, BOT_TEMPLATES, BotTemplate } from '../../lib/botTemplates';
+import { BOT_INDUSTRIES, BOT_TEMPLATES, BotTemplate, BOT_CATEGORIES } from '../../lib/botTemplates';
 import { cn } from '../../lib/utils';
 
 export default function BotsList() {
