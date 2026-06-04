@@ -29,6 +29,46 @@ class AutomationWorker {
         }
     }
 
+    async routeMessageToBot(eligibleBots, textMessage) {
+        if (!eligibleBots || eligibleBots.length === 0) return null;
+        if (eligibleBots.length === 1) return eligibleBots[0];
+
+        try {
+            this.init();
+            if (!this.genAI) {
+                console.warn('[AutomationWorker] Gemini não inicializado no roteamento de bots. Usando fallback do primeiro bot.');
+                return eligibleBots[0];
+            }
+
+            const model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+            const prompt = `Você é um orquestrador de atendimento inteligente. Analise a mensagem do cliente e decida qual dos seguintes agentes (bots) é o mais adequado para responder ao cliente com base em seus nomes e descrições.
+
+Agentes disponíveis:
+${eligibleBots.map(b => `- ID: "${b.id}" | Nome: "${b.name}" | Descrição: "${b.description || 'Sem descrição.'}"`).join('\n')}
+
+Mensagem do cliente:
+"${textMessage}"
+
+Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem formatações adicionais, sem markdown, sem aspas. Exemplo de resposta: "53a2db6c-d9c2-4760-8cbd-454ceccd280c".`;
+
+            const result = await model.generateContent(prompt);
+            const responseText = result.response.text().trim();
+            
+            const chosenBot = eligibleBots.find(b => responseText.includes(b.id) || b.id === responseText);
+            if (chosenBot) {
+                console.log(`[BotRouter] Roteamento inteligente escolheu o bot: "${chosenBot.name}" (ID: ${chosenBot.id}) para a mensagem: "${textMessage}"`);
+                return chosenBot;
+            } else {
+                console.warn(`[BotRouter] Escolha da IA (${responseText}) não bate com os bots disponíveis. Usando fallback do primeiro bot.`);
+                return eligibleBots[0];
+            }
+        } catch (err) {
+            console.error('[BotRouter] Erro ao rotear mensagem inteligente:', err);
+            return eligibleBots[0];
+        }
+    }
+
     async getConversationHistory(tenantId, conversationId, limit = 10) {
         if (!conversationId) return [];
         const { data } = await supabase.from('messages')

@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.9.9] - 2026-06-04
+
+### Adicionado
+- **Roteamento Inteligente de Robôs por Assunto (RAG)**: Desenvolvido um orquestrador que analisa a mensagem de entrada do cliente usando o modelo `gemini-2.5-flash` para identificar o assunto e selecionar dinamicamente o robô com a base de conhecimento RAG e personalidade mais adequada (ex: Delivery, Suporte, Vendas) quando múltiplos robôs estão associados ao mesmo canal.
+
 ## [2.9.8] - 2026-06-04
 
 ### Adicionado
