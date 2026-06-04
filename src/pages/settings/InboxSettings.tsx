@@ -610,6 +610,7 @@ export default function InboxSettings() {
                             Gerencie o comportamento do assistente virtual de inteligência artificial para esta caixa de entrada.
                           </p>
                        </div>
+                     </div>
                        
                        {/* Botão de Atalho para Criação de Robôs */}
                        <button
