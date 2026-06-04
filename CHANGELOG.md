@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.0] - 2026-06-03
+
+### Adicionado
+- **Configurações de Personalização do Bot**: Adicionada interface de gerenciamento com sliders e caixas de texto premium na aba "Configuração do Bot" (`InboxSettings.tsx`), possibilitando configurar tempo de resposta (atraso de resposta com simulação de digitação) e instruções de personalidade para o robô.
+- **Simulação de Digitação Reativa (composing)**: O robô de autoatendimento (`AutomationWorker.js`) agora emite o status `"digitando..."` e aguarda o intervalo de tempo configurado antes de enviar cada mensagem, humanizando os fluxos de IA.
+- **Injeção de Diretrizes no System Prompt**: Permite que observações e regras de personalidade inseridas na aba de configurações sejam injetadas diretamente no system prompt da IA Luna (Gemini), evitando termos robóticos e comportamentos inadequados.
+
 ## [2.8.19] - 2026-05-29
 
 ### Adicionado

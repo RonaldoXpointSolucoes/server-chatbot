@@ -48,6 +48,8 @@ export default function InboxSettings() {
   // Bot states
   const [botActive, setBotActive] = useState(false);
   const [botTestNumbers, setBotTestNumbers] = useState('');
+  const [botDelay, setBotDelay] = useState<number>(5);
+  const [botInstructions, setBotInstructions] = useState('');
   const [previousSettings, setPreviousSettings] = useState<any>(null);
   const [toast, setToast] = useState<{ message: string; isSuccess: boolean; showUndo?: boolean } | null>(null);
 
@@ -95,6 +97,8 @@ export default function InboxSettings() {
           setNotificationSound(data.notification_sound || 'default');
           setBotActive(data.settings?.bot_active !== false);
           setBotTestNumbers(data.settings?.bot_test_numbers || '');
+          setBotDelay(data.settings?.bot_delay ?? 5);
+          setBotInstructions(data.settings?.bot_instructions || '');
         }
       } catch (err) {
         console.error('Falha ao buscar instância:', err);
@@ -127,7 +131,9 @@ export default function InboxSettings() {
         assigned_agents: assignedAgents,
         auto_assignment: autoAssignment,
         bot_active: botActive,
-        bot_test_numbers: botTestNumbers
+        bot_test_numbers: botTestNumbers,
+        bot_delay: botDelay,
+        bot_instructions: botInstructions
       };
 
       const { error } = await supabase.from('whatsapp_instances')
@@ -178,6 +184,8 @@ export default function InboxSettings() {
       setAutoAssignment(previousSettings.settings.auto_assignment || false);
       setBotActive(previousSettings.settings.bot_active !== false);
       setBotTestNumbers(previousSettings.settings.bot_test_numbers || '');
+      setBotDelay(previousSettings.settings.bot_delay ?? 5);
+      setBotInstructions(previousSettings.settings.bot_instructions || '');
       
       setInstance({ 
         ...instance, 
@@ -656,6 +664,75 @@ export default function InboxSettings() {
                             </p>
                          </div>
                       )}
+                   </div>
+
+                   {/* Card de Configuração de Tempo de Resposta (Delay) */}
+                   <div className="bg-[#182229] border border-white/5 p-6 rounded-[2rem] flex flex-col gap-5 transition-all hover:bg-white/[0.04] animate-in fade-in slide-in-from-bottom-4 duration-500">
+                      <div className="flex items-center gap-3">
+                         <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center border border-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.15)]">
+                            <Clock className="text-blue-500" size={20} />
+                         </div>
+                         <div className="flex flex-col gap-0.5">
+                            <span className="font-bold text-white text-base">Tempo de Resposta (Atraso Humano)</span>
+                            <span className="text-xs text-blue-500 font-semibold">Simulação de Digitação Real</span>
+                         </div>
+                      </div>
+                      
+                      <div className="flex flex-col gap-2">
+                         <p className="text-xs text-gray-400 leading-relaxed font-medium">
+                            Ajuste o tempo médio que o robô aguardará antes de enviar cada resposta. Durante este intervalo, o robô exibirá o status <strong>"digitando..."</strong> no WhatsApp do cliente, tornando a interação muito mais humanizada.
+                         </p>
+                      </div>
+
+                      <div className="flex flex-col gap-3 mt-2">
+                         <div className="flex justify-between items-center text-xs font-bold text-gray-300">
+                            <span>Atraso de Resposta</span>
+                            <span className="bg-blue-600/20 text-blue-400 px-2.5 py-1 rounded-lg border border-blue-500/30 text-sm font-bold">
+                               {botDelay} segundos
+                            </span>
+                         </div>
+                         <div className="flex items-center gap-4">
+                            <span className="text-xs font-bold text-gray-500">1s</span>
+                            <input
+                               type="range"
+                               min="1"
+                               max="60"
+                               value={botDelay}
+                               onChange={e => setBotDelay(Number(e.target.value))}
+                               className="w-full h-2 bg-[#111b21] rounded-lg appearance-none cursor-pointer accent-blue-600 focus:outline-none"
+                            />
+                            <span className="text-xs font-bold text-gray-500">60s</span>
+                         </div>
+                      </div>
+                   </div>
+
+                   {/* Card de Configuração de Instruções de Personalidade */}
+                   <div className="bg-[#182229] border border-white/5 p-6 rounded-[2rem] flex flex-col gap-5 transition-all hover:bg-white/[0.04] animate-in fade-in slide-in-from-bottom-4 duration-500">
+                      <div className="flex items-center gap-3">
+                         <div className="w-10 h-10 bg-purple-500/10 rounded-xl flex items-center justify-center border border-purple-500/20 shadow-[0_0_10px_rgba(168,85,247,0.15)]">
+                            <Star className="text-purple-500" size={20} />
+                         </div>
+                         <div className="flex flex-col gap-0.5">
+                            <span className="font-bold text-white text-base">Instruções de Personalidade do Robô</span>
+                            <span className="text-xs text-purple-500 font-semibold">Diretrizes de Comportamento e Tom de Voz</span>
+                         </div>
+                      </div>
+                      
+                      <div className="flex flex-col gap-2">
+                         <p className="text-xs text-gray-400 leading-relaxed font-medium">
+                            Defina regras específicas para moldar a personalidade e o comportamento da IA Luna nesta caixa de entrada.
+                         </p>
+                      </div>
+
+                      <div className="flex flex-col gap-2 mt-2">
+                         <label className="text-xs font-bold text-gray-300">Instruções Personalizadas</label>
+                         <textarea
+                            value={botInstructions}
+                            onChange={e => setBotInstructions(e.target.value)}
+                            placeholder="Ex: Não diga que você é um assistente virtual. Seja o mais humanizado possível. Responda em tom informal e amigável usando emojis. Nunca utilize jargões técnicos."
+                            className="w-full h-32 bg-[#111b21] border border-white/10 rounded-2xl p-4 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all font-medium resize-none text-sm placeholder-gray-600"
+                         />
+                      </div>
                    </div>
                    
                    {/* Botão de Salvar Rápido na própria aba */}

@@ -60,7 +60,7 @@ class AutomationWorker {
         return sanitizedHistory;
     }
 
-    async processMessage({ tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock }) {
+    async processMessage({ tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock, botDelay, botInstructions }) {
         try {
             this.init();
             if (!this.genAI) {
@@ -89,7 +89,11 @@ class AutomationWorker {
             }
 
             // 2. Prepara o System Prompt
-            const systemPrompt = (botSettings.system_prompt || "Você é um assistente prestativo.") + contextText;
+            let basePrompt = botSettings.system_prompt || "Você é um assistente prestativo.";
+            if (botInstructions && botInstructions.trim().length > 0) {
+                basePrompt += `\n\n### INSTRUÇÕES DE COMPORTAMENTO PERSONALIZADAS ###\nImportante: Siga estritamente as diretrizes e regras de personalidade a seguir em todas as interações:\n${botInstructions}\n`;
+            }
+            const systemPrompt = basePrompt + contextText;
             
             // 3. Obtem histórico da conversa
             let history = await this.getConversationHistory(tenantId, conversationId, 12);
@@ -266,6 +270,20 @@ class AutomationWorker {
 
             // 4. Envia resposta final
             if (finalResponseText && sock) {
+                // Simulação de digitação (Atraso Humano) baseada no botDelay
+                const delaySec = Number(botDelay) || 0;
+                if (delaySec > 0) {
+                    try {
+                        await sock.sendPresenceUpdate('composing', jid);
+                    } catch (e) {
+                        console.error('[AutomationWorker] Falha ao enviar presença composing:', e);
+                    }
+                    await new Promise(resolve => setTimeout(resolve, delaySec * 1000));
+                    try {
+                        await sock.sendPresenceUpdate('paused', jid);
+                    } catch (e) {}
+                }
+
                 const msgResult = await sock.sendMessage(jid, { text: finalResponseText });
                 if (msgResult && msgResult.key) {
                     try {

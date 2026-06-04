@@ -839,7 +839,9 @@ class EventProcessor {
                                                  textMessage: b.textMessage,
                                                  botId: botData.id,
                                                  botSettings: botData,
-                                                 sock: b.sock
+                                                 sock: b.sock,
+                                                 botDelay: instanceConfig.bot_delay,
+                                                 botInstructions: instanceConfig.bot_instructions
                                              });
                                          } else if (botsData.length === 0) {
                                              // Fallback para o Runtime do Flow Builder APENAS se o tenant não tiver nenhuma configuração de bot (evita double-talk)
