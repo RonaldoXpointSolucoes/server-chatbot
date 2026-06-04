@@ -508,13 +508,32 @@ class EventProcessor {
              const toInsertConvs = [];
              const toUpdateConvs = []; 
              
+             const updatedStatusMap = new Map();
+             const updatedAiPausedMap = new Map();
+             
              for(const [key, data] of convMap.entries()) {
                  const exist = existingConvMap.get(key);
+                 let finalStatus = 'bot';
+                 let finalAiPaused = false;
+                 
                  if(exist) {
                      let nextStatus = exist.status || 'bot';
+                     let nextAiPaused = exist.ai_paused || false;
+                     
                      if ((exist.status === 'resolved' || exist.status === 'closed') && (data.has_inbound || data.has_human_outbound)) {
-                         nextStatus = 'open'; // Reabertura automática por nova mensagem do cliente (inbound) ou operador humano (outbound)
+                         if (data.has_inbound && !exist.ai_paused) {
+                             nextStatus = 'bot';
+                         } else {
+                             nextStatus = 'open';
+                         }
                      }
+                     
+                     if (data.has_human_outbound) {
+                         nextAiPaused = true;
+                     }
+                     
+                     finalStatus = nextStatus;
+                     finalAiPaused = nextAiPaused;
                      
                      toUpdateConvs.push({
                          id: exist.id,
@@ -529,11 +548,16 @@ class EventProcessor {
                      });
                  } else {
                      let initialStatus = 'resolved';
+                     let initialAiPaused = false;
                      if (data.has_inbound) {
                          initialStatus = 'bot';
                      } else if (data.has_human_outbound) {
                          initialStatus = 'open';
+                         initialAiPaused = true;
                      }
+                     
+                     finalStatus = initialStatus;
+                     finalAiPaused = initialAiPaused;
                      
                      toInsertConvs.push({
                          tenant_id: data.tenant_id,
@@ -546,6 +570,9 @@ class EventProcessor {
                          ...(data.has_human_outbound && { ai_paused: true })
                      });
                  }
+                 
+                 updatedStatusMap.set(key, finalStatus);
+                 updatedAiPausedMap.set(key, finalAiPaused);
              }
              
              const insertedConvs = [];
@@ -611,8 +638,9 @@ class EventProcessor {
              await Promise.all(activeBatch.map(async b => {
                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
                  b.conversationId = finalConvIdMap.get(`${b.tenantId}_${b.instanceId}_${cid}`) || finalConvIdMap.get(`${b.tenantId}_null_instance_${cid}`);
-                 b.convStatus = existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.status || existingConvMap.get(`${b.tenantId}_null_instance_${cid}`)?.status || 'bot';
-                 b.aiPaused = existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.ai_paused || false;
+                 const mapKey = `${b.tenantId}_${b.instanceId || 'null_instance'}_${cid}`;
+                 b.convStatus = updatedStatusMap.get(mapKey) || existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.status || existingConvMap.get(`${b.tenantId}_null_instance_${cid}`)?.status || 'bot';
+                 b.aiPaused = updatedAiPausedMap.has(mapKey) ? updatedAiPausedMap.get(mapKey) : (existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.ai_paused || false);
                  
                  if (!b.conversationId) return; // ignora falha bruta
                  

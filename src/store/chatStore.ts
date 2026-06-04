@@ -3288,6 +3288,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     
     // UI Otimista (Separa flags internas que não pertencem ao schema de conversations)
     const { snoozed_by_system, ...dbPayload } = payload as any;
+    if ('ai_paused' in payload) {
+      dbPayload.status = payload.ai_paused ? 'open' : 'bot';
+    }
 
     set((state) => ({
        contacts: state.contacts.map((c) => {
@@ -3302,6 +3305,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if ('ai_paused' in payload) {
                stateUpdates.ai_paused = payload.ai_paused;
                stateUpdates.bot_status = payload.ai_paused ? 'paused' : 'active';
+               stateUpdates.conv_status = payload.ai_paused ? 'open' : 'bot';
             }
             return { ...c, ...stateUpdates };
          }

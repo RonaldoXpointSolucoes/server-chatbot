@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.9.4] - 2026-06-03
+
+### Corrigido
+- **Sincronização de Status da Conversa (IA e Atendente)**: Corrigido o silenciamento indesejado do bot Luna. O frontend agora atualiza automaticamente o status da conversa para `'bot'` ao ativar a IA (`ai_paused: false`) e para `'open'` ao pausá-la (`ai_paused: true`). O backend foi ajustado para que o lote (`flushQueue`) reabra conversas resolvidas pelo cliente diretamente no status `'bot'` se a IA estiver ativa. Além disso, o backend agora propaga o status e o estado de pausa recalculados no lote de forma instantânea para o loop de decisão do bot Luna, eliminando o atraso de sincronização que o silenciava.
+
 ## [2.9.3] - 2026-06-03
 
 ### Corrigido
