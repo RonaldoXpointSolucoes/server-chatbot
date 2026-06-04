@@ -38,6 +38,43 @@ export default function BotsList() {
     }
   };
 
+  const getBotCategory = (bot: any) => {
+    // Primeiro tenta achar pelo prompt de sistema correspondente
+    const templateByPrompt = BOT_TEMPLATES.find(t => t.systemPrompt.trim() === bot.systemPrompt?.trim());
+    if (templateByPrompt) return templateByPrompt.category;
+    
+    // Se não achar, tenta achar pelo nome do robô
+    const templateByName = BOT_TEMPLATES.find(t => t.name.toLowerCase() === bot.name?.toLowerCase());
+    if (templateByName) return templateByName.category;
+    
+    // Se for um bot da Luna (pelo nome)
+    const nameLower = bot.name?.toLowerCase() || '';
+    if (nameLower.includes('core') || nameLower.includes('recep') || nameLower.includes('menu') || nameLower.includes('ponte') || nameLower.includes('marca') || nameLower.includes('unidade')) {
+      return 'Atendimento e Triagem';
+    }
+    if (nameLower.includes('pedid') || nameLower.includes('cardapio vivo') || nameLower.includes('campanha') || nameLower.includes('pagament') || nameLower.includes('fechad') || nameLower.includes('vendedor')) {
+      return 'Vendas e Orçamentos';
+    }
+    if (nameLower.includes('mesa') || nameLower.includes('reserva') || nameLower.includes('agenda')) {
+      return 'Agendamentos e Reservas';
+    }
+    if (nameLower.includes('entreg') || nameLower.includes('status') || nameLower.includes('compra') || nameLower.includes('talent')) {
+      return 'Suporte e Operacional';
+    }
+    if (nameLower.includes('qualidad') || nameLower.includes('relaciona') || nameLower.includes('satisfa') || nameLower.includes('fidel')) {
+      return 'Encantamento e Pós-Venda';
+    }
+    
+    // Fallback para a primeira categoria
+    return 'Atendimento e Triagem';
+  };
+
+  const isBotDefault = (bot: any) => {
+    const template = BOT_TEMPLATES.find(t => t.name.toLowerCase() === bot.name?.toLowerCase() || t.systemPrompt.trim() === bot.systemPrompt?.trim());
+    if (!template) return false; // Se foi criado do zero, é customizado
+    return bot.systemPrompt?.trim() === template.systemPrompt.trim();
+  };
+
   const filteredBots = bots.filter((bot) => 
     bot.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     bot.description?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -242,104 +279,125 @@ export default function BotsList() {
                </p>
              </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 auto-rows-max animate-in fade-in slide-in-from-bottom-8 duration-700">
-              {filteredBots.map((bot) => (
-                <div 
-                  key={bot.id}
-                  className="group relative bg-[#18181b]/40 hover:bg-[#1a1b1e]/80 backdrop-blur-2xl border border-white/[0.05] hover:border-indigo-500/40 rounded-3xl overflow-hidden transition-all duration-500 hover:shadow-[0_20px_50px_-20px_rgba(79,70,229,0.3)] hover:-translate-y-1 p-6 flex flex-col"
-                >
-                  {/* Background Blob On Hover */}
-                  <div className="absolute -inset-4 bg-gradient-to-r from-indigo-500/0 via-purple-500/0 to-indigo-500/0 opacity-0 group-hover:opacity-20 blur-3xl transition-all duration-700 pointer-events-none" />
-
-                  {/* Header do Card */}
-                  <div className="flex justify-between items-start mb-6 relative z-10">
-                    <div className="flex gap-4 items-center">
-                       <div className="w-16 h-16 rounded-[1.25rem] bg-gradient-to-br from-[#20202a] to-[#15151a] border border-white/5 flex items-center justify-center shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] group-hover:border-indigo-500/30 group-hover:shadow-[0_0_20px_rgba(99,102,241,0.2)] transition-all">
-                          <Bot className="w-8 h-8 text-indigo-400 group-hover:text-indigo-300 group-hover:scale-110 transition-transform duration-500" />
+             <div className="flex gap-6 overflow-x-auto pb-6 styled-scrollbar select-none w-full">
+               {BOT_CATEGORIES.map(category => {
+                 const botsInCategory = filteredBots.filter(bot => getBotCategory(bot) === category);
+                 return (
+                   <div key={category} className="w-[370px] shrink-0 flex flex-col bg-[#141519]/70 border border-white/5 p-5 rounded-[2.5rem] backdrop-blur-xl shadow-2xl h-[calc(100vh-320px)] overflow-hidden animate-in fade-in slide-in-from-right-4 duration-500">
+                     {/* Header da Coluna */}
+                     <div className="flex items-center justify-between mb-5 px-1">
+                       <div className="flex items-center gap-2.5">
+                         <span className={cn(
+                           "w-2.5 h-2.5 rounded-full",
+                           category === 'Atendimento e Triagem' && "bg-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.5)]",
+                           category === 'Vendas e Orçamentos' && "bg-purple-400 shadow-[0_0_10px_rgba(192,132,252,0.5)]",
+                           category === 'Suporte e Operacional' && "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.5)]",
+                           category === 'Agendamentos e Reservas' && "bg-pink-400 shadow-[0_0_10px_rgba(244,114,182,0.5)]",
+                           category === 'Encantamento e Pós-Venda' && "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]"
+                         )} />
+                         <h4 className="text-xs font-bold text-white/95 tracking-wide uppercase">{category}</h4>
                        </div>
-                       <div>
-                         <div className="flex items-center gap-2 mb-1.5">
-                           <h3 className="font-bold text-lg text-white/90 group-hover:text-white transition-colors">{bot.name}</h3>
-                         </div>
-                         <div className="flex flex-wrap items-center gap-2 text-xs text-white/50 font-medium">
-                           {bot.status === 'active' ? (
-                             <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-widest shadow-[0_0_10px_rgba(16,185,129,0.1)]">
-                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Ativo
-                             </span>
-                           ) : (
-                             <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-500/10 border border-slate-500/20 text-slate-400 text-[10px] font-bold uppercase tracking-widest">
-                               <span className="w-1.5 h-1.5 rounded-full bg-slate-500" /> Inativo
-                             </span>
-                           )}
-                           {bot.test_mode && (
-                             <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold uppercase tracking-widest shadow-[0_0_10px_rgba(245,158,11,0.1)] animate-pulse" title={`Homologando exclusivamente no número: ${bot.test_phone}`}>
-                               <Sparkles className="w-3 h-3 text-amber-400" /> Sandbox
-                             </span>
-                           )}
-                           <span className="flex items-center gap-1.5 bg-white/5 px-2 py-0.5 rounded-md border border-white/5">
-                              <Network className="w-3.5 h-3.5 text-blue-400" />
-                              {bot.model}
-                           </span>
-                         </div>
-                       </div>
-                    </div>
-                  </div>
-
-                  {/* Body do Card */}
-                  <div className="flex-1 relative z-10 mb-6">
-                    <p className="text-white/50 text-sm leading-relaxed line-clamp-3 min-h-[60px] font-medium">
-                      {bot.description || 'Nenhuma descrição fornecida para este agente.'}
-                    </p>
-                  </div>
-
-                  {/* Footer - Stats & Knowledge Base info */}
-                  <div className="mt-auto pt-5 border-t border-white/[0.05] flex items-center justify-between relative z-10">
-                     <div className="flex gap-4">
-                       <div className="flex items-center gap-2 group/rag cursor-pointer" onClick={() => handleEditClick(bot)}>
-                          <div className="p-2 rounded-xl bg-emerald-500/5 text-emerald-400 group-hover/rag:bg-emerald-500 group-hover/rag:text-white transition-all shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] border border-emerald-500/10 group-hover/rag:border-transparent group-hover/rag:shadow-[0_0_15px_rgba(16,185,129,0.3)]">
-                             <Database className="w-4 h-4" />
-                          </div>
-                          <div className="flex flex-col">
-                             <span className="text-[9px] font-extrabold text-white/30 uppercase tracking-widest">Base RAG</span>
-                             <span className="text-xs font-bold text-white/70 group-hover/rag:text-white transition-colors">
-                               {bot.knowledgeDocuments || 0} Docs
-                             </span>
-                          </div>
-                       </div>
-                       
-                       <div className="flex items-center gap-2 group/chan cursor-pointer" onClick={() => handleEditClick(bot)}>
-                          <div className="p-2 rounded-xl bg-rose-500/5 text-rose-400 group-hover/chan:bg-rose-500 group-hover/chan:text-white transition-all shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] border border-rose-500/10 group-hover/chan:border-transparent group-hover/chan:shadow-[0_0_15px_rgba(244,63,94,0.3)]">
-                             <Waypoints className="w-4 h-4" />
-                          </div>
-                          <div className="flex flex-col">
-                             <span className="text-[9px] font-extrabold text-white/30 uppercase tracking-widest">Canais</span>
-                             <span className="text-xs font-bold text-white/70 group-hover/chan:text-white transition-colors">
-                               {bot.channels?.length || 0}
-                             </span>
-                          </div>
-                       </div>
+                       <span className="bg-white/5 border border-white/10 px-2.5 py-0.5 rounded-full text-xs text-white/50 font-bold">
+                         {botsInCategory.length}
+                       </span>
                      </div>
-                     <div className="flex gap-1.5 relative z-10">
-                       <button 
-                          onClick={(e) => { e.stopPropagation(); handleEditClick(bot); }}
-                          className="p-2.5 rounded-xl bg-white/5 hover:bg-indigo-500/20 hover:border-indigo-500/30 border border-transparent text-white/40 hover:text-indigo-400 transition-all shadow-sm"
-                          title="Configurar Robô"
-                       >
-                          <Edit3 className="w-4 h-4" />
-                       </button>
-                       <button 
-                          onClick={(e) => { e.stopPropagation(); handleDelete(bot.id); }}
-                          className="p-2.5 rounded-xl bg-white/5 hover:bg-rose-500/20 hover:border-rose-500/30 border border-transparent text-white/40 hover:text-rose-400 transition-all shadow-sm"
-                          title="Exterminar Robô"
-                       >
-                          <Trash2 className="w-4 h-4" />
-                       </button>
-                     </div>
-                  </div>
 
-                </div>
-              ))}
-            </div>
+                     {/* Lista de Bots na Coluna com Scroll Vertical */}
+                     <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4 styled-scrollbar pb-4">
+                       {botsInCategory.length === 0 ? (
+                         <div className="flex flex-col items-center justify-center py-12 text-center border border-white/5 rounded-3xl h-44">
+                           <Bot className="w-8 h-8 text-white/10 mb-2" />
+                           <p className="text-xs text-white/30 font-medium">Nenhum agente ativo</p>
+                         </div>
+                       ) : (
+                         botsInCategory.map((bot) => {
+                           const isDefault = isBotDefault(bot);
+                           return (
+                             <div 
+                               key={bot.id}
+                               className="group relative bg-[#1c1d22]/50 hover:bg-[#1c1d22]/90 border border-white/[0.04] hover:border-indigo-500/35 rounded-3xl p-5 flex flex-col transition-all duration-300 shadow-sm hover:shadow-[0_10px_25px_-10px_rgba(99,102,241,0.15)] cursor-pointer"
+                               onClick={() => handleEditClick(bot)}
+                             >
+                               {/* Header Card */}
+                               <div className="flex justify-between items-start gap-3 mb-4">
+                                 <div className="flex items-center gap-3">
+                                   <div className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/5 flex items-center justify-center shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] group-hover:border-indigo-500/20 group-hover:shadow-[0_0_15px_rgba(99,102,241,0.15)] transition-all">
+                                     <Bot className="w-6 h-6 text-indigo-400 group-hover:scale-105 transition-transform" />
+                                   </div>
+                                   <div>
+                                     <h5 className="font-bold text-sm text-white/90 group-hover:text-white transition-colors line-clamp-1">{bot.name}</h5>
+                                     <div className="flex items-center gap-1.5 mt-1">
+                                       {bot.status === 'active' ? (
+                                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Ativo" />
+                                       ) : (
+                                         <span className="w-2 h-2 rounded-full bg-slate-500" title="Inativo" />
+                                       )}
+                                       <span className="text-[10px] text-white/40 font-mono tracking-tight">{bot.model}</span>
+                                     </div>
+                                   </div>
+                                 </div>
+                               </div>
+
+                               {/* Descrição */}
+                               <p className="text-white/40 text-xs leading-relaxed font-medium mb-5 line-clamp-2 min-h-[32px]">
+                                 {bot.description || 'Sem descrição.'}
+                               </p>
+
+                               {/* Badges de Estado RAG e Versão (Sinalizadores Estratégicos) */}
+                               <div className="flex flex-wrap items-center gap-2 mb-4 border-t border-white/[0.03] pt-4">
+                                 {/* Sinalizador Default vs Editado */}
+                                 {isDefault ? (
+                                   <span className="px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[9px] font-extrabold uppercase tracking-wide">
+                                     Padrão (Original)
+                                   </span>
+                                 ) : (
+                                   <span className="px-2 py-0.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[9px] font-extrabold uppercase tracking-wide">
+                                     Editado (Custom)
+                                   </span>
+                                 )}
+
+                                 {/* Sinalizador Base RAG */}
+                                 {bot.knowledgeDocuments > 0 ? (
+                                   <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-extrabold uppercase tracking-wide">
+                                     <Database size={10} /> RAG Ativo ({bot.knowledgeDocuments})
+                                   </span>
+                                 ) : (
+                                   <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/5 border border-white/10 text-white/30 text-[9px] font-extrabold uppercase tracking-wide">
+                                     <Database size={10} /> Sem RAG
+                                   </span>
+                                 )}
+
+                                 {/* Canais */}
+                                 <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/5 border border-white/5 text-white/40 text-[9px] font-bold">
+                                   <Waypoints size={10} className="text-pink-400" /> {bot.channels?.length || 0} Canais
+                                 </span>
+                               </div>
+
+                               {/* Ações Rápidas */}
+                               <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                 <button 
+                                   onClick={() => handleEditClick(bot)}
+                                   className="p-2 rounded-xl bg-white/5 hover:bg-indigo-500/20 hover:border-indigo-500/30 border border-transparent text-white/40 hover:text-indigo-400 transition-all shadow-sm text-xs font-bold flex items-center gap-1"
+                                 >
+                                   <Edit3 className="w-3.5 h-3.5" /> Configurar
+                                 </button>
+                                 <button 
+                                   onClick={() => handleDelete(bot.id)}
+                                   className="p-2 rounded-xl bg-white/5 hover:bg-rose-500/20 hover:border-rose-500/30 border border-transparent text-white/40 hover:text-rose-400 transition-all shadow-sm"
+                                   title="Excluir"
+                                 >
+                                   <Trash2 className="w-3.5 h-3.5" />
+                                 </button>
+                               </div>
+                             </div>
+                           );
+                         })
+                       )}
+                     </div>
+                   </div>
+                 );
+               })}
+             </div>
           )}
         </div>
       </div>

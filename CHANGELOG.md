@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.11] - 2026-06-04
+
+### Adicionado
+- **Templates dos Agentes LUNA (Food Service)**: Criação de 17 agentes de IA baseados no Prompt Mestre Luna (Core, Recepção, Menu, Pedido, Entrega, Status, Qualidade, Ponte, Pagamentos, Mesa, Relacionamento, Compras, Talentos, Marca, Cardápio Vivo, Unidade e Campanhas) com prompts enriquecidos contendo regras de humanização, restrições e exemplos de tom.
+- **Categorização no Kanban de Robôs**: Estruturação da listagem de robôs em visualização horizontal estilo Kanban no gerenciador de agentes. A função de classificação agora move dinamicamente o robô Luna Mesa para a coluna 'Agendamentos e Reservas'.
+- **Sinalizadores Estratégicos de Robôs**: Adicionadas badges visuais premium que sinalizam o status de cada robô (Padrão/Original vs Editado/Customizado), presença de base RAG ativa (com total de documentos) e quantidade de canais WhatsApp ativos.
+
 ## [2.9.10] - 2026-06-04
 
 ### Adicionado
