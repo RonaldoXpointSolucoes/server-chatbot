@@ -2734,7 +2734,7 @@ export default function ChatDashboard() {
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
           {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.9.0'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '03/06/2026, 21:13'}`}</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.9.1'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '03/06/2026, 21:39'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
@@ -3965,9 +3965,12 @@ export default function ChatDashboard() {
                     
                     {/* Bot Controls in Menu */}
                     <div className="border-b border-gray-100 dark:border-[#304046] mb-1 pb-1">
-                      {activeChat.bot_status === 'paused' ? (
+                      {activeChat.ai_paused ? (
                         <button 
-                          onClick={() => { setBotStatus(activeChat.id, 'active'); setActiveChatDropdown(false); }}
+                          onClick={() => { 
+                            useChatStore.getState().updateConversationField(activeChat.id, { ai_paused: false }); 
+                            setActiveChatDropdown(false); 
+                          }}
                           className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors"
                         >
                           <Power size={16} className="text-[#00a884]" />
@@ -3975,10 +3978,13 @@ export default function ChatDashboard() {
                         </button>
                       ) : (
                         <button 
-                          onClick={() => { setBotStatus(activeChat.id, 'paused'); setActiveChatDropdown(false); }}
+                          onClick={() => { 
+                            useChatStore.getState().updateConversationField(activeChat.id, { ai_paused: true }); 
+                            setActiveChatDropdown(false); 
+                          }}
                           className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors"
                         >
-                          <Bot size={16} className="text-yellow-600" />
+                          <Bot size={16} className="text-yellow-600 animate-pulse" />
                           <span className="text-[14px] text-[#3b4a54] dark:text-[#d1d7db] font-medium">Pausar a IA</span>
                         </button>
                       )}

@@ -229,8 +229,7 @@ class AutomationWorker {
                         }
                         else if (call.name === "Escalar_humano") {
                             if (conversationId) {
-                                await supabase.from('conversations').update({ status: 'open' }).eq('id', conversationId);
-                                // Desativa bot desta conversa se houver algum log ou state (depende de como o event-processor roteia)
+                                await supabase.from('conversations').update({ status: 'open', ai_paused: true }).eq('id', conversationId);
                             }
                             functionResult = { status: "Atendimento transferido. Encerre sua participação." };
                         }

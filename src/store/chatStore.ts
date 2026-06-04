@@ -1705,10 +1705,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setBotStatus: async (contactId, status) => {
     // Atualiza otimista
     set((state) => ({
-      contacts: state.contacts.map((c) => c.id === contactId ? { ...c, bot_status: status } : c)
+      contacts: state.contacts.map((c) => c.id === contactId ? { ...c, bot_status: status, ai_paused: status === 'paused' } : c)
     }));
     // Assíncrono no DB
     await supabase.from('contacts').update({ bot_status: status }).eq('id', getRealContactId(contactId));
+
+    try {
+      const realContactId = getRealContactId(contactId);
+      const instId = getInstanceIdFromContact(contactId);
+      const tenant = get().tenantInfo;
+      if (tenant) {
+        let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
+        if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+        const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
+        if (conv) {
+          await supabase.from('conversations').update({ ai_paused: status === 'paused' }).eq('id', conv.id);
+        }
+      }
+    } catch (e) {
+      console.error('Erro ao sincronizar ai_paused na conversa pelo setBotStatus:', e);
+    }
   },
 
   addMessageLocally: (contactId, msg, options) => {
@@ -1989,11 +2005,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         // 2. Remove o assignment direto na tabela certa (conversations)
-        await supabase.from('conversations').update({ assigned_to: null, status: 'resolved' }).eq('id', conv.id);
+        await supabase.from('conversations').update({ assigned_to: null, status: 'resolved', ai_paused: false }).eq('id', conv.id);
 
         // 3. Atualização local do estado para sumir da lista e fechar o chat ativo
         set((state) => ({
-            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, assigned_to: null, conv_status: 'resolved' } : c),
+            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, assigned_to: null, conv_status: 'resolved', ai_paused: false } : c),
             activeChatId: state.activeChatId === contactId ? null : state.activeChatId
         }));
 
@@ -3283,7 +3299,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if ('snoozed_by' in payload) stateUpdates.snoozed_by = payload.snoozed_by;
             if ('priority' in payload) stateUpdates.priority = payload.priority;
             if ('assigned_to' in payload) stateUpdates.assigned_to = payload.assigned_to;
-            if ('ai_paused' in payload) stateUpdates.ai_paused = payload.ai_paused;
+            if ('ai_paused' in payload) {
+               stateUpdates.ai_paused = payload.ai_paused;
+               stateUpdates.bot_status = payload.ai_paused ? 'paused' : 'active';
+            }
             return { ...c, ...stateUpdates };
          }
          return c;
@@ -3300,6 +3319,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const { error } = await supabase.from('conversations').update(dbPayload).eq('id', conv.id);
       if (error) throw error;
+
+      if ('ai_paused' in payload) {
+        await supabase.from('contacts').update({ bot_status: payload.ai_paused ? 'paused' : 'active' }).eq('id', realContactId);
+      }
 
       // 1. Identificar se foi uma reabertura de atendimento reagendado/adiado (snoozed -> open)
       const currentContacts = get().contacts;

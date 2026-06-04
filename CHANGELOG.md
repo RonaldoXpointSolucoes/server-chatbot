@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.1] - 2026-06-03
+
+### Corrigido
+- **Sincronização de IA Pausada (Realtime)**: Corrigido o bug em que o status de pausa da Inteligência Artificial (`ai_paused`) não era sincronizado em tempo real com o frontend no callback do realtime de `conversations`. Agora, as badges no topo esquerdo do cabeçalho de chat ativo do painel de operador e do celular atualizam instantaneamente ao haver qualquer mudança de estado no banco (como quando a IA decide transferir o chat para atendente humano ou quando uma mensagem outbound é disparada).
+- **Consistência de Dupla Persistência (Pausa da IA)**: Sincronizadas as colunas `ai_paused` (tabela `conversations`) e `bot_status` (tabela `contacts`) no banco Supabase e no estado local do cliente. Toda alteração em uma delas reflete automaticamente na outra, garantindo consistência absoluta das automações e do CRM.
+- **Unificação dos Controles do Cabeçalho**: Atualizado o dropdown de ações rápidas do cabeçalho de chat ativo no desktop para controlar a flag `ai_paused` (tabela `conversations`) usando `updateConversationField` em vez de apenas alterar `bot_status` (tabela `contacts`), harmonizando o controle visual premium do cabeçalho com os critérios de silenciamento de mensagens executados no backend.
+
 ## [2.9.0] - 2026-06-03
 
 ### Adicionado
