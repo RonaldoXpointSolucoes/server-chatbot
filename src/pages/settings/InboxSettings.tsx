@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
-import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X, QrCode, RefreshCcw, LogOut, CheckCircle } from 'lucide-react';
+import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X, QrCode, RefreshCcw, LogOut, CheckCircle, Sparkles } from 'lucide-react';
 import { NOTIFICATION_SOUNDS, playNotificationSound } from '../../utils/AudioEngine';
 interface InstanceData {
   id: string;
@@ -599,7 +599,8 @@ export default function InboxSettings() {
                 <div className="flex flex-col gap-8 max-w-4xl animate-in fade-in slide-in-from-bottom-4 duration-500">
                    
                    {/* Card de introdução com Glassmorphism */}
-                   <div className="relative overflow-hidden bg-white/[0.03] backdrop-blur-xl border border-white/10 p-6 rounded-[2rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] flex flex-col sm:flex-row items-center gap-6">
+                    <div className="relative overflow-hidden bg-white/[0.03] backdrop-blur-xl border border-white/10 p-6 rounded-[2rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] flex flex-col sm:flex-row items-center justify-between gap-6">
+                       <div className="flex flex-col sm:flex-row items-center gap-6">
                       <div className="w-16 h-16 bg-blue-500/10 rounded-2xl flex items-center justify-center shrink-0 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.2)]">
                          <Bot className="text-blue-500" size={32} />
                       </div>
@@ -607,9 +608,17 @@ export default function InboxSettings() {
                          <h3 className="text-xl font-bold text-white tracking-wide">Robô de Autoatendimento (Luna AI)</h3>
                          <p className="text-gray-400 text-sm leading-relaxed">
                             Gerencie o comportamento do assistente virtual de inteligência artificial para esta caixa de entrada.
-                         </p>
-                      </div>
-                   </div>
+                          </p>
+                       </div>
+                       
+                       {/* Botão de Atalho para Criação de Robôs */}
+                       <button
+                          onClick={() => navigate('/settings/bots')}
+                          className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold py-2.5 px-5 rounded-2xl transition-all shadow-[0_4px_20px_-4px_rgba(59,130,246,0.5)] hover:scale-105 shrink-0 border border-white/10"
+                       >
+                          <Sparkles size={16} /> Gerenciar Robôs (RAG)
+                       </button>
+                    </div>
 
                    {/* Toggle Ativar Robô */}
                    <div className="bg-[#182229] border border-white/5 p-6 rounded-[2rem] flex justify-between items-center transition-all hover:bg-white/[0.04]">

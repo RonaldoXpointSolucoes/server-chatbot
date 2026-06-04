@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.9.10] - 2026-06-04
+
+### Adicionado
+- **Atalho de Acesso aos Robôs (RAG)**: Adicionado um botão premium de atalho na aba 'Configuração do Bot' dentro da página de configurações da caixa de entrada, permitindo redirecionar o administrador de forma direta e rápida para a tela de gerenciamento/criação de agentes e robôs RAG.
+
 ## [2.9.9] - 2026-06-04
 
 ### Adicionado
