@@ -2959,7 +2959,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     buttons: advanced.buttons,
                     transcription: m.transcription,
                     vcardWaid: advanced.vcardWaid,
-                    payload: m.payload
+                    payload: m.raw_payload || m.payload
                 };
             });
  
@@ -3603,7 +3603,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           vcardWaid: advanced.vcardWaid,
           isIgnored: isIgnored,
           isIgnoredSilent: isIgnoredSilent,
-          payload: m.payload
+          payload: m.raw_payload || m.payload
         });
 
         // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele

@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.9.8] - 2026-06-04
+
+### Adicionado
+- **Exibição do Nome do Robô Específico**: Modificados o backend e frontend para identificar e exibir o nome do robô específico (ex: `Atendente de Delivery (Recepcionista)`) nas mensagens enviadas pela IA Luna no painel de conversas. O nome é injetado no `raw_payload` no backend e recuperado no componente `MessageBubble` no frontend.
+
 ## [2.9.7] - 2026-06-04
 
 ### Adicionado

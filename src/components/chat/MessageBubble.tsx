@@ -493,7 +493,7 @@ export const MessageBubble = memo(({
 
          {msg.sender === 'bot' && (
           <div className="flex items-center gap-1 mb-1 text-[10px] text-[#005c4b] dark:text-[#1d9782] opacity-80 font-bold uppercase tracking-wider">
-            <Bot size={10} /> IA ChatBoot
+            <Bot size={10} /> {msg.payload?.bot_name || 'IA ChatBoot'}
           </div>
         )}
         {msg.sender === 'human' && (

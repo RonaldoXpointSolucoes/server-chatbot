@@ -296,7 +296,10 @@ class AutomationWorker {
                             text_content: finalResponseText,
                             whatsapp_message_id: msgResult.key.id,
                             sender_type: 'bot',
-                            raw_payload: msgResult
+                            raw_payload: {
+                                ...msgResult,
+                                bot_name: botSettings?.name || 'IA ChatBoot'
+                            }
                         }).select('*').single();
 
                         if (conversationId) {

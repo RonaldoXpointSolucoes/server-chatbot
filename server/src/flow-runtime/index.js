@@ -268,7 +268,10 @@ class FlowEngine {
                 text_content: textContent,
                 whatsapp_message_id: msgResult.key.id,
                 sender_type: 'bot',
-                raw_payload: msgResult
+                raw_payload: {
+                    ...msgResult,
+                    bot_name: 'Fluxo Automático'
+                }
             }).select('*').single();
 
             if (conversationId) {
