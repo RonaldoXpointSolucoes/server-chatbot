@@ -649,6 +649,14 @@ class EventProcessor {
                  
                  if (!b.conversationId) return; // ignora falha bruta
                  
+                 // Tenta recuperar a URL do cache de mídias pendentes (outbound)
+                 if (!b.mediaUrl && b.rawMsg?.key?.id && EventProcessor.pendingMediaCache) {
+                     const cachedUrl = EventProcessor.pendingMediaCache.get(b.rawMsg.key.id);
+                     if (cachedUrl) {
+                         b.mediaUrl = cachedUrl;
+                     }
+                 }
+                 
                  if (!b.mediaUrl && ['image', 'video', 'audio', 'document'].includes(b.msgType)) {
                      try {
                          const mediaMeta = this.extractMediaMeta(b.rawMsg, b.msgType) || {};

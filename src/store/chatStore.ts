@@ -1451,12 +1451,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       console.log('[uploadAndSendMedia] Resposta do server:', data);
       
-      if (data.media_url) {
+      if (data.media_url || (data.result?.key?.id)) {
         set((s) => ({
           contacts: s.contacts.map(c => c.id === contactId ? {
             ...c,
-            // Procura o pseudoId e substitui a url temporaria
-            messages: c.messages.map(m => m.id === pseudoId ? { ...m, mediaUrl: data.media_url } : m)
+            // Procura o pseudoId, substitui a url temporaria e adiciona o whatsapp_id correspondente
+            messages: c.messages.map(m => m.id === pseudoId ? { 
+              ...m, 
+              ...(data.media_url && { mediaUrl: data.media_url }),
+              ...(data.result?.key?.id && { whatsapp_id: data.result.key.id })
+            } : m)
           } : c)
         }));
       }
@@ -1768,6 +1772,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // Tratamento de UI otimista: varre se ja tem uma mensagem igualzinha pendente
           if (msg.sender === 'human' || msg.sender === 'bot') {
             const optIndex = c.messages.findIndex(m => {
+                if (msg.whatsapp_id && m.whatsapp_id === msg.whatsapp_id) return true;
                 if (!String(m.id).startsWith('optimistic-')) return false;
                 if (m.mediaType && msg.mediaType && m.mediaType === msg.mediaType) return true;
                 return m.text === msg.text;
@@ -3686,10 +3691,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
               const msgIndex = updatedContacts[i].messages.findIndex(msg => msg.id === m.id || (m.whatsapp_message_id && msg.whatsapp_id === m.whatsapp_message_id));
               if (msgIndex !== -1) {
                   const newMessages = [...updatedContacts[i].messages];
+                  const advanced = parseAdvancedMsgMetadata(m);
                   newMessages[msgIndex] = { 
                     ...newMessages[msgIndex], 
                     status: m.status,
-                    ...(m.text_content !== undefined && { text_content: m.text_content })
+                    ...(m.text_content !== undefined && { text: advanced.text || m.text_content }),
+                    ...(m.media_url !== undefined && { mediaUrl: m.media_url }),
+                    ...(advanced.mediaType !== undefined && { mediaType: advanced.mediaType }),
+                    ...(advanced.quoted !== undefined && { quoted: advanced.quoted }),
+                    ...(advanced.buttons !== undefined && { buttons: advanced.buttons })
                   };
                   updatedContacts[i] = { ...updatedContacts[i], messages: newMessages };
                   break;
