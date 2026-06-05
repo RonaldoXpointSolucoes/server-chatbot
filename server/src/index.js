@@ -128,7 +128,8 @@ app.use('/api/v1/system/logs', systemLogger);
 // Middleware global de tratamento de erros (ex: Multer LIMIT_FILE_SIZE)
 app.use((err, req, res, next) => {
     if (err.name === 'MulterError' || err.code === 'LIMIT_FILE_SIZE') {
-        const limitMB = err.field === 'file' ? '50MB' : '100MB';
+        const isKnowledge = req.originalUrl && req.originalUrl.includes('/knowledge');
+        const limitMB = isKnowledge ? '100MB' : '500MB';
         return res.status(413).json({
             error: `O arquivo enviado é muito grande. O limite máximo permitido para este recurso é de ${limitMB}.`
         });

@@ -1,9 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ path: '../.env' });
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
 if (!SUPABASE_URL) {
   console.error("Faltou SUPABASE_URL");
@@ -35,7 +35,7 @@ async function setup() {
       const { data: newB, error: newBErr } = await supabase.storage.createBucket('chat_media', {
           public: true,
           allowedMimeTypes: ['image/*', 'video/*', 'audio/*', 'application/*'],
-          fileSizeLimit: 52428800 // 50MB
+          fileSizeLimit: 524288000 // 500MB
       });
       if (newBErr) { 
           console.error("Falha ao criar bucket. Execute via UI ou verifique Role.", newBErr.message);
@@ -43,8 +43,8 @@ async function setup() {
           console.log("Bucket criado com sucesso.");
       }
   } else {
-      console.log("Bucket chat_media já existe. Garantindo que seja publico...");
-      await supabase.storage.updateBucket('chat_media', { public: true });
+      console.log("Bucket chat_media já existe. Garantindo que seja publico e com limite de 500MB...");
+      await supabase.storage.updateBucket('chat_media', { public: true, fileSizeLimit: 524288000 });
   }
 
   console.log("\n==== INSTRUÇÕES ====\n");
