@@ -537,7 +537,7 @@ export default function KnowledgeBase() {
 
               <div className="flex items-center justify-between mt-8 border-t border-white/5 pt-4">
                 <div className="text-xs text-gray-500 font-medium">
-                  Última alteração: {viewingFile.updated_at ? new Date(viewingFile.updated_at).toLocaleString() : new Date(viewingFile.created_at).toLocaleString()}
+                  Última alteração: {viewingFile.metadata?.updated_at ? new Date(viewingFile.metadata.updated_at).toLocaleString() : (viewingFile.updated_at ? new Date(viewingFile.updated_at).toLocaleString() : new Date(viewingFile.created_at).toLocaleString())}
                 </div>
                 <div className="flex items-center gap-3">
                   {!isLoadingContent && (
