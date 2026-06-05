@@ -17,6 +17,7 @@ export default function BotsList() {
   const [selectedOnboardingTemplate, setSelectedOnboardingTemplate] = useState<BotTemplate | null>(null);
 
   const [bots, setBots] = useState<any[]>([]);
+  const [ragDocsCount, setRagDocsCount] = useState(0);
 
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
   const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
@@ -27,6 +28,8 @@ export default function BotsList() {
 
   const fetchBots = async () => {
     if (!tenantId) return;
+    
+    // Buscar robôs
     const { data, error } = await supabase
       .from('bots')
       .select('*')
@@ -35,6 +38,20 @@ export default function BotsList() {
       
     if (!error && data) {
       setBots(data);
+    }
+
+    // Buscar a contagem real e atualizada de documentos RAG
+    try {
+      const { count, error: countError } = await supabase
+        .from('knowledge_documents')
+        .select('*', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId);
+
+      if (!countError && count !== null) {
+        setRagDocsCount(count);
+      }
+    } catch (err) {
+      console.error("Erro ao buscar contagem de RAG:", err);
     }
   };
 
@@ -357,9 +374,9 @@ export default function BotsList() {
                                  )}
 
                                  {/* Sinalizador Base RAG */}
-                                 {bot.knowledgeDocuments > 0 ? (
+                                 {ragDocsCount > 0 ? (
                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-extrabold uppercase tracking-wide">
-                                     <Database size={10} /> RAG Ativo ({bot.knowledgeDocuments})
+                                     <Database size={10} /> RAG Ativo ({ragDocsCount})
                                    </span>
                                  ) : (
                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/5 border border-white/10 text-white/30 text-[9px] font-extrabold uppercase tracking-wide">

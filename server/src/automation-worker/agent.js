@@ -110,6 +110,48 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
             console.log(`[AutomationWorker] Processando mensagem para o bot: ${botSettings.name} | Tenant: ${tenantId}`);
 
+            // Carrega as variáveis globais da empresa
+            let companyName = '';
+            let companySettings = {};
+            try {
+                const { data: companyData } = await supabase
+                    .from('companies')
+                    .select('name, settings')
+                    .eq('id', tenantId)
+                    .single();
+
+                if (companyData) {
+                    companyName = companyData.name || '';
+                    companySettings = companyData.settings || {};
+                }
+            } catch (err) {
+                console.error(`[AutomationWorker] Erro ao carregar variáveis globais do tenant ${tenantId}:`, err);
+            }
+
+            const vars = {
+                nomeIa: companySettings.nome_ia || companyName || 'Luna',
+                endereco: companySettings.endereco || '',
+                horarioFuncionamento: companySettings.horario_funcionamento || '',
+                linkCardapio: companySettings.link_cardapio || '',
+                instagram: companySettings.instagram || '',
+                googleMaps: companySettings.google_maps || '',
+                youtube: companySettings.youtube || '',
+                tiktok: companySettings.tiktok || ''
+            };
+
+            const replaceTokens = (text) => {
+                if (!text || typeof text !== 'string') return text;
+                return text
+                    .replace(/\[NOME_DA_EMPRESA\]/g, vars.nomeIa)
+                    .replace(/\[ENDERECO_DA_EMPRESA\]/g, vars.endereco)
+                    .replace(/\[HORARIO_FUNCIONAMENTO\]/g, vars.horarioFuncionamento)
+                    .replace(/\[LINK_CARDAPIO\]/g, vars.linkCardapio)
+                    .replace(/\[LINK_INSTAGRAM\]/g, vars.instagram)
+                    .replace(/\[LINK_GOOGLE_MAPS\]/g, vars.googleMaps)
+                    .replace(/\[LINK_YOUTUBE\]/g, vars.youtube)
+                    .replace(/\[LINK_TIKTOK\]/g, vars.tiktok);
+            };
+
             // 1. Busca contexto no RAG
             const transformer = await LocalEmbeddingsPipeline.getInstance();
             const output = await transformer(textMessage, { pooling: 'mean', normalize: true });
@@ -133,7 +175,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             if (botInstructions && botInstructions.trim().length > 0) {
                 basePrompt += `\n\n### INSTRUÇÕES DE COMPORTAMENTO PERSONALIZADAS ###\nImportante: Siga estritamente as diretrizes e regras de personalidade a seguir em todas as interações:\n${botInstructions}\n`;
             }
-            const systemPrompt = basePrompt + contextText;
+            const systemPrompt = replaceTokens(basePrompt + contextText);
             
             // 3. Obtem histórico da conversa
             let history = await this.getConversationHistory(tenantId, conversationId, 12);

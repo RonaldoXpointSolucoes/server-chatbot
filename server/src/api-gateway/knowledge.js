@@ -92,6 +92,17 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         (async () => {
             try {
                 const chunks = splitTextIntoChunks(content, 300, 50);
+                
+                // Grava inicialmente a quantidade total de chunks
+                await supabase.from('knowledge_documents').update({
+                    metadata: { 
+                        size, 
+                        chunks_total: chunks.length, 
+                        chunks_processed: 0,
+                        current_status: 'Carregando pipeline de Inteligência Artificial...' 
+                    }
+                }).eq('id', documentId);
+
                 const transformer = await EmbeddingsPipeline.getInstance();
 
                 const dbChunks = [];
@@ -99,6 +110,17 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                 // Vetorizar todos os Chunks usando a IA embarcada
                 for (let i = 0; i < chunks.length; i++) {
                     const chunkText = chunks[i];
+                    
+                    // Atualiza o progresso no banco de dados
+                    await supabase.from('knowledge_documents').update({
+                        metadata: { 
+                            size, 
+                            chunks_total: chunks.length, 
+                            chunks_processed: i,
+                            current_status: `Vetorizando trecho ${i + 1} de ${chunks.length}...`
+                        }
+                    }).eq('id', documentId);
+
                     if(chunkText.trim().length < 5) continue;
 
                     // Gerar matriz de similaridade
@@ -124,15 +146,39 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
                 // Inserir o resto
                 if (dbChunks.length > 0) {
+                    await supabase.from('knowledge_documents').update({
+                        metadata: { 
+                            size, 
+                            chunks_total: chunks.length, 
+                            chunks_processed: chunks.length - 1,
+                            current_status: 'Salvando vetores semânticos no banco de dados...' 
+                        }
+                    }).eq('id', documentId);
+
                     await supabase.from('knowledge_chunks').insert(dbChunks);
                 }
 
                 // Arquivo 100% lido pela IA.
-                await supabase.from('knowledge_documents').update({ status: 'ready' }).eq('id', documentId);
+                await supabase.from('knowledge_documents').update({ 
+                    status: 'ready',
+                    metadata: { 
+                        size, 
+                        chunks_total: chunks.length, 
+                        chunks_processed: chunks.length,
+                        current_status: 'Concluído com sucesso!' 
+                    }
+                }).eq('id', documentId);
 
             } catch (bgError) {
                 console.error("Erro crítico no Pipeline RAG:", bgError);
-                await supabase.from('knowledge_documents').update({ status: 'error', metadata: { err: bgError.message } }).eq('id', documentId);
+                await supabase.from('knowledge_documents').update({ 
+                    status: 'error', 
+                    metadata: { 
+                        size,
+                        err: bgError.message, 
+                        current_status: `Falha: ${bgError.message}` 
+                    } 
+                }).eq('id', documentId);
             }
         })();
 
@@ -213,7 +259,7 @@ router.put('/:id', async (req, res) => {
         if (!content || content.trim() === '') return res.status(400).json({ error: 'O conteúdo não pode ser vazio.' });
 
         // 1. Atualizar status na doc para processando
-        let updateQuery = supabase.from('knowledge_documents').update({ status: 'processing', updated_at: new Date() }).eq('id', docId).eq('tenant_id', tenant_id);
+        let updateQuery = supabase.from('knowledge_documents').update({ status: 'processing' }).eq('id', docId).eq('tenant_id', tenant_id);
         if (agent_id) updateQuery = updateQuery.eq('agent_id', agent_id); else updateQuery = updateQuery.is('agent_id', null);
         const { error: updateError } = await updateQuery;
         
@@ -230,11 +276,36 @@ router.put('/:id', async (req, res) => {
 
                 // 3. Gerar novos chunks e embeddings
                 const chunks = splitTextIntoChunks(content, 300, 50);
+                
+                // Grava inicialmente a quantidade total de chunks
+                const docCheck = await supabase.from('knowledge_documents').select('metadata').eq('id', docId).single();
+                const size = docCheck.data?.metadata?.size || 0;
+
+                await supabase.from('knowledge_documents').update({
+                    metadata: { 
+                        size, 
+                        chunks_total: chunks.length, 
+                        chunks_processed: 0,
+                        current_status: 'Carregando pipeline de Inteligência Artificial...' 
+                    }
+                }).eq('id', docId);
+
                 const transformer = await EmbeddingsPipeline.getInstance();
                 const dbChunks = [];
 
                 for (let i = 0; i < chunks.length; i++) {
                     const chunkText = chunks[i];
+                    
+                    // Atualiza o progresso no banco de dados
+                    await supabase.from('knowledge_documents').update({
+                        metadata: { 
+                            size, 
+                            chunks_total: chunks.length, 
+                            chunks_processed: i,
+                            current_status: `Re-vetorizando trecho ${i + 1} de ${chunks.length}...`
+                        }
+                    }).eq('id', docId);
+
                     if(chunkText.trim().length < 5) continue;
 
                     const output = await transformer(chunkText, { pooling: 'mean', normalize: true });
@@ -256,15 +327,39 @@ router.put('/:id', async (req, res) => {
                 }
 
                 if (dbChunks.length > 0) {
+                    await supabase.from('knowledge_documents').update({
+                        metadata: { 
+                            size, 
+                            chunks_total: chunks.length, 
+                            chunks_processed: chunks.length - 1,
+                            current_status: 'Salvando vetores semânticos no banco de dados...' 
+                        }
+                    }).eq('id', docId);
+
                     await supabase.from('knowledge_chunks').insert(dbChunks);
                 }
 
                 // 4. Marca doc como ready
-                await supabase.from('knowledge_documents').update({ status: 'ready' }).eq('id', docId);
+                await supabase.from('knowledge_documents').update({ 
+                    status: 'ready',
+                    metadata: { 
+                        size, 
+                        chunks_total: chunks.length, 
+                        chunks_processed: chunks.length,
+                        current_status: 'Concluído com sucesso!',
+                        updated_at: new Date().toISOString()
+                    }
+                }).eq('id', docId);
 
             } catch (bgError) {
                 console.error("Erro crítico na Re-vetorização do RAG:", bgError);
-                await supabase.from('knowledge_documents').update({ status: 'error', metadata: { err: bgError.message } }).eq('id', docId);
+                await supabase.from('knowledge_documents').update({ 
+                    status: 'error', 
+                    metadata: { 
+                        err: bgError.message, 
+                        current_status: `Falha na re-vetorização: ${bgError.message}` 
+                    } 
+                }).eq('id', docId);
             }
         })();
 
