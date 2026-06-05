@@ -16,10 +16,24 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pidusage from 'pidusage';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
+
+// Injeta os caminhos do ffmpeg e ffprobe instalados via npm no PATH global do processo para o Baileys
+try {
+   const ffmpegDir = path.dirname(ffmpegInstaller.path);
+   const ffprobeDir = path.dirname(ffprobeInstaller.path);
+   process.env.PATH = `${ffmpegDir}${path.delimiter}${ffprobeDir}${path.delimiter}${process.env.PATH}`;
+   console.log(`[Antigravity Boot] Sincronização de Executáveis do Sistema concluída!`);
+   console.log(`[Antigravity Boot] FFmpeg PATH: ${ffmpegDir}`);
+   console.log(`[Antigravity Boot] FFprobe PATH: ${ffprobeDir}`);
+} catch (pathErr) {
+   console.error("[Antigravity Boot] Falha ao injetar caminhos ffmpeg/ffprobe no PATH:", pathErr.message);
+}
 
 let serverChangelog = [];
 try {

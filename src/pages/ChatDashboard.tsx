@@ -2041,16 +2041,17 @@ export default function ChatDashboard() {
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const files = event.target.files;
     const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
-    if (!file || !activeChatId || !properTargetInstance) return;
+    if (!files || files.length === 0 || !activeChatId || !properTargetInstance) return;
     
-    let mediaType: 'image' | 'video' | 'audio' | 'document' = 'document';
-    if (file.type.startsWith('image/')) mediaType = 'image';
-    else if (file.type.startsWith('video/')) mediaType = 'video';
-    else if (file.type.startsWith('audio/')) mediaType = 'audio';
-
     if (chatMode === 'internal_note') {
+      const file = files[0];
+      let mediaType: 'image' | 'video' | 'audio' | 'document' = 'document';
+      if (file.type.startsWith('image/')) mediaType = 'image';
+      else if (file.type.startsWith('video/')) mediaType = 'video';
+      else if (file.type.startsWith('audio/')) mediaType = 'audio';
+
       setNoteAttachedFile(file);
       setNoteAttachedType(mediaType);
       if (mediaType === 'image') {
@@ -2059,7 +2060,16 @@ export default function ChatDashboard() {
         setNoteAttachedPreview('attached');
       }
     } else {
-      await useChatStore.getState().uploadAndSendMedia(activeChatId, file, mediaType, properTargetInstance as string);
+      // Loop sequencial for para manter a ordem cronológica correta das mídias na conversa
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        let mediaType: 'image' | 'video' | 'audio' | 'document' = 'document';
+        if (file.type.startsWith('image/')) mediaType = 'image';
+        else if (file.type.startsWith('video/')) mediaType = 'video';
+        else if (file.type.startsWith('audio/')) mediaType = 'audio';
+
+        await useChatStore.getState().uploadAndSendMedia(activeChatId, file, mediaType, properTargetInstance as string);
+      }
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -5113,6 +5123,7 @@ export default function ChatDashboard() {
                         ref={fileInputRef} 
                         style={{ display: 'none' }} 
                         onChange={handleFileUpload} 
+                        multiple
                         accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
                       />
 

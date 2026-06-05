@@ -1463,6 +1463,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     } catch (err: any) {
       console.error('[uploadAndSendMedia] Falha crítica:', err);
+      alert('Falha ao enviar arquivo para o WhatsApp: ' + (err.message || err));
       // Se der erro, pelo menos mostramos no componente que a media deu erro
       // Não removemos para o dev ver onde falhou
     }
