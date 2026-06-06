@@ -511,7 +511,7 @@ export default function ChatDashboard() {
   const [copiedDoc, setCopiedDoc] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [associatedCompaniesOpen, setAssociatedCompaniesOpen] = useState(false);
-  const [companyDetailsOpen, setCompanyDetailsOpen] = useState(false);
+  const [companyDetailsOpen, setCompanyDetailsOpen] = useState<any | null>(null);
   const [allCompanies, setAllCompanies] = useState<any[]>([]);
 
   useEffect(() => {
@@ -1727,33 +1727,66 @@ export default function ChatDashboard() {
       subscribeToNewMessages();
     })();
 
-    supabase.from('whatsapp_instances').select('id, display_name, color, status').then(({data}) => {
-      if (data) {
-        const nameMap: Record<string, string> = {};
-        const colorMap: Record<string, string> = {};
-        
-        const allowedStr = sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances');
-        let allowedInstances: string[] = [];
-        if (allowedStr) {
-           try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
-        }
-        
-        const availableInstances = data.filter(d => {
-           if (allowedInstances.length > 0 && !allowedInstances.includes(d.id)) return false;
-           return true;
-        });
+    (async () => {
+      try {
+        const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || tenantInfo?.id;
+        if (!tenantId) return;
 
-        data.forEach(d => { 
-           nameMap[d.id] = d.display_name; 
-           if(d.color) colorMap[d.id] = d.color;
-           setInstanceStatus(d.id, d.status);
-        });
-        
-        setInstanceNamesMap(nameMap);
-        setInstanceColorsMap(colorMap);
-        setAvailableInstancesList(availableInstances);
+        // 1. Buscar informações da empresa logada para ver seu grupo econômico
+        const { data: currentComp } = await supabase
+          .from('companies')
+          .select('id, economic_group_id')
+          .eq('id', tenantId)
+          .maybeSingle();
+
+        let allowedTenants = [tenantId];
+
+        if (currentComp?.economic_group_id) {
+          const { data: groupCompanies } = await supabase
+            .from('companies')
+            .select('id')
+            .eq('economic_group_id', currentComp.economic_group_id);
+          
+          if (groupCompanies && groupCompanies.length > 0) {
+            allowedTenants = groupCompanies.map(c => c.id);
+          }
+        }
+
+        // 2. Buscar instâncias pertencentes ao grupo econômico
+        const { data } = await supabase
+          .from('whatsapp_instances')
+          .select('id, display_name, color, status, tenant_id')
+          .in('tenant_id', allowedTenants);
+
+        if (data) {
+          const nameMap: Record<string, string> = {};
+          const colorMap: Record<string, string> = {};
+          
+          const allowedStr = sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances');
+          let allowedInstances: string[] = [];
+          if (allowedStr) {
+             try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
+          }
+          
+          const availableInstances = data.filter(d => {
+             if (allowedInstances.length > 0 && !allowedInstances.includes(d.id)) return false;
+             return true;
+          });
+
+          data.forEach(d => { 
+             nameMap[d.id] = d.display_name; 
+             if(d.color) colorMap[d.id] = d.color;
+             setInstanceStatus(d.id, d.status);
+          });
+          
+          setInstanceNamesMap(nameMap);
+          setInstanceColorsMap(colorMap);
+          setAvailableInstancesList(availableInstances);
+        }
+      } catch (err) {
+        console.error("Erro ao carregar instâncias permitidas no ChatDashboard:", err);
       }
-    });
+    })();
   }, []);
 
   // Solução PWA: Atualiza os dados (contatos e mensagens) e força reconexão Realtime com Cooldown de 10s quando volta do background
@@ -2519,9 +2552,9 @@ export default function ChatDashboard() {
       />
 
       <CompanyDetailsModal
-        isOpen={companyDetailsOpen}
-        onClose={() => setCompanyDetailsOpen(false)}
-        contact={activeChat}
+        isOpen={!!companyDetailsOpen}
+        onClose={() => setCompanyDetailsOpen(null)}
+        contact={companyDetailsOpen}
       />
 
       {/* Modal de Preview de Imagem Colada (Agora com Editor de Imagem) */}
@@ -2762,7 +2795,7 @@ export default function ChatDashboard() {
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
           {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.9.14'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '05/06/2026, 14:46'}`}</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.9.20'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '06/06/2026, 18:48'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
@@ -3504,13 +3537,13 @@ export default function ChatDashboard() {
                                            borderColor: `${l.color}30`, 
                                            color: l.color 
                                          } : {}} 
-                                         title={l.name}
-                                       >
-                                         <span 
-                                           className={cn("w-1.5 h-1.5 rounded-full mr-1 shrink-0 shadow-inner", !isHex && l.color)} 
-                                           style={isHex ? { backgroundColor: l.color } : {}}
-                                         />
-                                         <span className="truncate">{l.name}</span>
+                                          title={l.name}
+                                        >
+                                          <span 
+                                            className={cn("w-1.5 h-1.5 rounded-full mr-1 shrink-0 shadow-inner", !isHex && l.color)} 
+                                            style={isHex ? { backgroundColor: l.color } : {}}
+                                          />
+                                          <span className="truncate">{l.name}</span>
                                        </span>
                                      );
                                     })}
@@ -3519,12 +3552,30 @@ export default function ChatDashboard() {
                              </div>
                            )}
                          </div>
-                         {contact.fantasy_name && (
-                           <span className="text-[11px] text-gray-500 dark:text-[#8696a0] truncate flex items-center gap-1">
-                             <Building2 size={10} className="shrink-0" />
-                             {contact.fantasy_name}
-                           </span>
-                         )}
+                          {contact.fantasy_name ? (
+                            <span className="text-[11px] text-gray-500 dark:text-[#8696a0] truncate flex items-center gap-1">
+                              <Building2 size={10} className="shrink-0" />
+                              {contact.fantasy_name}
+                            </span>
+                          ) : (
+                            (() => {
+                              const linkedCompanies = contact.company_ids
+                                ?.map((id: string) => allCompanies.find((c: any) => c.id === id))
+                                .filter(Boolean) || [];
+                              if (linkedCompanies.length > 0) {
+                                return (
+                                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium truncate flex items-center gap-1">
+                                    <Building2 size={10} className="shrink-0" />
+                                    {linkedCompanies[0].fantasy_name || linkedCompanies[0].name}
+                                    {linkedCompanies.length > 1 && ` (+${linkedCompanies.length - 1})`}
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()
+                          )}
+                           
+                         
                         {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (
                           <span 
                             className="text-[10px] px-1.5 py-[2px] rounded-md border font-medium truncate mt-1 w-fit max-w-[140px] flex items-center gap-1 shadow-sm transition-all"
@@ -3788,12 +3839,12 @@ export default function ChatDashboard() {
                   </h2>
                   
                   {/* Premium Company Info Button or Phone with Copy Option */}
-                  <div className="flex items-center mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                  <div className="flex items-center gap-2 mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300 flex-wrap">
                     {(activeChat.fantasy_name || activeChat.document_number) ? (
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          setCompanyDetailsOpen(true);
+                          setCompanyDetailsOpen(activeChat);
                         }}
                         className="flex items-center gap-1.5 bg-[#00a884]/10 hover:bg-[#00a884]/20 px-2.5 py-0.5 rounded-full border border-[#00a884]/20 transition-all duration-200 group"
                         title="Ver Dados da Empresa e Faturamento"
@@ -3801,27 +3852,50 @@ export default function ChatDashboard() {
                         <Building2 size={12} className="text-[#00a884] group-hover:scale-110 transition-transform" />
                         <span className="text-[11px] font-semibold text-[#00a884]">Ver Empresa</span>
                       </button>
-                    ) : activeChat.phone ? (
-                      <div className="flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/5 px-2.5 py-0.5 rounded-full border border-blue-500/20 text-blue-600 dark:text-blue-400 text-[11px] font-medium transition-all duration-200">
-                        <span className="font-mono">{formatDisplayPhone(activeChat.phone)}</span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigator.clipboard.writeText(activeChat.phone);
-                            setCopiedPhone(true);
-                            setTimeout(() => setCopiedPhone(false), 2000);
-                          }}
-                          className="p-0.5 rounded hover:bg-blue-500/20 transition-colors flex items-center justify-center"
-                          title="Copiar Celular"
-                        >
-                          {copiedPhone ? (
-                            <CheckCircle2 size={11} className="text-emerald-500 animate-in zoom-in-95 duration-200" />
-                          ) : (
-                            <Copy size={11} className="opacity-70 hover:opacity-100 hover:scale-110 active:scale-95 transition-all duration-200" />
-                          )}
-                        </button>
-                      </div>
-                    ) : null}
+                    ) : (
+                      <>
+                        {activeChat.phone && (
+                          <div className="flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/5 px-2.5 py-0.5 rounded-full border border-blue-500/20 text-blue-600 dark:text-blue-400 text-[11px] font-medium transition-all duration-200">
+                            <span className="font-mono">{formatDisplayPhone(activeChat.phone)}</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(activeChat.phone);
+                                setCopiedPhone(true);
+                                setTimeout(() => setCopiedPhone(false), 2000);
+                              }}
+                              className="p-0.5 rounded hover:bg-blue-500/20 transition-colors flex items-center justify-center"
+                              title="Copiar Celular"
+                            >
+                              {copiedPhone ? (
+                                <CheckCircle2 size={11} className="text-emerald-500 animate-in zoom-in-95 duration-200" />
+                              ) : (
+                                <Copy size={11} className="opacity-70 hover:opacity-100 hover:scale-110 active:scale-95 transition-all duration-200" />
+                              )}
+                            </button>
+                          </div>
+                        )}
+                        {(() => {
+                          const linkedCompanies = activeChat.company_ids
+                            ?.map((id: string) => allCompanies.find((c: any) => c.id === id))
+                            .filter(Boolean) || [];
+                          return linkedCompanies.map((comp: any) => (
+                            <button
+                              key={comp.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCompanyDetailsOpen(comp);
+                              }}
+                              className="flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold transition-all duration-200"
+                              title={`Empresa Vinculada: ${comp.fantasy_name || comp.name}`}
+                            >
+                              <Building2 size={10} className="shrink-0" />
+                              <span className="truncate max-w-[120px]">{comp.fantasy_name || comp.name}</span>
+                            </button>
+                          ));
+                        })()}
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

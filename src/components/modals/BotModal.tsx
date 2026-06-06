@@ -238,9 +238,38 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
     if (isOpen) {
       // Fetch available channels/instances
       const fetchInstances = async () => {
-        const { data, error } = await supabase.from('whatsapp_instances').select('id, display_name, status, tenant_id');
-        if (!error && data) {
-          setInstances(data);
+        try {
+          // 1. Obter informações da empresa atual para checar o economic_group_id
+          const { data: currentComp } = await supabase
+            .from('companies')
+            .select('id, economic_group_id')
+            .eq('id', tenantId)
+            .maybeSingle();
+
+          let allowedTenants = [tenantId];
+
+          if (currentComp?.economic_group_id) {
+            const { data: groupCompanies } = await supabase
+              .from('companies')
+              .select('id')
+              .eq('economic_group_id', currentComp.economic_group_id);
+            
+            if (groupCompanies && groupCompanies.length > 0) {
+              allowedTenants = groupCompanies.map(c => c.id);
+            }
+          }
+
+          // 2. Buscar instâncias filtrando por esses tenants permitidos
+          const { data, error } = await supabase
+            .from('whatsapp_instances')
+            .select('id, display_name, status, tenant_id')
+            .in('tenant_id', allowedTenants);
+
+          if (!error && data) {
+            setInstances(data);
+          }
+        } catch (err) {
+          console.error("Erro ao carregar instâncias permitidas:", err);
         }
       };
       fetchInstances();

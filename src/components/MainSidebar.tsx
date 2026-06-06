@@ -398,7 +398,7 @@ export function MainSidebar() {
   return (
     <div 
       className={cn(
-        "h-full bg-[#182229] dark:bg-[#111b21] flex flex-col text-[#d1d7db] font-sans text-sm border-r border-[#2a3942] z-50 shrink-0 shadow-lg relative overflow-x-hidden transition-all duration-300 group/sidebar",
+        "h-full bg-[#182229] dark:bg-[#111b21] flex flex-col text-[#d1d7db] font-sans text-sm border-r border-[#2a3942] z-50 shrink-0 shadow-lg relative transition-all duration-300 group/sidebar",
         isAppEmbedded ? "w-[68px] hover:w-[260px] is-minimized" : "w-[260px]"
       )}
     >
@@ -431,7 +431,7 @@ export function MainSidebar() {
 
         {/* Workspace Dropdown Panel */}
         {showWorkspaceMenu && (userCompanies.length > 1 || currentUserRole === 'admin') && (
-          <div className="absolute top-[68px] left-2 w-[340px] bg-[#1e1e24] border border-[#2a2a2f] rounded-xl shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="absolute top-[68px] left-2 w-[340px] bg-[#1e1e24] border border-[#2a2a2f] rounded-xl shadow-2xl overflow-hidden z-[9999] animate-in fade-in slide-in-from-top-2 duration-200">
              
              <div className="max-h-[300px] overflow-y-auto styled-scrollbar py-2">
                 {userCompanies.map((ws) => (
@@ -455,59 +455,6 @@ export function MainSidebar() {
                   </div>
                 ))}
              </div>
-
-             {/* Add New Workspace Action */}
-             {currentUserRole === 'admin' && (
-               <div className="p-3 bg-[#18181b] border-t border-[#2a2a2f]" onClick={e => e.stopPropagation()}>
-                 {isCreatingWorkspace ? (
-                    <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                       <input 
-                         autoFocus
-                         type="text"
-                         value={newWorkspaceName}
-                         onChange={(e) => setNewWorkspaceName(e.target.value)}
-                         placeholder="Nome da Nova Empresa..."
-                         className="w-full bg-[#202027] border border-[#2a2a2f] rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors"
-                         onKeyDown={(e) => {
-                           if (e.key === 'Enter') handleCreateWorkspace()
-                           if (e.key === 'Escape') setIsCreatingWorkspace(false)
-                         }}
-                       />
-                       <div className="flex gap-2">
-                         <button 
-                           onClick={(e) => {
-                             e.stopPropagation();
-                             handleCreateWorkspace();
-                           }}
-                           disabled={!newWorkspaceName.trim()}
-                           className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium py-2 rounded-md transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
-                         >
-                           Criar
-                         </button>
-                         <button 
-                           onClick={(e) => {
-                             e.stopPropagation();
-                             setIsCreatingWorkspace(false);
-                           }}
-                           className="flex-1 bg-[#2a2a2f] hover:bg-[#323238] text-slate-300 text-xs font-medium py-2 rounded-md transition-colors"
-                         >
-                           Cancelar
-                         </button>
-                       </div>
-                    </div>
-                 ) : (
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsCreatingWorkspace(true);
-                      }}
-                      className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-[#2a2a2f] hover:border-indigo-500/50 hover:bg-indigo-500/5 text-slate-400 hover:text-indigo-400 transition-all text-sm font-medium"
-                    >
-                      <Plus size={16} /> Criar nova empresa
-                    </button>
-                 )}
-               </div>
-             )}
           </div>
         )}
       </div>
@@ -696,12 +643,7 @@ export function MainSidebar() {
               onClick={() => navigate('/crm')}
               isActive={window.location.pathname === '/crm'} 
             />
-            <NavItem 
-              icon={<Network size={16} className="text-emerald-500" />} 
-              title="Central de Usuários RAG" 
-              onClick={() => navigate('/agents-hub')}
-              isActive={window.location.pathname === '/agents-hub'}
-            />
+
             <NavItem 
               title="Agenda Interna" 
               icon={<CalendarDays size={16} />} 

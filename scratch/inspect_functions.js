@@ -1,0 +1,22 @@
+import pg from 'pg';
+import fs from 'fs';
+
+const envMap = {};
+try {
+  const envText = fs.readFileSync('.env', 'utf-8');
+  envText.split('\n').forEach(line => {
+    const match = line.match(/^([^=]+)=(.*)$/);
+    if(match) envMap[match[1]] = match[2].trim();
+  });
+} catch(e) {}
+
+const connectionString = envMap.DATABASE_URL || process.env.DATABASE_URL;
+
+const client = new pg.Client({ connectionString });
+await client.connect();
+const res = await client.query("SELECT proname, prosrc FROM pg_proc WHERE proname IN ('get_auth_tenant_id', 'is_auth_tenant_admin');");
+res.rows.forEach(row => {
+  console.log(`--- FUNCTION ${row.proname} ---`);
+  console.log(row.prosrc);
+});
+await client.end();

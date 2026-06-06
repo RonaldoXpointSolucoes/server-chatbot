@@ -52,12 +52,41 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
       // Fetch available instances and companies
       const fetchRBACData = async () => {
         try {
-           // Fetch companies (for platform admins or multi-tenant setups)
-           const { data: companies } = await supabase.from('companies').select('id, name');
+           const currentTenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+           if (!currentTenantId) return;
+
+           // 1. Obter informações da empresa atual para checar o economic_group_id
+           const { data: currentComp } = await supabase
+             .from('companies')
+             .select('id, economic_group_id')
+             .eq('id', currentTenantId)
+             .maybeSingle();
+
+           let allowedTenants = [currentTenantId];
+
+           if (currentComp?.economic_group_id) {
+             const { data: groupCompanies } = await supabase
+               .from('companies')
+               .select('id')
+               .eq('economic_group_id', currentComp.economic_group_id);
+             
+             if (groupCompanies && groupCompanies.length > 0) {
+               allowedTenants = groupCompanies.map(c => c.id);
+             }
+           }
+
+           // 2. Fetch companies matching allowed group tenants
+           const { data: companies } = await supabase
+             .from('companies')
+             .select('id, name')
+             .in('id', allowedTenants);
            if (companies) setAllCompanies(companies);
 
-           // Fetch all instances but select tenant_id so we can filter them by selected companies
-           const { data: instances } = await supabase.from('whatsapp_instances').select('id, display_name, tenant_id');
+           // 3. Fetch instances matching allowed group tenants
+           const { data: instances } = await supabase
+             .from('whatsapp_instances')
+             .select('id, display_name, tenant_id')
+             .in('tenant_id', allowedTenants);
            if (instances) setAllInstances(instances);
         } catch (error) {
            console.error("Erro ao buscar dados de RBAC", error);

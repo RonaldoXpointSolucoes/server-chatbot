@@ -56,7 +56,16 @@ export default function ContactsManager() {
       .eq('tenant_id', tenantId);
 
     if (search) {
-      query = query.or(`name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%,document_number.ilike.%${search}%,phone.ilike.%${search}%`);
+      const searchLower = search.toLowerCase();
+      const matchingCompIds = allCompanies
+        .filter(c => c.name?.toLowerCase().includes(searchLower) || c.fantasy_name?.toLowerCase().includes(searchLower))
+        .map(c => c.id);
+
+      if (matchingCompIds.length > 0) {
+        query = query.or(`name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%,document_number.ilike.%${search}%,phone.ilike.%${search}%,company_ids.ov.{${matchingCompIds.join(',')}}`);
+      } else {
+        query = query.or(`name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%,document_number.ilike.%${search}%,phone.ilike.%${search}%`);
+      }
     }
 
     if (currentFilter !== 'all') {

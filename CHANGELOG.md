@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.9.20] - 2026-06-06
+
+### Adicionado
+- **Exibição de Empresas Vinculadas no Chat**: Implementada a exibição de empresas associadas a contatos físicos na lista lateral de chats em verde suave (`text-emerald-500`) com o ícone `<Building2 size={10} />`.
+- **Badges de Empresas no Cabeçalho**: Renderização de badges interativas para as empresas associadas ao lado do celular do contato físico no cabeçalho da conversa.
+- **Detalhamento Rápido de Empresas**: Ajustado o estado `companyDetailsOpen` no `ChatDashboard.tsx` para aceitar objetos de contato de empresas, permitindo que o clique em qualquer badge no cabeçalho abra instantaneamente o modal de detalhes correspondente.
+
+## [2.9.19] - 2026-06-06
+
+### Corrigido
+- **Feedback Visual de Duplicidade de Documento no CRM**: Corrigido o bug na Ficha do Contato (`ChatModals.tsx`) onde, ao tentar salvar um contato contendo CPF ou CNPJ duplicado (já cadastrado na empresa), o modal de salvamento bloqueava o envio mas não exibia feedback visual do erro na tela. Agora o erro `docFeedback` é renderizado debaixo do campo correspondente em vermelho, com ícone de alerta e animação de entrada premium (`animate-in fade-in`), e é limpo automaticamente caso o usuário altere o tipo ou valor do documento.
+- **Robustecimento da submissão do formulário**: Adicionado suporte direto a cliques no botão "Salvar Alterações" (`onClick={handleSubmit}`), evitando que problemas no mapeamento do ID do formulário em navegadores/Vite impeçam o envio do formulário estruturado fora da árvore do form.
+
+## [2.9.18] - 2026-06-06
+
+### Adicionado
+- **Unificação da Central RAG & Robôs (Agentes Hub)**: Fusão completa das duas interfaces de gerenciamento na tela de Configurações de Robôs (`/settings/bots`). Foram implementadas 3 abas unificadas com design Premium: "Meus Robôs" (listagem e CRUD), "Dados da Empresa" (com consulta automática de CNPJ e CEP via APIs públicas, sincronizando dados no Supabase via `updateTenantSettings`) e "Simulador de Atendimento" (ambiente interativo de orquestração de robôs e testes de respostas da IA consumindo robôs ativos no banco e configurações da empresa).
+- **Remoção de rotas legadas**: Desativação e exclusão física do arquivo `/agents-hub` (`RagAgentsHub.tsx`) e remoção do menu lateral correspondente.
+
+## [2.9.17] - 2026-06-06
+
+### Corrigido
+- **Isolamento de Instâncias e Empresas por Grupo Econômico (Multi-Tenant)**: Resolvido o vazamento de segurança que permitia que usuários logados em tenants de empresas distintas (ex: *Osivaldo Teixeira*) visualizassem instâncias do WhatsApp e configurações de outras empresas/grupos econômicos (ex: *X-Point* e *Burguer Plus*). A lógica de busca do `BotModal.tsx`, `AgentModal.tsx` e `ChatDashboard.tsx` agora filtra dinamicamente com base nas empresas que pertencem ao mesmo grupo empresarial (`economic_group_id`) ou restringe estritamente ao próprio `tenant_id` ativo.
+
+## [2.9.16] - 2026-06-06
+
+### Alterado
+- **Remoção da criação de nova empresa na sidebar**: Removida a seção de criação de empresa ("Criar nova empresa") do painel dropdown de seleção de workspaces na barra lateral.
+- **Ajuste de visibilidade e z-index do dropdown de workspace**: Aumentado o z-index do painel do menu de workspaces para `z-[9999]` e removida a diretiva `overflow-x-hidden` da sidebar principal (`MainSidebar`), garantindo que o dropdown renderize acima de qualquer outro elemento visual e que não seja mais cortado horizontalmente na tela.
+
+## [2.9.15] - 2026-06-06
+
+### Corrigido
+- **Ajuste de RLS na tabela `companies`**: Corrigida a política de Row Level Security `companies_tenant_isolation` na tabela `companies` adicionando a regra de comparação pelo e-mail do usuário autenticado (`companies.email = auth.email()`). Isso resolve o bloqueio de acesso que desconectava administradores de tenant involuntariamente.
+- **Fluxo do Modal de Face ID (Lembrar Mais Tarde)**: Corrigido o fluxo de login onde a ação "Lembrar mais tarde" no modal de Face ID agora navega com sucesso para o painel de chat e mantém o usuário conectado.
+
 ## [2.9.12] - 2026-06-04
 
 ### Corrigido
