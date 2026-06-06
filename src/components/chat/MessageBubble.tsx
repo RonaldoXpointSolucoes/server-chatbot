@@ -535,7 +535,7 @@ export const MessageBubble = memo(({
             <>
                {msg.quoted && (
                   <div 
-                    className="bg-black/5 dark:bg-black/20 border-l-4 border-[#00a884] rounded-lg p-2 mb-2 w-full flex flex-col gap-0.5 relative overflow-hidden group/quote cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                    className="relative pl-4 pr-3 py-2.5 bg-slate-500/10 dark:bg-black/30 backdrop-blur-sm border border-slate-500/15 dark:border-white/5 border-l-4 border-l-slate-400 dark:border-l-slate-500 rounded-2xl text-[0.825rem] text-slate-600 dark:text-slate-300/90 whitespace-normal overflow-hidden max-w-full cursor-pointer hover:bg-slate-500/15 dark:hover:bg-black/40 hover:border-slate-500/25 dark:hover:border-white/10 hover:scale-[0.99] transition-all duration-300 group/quote mb-2 shadow-sm"
                     onClick={(e) => {
                       e.stopPropagation();
                       const targetId = `msg-${msg.quoted!.id}`;
@@ -558,21 +558,23 @@ export const MessageBubble = memo(({
                     }}
                     title="Clique para ir até a mensagem original"
                   >
-                    <div className="absolute inset-0 bg-white/40 dark:bg-white/5 opacity-0 group-hover/quote:opacity-100 transition-opacity pointer-events-none"></div>
-                    
-                    <div className="absolute top-2 right-2 text-[#00a884] opacity-0 group-hover/quote:opacity-100 transition-opacity">
-                      <MessageSquareReply size={14} className="scale-x-[-1]" />
+                    {/* Ícone de Marca d'Água Elegante */}
+                    <div className="absolute right-3 top-2.5 text-slate-400 dark:text-slate-500 opacity-[0.12] dark:opacity-[0.15] group-hover/quote:opacity-30 group-hover/quote:scale-110 transition-all duration-300 transform rotate-12 pointer-events-none select-none">
+                      <MessageSquareReply size={36} className="stroke-[1.5]" />
                     </div>
-       
-                    <span className="text-[11px] font-bold text-[#00a884] opacity-90 truncate pr-6">
-                      {msg.quoted.sender && activeChat?.phone && msg.quoted.sender.includes(activeChat.phone.replace(/\D/g, '')) 
-                        ? getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)
-                        : 'Você'
-                      }
-                    </span>
-                    <span className="text-[13px] text-[#54656f] dark:text-[#aebac1] leading-snug line-clamp-3 pr-2">
+
+                    <div className="font-bold text-slate-500 dark:text-slate-400 text-xs mb-1 opacity-90 drop-shadow-sm flex items-center gap-1.5 select-none">
+                      <MessageSquareReply size={12} className="opacity-80" />
+                      <span>
+                        {msg.quoted.sender && activeChat?.phone && msg.quoted.sender.includes(activeChat.phone.replace(/\D/g, '')) 
+                          ? getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)
+                          : 'Você'
+                        }
+                      </span>
+                    </div>
+                    <div className="line-clamp-2 italic opacity-85 leading-relaxed pl-1 pr-6 border-l border-white/5">
                       {msg.quoted.text}
-                    </span>
+                    </div>
                   </div>
                )}
                

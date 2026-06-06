@@ -170,8 +170,11 @@ class FlowEngine {
     async executeNextNodes(tenantId, instanceId, conversationId, convState, nodes, edges, sock) {
         let isPaused = false;
         let currentNodeId = convState.current_node_id;
+        let nodeCount = 0;
+        const MAX_NODES_PER_EXECUTION = 25; // Proteção proativa contra loops infinitos de nós no design do fluxo
 
-        while (!isPaused) {
+        while (!isPaused && nodeCount < MAX_NODES_PER_EXECUTION) {
+            nodeCount++;
             // Acha as arestas conectadas partindo de currentNodeId
             const outgoingEdges = edges.filter(e => e.source === currentNodeId);
             
@@ -240,6 +243,12 @@ class FlowEngine {
                 await this.logExecution(convState.id, currentNodeId, `ERRO`, e.message);
                 isPaused = true; // Pausa para não looping de erro
             }
+        }
+
+        if (nodeCount >= MAX_NODES_PER_EXECUTION) {
+             console.error(`[FlowEngine] Loop infinito de nós detectado no fluxo do state ${convState.id}. Abortando execução para evitar spam.`);
+             await this.logExecution(convState.id, currentNodeId, `ERRO`, `Execução interrompida: Limite de iterações de nós atingido (${MAX_NODES_PER_EXECUTION}). Possível loop infinito no design do fluxo.`);
+             await this.finishState(convState.id);
         }
     }
 

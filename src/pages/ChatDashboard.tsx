@@ -103,17 +103,35 @@ export function renderMessageText(text: string) {
     });
   };
 
-  // Detecção de mensagem citada na string (padrão de envio)
-  const quoteMatch = text.match(/^> \*Mensagem Citada:\* "(.*?)"\n\n([\s\S]*)$/);
+  // Detecção de mensagem citada na string (padrão de envio) - Suporta assinaturas e formatação sutil
+  let prefixText = '';
+  let quotedText = '';
+  let actualMessage = '';
+  let hasQuote = false;
+
+  const quoteIndex = text.indexOf('> *Mensagem Citada:* "');
+  if (quoteIndex !== -1) {
+    prefixText = text.substring(0, quoteIndex).trim();
+    const rest = text.substring(quoteIndex + '> *Mensagem Citada:* "'.length);
+    const firstQuoteEnd = rest.indexOf('"');
+    if (firstQuoteEnd !== -1) {
+      quotedText = rest.substring(0, firstQuoteEnd);
+      const afterQuote = rest.substring(firstQuoteEnd + 1);
+      actualMessage = afterQuote.replace(/^[\r\n\s]+/, '');
+      hasQuote = true;
+    }
+  }
   
-  if (quoteMatch) {
-    const quotedText = quoteMatch[1];
-    const actualMessage = quoteMatch[2];
-    
+  if (hasQuote) {
     return (
       <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-top-1 duration-300">
+        {prefixText && (
+          <div className="text-inherit font-semibold mb-1 opacity-90 pl-1 leading-relaxed">
+            {renderMessageText(prefixText)}
+          </div>
+        )}
         <div 
-          className="relative pl-4 pr-3 py-2.5 bg-white/5 dark:bg-black/35 backdrop-blur-sm border border-white/10 dark:border-white/5 border-l-4 border-l-emerald-500/80 rounded-2xl text-[0.825rem] text-slate-600 dark:text-slate-300/90 whitespace-normal overflow-hidden max-w-full cursor-pointer hover:bg-white/10 dark:hover:bg-white/5 hover:border-white/25 hover:scale-[0.99] transition-all duration-300 group shadow-sm"
+          className="relative pl-4 pr-3 py-2.5 bg-slate-500/10 dark:bg-black/30 backdrop-blur-sm border border-slate-500/15 dark:border-white/5 border-l-4 border-l-slate-400 dark:border-l-slate-500 rounded-2xl text-[0.825rem] text-slate-600 dark:text-slate-300/90 whitespace-normal overflow-hidden max-w-full cursor-pointer hover:bg-slate-500/15 dark:hover:bg-black/40 hover:border-slate-500/25 dark:hover:border-white/10 hover:scale-[0.99] transition-all duration-300 group shadow-sm"
           onClick={(e) => {
             e.stopPropagation();
             if (quotedText) {
@@ -130,11 +148,11 @@ export function renderMessageText(text: string) {
           }}
         >
           {/* Ícone de Marca d'Água Elegante */}
-          <div className="absolute right-3 top-2.5 text-emerald-500 dark:text-emerald-400 opacity-[0.08] dark:opacity-[0.12] group-hover:opacity-20 group-hover:scale-110 transition-all duration-300 transform rotate-12 pointer-events-none select-none">
+          <div className="absolute right-3 top-2.5 text-slate-400 dark:text-slate-500 opacity-[0.12] dark:opacity-[0.15] group-hover:opacity-30 group-hover:scale-110 transition-all duration-300 transform rotate-12 pointer-events-none select-none">
             <MessageSquareReply size={36} className="stroke-[1.5]" />
           </div>
 
-          <div className="font-bold text-emerald-600 dark:text-emerald-400 text-xs mb-1 opacity-90 drop-shadow-sm flex items-center gap-1.5">
+          <div className="font-bold text-slate-500 dark:text-slate-400 text-xs mb-1 opacity-90 drop-shadow-sm flex items-center gap-1.5 select-none">
             <MessageSquareReply size={12} className="opacity-80" />
             Mensagem Citada
           </div>
@@ -144,7 +162,7 @@ export function renderMessageText(text: string) {
         </div>
         
         {/* Divisor Gradiente Elegante */}
-        <div className="h-px w-full bg-gradient-to-r from-emerald-500/20 via-emerald-500/5 to-transparent my-0.5 opacity-60" />
+        <div className="h-px w-full bg-gradient-to-r from-slate-500/20 via-slate-500/5 to-transparent my-0.5 opacity-60" />
         
         <div className="pl-1 text-slate-800 dark:text-slate-100 leading-relaxed">
            {renderMessageText(actualMessage)}

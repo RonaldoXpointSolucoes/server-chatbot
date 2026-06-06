@@ -26,6 +26,7 @@ class EventProcessor {
         this.pendingStatuses = new Map();
         this.processedMessagesCache = new Map(); // Cache de deduplicação de mensagens recentes
         this.statusUpdateQueue = new Map(); // Fila assíncrona para status atrasados
+        this.aiSendRateLimiter = new Map(); // Rastreio de taxa de disparos automáticos por conversa para anti-spam
         this.isFlushingStatus = false;
         
         // Loop de processamento em lote a cada 2 segundos.
@@ -834,6 +835,57 @@ class EventProcessor {
              // Executa os disparos da IA Luna consolidados (apenas a última mensagem de cada conversa no lote)
              for (const [convId, triggerData] of aiTriggerMap.entries()) {
                  const { msg, b } = triggerData;
+                 
+                 // SISTEMA ANTI-SPAM / RATE-LIMITER DE DISPAROS DE BOT
+                 const now = Date.now();
+                 let rateData = this.aiSendRateLimiter.get(convId);
+                 if (!rateData) {
+                     rateData = { timestamps: [] };
+                 }
+                 
+                 // Filtra timestamps mais velhos que 60 segundos
+                 rateData.timestamps = rateData.timestamps.filter(ts => now - ts < 60000);
+                 
+                 if (rateData.timestamps.length >= 5) { // Limite de 5 respostas de bot por minuto
+                     console.warn(`[EventProcessor] Anti-Spam Ativado para convId ${convId}. Excesso de disparos de bot detectados (${rateData.timestamps.length} em 60s). Pausando IA.`);
+                     
+                     try {
+                         // Pausa a IA e define como status 'open' para operador humano
+                         await supabase.from('conversations').update({ ai_paused: true, status: 'open' }).eq('id', convId);
+                         
+                         // Registra uma mensagem de aviso de sistema na conversa para avisar o Atendente
+                         const alertMsgText = `⚠️ Atendimento automático pausado: Taxa limite de respostas da IA excedida (limite contra bloqueio ativado).`;
+                         const { data: insertedMsg } = await supabase.from('messages').insert({
+                             tenant_id: b.tenantId,
+                             instance_id: b.instanceId,
+                             conversation_id: convId,
+                             direction: 'outgoing',
+                             message_type: 'text',
+                             status: 'sent',
+                             text_content: alertMsgText,
+                             sender_type: 'system',
+                             raw_payload: { system_alert: true }
+                         }).select().single();
+                         
+                         if (insertedMsg) {
+                             realtime.publishInboxEvent(b.tenantId, 'message.new', {
+                                 message: insertedMsg,
+                                 contact_phone: b.phone,
+                                 conversation_id: convId
+                             }).catch(() => {});
+                         }
+                     } catch (dbErr) {
+                         console.error(`[EventProcessor] Erro ao pausar IA por spam no banco:`, dbErr);
+                     }
+                     
+                     // Limpa os timestamps para evitar loops de escrita repetidos
+                     this.aiSendRateLimiter.delete(convId);
+                     continue; // Ignora o disparo
+                 }
+                 
+                 // Registra o novo disparo
+                 rateData.timestamps.push(now);
+                 this.aiSendRateLimiter.set(convId, rateData);
                  
                  this.getInstanceConfig(b.instanceId).then(async (instanceConfig) => {
                       // 1. Verifica se o robô está ativo para esta caixa de entrada (padrão true se undefined)
