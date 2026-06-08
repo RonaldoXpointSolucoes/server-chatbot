@@ -16,11 +16,21 @@ const requireApiKey = async (req, res, next) => {
     const apiKey = req.headers['apikey'] || req.headers['globalapikey'];
     if (!apiKey) return res.status(401).json({ error: 'ApiKey header is missing.' });
 
-    // Busca a Global Api Key
-    const { data: comp } = await supabase.from('companies').select('global_api_key').single();
-    const globalKey = comp ? comp.global_api_key : process.env.GLOBAL_API_KEY;
-
+    // Se for rota de criação de instância, identificamos o inquilino por x-tenant-id
     if (req.path === '/instance/create') {
+        const tenantId = req.headers['x-tenant-id'];
+        if (!tenantId) {
+            return res.status(400).json({ error: 'x-tenant-id header is required for instance creation.' });
+        }
+
+        const { data: comp } = await supabase
+            .from('companies')
+            .select('global_api_key')
+            .eq('id', tenantId)
+            .single();
+
+        const globalKey = comp ? comp.global_api_key : process.env.GLOBAL_API_KEY;
+
         if (globalKey && apiKey !== globalKey) {
             return res.status(401).json({ error: 'Unauthorized Global ApiKey.' });
         }
@@ -34,7 +44,7 @@ const requireApiKey = async (req, res, next) => {
         return res.status(400).json({ error: 'Instance name is missing in URL path or body ("instance").' });
     }
 
-    // Valida no Banco pela ApiKey e Nome
+    // Valida no Banco pelo Nome da Instância
     const { data, error } = await supabase
         .from('whatsapp_instances')
         .select('id, tenant_id, status, api_key')
@@ -45,7 +55,16 @@ const requireApiKey = async (req, res, next) => {
         return res.status(404).json({ error: 'Instance not found.' });
     }
 
-    // Autoriza se for a ApiKey da Instância OU a Global Api Key
+    // Busca a Global Api Key da empresa associada a esta instância específica
+    const { data: comp } = await supabase
+        .from('companies')
+        .select('global_api_key')
+        .eq('id', data.tenant_id)
+        .single();
+
+    const globalKey = comp ? comp.global_api_key : process.env.GLOBAL_API_KEY;
+
+    // Autoriza se for a ApiKey da Instância OU a Global Api Key da Empresa
     if (data.api_key !== apiKey && globalKey !== apiKey) {
         return res.status(401).json({ error: 'Unauthorized ApiKey.' });
     }

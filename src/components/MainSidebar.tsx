@@ -805,16 +805,12 @@ export function MainSidebar() {
               >
                 <NavItem icon={<Briefcase size={16} />} title="Conta" isSub onClick={() => navigate('/settings/account')} />
                 <NavItem icon={<UserSquare2 size={16} />} title="Usuários" isSub onClick={() => navigate('/settings/agents')} />
-                <NavItem icon={<Users size={16} />} title="Times" isSub onClick={() => navigate('/settings/teams')} />
                 <NavItem icon={<Inbox size={16} />} title="Caixas de Entrada" isSub onClick={() => navigate('/settings/inboxes')} />
                 <NavItem icon={<Tag size={16} />} title="Etiquetas" isSub onClick={() => navigate('/settings/labels')} />
-                <NavItem icon={<Code2 size={16} />} title="Atributos Personalizados" isSub onClick={() => navigate('/settings/attributes')} />
                 <NavItem icon={<History size={16} />} title="Log de Operações" isSub onClick={() => navigate('/settings/logs')} />
                 <NavItem icon={<Repeat size={16} />} title="Automação" isSub onClick={() => navigate('/settings/automation')} />
                 <NavItem icon={<Bot size={16} />} title="Robôs" isSub onClick={() => navigate('/settings/bots')} />
-                <NavItem icon={<CalendarDays size={16} />} title="Macros" isSub onClick={() => navigate('/settings/macros')} />
                 <NavItem icon={<Puzzle size={16} />} title="Integrações" isSub onClick={() => navigate('/settings/integrations')} />
-                <NavItem icon={<Workflow size={16} />} title="Fluxo de Conversa" isSub onClick={() => navigate('/flows')} />
               </CollapsibleSection>
             </div>
           )}

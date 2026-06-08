@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.9.22] - 2026-06-06
+
+### Corrigido
+- **Loop de Login e RLS de Empresas no Face ID Modal**: Corrigido o bug que provocava o deslogamento imediato do usuário `ronaldo@burguerplus.com.br` ao tentar acessar a plataforma. Identificamos que o campo `user_id` na tabela `public.tenant_users` estava com o UUID desalinhado em relação ao registro real na tabela `auth.users` do Supabase. Como consequência, as regras de RLS da tabela `companies` bloqueavam a leitura da empresa dele na barra lateral (`MainSidebar` no `fetchCompanies`), ativando a rotina de segurança que deslogava o usuário por segurança. Sincronizamos os IDs no banco para o Ronaldo e a conta de teste do gerente, corrigindo o loop de login definitivamente.
+
+## [2.9.21] - 2026-06-06
+
+### Corrigido
+- **Restauração de Contatos Históricos da Holding**: Corrigido o problema na empresa *Burguer Plus* onde contatos recém-sincronizados da caixa iPhone apareciam com o número de telefone bruto no lugar do nome. Fizemos um restauro em lote resgatando os nomes reais que já existiam cadastrados no tenant da *X-Point Soluções* (mesma holding/grupo econômico).
+- **Trigger Preventiva de Sincronização**: Criada a trigger de banco de dados `trg_sync_contact_name_from_holding` no Supabase. A trigger intercepta novas inserções ou atualizações de contatos que estejam sem nome e automaticamente herda o nome real já conhecido em outras empresas do mesmo grupo econômico. Isso impede a perda de nomes em futuras sincronizações de histórico ou reconexões de caixas.
+
 ## [2.9.20] - 2026-06-06
 
 ### Adicionado

@@ -43,6 +43,8 @@ import { useChatStore } from '../../store/chatStore';
 import { BOT_INDUSTRIES, BOT_TEMPLATES, BotTemplate, BOT_CATEGORIES } from '../../lib/botTemplates';
 import { cn } from '../../lib/utils';
 
+const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+
 interface HorarioPeriodo {
   inicio: string;
   fim: string;
@@ -119,6 +121,76 @@ function BookOpenIcon(props: any) {
   );
 }
 
+const sanitizeJsonString = (str: string) => {
+  let result = '';
+  let inString = false;
+  
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    
+    if (char === '"') {
+      if (i > 0 && str[i - 1] === '\\') {
+        result += char;
+        continue;
+      }
+      
+      const getPrevNonWhitespaceChar = (index: number) => {
+        for (let j = index - 1; j >= 0; j--) {
+          if (!/\s/.test(str[j])) return str[j];
+        }
+        return '';
+      };
+      
+      const getNextNonWhitespaceChar = (index: number) => {
+        for (let j = index + 1; j < str.length; j++) {
+          if (!/\s/.test(str[j])) return str[j];
+        }
+        return '';
+      };
+      
+      const prev = getPrevNonWhitespaceChar(i);
+      const next = getNextNonWhitespaceChar(i);
+      
+      const isStructural = 
+        prev === '{' || 
+        prev === ',' || 
+        next === ':' || 
+        prev === ':' || 
+        next === ',' || 
+        next === '}';
+        
+      if (isStructural) {
+        inString = !inString;
+        result += char;
+      } else {
+        result += '\\"';
+      }
+    } else if (char === '\n') {
+      if (inString) {
+        result += '\\n';
+      } else {
+        result += char;
+      }
+    } else if (char === '\r') {
+      if (!inString) {
+        result += char;
+      }
+    } else {
+      result += char;
+    }
+  }
+  return result;
+};
+
+const extractTextFromMessageContent = (m: any) => {
+  if (m.type === 'user') {
+    return (m.content as any)?.props?.children || '';
+  }
+  const secondChild = (m.content as any)?.props?.children?.[1];
+  const replyText = secondChild?.props?.children?.[1];
+  return typeof replyText === 'string' ? replyText : '...';
+};
+
 export default function BotsList() {
   const [activeTab, setActiveTab] = useState<'bots' | 'comercio' | 'simulador'>('bots');
   const [searchTerm, setSearchTerm] = useState('');
@@ -188,6 +260,7 @@ export default function BotsList() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [activeBotRole, setActiveBotRole] = useState<string | null>(null);
   const [isDebugMode, setIsDebugMode] = useState(false);
+  const [isGeneratingRules, setIsGeneratingRules] = useState(false);
   const [promptModalMsg, setPromptModalMsg] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -474,6 +547,29 @@ export default function BotsList() {
   };
 
   // Funções do Simulador Conversacional
+  const replaceTokens = (text: string) => {
+    if (!text || typeof text !== 'string') return text;
+    const vars = {
+      nomeIa: businessName || 'Luna',
+      endereco: street ? `${street}${number ? `, ${number}` : ''} - ${neighborhood} - ${city}/${state}` : '',
+      horarioFuncionamento: operatingDays ? `${operatingDays} - ${openTime} às ${closeTime}` : '',
+      linkCardapio: tenantInfo?.settings?.link_cardapio || '',
+      instagram: tenantInfo?.settings?.instagram || '',
+      googleMaps: tenantInfo?.settings?.google_maps || '',
+      youtube: tenantInfo?.settings?.youtube || '',
+      tiktok: tenantInfo?.settings?.tiktok || ''
+    };
+    return text
+      .replace(/\[NOME_DA_EMPRESA\]/g, vars.nomeIa)
+      .replace(/\[ENDERECO_DA_EMPRESA\]/g, vars.endereco)
+      .replace(/\[HORARIO_FUNCIONAMENTO\]/g, vars.horarioFuncionamento)
+      .replace(/\[LINK_CARDAPIO\]/g, vars.linkCardapio)
+      .replace(/\[LINK_INSTAGRAM\]/g, vars.instagram)
+      .replace(/\[LINK_GOOGLE_MAPS\]/g, vars.googleMaps)
+      .replace(/\[LINK_YOUTUBE\]/g, vars.youtube)
+      .replace(/\[LINK_TIKTOK\]/g, vars.tiktok);
+  };
+
   const activeBots = bots.filter(b => b.status === 'active');
 
   const scrollToBottom = () => {
@@ -540,7 +636,30 @@ export default function BotsList() {
       };
       setChatMessages(prev => [...prev, pendingOrchestratorMsg]);
 
-      // Montando o prompt do orquestrador com robôs do banco de dados
+      // 1. Busca contexto no RAG (Simulador)
+      let contextText = '';
+      try {
+        const matchResponse = await fetch(`${ENGINE_URL}/api/v1/knowledge/match`, {
+          method: 'POST',
+          headers: {
+            'x-tenant-id': tenantId || '',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ query: userText })
+        });
+        if (matchResponse.ok) {
+          const matchData = await matchResponse.json();
+          if (matchData.matches && matchData.matches.length > 0) {
+            contextText = "\n\n### CONTEXTO DA BASE DE CONHECIMENTO (RAG) ###\nVocê pode usar as informações a seguir para basear sua resposta caso seja útil:\n" +
+                          matchData.matches.map((m: any) => m.content).join("\n---\n");
+          }
+        }
+      } catch (err) {
+        console.warn("Erro ao buscar contexto RAG no simulador:", err);
+      }
+
+      // 2. Montando o prompt do orquestrador com robôs do banco de dados e tokens substituídos
+      const linkCardapio = tenantInfo?.settings?.link_cardapio || '';
       const addressText = street ? `${street}${number ? `, ${number}` : ''} - ${neighborhood} - ${city}/${state}` : '';
       const contextBase = `
 Você é o "Orquestrador RAG" da empresa "${businessName || 'Nossa Empresa'}".
@@ -553,7 +672,7 @@ ${customRules || 'Nenhuma regra customizada cadastrada.'}
 
 Você tem a seguinte equipe de robôs especialistas (Agentes Ativos) disponíveis no banco:
 ${activeBots.length > 0 
-  ? activeBots.map(b => `- ID: ${b.id} | Nome: ${b.name} | Descrição: ${b.description || 'Sem descrição'} | Diretrizes/System Prompt: ${b.systemPrompt}`).join('\n')
+  ? activeBots.map(b => `- ID: ${b.id} | Nome: ${b.name} | Descrição: ${b.description || 'Sem descrição'} | Diretrizes/System Prompt: ${replaceTokens(b.systemPrompt)}`).join('\n')
   : '- ID: default | Nome: Maestro | Descrição: Atendimento geral | Diretrizes/System Prompt: Você é o Maestro, atenda de forma simpática.'}
 
 INSTRUÇÕES DO ORQUESTRADOR:
@@ -562,13 +681,17 @@ INSTRUÇÕES DO ORQUESTRADOR:
 3. Escolha OBRIGATORIAMENTE um dos robôs da lista acima (usando o campo ID) para assumir a resposta.
    - Se for o primeiro contato ou se nenhum robô se encaixar perfeitamente, escolha o robô mais adequado.
 4. Gere a resposta final EXATAMENTE COMO o robô escolhido responderia, assumindo sua personalidade e system prompt.
-5. Responda ESTRITAMENTE em formato JSON com os seguintes campos:
+5. Se houver informações da base de conhecimento (RAG) no contexto abaixo, use-as para responder ao cliente caso o robô escolhido precise delas.
+6. Responda ESTRITAMENTE em formato JSON com os seguintes campos:
    {
      "intent": "classificação curta da intenção",
      "agentId": "id_do_robô_escolhido",
      "reasoning": "Sua justificativa para ter escolhido esse robô",
      "reply": "O texto de resposta formatado como se você fosse o robô escolhido, pronto para enviar ao cliente."
    }
+
+Contexto RAG recuperado para esta pergunta:
+${contextText || 'Nenhum contexto encontrado no RAG para esta pergunta.'}
 `;
 
       const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -576,7 +699,7 @@ INSTRUÇÕES DO ORQUESTRADOR:
 
       const geminiHistory = chatMessages.filter(m => m.type === 'user' || m.type === 'agent').slice(-5).map(m => ({
         role: m.type === 'user' ? 'user' : 'model',
-        parts: [{ text: m.type === 'user' ? (m.content as any)?.props?.children : "..." }]
+        parts: [{ text: extractTextFromMessageContent(m) }]
       }));
       geminiHistory.push({ role: 'user', parts: [{ text: userText }] });
 
@@ -586,7 +709,7 @@ INSTRUÇÕES DO ORQUESTRADOR:
         body: JSON.stringify({
           system_instruction: { parts: [{ text: contextBase }] },
           contents: geminiHistory,
-          generationConfig: { response_mime_type: 'application/json' }
+          generationConfig: { responseMimeType: 'application/json' }
         })
       });
 
@@ -596,7 +719,17 @@ INSTRUÇÕES DO ORQUESTRADOR:
       }
 
       const data = await response.json();
-      const result = JSON.parse(data.candidates[0].content.parts[0].text);
+      let rawText = data.candidates[0].content.parts[0].text;
+      
+      // Limpeza robusta de blocos de código markdown do JSON
+      if (rawText.includes('```json')) {
+        rawText = rawText.split('```json')[1].split('```')[0].trim();
+      } else if (rawText.includes('```')) {
+        rawText = rawText.split('```')[1].split('```')[0].trim();
+      }
+
+      const sanitizedText = sanitizeJsonString(rawText.trim());
+      const result = JSON.parse(sanitizedText);
 
       const targetBot = activeBots.find(b => b.id === result.agentId) || activeBots[0];
       const intent = result.intent || 'indefinida';
@@ -616,6 +749,12 @@ INSTRUÇÕES DO ORQUESTRADOR:
               <span className="text-indigo-400 font-bold">Intenção:</span> {intent}<br/>
               <span className="text-indigo-400 font-bold">Robô Escolhido:</span> {targetBot?.name || 'Padrão'}<br/>
               <span className="text-indigo-400 font-bold">Raciocínio:</span> {reasoning}
+              {contextText && (
+                <>
+                  <br/>
+                  <span className="text-emerald-400 font-bold">RAG Ativo:</span> Contexto semântico recuperado da base de dados.
+                </>
+              )}
             </div>
             {isDebugMode && (
               <button
@@ -667,6 +806,116 @@ INSTRUÇÕES DO ORQUESTRADOR:
           </div>
         )
       }]);
+    }
+  };
+
+  const handleGenerateCustomRulesWithAi = async () => {
+    if (isGeneratingRules || !tenantId) return;
+    setIsGeneratingRules(true);
+
+    try {
+      const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!geminiApiKey) {
+        throw new Error("Chave do Gemini (VITE_GEMINI_API_KEY) não configurada no arquivo .env.");
+      }
+
+      // 1. Buscar toda a base de conhecimento RAG para esta empresa
+      const { data: ragDocs, error: ragError } = await supabase
+        .from('knowledge_documents')
+        .select('title, content')
+        .eq('tenant_id', tenantId);
+
+      if (ragError) throw new Error("Erro ao consultar base de conhecimento RAG: " + ragError.message);
+
+      const ragContentFormatted = ragDocs && ragDocs.length > 0
+        ? ragDocs.map((doc, index) => `Documento #${index + 1}: [Título: ${doc.title}]\nConteúdo:\n${doc.content}`).join("\n\n---\n\n")
+        : 'Nenhum documento RAG cadastrado.';
+
+      // 2. Coletar dados preenchidos no formulário
+      const addressText = street ? `${street}${number ? `, ${number}` : ''} - ${neighborhood} - ${city}/${state}` : '';
+      const specificDetails = [];
+      if (selectedCategory === 'gastronomia') {
+        if (averagePrepTime) specificDetails.push(`Tempo médio de preparo: ${averagePrepTime}`);
+        if (wifiPassword) specificDetails.push(`Senha do WiFi: ${wifiPassword}`);
+        if (hasDeliveryFee && deliveryFeeRules) specificDetails.push(`Taxa de entrega / Regras: ${deliveryFeeRules}`);
+      } else if (selectedCategory === 'software') {
+        if (documentationLink) specificDetails.push(`Link da Documentação: ${documentationLink}`);
+        if (pricingPlans) specificDetails.push(`Planos & Preços: ${pricingPlans}`);
+        if (supportedIntegrations) specificDetails.push(`Integrações Suportadas: ${supportedIntegrations}`);
+        if (setupTime) specificDetails.push(`Tempo de Instalação: ${setupTime}`);
+      } else if (selectedCategory === 'clinica') {
+        if (specialties) specificDetails.push(`Especialidades Médicas: ${specialties}`);
+        if (consultationFee) specificDetails.push(`Valor Consulta Particular: ${consultationFee}`);
+        if (acceptedInsurances) specificDetails.push(`Convênios Aceitos: ${acceptedInsurances}`);
+      } else if (selectedCategory === 'varejo') {
+        if (shippingDeadlines) specificDetails.push(`Prazos de Entrega: ${shippingDeadlines}`);
+        if (exchangePolicy) specificDetails.push(`Política de Trocas: ${exchangePolicy}`);
+      }
+
+      const formDetails = `
+- Razão Social: ${corporateName || 'Não informado'}
+- Nome Fantasia / IA: ${businessName || 'Não informado'}
+- Nicho de Negócio: ${selectedCategory}
+- CNPJ: ${cnpj || 'Não informado'}
+- Endereço / Localização: ${addressText || 'Não informado'}
+- Horário de Funcionamento: ${operatingDays ? `${operatingDays} - ${openTime} às ${closeTime}` : 'Não informado'}
+- Formas de Pagamento: ${paymentMethods || 'Não informado'} (Aceita PIX: ${acceptsPix ? 'Sim' : 'Não'})
+- Detalhes Específicos do Ramo:
+  ${specificDetails.length > 0 ? specificDetails.map(d => `* ${d}`).join('\n  ') : 'Nenhum detalhe adicional informado.'}
+      `;
+
+      // 3. Montar Prompt do Gemini
+      const promptText = `
+Você é um Engenheiro de Prompt especialista em atendimento automatizado via WhatsApp para empresas.
+Sua missão é criar o conteúdo completo para o campo "Super Prompt Livre / Regras Customizadas" para alimentar o motor de I.A. (Orquestrador) que coordena a conversa com clientes da empresa "${businessName || 'Nossa Empresa'}".
+
+Aqui estão todos os dados cadastrados no formulário de identificação da empresa:
+${formDetails}
+
+Abaixo está o conteúdo extraído de TODOS os documentos de treinamento cadastrados na Base de Conhecimento RAG desta empresa:
+---
+${ragContentFormatted}
+---
+
+Com base nos dados fornecidos e no conteúdo RAG, monte um conjunto abrangente de regras, diretrizes de atendimento e instruções detalhadas para o comportamento dos robôs.
+
+Instruções importantes:
+- Inicie diretamente com as regras formatadas em tópicos. NÃO inclua nenhum tipo de introdução (como "Aqui estão as regras..." ou blocos de código markdown \`\`\`).
+- Formate a resposta usando tópicos claros com emojis apropriados (ex: 📋 DIRETRIZES GERAIS, 🍔 CARDÁPIO E PEDIDOS, 📍 LOCALIZAÇÃO E CONTATO, ⚙️ DICAS DE ATENDIMENTO).
+- Escreva regras explícitas sobre como lidar com perguntas frequentes dos clientes usando as informações dos documentos RAG que você leu.
+- As regras devem instruir os robôs a serem extremamente rápidos, simpáticos e assertivos.
+      `;
+
+      // 4. Chamar o Gemini
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${geminiApiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: promptText }] }]
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || "Falha na chamada ao Gemini API.");
+      }
+
+      const data = await response.json();
+      let generatedText = data.candidates[0].content.parts[0].text;
+      
+      // Limpeza robusta se o modelo insistir em colocar blocos de markdown
+      if (generatedText.includes('```')) {
+        generatedText = generatedText.replace(/```[a-zA-Z]*/g, '').replace(/```/g, '').trim();
+      }
+
+      setCustomRules(generatedText.trim());
+      alert("Regras Customizadas otimizadas com sucesso pela I.A. baseada no seu RAG e dados comerciais! Não se esqueça de salvar as alterações.");
+
+    } catch (e: any) {
+      console.error(e);
+      alert("Erro ao gerar regras com I.A.: " + e.message);
+    } finally {
+      setIsGeneratingRules(false);
     }
   };
 
@@ -1273,7 +1522,18 @@ INSTRUÇÕES DO ORQUESTRADOR:
 
                 {/* Regras Customizadas / Conhecimento Livre */}
                 <div className="border-t border-white/5 pt-6 space-y-3">
-                  <label className="text-xs font-bold text-white/60 uppercase tracking-widest block ml-1">Regras Customizadas / Super Prompt Livre</label>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 ml-1">
+                    <label className="text-xs font-bold text-white/60 uppercase tracking-widest block">Regras Customizadas / Super Prompt Livre</label>
+                    <button
+                      type="button"
+                      onClick={handleGenerateCustomRulesWithAi}
+                      disabled={isGeneratingRules || !tenantId}
+                      className="px-3.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 hover:border-indigo-500/50 rounded-xl text-indigo-400 hover:text-indigo-300 font-bold text-xs transition-all flex items-center gap-1.5 disabled:opacity-50 self-start sm:self-center shadow-sm"
+                    >
+                      {isGeneratingRules ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-indigo-400" />}
+                      {isGeneratingRules ? 'Analisando Base RAG...' : 'Gerar com I.A.'}
+                    </button>
+                  </div>
                   <textarea
                     rows={6}
                     placeholder="Cole aqui informações diversas que os robôs devem saber, como promoções ativas, regras de atendimento especiais, link de suporte adicional ou avisos importantes..."

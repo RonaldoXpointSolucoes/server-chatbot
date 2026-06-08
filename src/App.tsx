@@ -22,13 +22,7 @@ import DevLogger from './components/DevLogger';
 import { InstallPWA } from './components/InstallPWA';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { usePushNotifications } from './hooks/usePushNotifications';
-import FlowManager from './pages/FlowManager';
-import FlowBuilder from './pages/FlowBuilder';
-
 import { MainLayout } from './components/MainLayout';
-import SettingsLayout from './pages/settings/SettingsLayout';
-import SettingsPreferences from './pages/settings/SettingsPreferences';
-import SettingsCredentials from './pages/settings/SettingsCredentials';
 import { CannedResponses } from './pages/CannedResponses';
 import PortalApp from './pages/PortalApp';
 import DeliveryApp from './pages/DeliveryApp';
@@ -36,6 +30,7 @@ import KdsApp from './pages/KdsApp';
 import CardapioApp from './pages/CardapioApp';
 import FinanceiroApp from './pages/FinanceiroApp';
 import AccountSettings from './pages/settings/AccountSettings';
+import Integrations from './pages/settings/Integrations';
 import { ScheduleManager } from './pages/ScheduleManager';
 import ChecklistDashboard from './pages/checklist/ChecklistDashboard';
 import ChecklistBuilder from './pages/checklist/ChecklistBuilder';
@@ -80,8 +75,6 @@ export default function App() {
             <Route path="/instances" element={<InstancesDashboard />} />
             <Route path="/knowledge" element={<ErrorBoundary><KnowledgeBase /></ErrorBoundary>} />
 
-            <Route path="/flows" element={<ErrorBoundary><FlowManager /></ErrorBoundary>} />
-            <Route path="/flows/:id/edit" element={<ErrorBoundary><FlowBuilder /></ErrorBoundary>} />
 
             {/* Configurações Globais originais conectadas à Sidebar Principal */}
             <Route path="/settings/inboxes" element={<InboxesList />} />
@@ -94,6 +87,7 @@ export default function App() {
             <Route path="/settings/automation" element={<AutomationSettings />} />
             <Route path="/settings/logs" element={<OperationLogs />} />
             <Route path="/settings/account" element={<AccountSettings />} />
+            <Route path="/settings/integrations" element={<Integrations />} />
 
             {/* Rotas Nativas do Módulo de Checklists Operacionais (Tema Administrativo) */}
             <Route path="/checklist/dashboard" element={<ErrorBoundary><ChecklistDashboard /></ErrorBoundary>} />
@@ -112,12 +106,6 @@ export default function App() {
           {/* Rota Blindada de Operador (Sem Sidebar para tablets de cozinha compartilhados) */}
           <Route path="/checklist/tablet" element={<ErrorBoundary><ChecklistTablet /></ErrorBoundary>} />
 
-          {/* Settings do Modulo Flow (Typebot UI) */}
-          <Route path="/flows/settings" element={<SettingsLayout />}>
-            <Route index element={<Navigate to="preferences" replace />} />
-            <Route path="preferences" element={<SettingsPreferences />} />
-            <Route path="credentials" element={<SettingsCredentials />} />
-          </Route>
         </Route>
 
         {/* Gerenciamento Master SaaS */}
