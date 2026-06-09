@@ -81,6 +81,11 @@ export default function ClientLogin() {
     try {
       setFaceVerifyError('');
       addDevLog('CAMERA_INIT', "Iniciando captura de vídeo nativa...", 'info');
+      
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("O navegador não suporta captura de vídeo ou você está acessando por uma conexão não segura (HTTP). O Face ID exige uma conexão segura (HTTPS ou localhost) para funcionar.");
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user', width: 480, height: 480 }
       });
@@ -93,8 +98,19 @@ export default function ClientLogin() {
       addDevLog('CAMERA_SUCCESS', "Câmera conectada e transmitindo!", 'success');
     } catch (err: any) {
       console.error("Erro ao iniciar câmera para Face ID:", err);
+      let errMsg = "Não foi possível acessar a câmera. Verifique as permissões de vídeo.";
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errMsg = "Permissão de câmera negada. Por favor, permita o acesso à câmera nas configurações do seu navegador para usar o Face ID.";
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errMsg = "Nenhuma câmera foi encontrada no seu dispositivo.";
+      } else if (err.message && (err.message.includes("conexão não segura") || err.message.includes("undefined"))) {
+        errMsg = "Acesso à câmera bloqueado. O Face ID exige uma conexão segura (HTTPS ou localhost) para funcionar.";
+      } else if (err.message) {
+        errMsg = err.message;
+      }
+      
       addDevLog('CAMERA_ERROR', err.message || String(err), 'error');
-      setFaceVerifyError("Não foi possível acessar a câmera. Verifique as permissões de vídeo.");
+      setFaceVerifyError(errMsg);
       setCameraActive(false);
     }
   };
@@ -593,6 +609,8 @@ export default function ClientLogin() {
 
       if (!faceRecord) {
         addDevLog('FACE_AUTH_OFFER', `Usuário logado com sucesso. Sugerindo Face ID...`, 'info');
+        setFaceVerifyError('');
+        setCameraActive(false);
         setFaceRegisterModal({ email: email.trim().toLowerCase(), pwdPlain: password.trim() });
         setIsLoading(false);
       } else {
@@ -883,6 +901,7 @@ export default function ClientLogin() {
                             videoRef.current = el;
                             if (el && streamRef.current && el.srcObject !== streamRef.current) {
                               el.srcObject = streamRef.current;
+                              el.play().catch(err => console.error("Erro ao dar play no vídeo ref:", err));
                             }
                           }}
                           autoPlay
@@ -988,7 +1007,7 @@ export default function ClientLogin() {
             )}
 
             {!cameraActive ? (
-              <div className="w-full space-y-6 text-center">
+              <div className="w-full space-y-6 text-center animate-in fade-in duration-300">
                 <div className="flex flex-col items-center">
                   <div className="w-20 h-20 bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-500 rounded-3xl flex items-center justify-center mb-4">
                     <UserCheck size={40} />
@@ -998,6 +1017,13 @@ export default function ClientLogin() {
                     Acesse sua conta instantaneamente nos próximos acessos usando apenas a sua câmera, de forma 100% segura e sem precisar digitar senhas.
                   </p>
                 </div>
+
+                {faceVerifyError && (
+                  <div className="flex items-start gap-2.5 text-red-500 text-sm font-medium bg-red-50 dark:bg-red-500/10 p-4 rounded-2xl border border-red-500/10 text-left w-full animate-in slide-in-from-top-2">
+                    <AlertCircle size={18} className="mt-0.5 shrink-0 text-red-500" />
+                    <span className="leading-relaxed">{faceVerifyError}</span>
+                  </div>
+                )}
 
                 <div className="space-y-3 pt-2">
                   <button
@@ -1047,6 +1073,7 @@ export default function ClientLogin() {
                             videoRef.current = el;
                             if (el && streamRef.current && el.srcObject !== streamRef.current) {
                               el.srcObject = streamRef.current;
+                              el.play().catch(err => console.error("Erro ao dar play no vídeo ref:", err));
                             }
                           }}
                           autoPlay

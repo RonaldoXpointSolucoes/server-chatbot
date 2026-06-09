@@ -10,6 +10,7 @@ class SessionManager {
         this.sessions = new Map();
         this.connectingState = new Map();
         this.reconnectAttempts = new Map();
+        this.queues = new Map();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -203,6 +204,54 @@ class SessionManager {
             sock.ev.on('messages.update', async (updates) => {
                 await eventProcessor.handleMessagesUpdate(tenantId, instanceId, sock, updates);
             });
+            // --- Proteção Antiban e Fila de Mensagens Sequencial ---
+            const originalSendMessage = sock.sendMessage.bind(sock);
+            
+            sock.sendMessage = async (jid, content, options) => {
+                // Obter ou inicializar a fila da instância
+                if (!this.queues.has(instanceId)) {
+                    this.queues.set(instanceId, Promise.resolve());
+                }
+                
+                const currentQueue = this.queues.get(instanceId);
+                
+                // Criamos uma nova promessa para controlar a liberação da fila para o próximo item
+                let resolveQueue;
+                const nextQueuePromise = new Promise((resolve) => {
+                    resolveQueue = resolve;
+                });
+                
+                // Atualiza a fila da instância imediatamente para que os próximos envios aguardem nextQueuePromise
+                this.queues.set(instanceId, nextQueuePromise);
+                
+                // Retornamos ao chamador original o resultado real
+                return new Promise(async (resolve, reject) => {
+                    try {
+                        // Aguarda a fila atual (mensagens anteriores) terminar
+                        await currentQueue;
+                    } catch (e) {
+                        // Ignoramos erros de mensagens anteriores para continuar a fila resiliente
+                    }
+                    
+                    // Delay humano aleatório entre 1.5s e 3.5s
+                    const delay = Math.floor(Math.random() * (3500 - 1500 + 1)) + 1500;
+                    
+                    // Simular o delay antes do envio
+                    setTimeout(async () => {
+                        try {
+                            console.log(`[SessionManager - Antiban] Enviando mensagem na fila para ${jid} via instância ${instanceId} com delay de ${delay}ms`);
+                            const result = await originalSendMessage(jid, content, options);
+                            resolve(result);
+                        } catch (error) {
+                            console.error(`[SessionManager - Antiban] Erro ao enviar mensagem na fila para ${jid} via instância ${instanceId}:`, error);
+                            reject(error);
+                        } finally {
+                            // Independente de sucesso ou falha, resolve a fila interna para permitir o próximo envio
+                            resolveQueue();
+                        }
+                    }, delay);
+                });
+            };
             
             this.sessions.set(instanceId, { sock, tenantId });
 

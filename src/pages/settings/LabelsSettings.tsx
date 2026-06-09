@@ -5,6 +5,63 @@ import { cn } from '../../lib/utils';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
 
+export const resolveLabelColor = (colorStr: string) => {
+  if (!colorStr) return { hex: '#6366f1', bg: 'rgba(99, 102, 241, 0.12)', border: 'rgba(99, 102, 241, 0.25)', text: '#818cf8' };
+  
+  if (colorStr.startsWith('#')) {
+    const hex = colorStr;
+    return {
+      hex,
+      bg: `${hex}15`, // ~8% opacity
+      border: `${hex}30`, // ~18% opacity
+      text: hex
+    };
+  }
+  
+  const colorMap: Record<string, string> = {
+    'bg-rose-500': '#f43f5e',
+    'bg-emerald-500': '#10b981',
+    'bg-indigo-500': '#6366f1',
+    'bg-amber-500': '#f59e0b',
+    'bg-purple-500': '#a855f7',
+    'bg-cyan-500': '#06b6d4',
+    'bg-slate-600': '#475569',
+    'bg-[#182229]': '#34495e',
+  };
+  
+  const cleanColor = colorStr.replace('bg-', '');
+  const colorKey = Object.keys(colorMap).find(k => k.includes(cleanColor)) || colorStr;
+  let hex = colorMap[colorKey];
+  
+  if (!hex) {
+    const basicColor = cleanColor.split('-')[0];
+    const basicMap: Record<string, string> = {
+      rose: '#f43f5e',
+      emerald: '#10b981',
+      indigo: '#6366f1',
+      amber: '#f59e0b',
+      purple: '#a855f7',
+      cyan: '#06b6d4',
+      slate: '#475569',
+      blue: '#3b82f6',
+      red: '#ef4444',
+      green: '#22c55e',
+      yellow: '#eab308',
+      orange: '#f97316',
+      gray: '#6b7280',
+      zinc: '#71717a',
+    };
+    hex = basicMap[basicColor] || '#6366f1';
+  }
+  
+  return {
+    hex,
+    bg: `${hex}15`,
+    border: `${hex}30`,
+    text: hex
+  };
+};
+
 // Paleta premium de cores de Etiqueta com Gradientes ou cores vibrantes
 const LABEL_COLORS = [
   { id: 'rose', name: 'Rose', bg: 'bg-rose-500', rings: 'ring-rose-500' },
@@ -284,10 +341,25 @@ export default function LabelsSettings() {
                      <div>
                         <label className="block text-sm font-medium text-[#8696a0] mb-2 pointer-events-none">Visualização Prévia</label>
                         <div className="flex items-center justify-center p-6 bg-[#111b21] rounded-2xl border border-dashed border-[#2a3942]">
-                           <div className="flex items-center gap-2 bg-[#202c33] px-4 py-2 rounded-2xl shadow-sm border border-white/5">
-                              <div className={cn("w-4 h-4 rounded-full shadow-inner", !formData.color?.startsWith('#') && formData.color)} style={formData.color?.startsWith('#') ? { backgroundColor: formData.color } : undefined} />
-                              <span className="text-sm font-medium text-[#e9edef] tracking-tight">{formData.name || 'Nome da etiqueta'}</span>
-                           </div>
+                           {(() => {
+                              const styles = resolveLabelColor(formData.color);
+                              return (
+                                <div 
+                                  className="px-3 py-1.5 text-xs font-bold rounded-full flex items-center max-w-[150px] truncate shadow-sm border transition-all duration-200" 
+                                  style={{ 
+                                    backgroundColor: styles.bg, 
+                                    borderColor: styles.border, 
+                                    color: styles.text 
+                                  }}
+                                >
+                                  <span 
+                                    className="w-1.5 h-1.5 rounded-full mr-2 shrink-0 shadow-inner" 
+                                    style={{ backgroundColor: styles.hex }}
+                                  />
+                                  <span className="truncate tracking-wide">{formData.name || 'Nome da etiqueta'}</span>
+                                </div>
+                              );
+                           })()}
                         </div>
                      </div>
 

@@ -115,15 +115,8 @@ export function MainSidebar() {
   const agentName = localAgentName || storedName || storeNameFallback || 'Agente';
   const agentInitial = agentName ? agentName.substring(0, 1).toUpperCase() : 'A';
   
-  const currentUserRole = typeof window !== 'undefined' ? (localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role')) || 'admin' : 'admin';
-  const storedEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
-  
-  const storeEmailFallback = useChatStore(state => {
-    if (currentUserRole === 'admin') return state.tenantInfo?.email;
-    return state.tenantInfo?.users?.find((u: any) => u.full_name === agentName)?.email;
-  });
-  
-  const agentEmail = storedEmail || storeEmailFallback || `${agentName.toLowerCase().replace(/\s/g, '')}@xpoint.com`;
+  const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+  const currentUserRole = typeof window !== 'undefined' ? (localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role') || 'agent') : 'agent';
 
   const activeChannelFilter = useChatStore(state => state.activeChannelFilter);
   const setActiveChannelFilter = useChatStore(state => state.setActiveChannelFilter);
@@ -133,14 +126,15 @@ export function MainSidebar() {
   const contacts = useChatStore(state => state.contacts);
   const agents = useChatStore(state => state.agents);
   const tenantLabels = useChatStore(state => state.tenantLabels);
-  const currentAgent = agents.find(a => a.email === agentEmail);
+  
+  const currentAgent = agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
   const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to === currentAgent.id && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
   
   const myTasksCount = React.useMemo(() => {
     if (!currentAgent) return 0;
     return contacts.filter(c => 
       c.messages && c.messages.some(m => 
-        m.isTask && !m.taskCompleted && m.assignedTo === currentAgent.id
+        m.isTask && !m.taskCompleted && (m.assignedTo === currentAgent.id || m.assignedTo === currentAgent.user_id)
       )
     ).length;
   }, [contacts, currentAgent]);
@@ -869,7 +863,7 @@ export function MainSidebar() {
         </div>
         <div className={cn("ml-3 flex-1 min-w-0 transition-opacity duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100")}>
           <p className="text-[14px] font-medium text-[#e9edef] truncate">{agentName}</p>
-          <p className="text-[11px] text-[#8696a0] truncate opacity-80">{agentEmail}</p>
+          <p className="text-[11px] text-[#8696a0] truncate opacity-80">{currentUserEmail || ''}</p>
         </div>
         <button 
           onClick={handleLogout}

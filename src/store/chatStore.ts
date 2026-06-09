@@ -2246,7 +2246,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const clientMsgs = contact.messages.filter(m => m.sender === 'client');
     const unreadMsgs = clientMsgs.slice(-unreadCount);
-    const unreadIds = unreadMsgs.map(m => m.id).filter(id => !String(id).startsWith('optimistic-') && !String(id).startsWith('preview-'));
+    const unreadIds = unreadMsgs
+      .map(m => m.id)
+      .filter(id => 
+        typeof id === 'string' && 
+        /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id)
+      );
 
     const readReceipt = {
       read_by_name: currentUserName,

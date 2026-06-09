@@ -171,7 +171,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             }
 
             // 2. Prepara o System Prompt
-            let basePrompt = botSettings.system_prompt || "Você é um assistente prestativo.";
+            let basePrompt = botSettings.systemPrompt || botSettings.system_prompt || "Você é um assistente prestativo.";
+            
+            // Regra Global Estrita: Ocultar arquitetura interna de sub-robôs e unificar a persona como "Luna"
+            basePrompt += `\n\n### DIRETRIZES DE IDENTIDADE E CONFIDENCIALIDADE (ESTRITAS) ###\n` +
+                          `1. Sua identidade pública para o cliente é unicamente "Luna". Você deve se apresentar e se comportar apenas como Luna.\n` +
+                          `2. NUNCA mencione termos de arquitetura interna de robôs ou outros nomes de robôs (como "Luna Menu", "Luna Pedido", "Luna SAC", "Luna Agendador", etc.) na conversa com o cliente.\n` +
+                          `3. Jamais diga coisas como "posso chamar a Luna Pedido" ou "a Luna Menu vai te ajudar". Em vez disso, assuma toda a responsabilidade pela interação ou diga que você mesma (Luna) ajudará o cliente com o que for necessário (pedido, cardápio, agendamento, etc.).\n` +
+                          `4. Para o cliente, você é única e seu nome é apenas Luna.\n`;
+
             if (botInstructions && botInstructions.trim().length > 0) {
                 basePrompt += `\n\n### INSTRUÇÕES DE COMPORTAMENTO PERSONALIZADAS ###\nImportante: Siga estritamente as diretrizes e regras de personalidade a seguir em todas as interações:\n${botInstructions}\n`;
             }
@@ -250,6 +258,20 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                             name: "Atualizar_nome_contato",
                             description: "Atualiza o nome do contato no sistema quando o cliente informar seu nome na conversa ou no resumo de pedidos.",
                             parameters: { type: "OBJECT", properties: { nome_cliente: { type: "STRING" } }, required: ["nome_cliente"] }
+                        },
+                        {
+                            name: "Consultar_cep",
+                            description: "Consulta informações de endereço completo (rua, bairro, cidade e estado) a partir de um número de CEP fornecido pelo cliente.",
+                            parameters: {
+                                type: "OBJECT",
+                                properties: {
+                                    cep: {
+                                        type: "STRING",
+                                        description: "O número de CEP fornecido pelo cliente (ex: 01001-000 ou 01001000)."
+                                    }
+                                },
+                                required: ["cep"]
+                            }
                         }
                     ]
                 }]
@@ -320,6 +342,36 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                 await supabase.from('contacts').update({ name: call.args.nome_cliente }).eq('id', contactId);
                             }
                             functionResult = { status: "Nome do contato atualizado com sucesso no sistema para " + call.args.nome_cliente };
+                        }
+                        else if (call.name === "Consultar_cep") {
+                            const rawCep = String(call.args.cep || '').replace(/\D/g, '');
+                            if (rawCep.length !== 8) {
+                                functionResult = { erro: "O CEP fornecido é inválido. Deve conter exatamente 8 algarismos." };
+                            } else {
+                                try {
+                                    console.log(`[AutomationWorker - CEP] Consultando CEP ${rawCep} na ViaCEP...`);
+                                    const response = await fetch(`https://viacep.com.br/ws/${rawCep}/json/`);
+                                    if (response.ok) {
+                                        const data = await response.json();
+                                        if (data.erro) {
+                                            functionResult = { erro: "O CEP pesquisado não foi localizado na base dos Correios." };
+                                        } else {
+                                            functionResult = {
+                                                logradouro: data.logradouro || '',
+                                                bairro: data.bairro || '',
+                                                cidade: data.localidade || '',
+                                                estado: data.uf || '',
+                                                cep: data.cep || ''
+                                            };
+                                        }
+                                    } else {
+                                        functionResult = { erro: "Serviço de busca de CEP temporariamente indisponível." };
+                                    }
+                                } catch (cepErr) {
+                                    console.error("[AutomationWorker - CEP] Erro na requisição ViaCEP:", cepErr);
+                                    functionResult = { erro: "Erro ao conectar-se ao servidor de CEP." };
+                                }
+                            }
                         }
                         else {
                             functionResult = { erro: "Ferramenta desconhecida" };
