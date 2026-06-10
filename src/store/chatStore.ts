@@ -52,7 +52,21 @@ export type ContactType = ContactRow & {
   is_blocked?: boolean;
   conv_id?: string;
   ai_paused?: boolean;
+  ai_paused_manually?: boolean;
 };
+
+export interface AppointmentType {
+  id: string;
+  tenant_id: string;
+  contact_id?: string | null;
+  title: string;
+  notes?: string | null;
+  start_time: string;
+  end_time: string;
+  status: 'scheduled' | 'completed' | 'cancelled';
+  checklist_items?: Array<{ id: string; text: string; completed: boolean }>;
+  created_at?: string;
+}
 
 export const getRealContactId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
 export const getInstanceIdFromContact = (id: string) => id.includes('_') ? id.split('_')[1] : null;
@@ -218,7 +232,7 @@ interface ChatState {
   ticketMode: boolean;
   setTicketMode: (active: boolean) => void;
   reopenConversation: (contactId: string) => Promise<void>;
-  resolveConversation: (contactId: string) => Promise<void>;
+  resolveConversation: (contactId: string, reactivateAi?: boolean) => Promise<void>;
   lastBatchResolvedConversations: { conversationId: string, contactId: string, previousStatus: string, assignedTo: string | null, instanceId?: string | null }[] | null;
   resolveAllConversations: (onlyMine?: boolean) => Promise<{ success: boolean, count: number }>;
   undoLastBatchResolve: () => Promise<boolean>;
@@ -258,6 +272,12 @@ interface ChatState {
     itemId: string, 
     completed: boolean
   ) => Promise<void>;
+
+  appointments: AppointmentType[];
+  fetchAppointments: () => Promise<void>;
+  createAppointment: (appointment: Omit<AppointmentType, 'id' | 'created_at' | 'tenant_id'>) => Promise<void>;
+  updateAppointment: (id: string, payload: Partial<AppointmentType>) => Promise<void>;
+  deleteAppointment: (id: string) => Promise<void>;
 }
 
 export interface QuickReply {
@@ -473,6 +493,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   tenantLabels: [],
   isSearchingGlobally: false,
   quickReplies: [],
+  appointments: [],
   filterType: (typeof window !== 'undefined' ? localStorage.getItem('chat_filter_preference') : null) || 'all',
   theme: (typeof window !== 'undefined' ? localStorage.getItem('theme') as 'light' | 'dark' : 'light') || 'light',
   ticketMode: typeof window !== 'undefined' ? localStorage.getItem('chatboot_ticket_mode') === 'true' : false,
@@ -1961,7 +1982,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  resolveConversation: async (contactId) => {
+  resolveConversation: async (contactId, reactivateAi) => {
     try {
         const tenantInfo = get().tenantInfo;
         if (!tenantInfo) return;
@@ -2010,12 +2031,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
             get().addMessageLocally(contactId, msgTypeObj);
         }
 
-        // 2. Remove o assignment direto na tabela certa (conversations)
-        await supabase.from('conversations').update({ assigned_to: null, status: 'resolved', ai_paused: false }).eq('id', conv.id);
+        const targetContact = get().contacts.find(c => c.id === contactId);
+        let nextAiPaused = false;
+        
+        if (reactivateAi !== undefined) {
+          nextAiPaused = !reactivateAi;
+        } else {
+          // Fallback se não informado: segue o ai_paused_manually atual
+          const isPausedManually = targetContact?.ai_paused_manually || false;
+          nextAiPaused = isPausedManually ? true : false;
+        }
 
-        // 3. Atualização local do estado para sumir da lista e fechar o chat ativo
+        // 2. Sincroniza o status da IA no contato
+        await supabase
+          .from('contacts')
+          .update({ ai_paused: nextAiPaused, ai_paused_manually: nextAiPaused })
+          .eq('id', realContactId);
+
+        // 3. Remove o assignment direto na tabela certa (conversations)
+        await supabase.from('conversations').update({ assigned_to: null, status: 'resolved', ai_paused: nextAiPaused }).eq('id', conv.id);
+
+        // 4. Atualização local do estado para sumir da lista e fechar o chat ativo
         set((state) => ({
-            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, assigned_to: null, conv_status: 'resolved', ai_paused: false } : c),
+            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, assigned_to: null, conv_status: 'resolved', ai_paused: nextAiPaused, ai_paused_manually: nextAiPaused } : c),
             activeChatId: state.activeChatId === contactId ? null : state.activeChatId
         }));
 
@@ -2470,6 +2508,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           get().fetchAutomations(),
           get().fetchTenantLabels(),
           get().fetchQuickReplies(),
+          get().fetchAppointments(),
           (async () => {
             try {
               const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
@@ -2668,7 +2707,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.tenant_labels).filter(Boolean) : [],
                         instance_id: conv.instance_id || dbC.instance_id || null,
                         conv_id: conv.id,
-                        ai_paused: conv.ai_paused || false
+                        ai_paused: conv.ai_paused || false,
+                        ai_paused_manually: conv.ai_paused_manually || false
                      };
                      
                      // Injeta um preview fake se messages tiver vazio e tem preview no banco 
@@ -2705,7 +2745,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         assigned_to: conv.assigned_to,
                         instance_id: conv.instance_id || dbC.instance_id || null,
                         conv_id: conv.id,
-                        ai_paused: conv.ai_paused || false
+                        ai_paused: conv.ai_paused || false,
+                        ai_paused_manually: conv.ai_paused_manually || false
                       });
                    }
                 });
@@ -3315,6 +3356,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if ('assigned_to' in payload) stateUpdates.assigned_to = payload.assigned_to;
             if ('ai_paused' in payload) {
                stateUpdates.ai_paused = payload.ai_paused;
+               stateUpdates.ai_paused_manually = payload.ai_paused_manually;
                stateUpdates.bot_status = payload.ai_paused ? 'paused' : 'active';
                stateUpdates.conv_status = payload.ai_paused ? 'open' : 'bot';
             }
@@ -3701,7 +3743,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     ...newMessages[msgIndex], 
                     status: m.status,
                     ...(m.text_content !== undefined && { text: advanced.text || m.text_content }),
-                    ...(m.media_url !== undefined && { mediaUrl: m.media_url }),
+                    ...(m.media_url !== undefined && { media_url: m.media_url }),
                     ...(advanced.mediaType !== undefined && { mediaType: advanced.mediaType }),
                     ...(advanced.quoted !== undefined && { quoted: advanced.quoted }),
                     ...(advanced.buttons !== undefined && { buttons: advanced.buttons })
@@ -3717,6 +3759,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if(payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
            get().upsertContactLocally(payload.new as ContactRow);
         }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
+         console.log('[Realtime] Appointment change:', payload);
+         const { eventType, new: newRecord, old: oldRecord } = payload;
+         
+         set((s: any) => {
+            let nextAppointments = [...(s.appointments || [])];
+            if (eventType === 'INSERT') {
+               const alreadyHas = nextAppointments.some(a => a.id === newRecord.id);
+               if (!alreadyHas) nextAppointments.push(newRecord as any);
+            } else if (eventType === 'UPDATE') {
+               nextAppointments = nextAppointments.map(a => a.id === newRecord.id ? (newRecord as any) : a);
+            } else if (eventType === 'DELETE') {
+               nextAppointments = nextAppointments.filter(a => a.id !== oldRecord.id);
+            }
+            return { appointments: nextAppointments };
+         });
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
          const conv = payload.new as any;
@@ -3780,7 +3839,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      snoozed_until: conv.snoozed_until,
                      snoozed_at: conv.snoozed_at,
                      snoozed_by: conv.snoozed_by,
-                     instance_id: conv.instance_id || c.instance_id
+                     instance_id: conv.instance_id || c.instance_id,
+                     ai_paused: conv.ai_paused,
+                     ai_paused_manually: conv.ai_paused_manually
                   };
                }
                return c;
@@ -4151,6 +4212,84 @@ export const useChatStore = create<ChatState>((set, get) => ({
      } catch (e) {
        console.error('[deleteInternalNote] Erro ao excluir nota interna:', e);
        alert('Erro ao excluir a anotação interna no banco de dados.');
+     }
+   },
+
+   fetchAppointments: async () => {
+     const tenant = get().tenantInfo;
+     if (!tenant) return;
+     try {
+       const { data, error } = await supabase
+         .from('appointments')
+         .select('*')
+         .eq('tenant_id', tenant.id)
+         .order('start_time', { ascending: true });
+       if (error) throw error;
+       set({ appointments: data || [] });
+     } catch (e) {
+       console.error('[fetchAppointments] Erro:', e);
+     }
+   },
+
+   createAppointment: async (appointment) => {
+     const tenant = get().tenantInfo;
+     if (!tenant) return;
+     try {
+       const newAppointment = {
+         ...appointment,
+         tenant_id: tenant.id,
+         status: appointment.status || 'scheduled'
+       };
+       const { data, error } = await supabase
+         .from('appointments')
+         .insert(newAppointment)
+         .select()
+         .single();
+       if (error) throw error;
+       if (data) {
+         set((s) => ({ 
+           appointments: [...s.appointments, data].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()) 
+         }));
+       }
+     } catch (e) {
+       console.error('[createAppointment] Erro:', e);
+       throw e;
+     }
+   },
+
+   updateAppointment: async (id, payload) => {
+     try {
+       const { data, error } = await supabase
+         .from('appointments')
+         .update(payload)
+         .eq('id', id)
+         .select()
+         .single();
+       if (error) throw error;
+       if (data) {
+         set((s) => ({
+           appointments: s.appointments.map(a => a.id === id ? data : a)
+         }));
+       }
+     } catch (e) {
+       console.error('[updateAppointment] Erro:', e);
+       throw e;
+     }
+   },
+
+   deleteAppointment: async (id) => {
+     try {
+       const { error } = await supabase
+         .from('appointments')
+         .delete()
+         .eq('id', id);
+       if (error) throw error;
+       set((s) => ({
+         appointments: s.appointments.filter(a => a.id !== id)
+       }));
+     } catch (e) {
+       console.error('[deleteAppointment] Erro:', e);
+       throw e;
      }
    }
 }));

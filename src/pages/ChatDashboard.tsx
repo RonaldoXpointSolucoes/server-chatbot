@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, ShieldCheck } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
+import { playNotificationSound } from '../utils/AudioEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal, CompanyDetailsModal, SnoozedListModal } from '../components/ChatModals';
 import ImageEditorModal from '../components/ImageEditorModal';
@@ -13,7 +14,7 @@ import { GeminiEditorModal } from '../components/GeminiEditorModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Flag, Clock, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList } from 'lucide-react'; // Adicionado lucide pro flag e lightbulb para corretor discreto
+import { Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList } from 'lucide-react'; // Adicionado lucide pro flag e lightbulb para corretor discreto
 import { useShallow } from 'zustand/react/shallow';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import clsx from 'clsx';
@@ -482,6 +483,70 @@ export default function ChatDashboard() {
   const [noteAttachedPreview, setNoteAttachedPreview] = useState<string | null>(null);
   const [noteAttachedType, setNoteAttachedType] = useState<'image' | 'video' | 'audio' | 'document' | null>(null);
   const [showTemplatesDropdown, setShowTemplatesDropdown] = useState(false);
+
+  // Estados para Agendamento na Nota Interna e Alarme
+  const [scheduleNote, setScheduleNote] = useState(false);
+  const [scheduleNoteTitle, setScheduleNoteTitle] = useState('');
+  const [scheduleNoteDate, setScheduleNoteDate] = useState('');
+  const [scheduleNoteTime, setScheduleNoteTime] = useState('');
+  const [activeAlarmAppointment, setActiveAlarmAppointment] = useState<any | null>(null);
+  const [hasPlayedAlarmSound, setHasPlayedAlarmSound] = useState(false);
+  const dismissedAlarmsRef = useRef<Set<string>>(new Set());
+
+  // Monitor de Alarmes Ativos em tempo real
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const appointments = useChatStore.getState().appointments;
+      if (!appointments || appointments.length === 0) return;
+      
+      const now = new Date().getTime();
+      
+      // Procurar algum agendamento ativo que venceu nos últimos 10 minutos
+      const activeAlarm = appointments.find(appt => {
+        if (appt.status !== 'scheduled') return false;
+        if (dismissedAlarmsRef.current.has(appt.id)) return false;
+        
+        const startTime = new Date(appt.start_time).getTime();
+        // Disparar se a hora atual for maior ou igual ao início E não tiver passado de 10 minutos (limite razoável)
+        return now >= startTime && (now - startTime) <= 10 * 60 * 1000;
+      });
+      
+      if (activeAlarm) {
+        setActiveAlarmAppointment(activeAlarm);
+      }
+    }, 5000); // Checa a cada 5 segundos para precisão premium
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Efeito para reproduzir som de alarme premium
+  useEffect(() => {
+    if (activeAlarmAppointment && !hasPlayedAlarmSound) {
+      playNotificationSound('default'); // toca o som de notificação
+      setHasPlayedAlarmSound(true);
+    }
+  }, [activeAlarmAppointment, hasPlayedAlarmSound]);
+
+  const handleDismissAlarm = (apptId: string) => {
+    dismissedAlarmsRef.current.add(apptId);
+    setActiveAlarmAppointment(null);
+    setHasPlayedAlarmSound(false);
+  };
+
+  const handleCompleteAlarmAppointment = async (apptId: string, updatedChecklist?: any[]) => {
+    try {
+      const payload: any = { status: 'completed' };
+      if (updatedChecklist) {
+        payload.checklist_items = updatedChecklist;
+      }
+      await useChatStore.getState().updateAppointment(apptId, payload);
+      dismissedAlarmsRef.current.add(apptId);
+      setActiveAlarmAppointment(null);
+      setHasPlayedAlarmSound(false);
+    } catch (e) {
+      console.error("Erro ao concluir compromisso pelo alarme:", e);
+    }
+  };
 
   // Estados para o Modal Premium de Atribuição de Implantação Completa CRM
   const [showImplantacaoModal, setShowImplantacaoModal] = useState(false);
@@ -1272,8 +1337,16 @@ export default function ChatDashboard() {
   const [contactForLabels, setContactForLabels] = useState<any | null>(null);
   const [isNewChatOpen, setIsNewChatOpen] = useState(false);
   const [showSnoozeModal, setShowSnoozeModal] = useState<string | null>(null);
+  const [resolveAiConfirmContactId, setResolveAiConfirmContactId] = useState<string | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [activeChatDropdown, setActiveChatDropdown] = useState(false);
+
+  // Estados para Extração e Validação do RAG
+  const [isRagModalOpen, setIsRagModalOpen] = useState(false);
+  const [isRagExtracting, setIsRagExtracting] = useState(false);
+  const [extractedRules, setExtractedRules] = useState<Array<{ text: string; checked: boolean; similarity: number | null; matchContent: string | null }>>([]);
+  const [saveFileName, setSaveFileName] = useState('');
+  const [isSavingToRag, setIsSavingToRag] = useState(false);
   const [mobileHeaderMenuOpen, setMobileHeaderMenuOpen] = useState(false);
   const [activeMsgDropdown, setActiveMsgDropdown] = useState<string | null>(null);
   const [messageToForward, setMessageToForward] = useState<any | null>(null);
@@ -1351,12 +1424,12 @@ export default function ChatDashboard() {
     }
   };
 
-  const handleResolveConversation = async (contactId: string) => {
+  const executeResolve = async (contactId: string, reactivateAi: boolean) => {
     // 1. Salva a posição de scroll atual da lista lateral de chats
     const currentScrollTop = contactListRef.current ? contactListRef.current.scrollTop : 0;
     
     // 2. Dispara a ação de resolução
-    await resolveConversation(contactId);
+    await resolveConversation(contactId, reactivateAi);
     
     // 3. Estabilização absoluta em cascata de tempo para anular saltos enquanto o Framer-motion anima a saída
     const restoreScroll = () => {
@@ -1368,6 +1441,15 @@ export default function ChatDashboard() {
     restoreScroll();
     requestAnimationFrame(restoreScroll);
     [10, 30, 50, 100, 180, 300, 500].forEach(ms => setTimeout(restoreScroll, ms));
+  };
+
+  const handleResolveConversation = async (contactId: string) => {
+    const contact = contacts.find(c => c.id === contactId);
+    if (contact && (contact.ai_paused || contact.ai_paused_manually)) {
+      setResolveAiConfirmContactId(contactId);
+    } else {
+      await executeResolve(contactId, true);
+    }
   };
 
   const handleStartChatWithSearchedNumber = async (phoneNumber: string) => {
@@ -1802,6 +1884,140 @@ export default function ChatDashboard() {
     }
   };
 
+  const handleExtractRulesForRag = async () => {
+    if (!activeChat || !activeChat.messages || activeChat.messages.length === 0) {
+      alert("A conversa não possui mensagens para serem analisadas.");
+      return;
+    }
+    
+    setIsRagModalOpen(true);
+    setIsRagExtracting(true);
+    setExtractedRules([]);
+
+    try {
+      const chatHistory = activeChat.messages.map(m => ({
+        role: m.sender === 'client' ? 'user' : 'model',
+        text: m.text
+      }));
+
+      const result = await geminiService.extractBusinessRulesForRag(chatHistory);
+      
+      if (!result.suggestedRules || result.suggestedRules.length === 0) {
+        alert("A inteligência artificial não identificou nenhuma regra ou política comercial explícita nesta conversa.");
+        setIsRagModalOpen(false);
+        setIsRagExtracting(false);
+        return;
+      }
+
+      // Validar similaridade de cada regra com match semântico contra o servidor RAG
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+      const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+
+      const evaluatedRules = await Promise.all(
+        result.suggestedRules.map(async (ruleText) => {
+          try {
+            const matchRes = await fetch(`${ENGINE_URL}/api/v1/knowledge/match`, {
+              method: 'POST',
+              headers: {
+                'x-tenant-id': tenantId,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ query: ruleText })
+            });
+
+            if (matchRes.ok) {
+              const matchData = await matchRes.json();
+              const bestMatch = matchData.matches && matchData.matches.length > 0 ? matchData.matches[0] : null;
+              
+              if (bestMatch && bestMatch.similarity >= 0.75) {
+                return {
+                  text: ruleText,
+                  checked: false, // Desmarca por padrão por ser duplicada
+                  similarity: bestMatch.similarity,
+                  matchContent: bestMatch.content
+                };
+              }
+            }
+          } catch (matchErr) {
+            console.error("Erro no match semântico da regra:", matchErr);
+          }
+
+          return {
+            text: ruleText,
+            checked: true,
+            similarity: null,
+            matchContent: null
+          };
+        })
+      );
+
+      setExtractedRules(evaluatedRules);
+      
+      const cleanName = (activeChat.name || activeChat.pushname || activeChat.phone || 'conversa').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "_");
+      setSaveFileName(`regras_${cleanName}_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '_')}.txt`);
+
+    } catch (err: any) {
+      console.error("Erro ao extrair regras para o RAG:", err);
+      alert(err.message || "Erro de comunicação ao analisar conversa com a Inteligência Artificial.");
+      setIsRagModalOpen(false);
+    } finally {
+      setIsRagExtracting(false);
+    }
+  };
+
+  const handleSaveToRag = async () => {
+    const approvedRules = extractedRules.filter(r => r.checked);
+    if (approvedRules.length === 0) {
+      alert("Por favor, selecione pelo menos uma regra para salvar.");
+      return;
+    }
+
+    if (!saveFileName.trim()) {
+      alert("Por favor, informe o nome do arquivo para gravação.");
+      return;
+    }
+
+    let fileName = saveFileName.trim();
+    if (!fileName.endsWith('.txt')) {
+      fileName += '.txt';
+    }
+
+    setIsSavingToRag(true);
+
+    try {
+      const fileContent = approvedRules.map(r => r.text).join('\n\n');
+      const virtualFile = new File([fileContent], fileName, { type: 'text/plain' });
+      
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+      const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+
+      const formData = new FormData();
+      formData.append('file', virtualFile);
+
+      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/upload`, {
+        method: 'POST',
+        headers: {
+          'x-tenant-id': tenantId
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json();
+        throw new Error(errJson.error || 'Erro no upload das regras.');
+      }
+
+      alert("Regras de negócio salvas e vetorizadas com sucesso no RAG global!");
+      setIsRagModalOpen(false);
+      setExtractedRules([]);
+    } catch (err: any) {
+      console.error("Erro salvando regras no RAG:", err);
+      alert(err.message || "Erro ao conectar com o servidor RAG.");
+    } finally {
+      setIsSavingToRag(false);
+    }
+  };
+
   const handleSendHuman = async (e: React.FormEvent) => {
     e.preventDefault();
     const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
@@ -1864,6 +2080,27 @@ export default function ChatDashboard() {
         taskAssignedTo,
         formattedChecklist
       );
+
+      // Criar compromisso na Agenda se estiver agendado
+      if (scheduleNote && scheduleNoteDate && scheduleNoteTime) {
+        try {
+          const startDateTime = new Date(`${scheduleNoteDate}T${scheduleNoteTime}:00`);
+          const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000); // 1 hora de duração
+          
+          const { getRealContactId } = await import('../store/chatStore');
+          await useChatStore.getState().createAppointment({
+            contact_id: getRealContactId(activeChatId),
+            title: scheduleNoteTitle.trim() || noteText.substring(0, 50) || "Lembrete de Nota Interna",
+            notes: noteText,
+            start_time: startDateTime.toISOString(),
+            end_time: endDateTime.toISOString(),
+            status: 'scheduled',
+            checklist_items: formattedChecklist.map(i => ({ id: i.id, text: i.text, completed: false }))
+          });
+        } catch (e) {
+          console.error("Erro ao criar compromisso associado à nota interna:", e);
+        }
+      }
       
       // Reseta estados locais
       setInputText('');
@@ -1874,6 +2111,10 @@ export default function ChatDashboard() {
       setNoteAttachedPreview(null);
       setNoteAttachedType(null);
       setNotePreviewMode(false);
+      setScheduleNote(false);
+      setScheduleNoteTitle('');
+      setScheduleNoteDate('');
+      setScheduleNoteTime('');
     } else {
       let finalMessageText = inputText;
       if (replyMessage) {
@@ -2334,6 +2575,110 @@ export default function ChatDashboard() {
   return (
     <div className="flex w-full h-[100dvh] min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
       
+      {/* Modal de Alarme de Compromisso Vencido */}
+      {activeAlarmAppointment && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="w-full max-w-md bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl rounded-[28px] border-2 border-red-500/40 dark:border-red-500/30 p-6 shadow-[0_20px_50px_rgba(239,68,68,0.25)] flex flex-col gap-5 text-left transform scale-100 transition-all duration-300 animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-red-500/20 pb-3">
+              <div className="flex items-center gap-2.5 text-red-600 dark:text-red-400 font-extrabold text-sm uppercase tracking-wider">
+                <AlertTriangle className="text-red-500 animate-bounce" size={20} />
+                Alerta de Compromisso
+              </div>
+              <button 
+                type="button" 
+                onClick={() => handleDismissAlarm(activeAlarmAppointment.id)}
+                className="text-gray-400 hover:text-red-500 transition-colors p-1.5 hover:bg-red-500/10 rounded-xl"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <h3 className="text-lg font-black text-gray-900 dark:text-white leading-tight">
+                {activeAlarmAppointment.title}
+              </h3>
+              <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                <Clock size={14} />
+                <span>
+                  {new Date(activeAlarmAppointment.start_time).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                </span>
+              </div>
+            </div>
+
+            {activeAlarmAppointment.notes && (
+              <div className="bg-gray-50 dark:bg-[#202c33] border border-gray-150 dark:border-[#384c56] rounded-2xl p-4 text-xs text-gray-700 dark:text-gray-300 font-medium whitespace-pre-line max-h-32 overflow-y-auto scrollbar-thin">
+                {activeAlarmAppointment.notes}
+              </div>
+            )}
+
+            {/* Checklist de Compromisso */}
+            {activeAlarmAppointment.checklist_items && activeAlarmAppointment.checklist_items.length > 0 && (
+              <div className="flex flex-col gap-2.5">
+                <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                  Checklist de Tarefas
+                </label>
+                <div className="flex flex-col gap-2 max-h-40 overflow-y-auto scrollbar-thin pr-1">
+                  {activeAlarmAppointment.checklist_items.map((item: any, idx: number) => (
+                    <div key={item.id || idx} className="flex items-center gap-3 bg-gray-50/50 dark:bg-[#202c33]/50 hover:bg-gray-100/50 dark:hover:bg-[#202c33]/80 p-2.5 rounded-xl border border-gray-200/50 dark:border-gray-700/50 transition-all">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const updatedChecklist = activeAlarmAppointment.checklist_items.map((i: any, k: number) => {
+                            if ((i.id && i.id === item.id) || (!i.id && k === idx)) {
+                              return { ...i, completed: !i.completed };
+                            }
+                            return i;
+                          });
+                          
+                          // Atualiza local e DB
+                          setActiveAlarmAppointment({ ...activeAlarmAppointment, checklist_items: updatedChecklist });
+                          await useChatStore.getState().updateAppointment(activeAlarmAppointment.id, {
+                            checklist_items: updatedChecklist
+                          });
+                        }}
+                        className="flex items-center justify-center w-5 h-5 rounded-full border border-red-500/30 hover:border-red-500/60 dark:border-red-400/30 dark:hover:border-red-400/60 transition-all cursor-pointer shrink-0"
+                      >
+                        {item.completed ? (
+                          <Check className="text-emerald-500" size={13} strokeWidth={3} />
+                        ) : (
+                          <div className="w-1.5 h-1.5 rounded-full bg-transparent" />
+                        )}
+                      </button>
+                      <span className={cn(
+                        "text-xs font-semibold select-none transition-all",
+                        item.completed ? "line-through text-gray-400 dark:text-gray-500" : "text-gray-700 dark:text-gray-200"
+                      )}>
+                        {item.text}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-3.5 mt-2">
+              <button
+                type="button"
+                onClick={() => handleDismissAlarm(activeAlarmAppointment.id)}
+                className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 dark:bg-[#202c33] dark:hover:bg-[#2c3d47] text-gray-700 dark:text-gray-200 rounded-2xl text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98] border border-gray-200/40 dark:border-gray-700/40"
+              >
+                Dispensar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCompleteAlarmAppointment(
+                  activeAlarmAppointment.id,
+                  activeAlarmAppointment.checklist_items
+                )}
+                className="flex-1 px-4 py-3 bg-red-500 hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-700 text-white rounded-2xl text-xs font-bold transition-all shadow-md shadow-red-500/20 hover:scale-[1.02] active:scale-[0.98]"
+              >
+                Concluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Nossos Novos Modais Premium */}
       <RenameModal 
         isOpen={!!contactToEdit} 
@@ -2360,6 +2705,173 @@ export default function ChatDashboard() {
         onForward={(contactId) => forwardMessage(contactId, messageToForward, activeChat?.instance_id || connectedInstanceName || '')}
         messagePreview={messageToForward?.text ? messageToForward.text.substring(0, 40) + '...' : (messageToForward?.mediaType ? `Mídia: ${messageToForward.mediaType}` : undefined)}
       />
+
+      {/* Modal Premium para Extração e Validação de Regras RAG */}
+      {isRagModalOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-300 text-left">
+          <div className="bg-[#0b141a]/95 border border-amber-500/20 rounded-[2.5rem] p-6 md:p-8 max-w-2xl w-full shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
+            {/* Glow de fundo */}
+            <div className="absolute -top-24 -left-24 w-48 h-48 bg-amber-500/10 rounded-full blur-[80px] pointer-events-none"></div>
+            
+            <div className="flex items-center justify-between border-b border-white/5 pb-4 mb-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-2xl shadow-inner border border-amber-500/15">
+                  <BrainCircuit size={22} className="animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold text-gray-100">Extração Inteligente RAG</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Análise semântica da conversa com {activeChat?.name || 'Cliente'}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsRagModalOpen(false)}
+                className="p-2 text-white/40 hover:text-white/80 hover:bg-white/5 rounded-xl transition-all"
+                title="Fechar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin my-2">
+              {isRagExtracting ? (
+                <div className="py-20 flex flex-col items-center justify-center gap-4 text-gray-400">
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-amber-500 rounded-full blur-xl opacity-30 animate-pulse"></div>
+                    <Loader2 size={40} className="animate-spin text-amber-500 relative z-10" />
+                  </div>
+                  <div className="text-center space-y-1">
+                    <span className="text-sm font-bold text-gray-200 block">Lendo mensagens e processando regras...</span>
+                    <span className="text-xs text-gray-400 block">Isso pode levar alguns segundos.</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-4.5 mb-2">
+                    <p className="text-xs text-gray-300 leading-relaxed font-semibold">
+                      💡 Analisamos a conversa e extraímos as seguintes diretrizes corporativas abaixo. 
+                      Revise, edite se necessário e selecione o que deseja alimentar na Base RAG do Bot.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {extractedRules.map((rule, idx) => (
+                      <div 
+                        key={idx} 
+                        className={cn(
+                          "bg-white/5 dark:bg-black/30 border rounded-2xl p-4 transition-all duration-300 flex flex-col gap-3 relative overflow-hidden animate-in slide-in-from-bottom-2 duration-300",
+                          rule.checked ? "border-amber-500/30 bg-amber-500/[0.01]" : "border-white/5 opacity-70"
+                        )}
+                      >
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={rule.checked}
+                            onChange={(e) => {
+                              const next = [...extractedRules];
+                              next[idx].checked = e.target.checked;
+                              setExtractedRules(next);
+                            }}
+                            className="w-4.5 h-4.5 rounded border-gray-600 text-amber-500 focus:ring-amber-500/30 bg-black/40 mt-1 cursor-pointer"
+                          />
+                          <div className="flex-1">
+                            <textarea
+                              value={rule.text}
+                              onChange={(e) => {
+                                const next = [...extractedRules];
+                                next[idx].text = e.target.value;
+                                setExtractedRules(next);
+                              }}
+                              rows={2}
+                              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/10 transition-all resize-none font-medium"
+                              placeholder="Regra..."
+                            />
+                            
+                            <div className="mt-2 flex items-center justify-between flex-wrap gap-2">
+                              {rule.similarity && rule.similarity >= 0.75 ? (
+                                <div className="flex items-center gap-1.5 text-[9px] text-amber-500 font-extrabold uppercase bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
+                                  <AlertTriangle size={10} />
+                                  <span>Similaridade de {(rule.similarity * 100).toFixed(0)}%</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5 text-[9px] text-emerald-400 font-extrabold uppercase bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                                  <CheckCircle2 size={10} />
+                                  <span>Informação Única / Nova</span>
+                                </div>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setExtractedRules(extractedRules.filter((_, i) => i !== idx));
+                                }}
+                                className="text-gray-400 hover:text-red-500 text-[10px] font-bold flex items-center gap-1 hover:bg-red-500/10 px-2 py-1 rounded-lg transition-all"
+                                title="Descartar Regra"
+                              >
+                                <Trash2 size={11} />
+                                Descartar
+                              </button>
+                            </div>
+
+                            {rule.similarity && rule.similarity >= 0.75 && rule.matchContent && (
+                              <div className="mt-2 text-[10px] text-gray-400 italic bg-black/20 p-2.5 rounded-xl border border-white/5 select-none">
+                                <span className="font-bold text-amber-500 not-italic block mb-0.5">Dado Existente no RAG:</span>
+                                "{rule.matchContent.substring(0, 160)}..."
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Nome do Arquivo */}
+                  <div className="flex flex-col gap-1.5 bg-black/20 p-4.5 rounded-2xl border border-white/5 mt-4">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 flex items-center gap-1 select-none">
+                      <Database size={11} />
+                      <span>Nome do Arquivo na Base RAG (.txt)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={saveFileName}
+                      onChange={e => setSaveFileName(e.target.value)}
+                      className="bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-gray-200 focus:outline-none focus:border-amber-500/50 transition-all font-semibold"
+                      placeholder="Ex: regras_conversa.txt"
+                    />
+                    <span className="text-[9px] text-gray-500 font-semibold mt-0.5">
+                      As regras marcadas serão compiladas e salvas sob este documento no RAG.
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-4 border-t border-white/5 pt-4 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsRagModalOpen(false)}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-all"
+                disabled={isSavingToRag}
+              >
+                Cancelar
+              </button>
+              
+              {!isRagExtracting && extractedRules.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleSaveToRag}
+                  disabled={isSavingToRag || extractedRules.filter(r => r.checked).length === 0}
+                  className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-xl px-5 py-2.5 text-xs font-bold shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2"
+                >
+                  {isSavingToRag ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  {isSavingToRag ? 'Gravando no RAG...' : 'Gravar no RAG'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <SnoozeModal 
         isOpen={!!showSnoozeModal}
@@ -2414,6 +2926,82 @@ export default function ChatDashboard() {
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <AgentSettingsModal isOpen={isAgentSettingsOpen} onClose={() => setIsAgentSettingsOpen(false)} />
       <SnoozedListModal isOpen={isSnoozedListOpen} onClose={() => setIsSnoozedListOpen(false)} />
+
+      {/* Modal Premium de Confirmação de IA ao Resolver Conversa */}
+      <AnimatePresence>
+        {resolveAiConfirmContactId && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="bg-white/95 dark:bg-[#1f2c34]/95 border border-black/10 dark:border-white/10 rounded-[32px] shadow-2xl max-w-md w-full overflow-hidden p-6 flex flex-col gap-6 relative"
+            >
+              <button
+                type="button"
+                onClick={() => setResolveAiConfirmContactId(null)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-red-500 hover:bg-red-500/10 p-2 rounded-full transition-all hover:scale-105 active:scale-95"
+                title="Fechar"
+              >
+                <X size={16} strokeWidth={2.5} />
+              </button>
+
+              <div className="flex gap-4 items-start mt-2">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-655 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 shrink-0">
+                  <BrainCircuit size={24} className="animate-pulse" />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <h3 className="text-base font-extrabold text-gray-900 dark:text-white leading-tight uppercase tracking-wider">
+                    Reativar Inteligência Artificial?
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed font-semibold">
+                    Você está prestes a resolver a conversa com <span className="text-gray-900 dark:text-white font-black">{contacts.find(c => c.id === resolveAiConfirmContactId)?.custom_name || contacts.find(c => c.id === resolveAiConfirmContactId)?.name}</span>.
+                  </p>
+                  <p className="text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed font-medium">
+                    Como a IA estava pausada, escolha se ela deve voltar a atender automaticamente caso o cliente envie novas mensagens.
+                  </p>
+                </div>
+              </div>
+
+              {/* Ações */}
+              <div className="flex flex-col sm:flex-row gap-2.5 mt-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = resolveAiConfirmContactId;
+                    setResolveAiConfirmContactId(null);
+                    executeResolve(id, true);
+                  }}
+                  className="flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-extrabold text-xs rounded-2xl shadow-md transition-all active:scale-[0.98] cursor-pointer hover:shadow-indigo-500/20 border border-indigo-650/15"
+                >
+                  <Bot size={15} />
+                  <span>Sim, Reativar IA</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = resolveAiConfirmContactId;
+                    setResolveAiConfirmContactId(null);
+                    executeResolve(id, false);
+                  }}
+                  className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white/40 dark:bg-black/20 hover:bg-black/5 dark:hover:bg-white/5 text-gray-700 dark:text-gray-300 font-extrabold text-xs rounded-2xl border border-gray-200 dark:border-white/10 shadow-sm transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  <Ban size={15} className="text-amber-500" />
+                  <span>Não, Manter Pausada</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setResolveAiConfirmContactId(null)}
+                  className="sm:hidden flex items-center justify-center gap-2 px-5 py-2.5 bg-transparent text-gray-400 dark:text-gray-500 font-extrabold text-xs rounded-2xl transition-all active:scale-[0.98] cursor-pointer hover:bg-black/5 dark:hover:bg-white/5"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <BlockModal 
         isOpen={!!contactToBlock}
@@ -2617,7 +3205,7 @@ export default function ChatDashboard() {
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
           {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.9.24'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '08/06/2026, 09:55'}`}</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.9.25'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '09/06/2026, 23:36'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
@@ -3725,7 +4313,10 @@ export default function ChatDashboard() {
                 {/* Botão Premium de Controle da I.A (Desktop) */}
                 <button 
                   onClick={() => {
-                    useChatStore.getState().updateConversationField(activeChat.id, { ai_paused: !activeChat.ai_paused });
+                    useChatStore.getState().updateConversationField(activeChat.id, { 
+                      ai_paused: !activeChat.ai_paused,
+                      ai_paused_manually: !activeChat.ai_paused
+                    });
                   }}
                   className={cn(
                     "flex items-center gap-2 px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-semibold border shadow-sm hover:scale-105 active:scale-95",
@@ -3843,7 +4434,10 @@ export default function ChatDashboard() {
                       {/* Botão de Controle da I.A (Mobile) */}
                       <button 
                         onClick={() => {
-                          useChatStore.getState().updateConversationField(activeChat.id, { ai_paused: !activeChat.ai_paused });
+                          useChatStore.getState().updateConversationField(activeChat.id, { 
+                            ai_paused: !activeChat.ai_paused,
+                            ai_paused_manually: !activeChat.ai_paused
+                          });
                           setMobileHeaderMenuOpen(false);
                         }}
                         className={cn(
@@ -3887,7 +4481,10 @@ export default function ChatDashboard() {
                       {activeChat.ai_paused ? (
                         <button 
                           onClick={() => { 
-                            useChatStore.getState().updateConversationField(activeChat.id, { ai_paused: false }); 
+                            useChatStore.getState().updateConversationField(activeChat.id, { 
+                              ai_paused: false,
+                              ai_paused_manually: false
+                            }); 
                             setActiveChatDropdown(false); 
                           }}
                           className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors"
@@ -3898,7 +4495,10 @@ export default function ChatDashboard() {
                       ) : (
                         <button 
                           onClick={() => { 
-                            useChatStore.getState().updateConversationField(activeChat.id, { ai_paused: true }); 
+                            useChatStore.getState().updateConversationField(activeChat.id, { 
+                              ai_paused: true,
+                              ai_paused_manually: true
+                            }); 
                             setActiveChatDropdown(false); 
                           }}
                           className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors"
@@ -4305,38 +4905,40 @@ export default function ChatDashboard() {
                 
                 {/* Alternador de Modo de Chat Premium (WhatsApp vs Anotação Interna) */}
                 {activeChat && (
-                  <div className="flex items-center gap-2.5 px-4 pt-2.5 pb-1 border-t border-black/5 dark:border-white/5 bg-[#f0f2f5]/40 dark:bg-[#111b21]/40 backdrop-blur-md select-none shrink-0 animate-in fade-in duration-300">
-                    <button
-                      type="button"
-                      onClick={() => setChatMode('chat')}
-                      className={cn(
-                        "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all duration-300 active:scale-95 shadow-sm border",
-                        chatMode === 'chat'
-                          ? "bg-emerald-500/10 border-emerald-500/20 text-[#00a884] dark:text-[#00c298]"
-                          : "bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5"
-                      )}
-                    >
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" className="shrink-0">
-                        <path d="M12.004 2c-5.51 0-9.99 4.49-9.99 10 0 1.91.53 3.69 1.47 5.23L2.24 21.91c-.13.34-.04.73.23 1 .18.18.42.27.67.27.08 0 .17-.01.25-.03l4.89-1.25c1.47.8 3.12 1.25 4.88 1.25 5.51 0 9.99-4.49 9.99-10s-4.48-10-9.99-10zm.01 17.52c-1.63 0-3.17-.46-4.51-1.32-.15-.1-.34-.13-.51-.09l-3.08.79.82-3.08c.05-.18.01-.37-.1-.52-1.01-.1.44-2.48-1.51-4.09-1.51-1.61 0-3.15.46-4.51 1.32-.15.1-.34.13-.51.09l-3.08.79.82-3.08c.05-.18.01-.37-.1-.52-1.01-.1.44-2.48-1.51-4.09-1.51z" />
-                      </svg>
-                      Enviar via WhatsApp
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setChatMode('internal_note')}
-                      className={cn(
-                        "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all duration-300 active:scale-95 shadow-sm border",
-                        chatMode === 'internal_note'
-                          ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
-                          : "bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5"
-                      )}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-                        <path d="M12 20h9"></path>
-                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                      </svg>
-                      Anotação Interna
-                    </button>
+                  <div className="flex items-center gap-2 px-4.5 py-2.5 border-t border-black/[0.03] dark:border-white/[0.03] bg-[#f0f2f5]/30 dark:bg-[#111b21]/30 backdrop-blur-lg select-none shrink-0 animate-in fade-in duration-300">
+                    <div className="flex bg-gray-200/50 dark:bg-black/20 p-1 rounded-2xl gap-1 border border-black/[0.02] dark:border-white/[0.02] shadow-inner">
+                      <button
+                        type="button"
+                        onClick={() => setChatMode('chat')}
+                        className={cn(
+                          "flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all duration-300 active:scale-95 shadow-sm",
+                          chatMode === 'chat'
+                            ? "bg-white dark:bg-gray-800 text-emerald-650 dark:text-emerald-455 border border-emerald-500/10 shadow-[0_2px_8px_rgba(0,0,0,0.06)]"
+                            : "bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                        )}
+                      >
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" className={cn("shrink-0 transition-transform", chatMode === 'chat' && "scale-110")}>
+                          <path d="M12.004 2c-5.51 0-9.99 4.49-9.99 10 0 1.91.53 3.69 1.47 5.23L2.24 21.91c-.13.34-.04.73.23 1 .18.18.42.27.67.27.08 0 .17-.01.25-.03l4.89-1.25c1.47.8 3.12 1.25 4.88 1.25 5.51 0 9.99-4.49 9.99-10s-4.48-10-9.99-10zm.01 17.52c-1.63 0-3.17-.46-4.51-1.32-.15-.1-.34-.13-.51-.09l-3.08.79.82-3.08c.05-.18.01-.37-.1-.52-1.01-.1.44-2.48-1.51-4.09-1.51-1.61 0-3.15.46-4.51 1.32-.15.1-.34.13-.51.09l-3.08.79.82-3.08c.05-.18.01-.37-.1-.52-1.01-.1.44-2.48-1.51-4.09-1.51z" />
+                        </svg>
+                        <span>WhatsApp</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setChatMode('internal_note')}
+                        className={cn(
+                          "flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all duration-300 active:scale-95 shadow-sm",
+                          chatMode === 'internal_note'
+                            ? "bg-amber-500 text-white border border-amber-500/10 shadow-[0_2px_8px_rgba(245,158,11,0.2)]"
+                            : "bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                        )}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 transition-transform", chatMode === 'internal_note' && "scale-110")}>
+                          <path d="M12 20h9"></path>
+                          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                        </svg>
+                        <span>Anotação CRM</span>
+                      </button>
+                    </div>
                   </div>
                 )}
                 
@@ -4429,13 +5031,15 @@ export default function ChatDashboard() {
                   )}
 
                   {chatMode === 'internal_note' && isTaskMode && (
-                    <div className="absolute bottom-full left-4 right-4 mb-3.5 p-5 bg-white/90 dark:bg-[#111b21]/90 backdrop-blur-xl rounded-3xl border border-amber-500/35 shadow-[0_8px_32px_rgba(245,158,11,0.18)] flex flex-col gap-4 animate-in slide-in-from-bottom-2 duration-300 z-40 max-h-[300px] overflow-y-auto scrollbar-thin">
-                      <div className="flex items-center justify-between border-b border-amber-500/20 pb-2.5">
-                        <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-extrabold text-[11px] tracking-widest uppercase">
-                          <CheckSquare size={15} className="text-amber-500 animate-pulse" />
-                          Checklist de Tarefa CRM
+                    <div className="absolute bottom-full left-0 right-0 mb-[-1px] p-6 bg-gradient-to-br from-white/95 to-white/98 dark:from-[#152026]/95 dark:to-[#182229]/98 backdrop-blur-2xl rounded-t-[32px] border-t border-x border-amber-500/25 shadow-[0_-16px_48px_rgba(245,158,11,0.12)] flex flex-col gap-5 animate-in slide-in-from-bottom-3 duration-300 z-40 max-h-[380px] overflow-y-auto scrollbar-thin select-none">
+                      
+                      {/* Cabeçalho da Gaveta */}
+                      <div className="flex items-center justify-between border-b border-amber-500/15 pb-3">
+                        <div className="flex items-center gap-2.5 text-amber-750 dark:text-amber-400 font-extrabold text-xs tracking-wider uppercase">
+                          <ClipboardList size={16} className="text-amber-500 animate-pulse shrink-0" />
+                          <span>Checklist & Agendamento CRM</span>
                           {checklistDraft.length > 0 && (
-                            <span className="ml-1.5 px-2 py-0.5 bg-amber-500/20 text-amber-700 dark:text-amber-400 rounded-full font-mono text-[9px] font-black">
+                            <span className="ml-2 px-2.5 py-0.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded-full font-mono text-[10px] font-black border border-amber-500/10 shadow-sm">
                               {checklistDraft.length} {checklistDraft.length === 1 ? 'item' : 'itens'}
                             </span>
                           )}
@@ -4443,125 +5047,211 @@ export default function ChatDashboard() {
                         <button 
                           type="button"
                           onClick={() => setIsTaskMode(false)}
-                          className="text-gray-400 hover:text-red-500 transition-all p-1 hover:scale-110 active:scale-90"
+                          className="text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-all p-1.5 hover:scale-105 active:scale-95 shrink-0"
+                          title="Fechar Gaveta"
                         >
-                          <X size={15} />
+                          <X size={16} strokeWidth={2.5} />
                         </button>
                       </div>
-                      
-                      {/* Atribuir Responsável */}
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                          <span>👤</span> Operador Responsável
-                        </label>
-                        <select
-                          value={taskAssignedTo || ""}
-                          onChange={(e) => setTaskAssignedTo(e.target.value || null)}
-                          className="bg-gray-50 dark:bg-[#202c33] border border-amber-500/20 rounded-2xl px-3 py-2 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/10 transition-all cursor-pointer font-medium"
-                        >
-                          <option value="">(Nenhum - Atribuir a todos)</option>
-                          {agents.map((agent: any) => (
-                            <option key={agent.id} value={agent.id}>
-                              {agent.full_name || agent.email}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
 
-                      {/* Itens do Checklist */}
-                      <div className="flex flex-col gap-2.5">
-                        <div className="flex items-center justify-between">
-                          <label className="text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                            <span>📋</span> Itens do Checklist
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setChecklistDraft([...checklistDraft, ""]);
-                              setTimeout(() => {
-                                const nextInput = document.getElementById(`checklist-item-${checklistDraft.length}`);
-                                if (nextInput) (nextInput as HTMLInputElement).focus();
-                              }, 50);
-                            }}
-                            className="text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 text-[10px] font-extrabold flex items-center gap-1 hover:underline transition-all hover:scale-105 active:scale-95 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/10 shrink-0"
-                          >
-                            + Adicionar Item
-                          </button>
-                        </div>
+                      {/* Grade de 2 Colunas */}
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                         
-                        <div className="flex flex-col gap-2">
-                          {checklistDraft.map((item, index) => (
-                            <div key={index} className="flex items-center gap-2.5 animate-in slide-in-from-left-2 duration-250">
-                              {/* Círculo de checkbox simulado */}
-                              <div className="w-4 h-4 rounded-full border border-dashed border-amber-500/40 hover:border-amber-500/70 transition-colors flex items-center justify-center shrink-0 cursor-pointer" title="Pronto para marcar na conclusão">
-                                <div className="w-1.5 h-1.5 rounded-full bg-amber-500/0 hover:bg-amber-500/30 transition-all" />
-                              </div>
-                              <input
-                                id={`checklist-item-${index}`}
-                                type="text"
-                                value={item}
-                                onChange={(e) => {
-                                  const next = [...checklistDraft];
-                                  next[index] = e.target.value;
-                                  setChecklistDraft(next);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
+                        {/* Coluna da Esquerda: Checklist */}
+                        <div className="lg:col-span-7 flex flex-col gap-3">
+                          <div className="flex items-center justify-between select-none">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                              <span>📋</span> Itens do Checklist
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setChecklistDraft([...checklistDraft, ""]);
+                                setTimeout(() => {
+                                  const nextInput = document.getElementById(`checklist-item-${checklistDraft.length}`);
+                                  if (nextInput) (nextInput as HTMLInputElement).focus();
+                                }, 50);
+                              }}
+                              className="text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 text-[10px] font-black tracking-wider uppercase flex items-center gap-1.5 hover:underline transition-all hover:scale-105 active:scale-95 bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/15 rounded-full px-3.5 py-1.5 shrink-0 shadow-sm"
+                            >
+                              <Plus size={11} strokeWidth={3} />
+                              <span>Adicionar Item</span>
+                            </button>
+                          </div>
+
+                          <div className="flex flex-col gap-2 max-h-[180px] overflow-y-auto pr-1 scrollbar-thin">
+                            {checklistDraft.map((item, index) => (
+                              <div key={index} className="flex items-center gap-2.5 animate-in slide-in-from-left-2 duration-250 group">
+                                {/* Círculo de checkbox simulado */}
+                                <div className="w-4 h-4 rounded-full border border-dashed border-amber-500/40 hover:border-amber-500/70 transition-colors flex items-center justify-center shrink-0 cursor-pointer" title="Pronto para marcar na conclusão">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500/0 group-hover:bg-amber-500/30 transition-all" />
+                                </div>
+                                <input
+                                  id={`checklist-item-${index}`}
+                                  type="text"
+                                  value={item}
+                                  onChange={(e) => {
                                     const next = [...checklistDraft];
-                                    next.splice(index + 1, 0, "");
-                                    setChecklistDraft(next);
-                                    
-                                    // Foca no novo input criado
-                                    setTimeout(() => {
-                                      const nextInput = document.getElementById(`checklist-item-${index + 1}`);
-                                      if (nextInput) {
-                                        (nextInput as HTMLInputElement).focus();
-                                      }
-                                    }, 50);
-                                  } else if (e.key === 'Backspace' && e.currentTarget.value === '' && checklistDraft.length > 1) {
-                                    e.preventDefault();
-                                    const next = checklistDraft.filter((_, idx) => idx !== index);
-                                    setChecklistDraft(next);
-                                    
-                                    // Foca no input anterior
-                                    setTimeout(() => {
-                                      const prevId = index > 0 ? index - 1 : 0;
-                                      const prevInput = document.getElementById(`checklist-item-${prevId}`);
-                                      if (prevInput) {
-                                        (prevInput as HTMLInputElement).focus();
-                                      }
-                                    }, 50);
-                                  }
-                                }}
-                                placeholder={`Item ${index + 1}`}
-                                className="flex-1 bg-gray-50/50 dark:bg-[#202c33]/50 border border-amber-500/15 rounded-xl px-3 py-1.5 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/10 transition-all font-medium placeholder:text-gray-400 dark:placeholder:text-gray-500"
-                              />
-                              {checklistDraft.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const next = checklistDraft.filter((_, idx) => idx !== index);
+                                    next[index] = e.target.value;
                                     setChecklistDraft(next);
                                   }}
-                                  className="text-gray-400 hover:text-red-500 transition-colors p-1.5 hover:bg-red-500/10 rounded-lg active:scale-95"
-                                  title="Remover Item"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              )}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      const next = [...checklistDraft];
+                                      next.splice(index + 1, 0, "");
+                                      setChecklistDraft(next);
+                                      
+                                      // Foca no novo input criado
+                                      setTimeout(() => {
+                                        const nextInput = document.getElementById(`checklist-item-${index + 1}`);
+                                        if (nextInput) {
+                                          (nextInput as HTMLInputElement).focus();
+                                        }
+                                      }, 50);
+                                    } else if (e.key === 'Backspace' && e.currentTarget.value === '' && checklistDraft.length > 1) {
+                                      e.preventDefault();
+                                      const next = checklistDraft.filter((_, idx) => idx !== index);
+                                      setChecklistDraft(next);
+                                      
+                                      // Foca no input anterior
+                                      setTimeout(() => {
+                                        const prevId = index > 0 ? index - 1 : 0;
+                                        const prevInput = document.getElementById(`checklist-item-${prevId}`);
+                                        if (prevInput) {
+                                          (prevInput as HTMLInputElement).focus();
+                                        }
+                                      }, 50);
+                                    }
+                                  }}
+                                  placeholder={`Item ${index + 1}`}
+                                  className="flex-1 bg-gray-50/45 dark:bg-[#202c33]/45 border border-amber-500/15 rounded-xl px-3.5 py-2 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/10 transition-all font-medium placeholder:text-gray-400 dark:placeholder:text-gray-500 shadow-inner"
+                                />
+                                {checklistDraft.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const next = checklistDraft.filter((_, idx) => idx !== index);
+                                      setChecklistDraft(next);
+                                    }}
+                                    className="text-gray-400 hover:text-red-500 transition-colors p-2 hover:bg-red-500/10 rounded-xl active:scale-95 shrink-0"
+                                    title="Remover Item"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Coluna da Direita: Atribuição e Agendamento */}
+                        <div className="lg:col-span-5 border-t lg:border-t-0 lg:border-l border-amber-500/15 pt-5 lg:pt-0 lg:pl-6 flex flex-col gap-4.5 justify-start">
+                          
+                          {/* Operador Responsável */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 flex items-center gap-1.5 select-none">
+                              <UserCheck size={13} className="text-amber-500" />
+                              <span>Operador Responsável</span>
+                            </label>
+                            <select
+                              value={taskAssignedTo || ""}
+                              onChange={(e) => setTaskAssignedTo(e.target.value || null)}
+                              className="bg-gray-50/50 dark:bg-[#202c33]/50 border border-amber-500/20 rounded-xl px-3.5 py-2 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/10 transition-all cursor-pointer font-semibold shadow-inner"
+                            >
+                              <option value="">(Nenhum - Atribuir a todos)</option>
+                              {agents.map((agent: any) => (
+                                <option key={agent.id} value={agent.id}>
+                                  {agent.full_name || agent.email}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Switch de Agendar */}
+                          <div className="flex flex-col gap-3">
+                            <div className="flex items-center justify-between border-t border-dashed border-amber-500/10 pt-3 select-none">
+                              <label 
+                                onClick={() => setScheduleNote(!scheduleNote)}
+                                className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                              >
+                                <CalendarClock size={13} className="text-amber-500" />
+                                <span>Agendar na Agenda Interna</span>
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => setScheduleNote(!scheduleNote)}
+                                className={cn(
+                                  "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                                  scheduleNote ? "bg-amber-500" : "bg-gray-200 dark:bg-gray-700"
+                                )}
+                              >
+                                <span
+                                  className={cn(
+                                    "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out",
+                                    scheduleNote ? "translate-x-5" : "translate-x-0"
+                                  )}
+                                />
+                              </button>
                             </div>
-                          ))}
+
+                            {scheduleNote && (
+                              <div className="flex flex-col gap-3.5 animate-in fade-in slide-in-from-top-2 duration-300 pb-1">
+                                <div className="flex flex-col gap-1.5">
+                                  <label className="text-[9px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                    Assunto do Lembrete
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={scheduleNoteTitle}
+                                    onChange={(e) => setScheduleNoteTitle(e.target.value)}
+                                    placeholder="Ex: Retorno de orçamento com cliente"
+                                    className="bg-gray-50/50 dark:bg-[#202c33]/50 border border-amber-500/20 rounded-xl px-3 py-2 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/10 transition-all font-semibold shadow-inner placeholder:text-gray-400/70"
+                                  />
+                                </div>
+                                
+                                <div className="grid grid-cols-2 gap-3.5">
+                                  <div className="flex flex-col gap-1.5">
+                                    <label className="text-[9px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                                      <Calendar size={10} />
+                                      <span>Data</span>
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={scheduleNoteDate}
+                                      onChange={(e) => setScheduleNoteDate(e.target.value)}
+                                      className="bg-gray-50/50 dark:bg-[#202c33]/50 border border-amber-500/20 rounded-xl px-3 py-2 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/10 transition-all font-semibold cursor-pointer shadow-inner"
+                                    />
+                                  </div>
+                                  <div className="flex flex-col gap-1.5">
+                                    <label className="text-[9px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                                      <Clock size={10} />
+                                      <span>Hora</span>
+                                    </label>
+                                    <input
+                                      type="time"
+                                      value={scheduleNoteTime}
+                                      onChange={(e) => setScheduleNoteTime(e.target.value)}
+                                      className="bg-gray-50/50 dark:bg-[#202c33]/50 border border-amber-500/20 rounded-xl px-3 py-2 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/10 transition-all font-semibold cursor-pointer shadow-inner"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
                   )}
 
                   <div className={cn(
-                    "flex flex-1 rounded-2xl border transition-all duration-300 shadow-sm relative",
+                    "flex flex-1 border transition-all duration-300 relative shadow-sm",
                     chatMode === 'internal_note'
-                      ? "flex-col items-stretch px-4 py-3 bg-amber-500/5 dark:bg-amber-500/10 border-amber-500/30 focus-within:border-amber-500/60 shadow-[inset_0_1px_2px_rgba(245,158,11,0.05)] gap-3.5 order-first md:order-none"
-                      : "flex-row items-end px-4 py-2 bg-white dark:bg-[#2a3942] border-transparent focus-within:border-[#00a884]/50 gap-3"
+                      ? cn(
+                          "flex-col items-stretch px-5 py-4 bg-gradient-to-b from-amber-500/[0.03] to-amber-600/[0.06] dark:from-amber-500/[0.06] dark:to-amber-600/[0.1] border-amber-500/35 focus-within:border-amber-500/60 focus-within:ring-4 focus-within:ring-amber-500/5 shadow-[0_8px_32px_rgba(245,158,11,0.06)] gap-3.5 order-first md:order-none",
+                          isTaskMode ? "rounded-b-[32px] rounded-t-none border-t-amber-500/10" : "rounded-[32px]"
+                        )
+                      : "flex-row items-end px-4 py-2 bg-white dark:bg-[#2a3942] border-transparent focus-within:border-[#00a884]/50 gap-3 rounded-[24px]"
                   )}>
                     
                     {/* Barra de Ferramentas do Editor de Notas CRM */}
@@ -4632,11 +5322,21 @@ export default function ChatDashboard() {
 
                           <div className="w-[1px] h-4 bg-amber-500/20 mx-1.5 shrink-0" />
 
+                          <button
+                            type="button"
+                            onClick={handleExtractRulesForRag}
+                            className="px-3.5 py-1.5 rounded-xl text-[10px] bg-gradient-to-r from-amber-500 to-amber-650 hover:from-amber-600 hover:to-amber-700 text-white shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 cursor-pointer select-none font-bold mr-1 shrink-0"
+                            title="Mapear Regras de Negócio para o RAG"
+                          >
+                            <BrainCircuit size={12} className="animate-pulse" />
+                            <span>Mapear RAG</span>
+                          </button>
+
                           {/* Seletor de Modelos Rápidos */}
                           <div className="relative group/templates inline-block">
                             <button
                               type="button"
-                              className="px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider bg-amber-500/10 hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/15 transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer hover:scale-105 select-none font-bold"
+                              className="px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-amber-500/10 hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/15 transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer hover:scale-105 select-none font-bold"
                             >
                               💡 Modelos
                               <ChevronDown size={11} />
@@ -4669,7 +5369,7 @@ export default function ChatDashboard() {
                         </div>
 
                         {/* Alternador de Modo de Escrita / Preview */}
-                        <div className="flex items-center bg-black/5 dark:bg-black/20 rounded-xl p-0.5 border border-black/5 dark:border-white/5 shadow-inner">
+                        <div className="flex items-center bg-amber-500/5 dark:bg-amber-500/10 rounded-xl p-0.5 border border-amber-500/15 shadow-inner">
                           <button
                             type="button"
                             onClick={() => setNotePreviewMode(false)}
@@ -4807,7 +5507,12 @@ export default function ChatDashboard() {
                               ? "Escreva uma anotação interna sobre este contato (não será enviada al cliente)..."
                               : "Responda como humano e a IA sera pausada automaticamente..."
                           }
-                          className="bg-transparent border-none outline-none w-full text-sm font-sans leading-relaxed text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1] resize-none p-0 pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin relative z-10"
+                          className={cn(
+                            "bg-transparent border-none outline-none w-full text-sm font-sans leading-relaxed resize-none p-0 pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin relative z-10 transition-colors duration-200",
+                            chatMode === 'internal_note'
+                              ? "text-amber-950 dark:text-amber-50 placeholder:text-amber-700/50 dark:placeholder:text-amber-400/40"
+                              : "text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1]"
+                          )}
                         />
                       )}
                     </div>
@@ -5026,7 +5731,7 @@ export default function ChatDashboard() {
                           className={cn(
                             "w-10 h-10 flex items-center justify-center text-white rounded-full shadow-md hover:scale-105 transition-all active:scale-95 shrink-0 animate-in fade-in zoom-in-95 duration-200",
                             chatMode === 'internal_note'
-                              ? "bg-amber-500 hover:bg-amber-600 shadow-amber-500/20"
+                              ? "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-lg shadow-amber-500/20 hover:shadow-amber-500/35 border border-amber-600/10"
                               : "bg-[#00a884] hover:bg-[#00a884]/90 shadow-emerald-500/20"
                           )}
                         >

@@ -51,6 +51,7 @@ export function MainSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const isAppEmbedded = location.pathname.startsWith('/apps/');
+  const theme = useChatStore(state => state.theme);
   const reopenedTicketToast = useChatStore(state => state.reopenedTicketToast);
   const setReopenedTicketToast = useChatStore(state => state.setReopenedTicketToast);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
@@ -392,7 +393,7 @@ export function MainSidebar() {
   return (
     <div 
       className={cn(
-        "h-full bg-[#182229] dark:bg-[#111b21] flex flex-col text-[#d1d7db] font-sans text-sm border-r border-[#2a3942] z-50 shrink-0 shadow-lg relative transition-all duration-300 group/sidebar",
+        "h-full bg-[#f0f2f5] dark:bg-[#111b21] flex flex-col text-[#54656f] dark:text-[#d1d7db] font-sans text-sm border-r border-gray-250/85 dark:border-[#2a3942] z-50 shrink-0 shadow-lg relative transition-all duration-300 group/sidebar",
         isAppEmbedded ? "w-[68px] hover:w-[260px] is-minimized" : "w-[260px]"
       )}
     >
@@ -400,8 +401,8 @@ export function MainSidebar() {
       {/* Workspace Header Premium */}
       <div 
         className={cn(
-          "h-16 flex items-center px-4 border-b border-[#2a3942]/60 transition-colors group relative z-50",
-          (userCompanies.length > 1 || currentUserRole === 'admin') ? "hover:bg-[#202c33] cursor-pointer" : ""
+          "h-16 flex items-center px-4 border-b border-gray-250/60 dark:border-[#2a3942]/60 transition-colors group relative z-50",
+          (userCompanies.length > 1 || currentUserRole === 'admin') ? "hover:bg-gray-200/50 dark:hover:bg-[#202c33] cursor-pointer" : ""
         )}
         onClick={() => {
           if (userCompanies.length > 1 || currentUserRole === 'admin') {
@@ -413,19 +414,19 @@ export function MainSidebar() {
           <div className="w-2 h-2 bg-white rounded-sm"></div>
         </div>
         <div className={cn("flex-1 min-w-0 ml-3 transition-all duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto group-hover/sidebar:!block")}>
-          <h2 className="font-semibold text-[#e9edef] truncate text-[15px] tracking-tight group-hover:text-white transition-colors">
+          <h2 className="font-semibold text-[#111b21] dark:text-[#e9edef] truncate text-[15px] tracking-tight group-hover:text-emerald-600 dark:group-hover:text-white transition-colors">
             {currentCompanyContext?.name || 'Carregando...'}
           </h2>
         </div>
         {(userCompanies.length > 1 || currentUserRole === 'admin') && (
-          <div className={cn("bg-[#2a3942] group-hover:bg-[#3b4a54] p-1 rounded transition-colors", "group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!block")}>
-             <ChevronDown size={14} className="text-[#8696a0] group-hover:text-white transition-colors" />
+          <div className={cn("bg-gray-200/60 dark:bg-[#2a3942] group-hover:bg-gray-300 dark:group-hover:bg-[#3b4a54] p-1 rounded transition-colors", "group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!block")}>
+             <ChevronDown size={14} className="text-[#54656f] dark:text-[#8696a0] group-hover:text-emerald-600 dark:group-hover:text-white transition-colors" />
           </div>
         )}
 
         {/* Workspace Dropdown Panel */}
         {showWorkspaceMenu && (userCompanies.length > 1 || currentUserRole === 'admin') && (
-          <div className="absolute top-[68px] left-2 w-[340px] bg-[#1e1e24] border border-[#2a2a2f] rounded-xl shadow-2xl overflow-hidden z-[9999] animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="absolute top-[68px] left-2 w-[340px] bg-white dark:bg-[#1e1e24] border border-gray-200 dark:border-[#2a2a2f] rounded-xl shadow-2xl overflow-hidden z-[9999] animate-in fade-in slide-in-from-top-2 duration-200">
              
              <div className="max-h-[300px] overflow-y-auto styled-scrollbar py-2">
                 {userCompanies.map((ws) => (
@@ -433,15 +434,15 @@ export function MainSidebar() {
                     key={ws.id} 
                     onClick={() => handleSwitchWorkspace(ws)}
                     className={cn(
-                      "flex items-center justify-between px-4 py-2 hover:bg-[#2a2a2f]/50 cursor-pointer transition-colors",
-                      ws.id === tenantId ? "bg-indigo-500/10 border-l-2 border-indigo-500" : ""
+                      "flex items-center justify-between px-4 py-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2f]/50 cursor-pointer transition-colors",
+                      ws.id === tenantId ? "bg-indigo-500/10 dark:bg-indigo-500/20 border-l-2 border-indigo-500" : ""
                     )}
                   >
                      <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className="w-5 h-5 rounded bg-gradient-to-tr from-indigo-500/20 to-purple-500/20 flex items-center justify-center shrink-0 border border-indigo-500/30">
                           <span className="text-[10px] font-bold text-indigo-400">{ws.name.substring(0, 1).toUpperCase()}</span>
                         </div>
-                        <span className={cn("text-sm truncate", ws.id === tenantId ? "text-white font-medium" : "text-slate-300")}>{ws.name}</span>
+                        <span className={cn("text-sm truncate", ws.id === tenantId ? "text-gray-900 dark:text-white font-medium" : "text-gray-700 dark:text-slate-300")}>{ws.name}</span>
                      </div>
                      {ws.id === tenantId && (
                        <CheckCircle2 size={14} className="text-indigo-400 shrink-0 ml-2" />
@@ -457,7 +458,7 @@ export function MainSidebar() {
         
         {/* Search */}
         <div className="px-3 py-3">
-          <div className="relative flex items-center w-full h-8 bg-[#202c33] rounded-md border border-transparent focus-within:border-[#00a884]/50 focus-within:ring-1 focus-within:ring-[#00a884]/50 transition-all overflow-hidden">
+          <div className="relative flex items-center w-full h-8 bg-gray-200/50 dark:bg-[#202c33] rounded-md border border-gray-250 dark:border-transparent focus-within:border-[#00a884]/50 focus-within:ring-1 focus-within:ring-[#00a884]/50 transition-all overflow-hidden">
             <Search size={14} className="absolute left-2.5 text-[#8696a0] shrink-0" />
             <input 
               type="text" 
@@ -465,7 +466,7 @@ export function MainSidebar() {
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Pesquisar..." 
               className={cn(
-                "w-full h-full bg-transparent border-none focus:outline-none focus:ring-0 text-[#d1d7db] text-[13px] pl-8 pr-8 placeholder-[#8696a0] transition-opacity duration-200",
+                "w-full h-full bg-transparent border-none focus:outline-none focus:ring-0 text-[#111b21] dark:text-[#d1d7db] text-[13px] pl-8 pr-8 placeholder-[#8696a0] transition-opacity duration-200",
                 "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100"
               )}
             />
@@ -479,7 +480,7 @@ export function MainSidebar() {
             )}
             {!searchQuery && (
               <div className={cn(
-                "absolute right-2 px-1.5 py-0.5 rounded bg-black/20 font-mono text-[9px] text-[#8696a0] tracking-tighter transition-opacity duration-200",
+                "absolute right-2 px-1.5 py-0.5 rounded bg-gray-200 dark:bg-black/20 font-mono text-[9px] text-[#8696a0] tracking-tighter transition-opacity duration-200",
                 "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100"
               )}>/</div>
             )}
@@ -489,17 +490,17 @@ export function MainSidebar() {
         {/* Switch Robo I.A Global */}
         <div className="px-3 pb-3">
            <div className={cn(
-             "flex items-center bg-[#202c33] rounded-lg border border-[#2a3942]/50 hover:border-[#00a884]/30 transition-all overflow-hidden",
+             "flex items-center bg-gray-200/50 dark:bg-[#202c33] rounded-lg border border-gray-250 dark:border-[#2a3942]/50 hover:border-[#00a884]/30 transition-all overflow-hidden",
              "px-3 py-2 justify-between",
              "group-[.is-minimized]/sidebar:justify-center group-[.is-minimized]/sidebar:px-0",
              "group-hover/sidebar:!justify-between group-hover/sidebar:!px-3"
            )}>
              <div className="flex items-center gap-2.5 shrink-0">
-               <div className={cn("p-1.5 rounded-md transition-colors", globalAiEnabled ? "bg-[#00a884]/20" : "bg-[#2a3942]")}>
+               <div className={cn("p-1.5 rounded-md transition-colors", globalAiEnabled ? "bg-[#00a884]/20" : "bg-gray-200 dark:bg-[#2a3942]")}>
                  <Bot size={14} className={globalAiEnabled ? "text-[#00a884]" : "text-[#8696a0]"} />
                </div>
                <span className={cn(
-                 "text-[13px] font-medium text-[#d1d7db] transition-all duration-200 whitespace-nowrap", 
+                 "text-[13px] font-medium text-[#54656f] dark:text-[#d1d7db] transition-all duration-200 whitespace-nowrap", 
                  "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0",
                  "group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto"
                )}>Robô I.A</span>
@@ -752,7 +753,7 @@ export function MainSidebar() {
                <div className="px-5 py-2 text-[11px] text-[#8696a0]/60 italic">Nenhuma etiqueta</div>
             )}
             
-            <div className="mt-1 pt-1.5 mx-3 border-t border-[#2a3942]/60 flex gap-1">
+            <div className="mt-1 pt-1.5 mx-3 border-t border-gray-250/60 dark:border-[#2a3942]/60 flex gap-1">
                <button 
                   onClick={() => navigate('/settings/labels')}
                   className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-[#202c33] hover:bg-[#2a3942] rounded-md text-[11px] text-[#8696a0] hover:text-white transition-colors"
@@ -781,7 +782,7 @@ export function MainSidebar() {
           </div>
         </div>
 
-        <div className="h-px bg-[#2a3942]/60 mx-4 my-3" />
+        <div className="h-px bg-gray-250/60 dark:bg-[#2a3942]/60 mx-4 my-3" />
 
         <div className="px-2 space-y-0.5 pb-4">
           <NavItem icon={<MessageCircle size={16} />} title="Chat Interno" />
@@ -790,7 +791,7 @@ export function MainSidebar() {
           <NavItem icon={<BookOpen size={16} />} title="Central de Ajuda" />
           
           {currentUserRole === 'admin' && (
-            <div className="pt-2 mt-2 border-t border-[#2a3942]/60">
+            <div className="pt-2 mt-2 border-t border-gray-250/60 dark:border-[#2a3942]/60">
               <CollapsibleSection 
                 title="Configurações" 
                 icon={<Settings size={16} />}
@@ -960,11 +961,11 @@ export function MainSidebar() {
           background: transparent;
         }
         .styled-scrollbar::-webkit-scrollbar-thumb {
-          background: #2a3942;
+          background: ${theme === 'dark' ? '#2a3942' : '#cbd5e1'};
           border-radius: 4px;
         }
         .styled-scrollbar:hover::-webkit-scrollbar-thumb {
-          background: #3b4a54;
+          background: ${theme === 'dark' ? '#3b4a54' : '#94a3b8'};
         }
       `}</style>
     </div>
@@ -996,22 +997,22 @@ function NavItem({
       onClick={onClick}
       className={cn(
         "flex items-center justify-between px-3 py-1.5 rounded-md cursor-pointer transition-colors group relative",
-        isActive ? "bg-[#202c33]" : "hover:bg-[#202c33]/60",
-        isSub ? "ml-4 pl-3 border-l border-[#2a3942] hover:border-[#8696a0]" : "",
-        isActive && isSub ? "border-[#00a884] bg-[#202c33]" : ""
+        isActive ? "bg-gray-200 dark:bg-[#202c33]" : "hover:bg-gray-200/50 dark:hover:bg-[#202c33]/60",
+        isSub ? "ml-4 pl-3 border-l border-gray-200 dark:border-[#2a3942] hover:border-gray-400 dark:hover:border-[#8696a0]" : "",
+        isActive && isSub ? "border-[#00a884] bg-gray-200 dark:bg-[#202c33]" : ""
       )}
     >
       <div className="flex items-center min-w-0 gap-3 flex-1">
-        {icon && <span className={cn("shrink-0", isActive ? "text-[#e9edef]" : "text-[#8696a0] group-hover:text-[#d1d7db]")}>{icon}</span>}
+        {icon && <span className={cn("shrink-0", isActive ? "text-[#111b21] dark:text-[#e9edef]" : "text-[#54656f] dark:text-[#8696a0] group-hover:text-[#111b21] dark:group-hover:text-[#d1d7db]")}>{icon}</span>}
         {!icon && isSub && (
           <div className={cn(
             "w-1.5 h-1.5 rounded-full shrink-0 transition-colors",
-            isActive ? "bg-[#00a884]" : "bg-[#2a3942] group-hover:bg-[#8696a0]"
+            isActive ? "bg-[#00a884]" : "bg-gray-300 dark:bg-[#2a3942] group-hover:bg-gray-400 dark:group-hover:bg-[#8696a0]"
           )} />
         )}
         <span className={cn(
           "truncate tracking-tight flex-1 transition-all duration-200", 
-          isActive ? "text-[#e9edef] font-medium" : "text-[#aebac1] group-hover:text-[#d1d7db]",
+          isActive ? "text-[#111b21] dark:text-[#e9edef] font-semibold" : "text-[#54656f] dark:text-[#aebac1] group-hover:text-[#111b21] dark:group-hover:text-[#d1d7db]",
           isSub && !icon ? "text-[13px]" : "text-[14px]",
           "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto"
         )}>
@@ -1030,7 +1031,7 @@ function NavItem({
             </div>
          )}
          {badge && (
-           <span className="bg-[#2a3942] text-[#d1d7db] text-[10px] px-1.5 py-0.5 rounded-full font-mono">
+           <span className="bg-gray-200 dark:bg-[#2a3942] text-gray-700 dark:text-[#d1d7db] text-[10px] px-1.5 py-0.5 rounded-full font-mono">
              {badge}
            </span>
          )}
@@ -1061,13 +1062,13 @@ function CollapsibleSection({
     <div className="mb-0.5">
       <div 
         onClick={onToggle}
-        className="flex items-center justify-between px-3 py-1.5 rounded-md cursor-pointer hover:bg-[#202c33]/60 transition-colors group"
+        className="flex items-center justify-between px-3 py-1.5 rounded-md cursor-pointer hover:bg-gray-200/50 dark:hover:bg-[#202c33]/60 transition-colors group"
       >
         <div className="flex items-center gap-3">
-          {icon && <span className="text-[#8696a0] group-hover:text-[#d1d7db] transition-colors">{icon}</span>}
-          <span className={cn("text-[14px] text-[#aebac1] group-hover:text-[#d1d7db] tracking-tight transition-all duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto group-hover/sidebar:!inline")}>{title}</span>
+          {icon && <span className="text-[#54656f] dark:text-[#8696a0] group-hover:text-[#111b21] dark:group-hover:text-[#d1d7db] transition-colors">{icon}</span>}
+          <span className={cn("text-[14px] text-[#54656f] dark:text-[#aebac1] group-hover:text-[#111b21] dark:group-hover:text-[#d1d7db] tracking-tight transition-all duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto group-hover/sidebar:!inline")}>{title}</span>
         </div>
-        <div className={cn("text-[#8696a0]", "group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!block")}>
+        <div className={cn("text-[#54656f] dark:text-[#8696a0]", "group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!block")}>
           {isOpen ? <ChevronDown size={14} className="opacity-70 group-hover:opacity-100 transition-all" /> : <ChevronRight size={14} className="opacity-70 group-hover:opacity-100 transition-all" />}
         </div>
       </div>

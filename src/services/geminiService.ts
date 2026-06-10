@@ -451,6 +451,62 @@ Regras importantes de retorno:
       }
     }
   }
+
+  async extractBusinessRulesForRag(contextHistory: {role: string, text: string}[]): Promise<{ suggestedRules: string[] }> {
+    if (!this.isConfigured()) {
+      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+    }
+    const model = this.genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            suggestedRules: {
+              type: "array",
+              items: {
+                type: "string"
+              },
+              description: "Lista de regras comerciais de alta relevância, limpas, impessoais e formais."
+            }
+          },
+          required: ["suggestedRules"]
+        }
+      }
+    });
+
+    const historyText = contextHistory.slice(-50).map(m => `${m.role === 'user' ? 'Cliente' : 'Atendente'}: ${m.text}`).join('\n');
+
+    const prompt = `Você é um Analista de Sistemas e Engenheiro de Prompt experiente. Sua tarefa é analisar o histórico de conversa de atendimento no WhatsApp a seguir e extrair regras de negócios, políticas, processos, taxas, regras de cancelamento, políticas de bolo de aniversário, quantidade de pessoas e outras informações comerciais operacionais relevantes.
+
+Instruções cruciais:
+1. **Separação de fatos e regras corporativas**: Extraia apenas regras que sirvam de base de conhecimento reutilizável para o RAG (ex: "Clientes podem trazer seu próprio bolo para eventos de aniversário", "Reservas para mais de 25 pessoas devem ser escaladas para atendentes humanos", "O restaurante aceita PIX como meio de pagamento").
+2. **Filtragem rígida**: IGNORE piadas, conversas cotidianas, agradecimentos, saudações formais/informais e detalhes hiperespecíficos que não servem como regra corporativa (ex: ignore "aniversário da sobrinha da Luciene dia 11/06"). Mantenha a base enxuta e limpa para não inchar o banco de dados.
+3. **Escrita profissional**: Formule as regras de forma clara, em tópicos impessoais e curtos em português.
+4. **Formato do JSON**: Retorne estritamente um JSON com a chave "suggestedRules" contendo a lista de strings. Nenhuma introdução ou formatação extra de markdown.
+
+Histórico de Mensagens:
+${historyText}`;
+
+    try {
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text().trim();
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (parsed.suggestedRules && Array.isArray(parsed.suggestedRules)) {
+        return {
+          suggestedRules: parsed.suggestedRules.map(String)
+        };
+      }
+      throw new Error("JSON retornado não contém suggestedRules");
+    } catch (e) {
+      console.error("Erro ao extrair regras com Gemini:", e);
+      throw e;
+    }
+  }
 }
 
 export const geminiService = new GeminiService();
+
