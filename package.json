@@ -1,13 +1,14 @@
 {
   "name": "chatboot",
   "private": true,
-  "version": "2.9.25",
+  "version": "3.0.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "vercel --prod --force --yes"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

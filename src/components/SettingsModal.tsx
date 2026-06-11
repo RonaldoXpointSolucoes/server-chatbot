@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Database, Save, Loader2, X, CheckCircle, Terminal } from 'lucide-react';
+import { Settings, Database, X, CheckCircle, Terminal } from 'lucide-react';
 import { useSettingsStore } from '../store/settingsStore';
 import { useChatStore } from '../store/chatStore';
 import { useDevStore } from '../store/devStore';
