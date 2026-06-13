@@ -3,6 +3,7 @@ import { supabase } from './supabase.js';
 class SnoozeManager {
   constructor() {
     this.intervalId = null;
+    this.wasOffline = false;
   }
 
   start() {
@@ -32,8 +33,26 @@ class SnoozeManager {
         .lte('snoozed_until', now);
 
       if (selectError) {
-        console.error('[SnoozeManager] Erro ao buscar conversas expiradas:', selectError.message);
+        const isFetchError = selectError.message && (
+          selectError.message.includes('fetch failed') ||
+          selectError.message.includes('getaddrinfo') ||
+          selectError.message.includes('ENOTFOUND')
+        );
+
+        if (isFetchError) {
+          if (!this.wasOffline) {
+            console.error('[SnoozeManager] Erro ao buscar conversas expiradas: Sem conexão com o Supabase (Internet offline ou oscilação de rede).');
+            this.wasOffline = true;
+          }
+        } else {
+          console.error('[SnoozeManager] Erro ao buscar conversas expiradas:', selectError.message);
+        }
         return;
+      }
+
+      if (this.wasOffline) {
+        console.log('[SnoozeManager] Conexão com o Supabase restabelecida com sucesso!');
+        this.wasOffline = false;
       }
 
       if (!expiredConvs || expiredConvs.length === 0) {

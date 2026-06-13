@@ -144,7 +144,9 @@ export function MainSidebar() {
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [currentCompanyContext, setCurrentCompanyContext] = useState<any>(null);
-  const [globalAiEnabled, setGlobalAiEnabled] = useState(true);
+  const globalAiEnabled = useChatStore(state => state.globalAiEnabled);
+  const setGlobalAiEnabled = useChatStore(state => state.setGlobalAiEnabled);
+  const toggleGlobalAi = useChatStore(state => state.toggleGlobalAi);
   const [instanceContextMenu, setInstanceContextMenu] = useState<{ id: string, name: string, x: number, y: number } | null>(null);
   const [myConversationsMenu, setMyConversationsMenu] = useState<{ x: number, y: number } | null>(null);
 
@@ -331,6 +333,10 @@ export function MainSidebar() {
   const handleSwitchWorkspace = (company: any) => {
     if (company.id === tenantId) return;
     
+    // Clear tenant-specific channel filters when switching workspaces
+    localStorage.removeItem('activeChannelFilter');
+    localStorage.removeItem('activeChannelName');
+    
     if (localStorage.getItem('current_tenant_id')) {
         localStorage.setItem('current_tenant_id', company.id);
         localStorage.setItem('current_tenant_name', company.name);
@@ -342,26 +348,8 @@ export function MainSidebar() {
     window.location.reload();
   };
 
-  const handleToggleGlobalAi = async () => {
-    if (!currentCompanyContext || !tenantId) return;
-    const newValue = !globalAiEnabled;
-    setGlobalAiEnabled(newValue);
-    
-    try {
-       const { error } = await supabase.from('companies').update({ global_ai_enabled: newValue }).eq('id', tenantId);
-       if (error) throw error;
-       
-       useChatStore.getState().logOperation(
-         'UPDATE',
-         'companies',
-         tenantId,
-         { global_ai_enabled: !newValue },
-         { global_ai_enabled: newValue }
-       );
-    } catch(e) {
-       console.error("Erro ao atualizar status global do IA:", e);
-       setGlobalAiEnabled(!newValue); // revert on error
-    }
+  const handleToggleGlobalAi = () => {
+    toggleGlobalAi();
   };
 
   const handleCreateWorkspace = async () => {

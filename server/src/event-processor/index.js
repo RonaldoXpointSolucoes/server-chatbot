@@ -813,6 +813,15 @@ class EventProcessor {
                              console.log(`[BatchProcessor] Push abortado para mensagem atrasada/offline (${Math.round(messageAgeSecs)}s atrás)`);
                          }
 
+                         // Disparar Webhook Triggers para nova mensagem recebida
+                         const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
+                         dispatchWebhookTriggers(b.tenantId, 'message_received', {
+                             phone: b.phone,
+                             message: b.textMessage,
+                             conversation_id: b.conversationId,
+                             contact_id: cid
+                         }).catch(err => console.error('[WebhookTrigger] Falha ao despachar gatilho message_received:', err));
+
                          // Responde apenas se a conversa estiver sob os cuidados do bot ('bot' ou 'teste_robo')
                          // E não seja um self-chat (evita auto-loop em envios pro próprio numero)
                          if (!b.isSelfChat && !b.aiPaused && (b.convStatus === 'bot' || b.convStatus === 'teste_robo' || b.convStatus === 'open')) {
@@ -1098,8 +1107,24 @@ class EventProcessor {
              }
         }
 
-        // Histórico em Massa de Mensagens: Distribuir em Timers
-        if (messages && messages.length > 0) {
+        // Verifica se a caixa já possui histórico de conversas gravado no Supabase
+        let hasExistingHistory = false;
+        try {
+            const { count, error } = await supabase
+                .from('conversations')
+                .select('*', { count: 'exact', head: true })
+                .eq('instance_id', instanceId);
+            
+            if (!error && count > 0) {
+                hasExistingHistory = true;
+                console.log(`[EventProcessor] Instância ${instanceId} já possui ${count} conversas no banco de dados. Ignorando sincronização de histórico de mensagens.`);
+            }
+        } catch (e) {
+            console.error(`[EventProcessor] Erro ao verificar histórico de conversas no Supabase:`, e);
+        }
+
+        // Histórico em Massa de Mensagens: Distribuir em Timers (apenas se for primeira conexão)
+        if (!hasExistingHistory && messages && messages.length > 0) {
             // Regra Anti-Ban e Anti-Loop: Limitar a 50 Contatos, 50 mensagens por contato, fatiados a cada 10 min
             const chatMap = new Map();
             for (const m of messages) {
@@ -1426,3 +1451,64 @@ EventProcessor.pendingMediaCache = new Map();
 EventProcessor.humanMessagesCache = new Map();
 EventProcessor.automationMessagesCache = new Map();
 export default new EventProcessor();
+
+export async function dispatchWebhookTriggers(tenantId, eventType, data) {
+    try {
+        const { data: triggers, error } = await supabase
+            .from('webhook_triggers')
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .eq('event_type', eventType)
+            .eq('is_active', true);
+
+        if (error) {
+            console.error(`[WebhookTrigger] Erro ao buscar gatilhos para o tenant ${tenantId}:`, error);
+            return;
+        }
+
+        if (!triggers || triggers.length === 0) return;
+
+        for (const trigger of triggers) {
+            let processedUrl = trigger.url;
+            let processedBody = trigger.body_template || '{}';
+
+            // Substituir tokens simples
+            const tokens = {
+                '{{event}}': eventType || '',
+                '{{tenant_id}}': tenantId || '',
+                '{{phone}}': data.phone || '',
+                '{{message}}': data.message || '',
+                '{{conversation_id}}': data.conversation_id || '',
+                '{{contact_id}}': data.contact_id || ''
+            };
+
+            for (const [token, value] of Object.entries(tokens)) {
+                processedUrl = processedUrl.replaceAll(token, value);
+                processedBody = processedBody.replaceAll(token, value);
+            }
+
+            const fetchOptions = {
+                method: trigger.action_type === 'webhook_get' ? 'GET' : 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(trigger.headers || {})
+                }
+            };
+
+            if (trigger.action_type === 'webhook_post') {
+                fetchOptions.body = processedBody;
+            }
+
+            console.log(`[WebhookTrigger] Disparando gatilho '${trigger.name}' (${trigger.action_type}) para: ${processedUrl}`);
+            fetch(processedUrl, fetchOptions)
+                .then(async (res) => {
+                    console.log(`[WebhookTrigger] Gatilho '${trigger.name}' respondeu com status ${res.status}`);
+                })
+                .catch((err) => {
+                    console.error(`[WebhookTrigger] Falha ao enviar requisição para '${trigger.name}':`, err.message);
+                });
+        }
+    } catch (e) {
+        console.error('[WebhookTrigger] Falha ao executar gatilhos:', e);
+    }
+}

@@ -244,6 +244,60 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 tiktok: companySettings.tiktok || ''
             };
 
+            // Determinar se a empresa está fechada no momento
+            let isClosed = false;
+            let nomeDiaAtual = 'Segunda-feira';
+            let currentTimeStr = '00:00';
+            
+            try {
+                const nowBr = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+                const diaDaSemana = nowBr.getDay(); // 0 = Domingo, 1 = Segunda, etc.
+                const diasNomes = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+                nomeDiaAtual = diasNomes[diaDaSemana];
+                
+                const currentHour = nowBr.getHours();
+                const currentMinute = nowBr.getMinutes();
+                currentTimeStr = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
+                
+                const horariosEstrutura = companySettings.horarios_estrutura;
+                if (horariosEstrutura && Array.isArray(horariosEstrutura)) {
+                    const configDia = horariosEstrutura.find(d => d.dia === nomeDiaAtual);
+                    if (!configDia || !configDia.aberto) {
+                        isClosed = true;
+                    } else if (configDia.periodos && configDia.periodos.length > 0) {
+                        let isWithinAnyPeriod = false;
+                        for (const periodo of configDia.periodos) {
+                            if (periodo.inicio && periodo.fim) {
+                                const [startH, startM] = periodo.inicio.split(':').map(Number);
+                                const [endH, endM] = periodo.fim.split(':').map(Number);
+                                
+                                const startVal = startH * 60 + startM;
+                                const endVal = endH * 60 + endM;
+                                const currentVal = currentHour * 60 + currentMinute;
+                                
+                                if (endVal < startVal) {
+                                    // Turno passa da meia-noite (ex: 18:00 às 02:00)
+                                    if (currentVal >= startVal || currentVal <= endVal) {
+                                        isWithinAnyPeriod = true;
+                                        break;
+                                    }
+                                } else {
+                                    if (currentVal >= startVal && currentVal <= endVal) {
+                                        isWithinAnyPeriod = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (!isWithinAnyPeriod) {
+                            isClosed = true;
+                        }
+                    }
+                }
+            } catch (errHorario) {
+                console.error('[AutomationWorker] Erro ao calcular horário de funcionamento:', errHorario);
+            }
+
             const replaceTokens = (text) => {
                 if (!text || typeof text !== 'string') return text;
                 return text
@@ -347,6 +401,19 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             if (botInstructions && botInstructions.trim().length > 0) {
                 basePrompt += `\n\n### INSTRUÇÕES DE COMPORTAMENTO PERSONALIZADAS ###\nImportante: Siga estritamente as diretrizes e regras de personalidade a seguir em todas as interações:\n${botInstructions}\n`;
             }
+
+            // Diretrizes de Horário de Funcionamento
+            let storeStatusText = `\n\n### STATUS E HORÁRIO DE ATENDIMENTO ###\n` +
+                                  `- Status Atual da Loja: ${isClosed ? 'FECHADA' : 'ABERTA'}\n` +
+                                  `- Horário de Brasília Atual: ${currentTimeStr} (${nomeDiaAtual})\n` +
+                                  `- Horário Geral da Empresa: ${vars.horarioFuncionamento || 'Não cadastrado'}\n`;
+            
+            if (isClosed) {
+                storeStatusText += `\n⚠️ DIRETRIZ CRÍTICA (ESTRITA): A empresa está FECHADA neste momento. Você deve responder ao cliente de forma extremamente calorosa, empática e amigável informando que estamos fora do horário de atendimento. Indique os horários de funcionamento normais (acima) e convide-o com carinho a entrar em contato novamente quando reabrirmos. NUNCA faça anotações de pedidos, agendamento de turnos ou promessas de atendimento imediato se a casa estiver fechada.\n`;
+            }
+            
+            basePrompt += storeStatusText;
+
             const systemPrompt = replaceTokens(basePrompt + contextText + correctionsText);
             
             // 3. Obtem histórico da conversa

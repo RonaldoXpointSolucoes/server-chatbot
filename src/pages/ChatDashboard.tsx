@@ -395,9 +395,13 @@ export default function ChatDashboard() {
     setHistorySyncError,
     realtimeStatus,
     tenantLabels,
-    fetchTenantLabels
+    fetchTenantLabels,
+    globalAiEnabled,
+    toggleGlobalAi
   } = useChatStore(useShallow(state => ({
-    contacts: state.contacts, 
+    contacts: state.contacts,
+    globalAiEnabled: state.globalAiEnabled,
+    toggleGlobalAi: state.toggleGlobalAi, 
     activeChatId: state.activeChatId, 
     evolutionConnected: state.evolutionConnected, 
     connectedInstanceName: state.connectedInstanceName,
@@ -4018,7 +4022,7 @@ export default function ChatDashboard() {
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
           {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '2.9.25'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '09/06/2026, 23:36'}`}</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '3.0.6'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '13/06/2026, 09:51'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
@@ -4034,6 +4038,27 @@ export default function ChatDashboard() {
             </div>
             
             <div className="flex gap-3 text-[#54656f] dark:text-[#aebac1] items-center">
+              {/* Botão de Controle Global da IA (Glow verde se ativo, cinza/inativo se inativo - Visível apenas em mobile/tablet) */}
+              <button 
+                className={cn(
+                  "p-2 rounded-full transition-all duration-300 relative group lg:hidden",
+                  globalAiEnabled 
+                    ? "bg-[#00a884]/15 text-[#00a884] hover:bg-[#00a884]/25 shadow-[0_0_12px_rgba(0,168,132,0.3)] border border-[#00a884]/20" 
+                    : "bg-gray-100 dark:bg-gray-800/60 text-gray-400 dark:text-slate-500 hover:bg-gray-200 dark:hover:bg-gray-700/60 border border-transparent"
+                )}
+                title={globalAiEnabled ? "Desativar Robô I.A (Global)" : "Ativar Robô I.A (Global)"}
+                onClick={toggleGlobalAi}
+              >
+                <Bot size={20} className={cn("transition-transform duration-500", globalAiEnabled && "animate-pulse scale-105")} />
+                {/* Indicador de Status */}
+                <span className={cn(
+                  "absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white dark:border-[#202c33] shadow-sm transition-all duration-300",
+                  globalAiEnabled 
+                    ? "bg-emerald-500 animate-pulse" 
+                    : "bg-red-500"
+                )}></span>
+              </button>
+
               <button className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all text-[#00a884]" onClick={() => setIsNewChatOpen(true)}>
                 <MessageSquarePlus size={20} />
               </button>

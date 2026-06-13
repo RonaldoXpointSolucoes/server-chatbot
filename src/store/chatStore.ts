@@ -147,6 +147,9 @@ interface ChatState {
   realtimeStatus: 'connected' | 'connecting' | 'disconnected';
   isOffline: boolean;
   setOfflineStatus: (status: boolean) => void;
+  globalAiEnabled: boolean;
+  setGlobalAiEnabled: (enabled: boolean) => void;
+  toggleGlobalAi: () => Promise<void>;
   
   searchGlobalContacts: (term: string) => Promise<void>;
   openQRModal: (instanceId?: string | null) => void;
@@ -504,6 +507,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setHistorySyncError: (error) => set({ historySyncError: error }),
   isOffline: typeof navigator !== 'undefined' ? !navigator.onLine : false,
   setOfflineStatus: (status) => set({ isOffline: status }),
+  globalAiEnabled: true,
+  setGlobalAiEnabled: (enabled) => set({ globalAiEnabled: enabled }),
+  toggleGlobalAi: async () => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    const newValue = !get().globalAiEnabled;
+    set({ globalAiEnabled: newValue });
+    try {
+      const { error } = await supabase.from('companies').update({ global_ai_enabled: newValue }).eq('id', tenant.id);
+      if (error) throw error;
+      get().logOperation(
+        'UPDATE',
+        'companies',
+        tenant.id,
+        { global_ai_enabled: !newValue },
+        { global_ai_enabled: newValue }
+      );
+    } catch (e) {
+      console.error("Erro ao atualizar status global do IA:", e);
+      set({ globalAiEnabled: !newValue }); // Reverter
+    }
+  },
 
   clearStore: () => {
     if (get().isSubscribed) {
@@ -2853,7 +2878,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (tenantData) {
         set({
            tenantInfo: tenantData,
-           connectedInstanceName: tenantData.evolution_api_instance || null
+           connectedInstanceName: tenantData.evolution_api_instance || null,
+           globalAiEnabled: tenantData.global_ai_enabled ?? true
         });
 
         if (tenantData.evolution_api_instance) {
