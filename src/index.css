@@ -99,3 +99,16 @@
 body *:not(input):not(textarea):not([contenteditable]):not([contenteditable="true"]) {
   caret-color: transparent !important;
 }
+
+/* Forçar caret visível, cursor de texto e permitir seleção nas caixas de texto e seus descendentes */
+input,
+textarea,
+[contenteditable],
+[contenteditable="true"],
+[contenteditable] *,
+[contenteditable="true"] * {
+  caret-color: auto !important;
+  cursor: text !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
