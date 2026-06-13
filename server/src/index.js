@@ -154,6 +154,9 @@ async function runMigrations() {
         await client.connect();
         console.log("[Migration] Conectado ao banco de dados via pg client.");
         const migrationSQL = `
+          DROP FUNCTION IF EXISTS match_ai_reasoning_adjustments(vector, double precision, integer, uuid);
+          DROP FUNCTION IF EXISTS match_ai_reasoning_adjustments(vector, float, int, uuid);
+          DROP FUNCTION IF EXISTS match_ai_reasoning_adjustments(vector(384), float, int, uuid);
           ALTER TABLE ai_reasoning_adjustments ADD COLUMN IF NOT EXISTS context_summary text;
           CREATE OR REPLACE FUNCTION match_ai_reasoning_adjustments(
             query_embedding vector(384),
