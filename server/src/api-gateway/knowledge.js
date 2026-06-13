@@ -3,6 +3,7 @@ import multer from 'multer';
 import { pipeline } from '@xenova/transformers';
 import { supabase } from '../supabase.js';
 import { PDFParse } from 'pdf-parse';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 
 const router = express.Router();
@@ -484,6 +485,397 @@ router.post('/match', async (req, res) => {
    } catch(e) {
         res.status(500).json({ error: e.message });
    }
+});
+
+// Função para sincronizar todas as correções de IA para um único documento RAG da empresa
+async function syncCorrectionsToRagDocument(tenantId) {
+    try {
+        console.log(`[Corrections RAG Sync] Sincronizando correções da empresa ${tenantId} para o RAG...`);
+        // 1. Busca todos os raciocínios da empresa
+        const { data: corrections, error: fetchErr } = await supabase
+            .from('ai_reasoning_adjustments')
+            .select('user_query, original_response, corrected_response, context_summary, created_at')
+            .eq('tenant_id', tenantId)
+            .order('created_at', { ascending: false });
+
+        if (fetchErr) throw fetchErr;
+
+        const docName = "Manual de Raciocínio e Ajustes da I.A";
+
+        // 2. Se não houver correções, deleta o documento do RAG
+        if (!corrections || corrections.length === 0) {
+            console.log(`[Corrections RAG Sync] Nenhuma correção encontrada. Excluindo documento antigo se existir.`);
+            const { data: oldDoc } = await supabase
+                .from('knowledge_documents')
+                .select('id')
+                .eq('tenant_id', tenantId)
+                .eq('name', docName)
+                .maybeSingle();
+
+            if (oldDoc) {
+                await supabase.from('knowledge_chunks').delete().eq('document_id', oldDoc.id).eq('tenant_id', tenantId);
+                await supabase.from('knowledge_documents').delete().eq('id', oldDoc.id).eq('tenant_id', tenantId);
+            }
+            return;
+        }
+
+        // 3. Monta o markdown unificado do documento
+        let content = `# Manual de Raciocínio, Tom de Voz e Instruções Corrigidas da I.A.\n\n`;
+        content += `Este documento contém correções reais feitas por atendentes humanos para guiar as respostas da I.A. Siga de forma estrita as diretrizes de tom, empatia, escuta ativa e as respostas corretas abaixo para obter uma conversa de altíssimo nível humano e natural.\n\n---\n\n`;
+        
+        corrections.forEach((c, idx) => {
+            content += `## Correção ${idx + 1}:\n`;
+            if (c.context_summary) {
+                content += `### Memória da Conversa (Contexto):\n"${c.context_summary}"\n\n`;
+            }
+            content += `### Pergunta Similar do Cliente:\n"${c.user_query}"\n\n`;
+            if (c.original_response) {
+                content += `### Resposta Incorreta Original (Não repetir):\n"${c.original_response}"\n\n`;
+            }
+            content += `### Comportamento e Resposta Esperada Corrigida (Seguir esta linha):\n"${c.corrected_response}"\n\n`;
+            content += `---\n\n`;
+        });
+
+        // 4. Busca ou cria o documento correspondente em knowledge_documents
+        let { data: doc, error: docErr } = await supabase
+            .from('knowledge_documents')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .eq('name', docName)
+            .maybeSingle();
+
+        if (docErr) throw docErr;
+
+        if (!doc) {
+            const { data: newDoc, error: createErr } = await supabase
+                .from('knowledge_documents')
+                .insert([{
+                    tenant_id,
+                    name: docName,
+                    type: 'text/markdown',
+                    status: 'processing',
+                    metadata: { size: content.length, source: 'corrections_system' }
+                }])
+                .select('*')
+                .single();
+
+            if (createErr) throw createErr;
+            doc = newDoc;
+        } else {
+            // Atualiza status para processing
+            await supabase
+                .from('knowledge_documents')
+                .update({ 
+                    status: 'processing',
+                    metadata: { size: content.length, source: 'corrections_system' }
+                })
+                .eq('id', doc.id);
+        }
+
+        const docId = doc.id;
+
+        // 5. Deleta trechos (chunks) antigos
+        await supabase.from('knowledge_chunks').delete().eq('document_id', docId).eq('tenant_id', tenantId);
+
+        // 6. Divide o documento em chunks e vetoriza usando o pipeline de embeddings local
+        const chunks = splitTextIntoChunks(content, 350, 50);
+        const transformer = await EmbeddingsPipeline.getInstance();
+        const dbChunks = [];
+
+        for (let i = 0; i < chunks.length; i++) {
+            const chunkText = chunks[i];
+            if (chunkText.trim().length < 5) continue;
+
+            const output = await transformer(chunkText, { pooling: 'mean', normalize: true });
+            const embeddingVector = Array.from(output.data);
+
+            dbChunks.push({
+                document_id: docId,
+                tenant_id,
+                content: chunkText,
+                embedding: embeddingVector,
+                chunk_index: i
+            });
+
+            if (dbChunks.length >= 100) {
+                await supabase.from('knowledge_chunks').insert([...dbChunks]);
+                dbChunks.length = 0;
+            }
+        }
+
+        if (dbChunks.length > 0) {
+            await supabase.from('knowledge_chunks').insert(dbChunks);
+        }
+
+        // 7. Marca o documento como pronto
+        await supabase
+            .from('knowledge_documents')
+            .update({ 
+                status: 'ready',
+                metadata: { 
+                    size: content.length, 
+                    source: 'corrections_system',
+                    chunks_total: chunks.length,
+                    chunks_processed: chunks.length,
+                    current_status: 'Concluído com sucesso!'
+                }
+            })
+            .eq('id', docId);
+
+        console.log(`[Corrections RAG Sync] Manual sincronizado com sucesso para o tenant ${tenantId}. Documento ID: ${docId}`);
+    } catch (e) {
+        console.error(`[Corrections RAG Sync] Erro crítico ao sincronizar correções para o RAG:`, e);
+    }
+}
+
+// Rota para salvar alterações de raciocínio / correções da IA
+router.post('/corrections', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.body?.tenant_id;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+ 
+        const { user_query, original_response, corrected_response, context_summary } = req.body;
+        if (!user_query || !corrected_response) {
+            return res.status(400).json({ error: 'Missing user_query or corrected_response' });
+        }
+ 
+        // 1. Vetoriza o texto da pergunta
+        const transformer = await EmbeddingsPipeline.getInstance();
+        const output = await transformer(user_query, { pooling: 'mean', normalize: true });
+        const embedding = Array.from(output.data);
+ 
+        // 2. Grava na tabela ai_reasoning_adjustments (se já existir para essa exata query, atualiza)
+        const { data: existingAdjust } = await supabase
+            .from('ai_reasoning_adjustments')
+            .select('id')
+            .eq('tenant_id', tenant_id)
+            .eq('user_query', user_query.trim())
+            .maybeSingle();
+ 
+        let data, error;
+        if (existingAdjust) {
+            const updateRes = await supabase
+                .from('ai_reasoning_adjustments')
+                .update({
+                    original_response: original_response || '',
+                    corrected_response: corrected_response.trim(),
+                    context_summary: context_summary ? context_summary.trim() : null,
+                    embedding
+                })
+                .eq('id', existingAdjust.id)
+                .select('*')
+                .single();
+            data = updateRes.data;
+            error = updateRes.error;
+        } else {
+            const insertRes = await supabase
+                .from('ai_reasoning_adjustments')
+                .insert({
+                    tenant_id,
+                    user_query: user_query.trim(),
+                    original_response: original_response || '',
+                    corrected_response: corrected_response.trim(),
+                    context_summary: context_summary ? context_summary.trim() : null,
+                    embedding
+                })
+                .select('*')
+                .single();
+            data = insertRes.data;
+            error = insertRes.error;
+        }
+ 
+        if (error) throw error;
+ 
+        // 3. Sincroniza o RAG Document de forma assíncrona
+        syncCorrectionsToRagDocument(tenant_id).catch(err => {
+            console.error('[Corrections RAG Sync] Erro no background:', err);
+        });
+ 
+        res.json({ success: true, correction: data });
+    } catch (e) {
+        console.error('[Corrections API] Erro ao salvar correção:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+ 
+// Rota para listar correções cadastradas
+router.get('/corrections', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.query?.tenant_id;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+ 
+        const { data, error } = await supabase
+            .from('ai_reasoning_adjustments')
+            .select('id, user_query, original_response, corrected_response, context_summary, created_at')
+            .eq('tenant_id', tenant_id)
+            .order('created_at', { ascending: false });
+ 
+        if (error) throw error;
+ 
+        res.json({ corrections: data });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Rota para excluir uma correção
+router.delete('/corrections/:id', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'];
+        const { id } = req.params;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        const { error } = await supabase
+            .from('ai_reasoning_adjustments')
+            .delete()
+            .eq('id', id)
+            .eq('tenant_id', tenant_id);
+
+        if (error) throw error;
+
+        // Sincroniza o RAG Document de forma assíncrona
+        syncCorrectionsToRagDocument(tenant_id).catch(err => {
+            console.error('[Corrections RAG Sync] Erro no background:', err);
+        });
+
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Rota auxiliar IA para processar, humanizar e sugerir melhorias de respostas
+router.post('/corrections/helper', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'];
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        const { text, action, tone, user_query, conversationId } = req.body;
+        if (!text && action !== 'suggest' && action !== 'summarize-context') {
+            return res.status(400).json({ error: 'text is required' });
+        }
+
+        const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            return res.status(500).json({ error: 'Chave API Gemini não configurada no servidor.' });
+        }
+
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+        let prompt = '';
+        if (action === 'summarize-context') {
+            if (!conversationId) {
+                return res.status(400).json({ error: 'conversationId is required for summarize-context' });
+            }
+            const { data: msgs, error: msgsErr } = await supabase
+                .from('messages')
+                .select('text_content, sender_type')
+                .eq('tenant_id', tenant_id)
+                .eq('conversation_id', conversationId)
+                .order('timestamp', { ascending: false })
+                .limit(10);
+            
+            if (msgsErr) throw msgsErr;
+
+            let historyText = '';
+            if (msgs && msgs.length > 0) {
+                historyText = msgs.reverse().map(m => {
+                    const sender = m.sender_type === 'bot' || m.sender_type === 'agent' ? 'IA/Atendente' : 'Cliente';
+                    return `${sender}: ${m.text_content}`;
+                }).join('\n');
+            }
+
+            prompt = `Você é um analista de atendimento por WhatsApp. Analise o histórico recente da conversa e crie um resumo curto (uma linha, no máximo 15 palavras) sobre qual é o principal objetivo ou contexto da conversa (ex: "Cliente quer tirar dúvidas sobre horários" ou "Cliente está reclamando do atraso na entrega").
+Seja muito direto, objetivo e conciso.
+
+Histórico da Conversa:
+${historyText || '(Nenhum histórico disponível)'}
+
+Responda APENAS com o resumo em uma linha, sem introduções, sem explicações e sem aspas.`;
+        } else if (action === 'humanize') {
+            prompt = `Você é um especialista em atendimento ao cliente em português do Brasil, focado em humanizar e naturalizar conversas corporativas por WhatsApp.
+Mantenha a informação e o sentido do texto original, mas reescreva-o de forma extremamente amigável, acolhedora, natural e profissional. Use expressões comuns no Brasil como "Com certeza!", "Pode deixar!", "Sem problemas!", mas sem soar exagerado. Adicione emojis calorosos e adequados se apropriado.
+
+Texto original para humanizar:
+"${text}"
+
+Responda APENAS com o texto humanizado reescrito, sem introduções, sem explicações e sem aspas.`;
+        } else if (action === 'tone') {
+            let toneInstructions = '';
+            if (tone === 'casual') {
+                toneInstructions = 'casual, descontraído, caloroso e informal (mas respeitoso).';
+            } else if (tone === 'professional') {
+                toneInstructions = 'profissional, cortês, polido, focado na resolução e formal.';
+            } else if (tone === 'empathetic') {
+                toneInstructions = 'extremamente empático, acolhedor, compreensivo e de suporte a problemas.';
+            } else if (tone === 'enthusiastic') {
+                toneInstructions = 'entusiasta, enérgico, alegre, proativo e com emojis apropriados.';
+            }
+
+            prompt = `Você é um especialista em tom de voz para mensagens de WhatsApp.
+Reescreva o texto a seguir para ter um tom de voz ${toneInstructions}.
+Mantenha a informação básica do texto intacta.
+
+Texto original:
+"${text}"
+
+Responda APENAS com o texto reescrito no tom solicitado, sem explicações, sem introduções e sem aspas.`;
+        } else if (action === 'emoji') {
+            prompt = `Você é um especialista em engajamento de mensagens de WhatsApp.
+Insira emojis apropriados, calorosos e bem-posicionados no texto a seguir para torná-lo mais dinâmico e amigável. Não exagere na quantidade (use de 2 a 4 emojis bem selecionados). Mantenha as palavras idênticas.
+
+Texto original:
+"${text}"
+
+Responda APENAS com o texto modificado, sem explicações, sem introduções e sem aspas.`;
+        } else if (action === 'grammar') {
+            prompt = `Corrija quaisquer erros gramaticais, ortográficos ou de digitação no texto a seguir, mantendo exatamente o mesmo sentido e estilo original.
+
+Texto original:
+"${text}"
+
+Responda APENAS com o texto corrigido, sem explicações, sem introduções e sem aspas.`;
+        } else if (action === 'suggest') {
+            prompt = `Você é um assistente de inteligência artificial de alto nível.
+O atendente quer que você sugira uma resposta perfeita, humanizada e empática para um cliente no WhatsApp.
+O contexto é o seguinte:
+- Mensagem/Pergunta recebida do cliente: "${user_query}"
+- Resposta original incorreta/robotizada que a IA gerou antes: "${text || ''}"
+
+Escreva uma resposta excelente que resolva a dúvida do cliente de maneira humana, natural, educada e calorosa. Use emojis de forma equilibrada.
+
+Responda APENAS com a resposta sugerida, sem introduções, sem explicações e sem aspas.`;
+        } else if (action === 'simplify') {
+            prompt = `Você é um especialista em comunicação clara e humanizada por WhatsApp.
+Reescreva a mensagem a seguir de forma extremamente direta, simples e amigável.
+Remova jargões, termos corporativos engessados ou formalidades excessivas.
+Mantenha a informação essencial intacta de forma coloquial e acolhedora.
+
+Texto original:
+"${text}"
+
+Responda APENAS com a resposta simplificada reescrita, sem introduções, sem explicações e sem aspas.`;
+        } else if (action === 'empathize') {
+            prompt = `Você é um especialista em atendimento ao cliente focado em empatia profunda, escuta ativa e acolhimento por WhatsApp.
+Reescreva a mensagem a seguir validando os sentimentos do cliente, usando conectores amigáveis de suporte (como "Entendo perfeitamente", "Deixa comigo que vou resolver", "Peço desculpas") e adicione emojis calorosos de forma equilibrada.
+
+Texto original:
+"${text}"
+
+Responda APENAS com o texto empático reescrito, sem introduções, sem explicações e sem aspas.`;
+        } else {
+            return res.status(400).json({ error: 'Ação auxiliar inválida' });
+        }
+
+        const result = await model.generateContent(prompt);
+        const responseText = result.response.text().trim();
+
+        res.json({ success: true, text: responseText });
+    } catch (e) {
+        console.error('[Corrections Helper API] Erro:', e);
+        res.status(500).json({ error: e.message });
+    }
 });
 
 export default router;

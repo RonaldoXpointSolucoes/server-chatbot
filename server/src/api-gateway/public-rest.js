@@ -328,9 +328,9 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
 
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
-            if (EventProcessor?.humanMessagesCache && msgResult?.key?.id) {
-                EventProcessor.humanMessagesCache.set(msgResult.key.id, true);
-                setTimeout(() => EventProcessor.humanMessagesCache.delete(msgResult.key.id), 60000);
+            if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
+                EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
+                setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
             }
         } catch(e) {}
 
@@ -472,9 +472,9 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
                 EventProcessor.pendingMediaCache.set(msgResult.key.id, mediaUrl);
                 setTimeout(() => EventProcessor.pendingMediaCache.delete(msgResult.key.id), 60000);
             }
-            if (EventProcessor?.humanMessagesCache && msgResult?.key?.id) {
-                EventProcessor.humanMessagesCache.set(msgResult.key.id, true);
-                setTimeout(() => EventProcessor.humanMessagesCache.delete(msgResult.key.id), 60000);
+            if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
+                EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
+                setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
             }
         } catch(e) {}
 
@@ -540,6 +540,14 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
             location: { degreesLatitude: latitude, degreesLongitude: longitude, name, address }
         });
 
+        try {
+            const { EventProcessor } = await import('../event-processor/index.js');
+            if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
+                EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
+                setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
+            }
+        } catch(e) {}
+
         res.json({ key: msgResult.key, status: "PENDING" });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -598,6 +606,14 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
                 contacts: [{ vcard }]
             }
         });
+
+        try {
+            const { EventProcessor } = await import('../event-processor/index.js');
+            if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
+                EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
+                setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
+            }
+        } catch(e) {}
 
         res.json({ key: msgResult.key, status: "PENDING" });
     } catch (e) {
@@ -659,6 +675,14 @@ router.post('/message/sendReaction', requireApiKey, async (req, res) => {
                 key: { id: messageId, remoteJid, fromMe }
             }
         });
+
+        try {
+            const { EventProcessor } = await import('../event-processor/index.js');
+            if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
+                EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
+                setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
+            }
+        } catch(e) {}
 
         res.json({ key: msgResult.key, status: "PENDING" });
     } catch (e) {

@@ -94,3 +94,8 @@
 ::-webkit-scrollbar-thumb {
   @apply bg-muted-foreground/30 rounded-full hover:bg-muted-foreground/50 transition-colors;
 }
+
+/* Evitar cursor piscando (caret) em elementos que não são campos de texto editáveis */
+body *:not(input):not(textarea):not([contenteditable]):not([contenteditable="true"]) {
+  caret-color: transparent !important;
+}

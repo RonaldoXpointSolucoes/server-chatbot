@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { playNotificationSound } from '../utils/AudioEngine';
@@ -14,7 +14,6 @@ import { GeminiEditorModal } from '../components/GeminiEditorModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList } from 'lucide-react'; // Adicionado lucide pro flag e lightbulb para corretor discreto
 import { useShallow } from 'zustand/react/shallow';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import clsx from 'clsx';
@@ -1337,7 +1336,6 @@ export default function ChatDashboard() {
   const [contactForLabels, setContactForLabels] = useState<any | null>(null);
   const [isNewChatOpen, setIsNewChatOpen] = useState(false);
   const [showSnoozeModal, setShowSnoozeModal] = useState<string | null>(null);
-  const [resolveAiConfirmContactId, setResolveAiConfirmContactId] = useState<string | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [activeChatDropdown, setActiveChatDropdown] = useState(false);
 
@@ -1411,6 +1409,341 @@ export default function ChatDashboard() {
   const [selectedAnalyzePeriod, setSelectedAnalyzePeriod] = useState<'2h' | '24h' | '3d' | '7d' | 'all'>('24h');
   const [transcriptionProgressText, setTranscriptionProgressText] = useState<string | null>(null);
 
+  // AI Reasoning Corrections States
+  const [isReasoningModalOpen, setIsReasoningModalOpen] = useState(false);
+  const [reasoningBotMessage, setReasoningBotMessage] = useState<any>(null);
+  const [reasoningUserQuery, setReasoningUserQuery] = useState('');
+  const [reasoningCorrectedText, setReasoningCorrectedText] = useState('');
+  const [isSavingReasoning, setIsSavingReasoning] = useState(false);
+  const [isHelperLoading, setIsHelperLoading] = useState(false);
+  const [helperActionActive, setHelperActionActive] = useState<string | null>(null);
+
+  // Enhanced Cockpit RAG & Humanization states
+  const [activeLeftTab, setActiveLeftTab] = useState<'context' | 'manual'>('context');
+  const [correctionsList, setCorrectionsList] = useState<any[]>([]);
+  const [searchCorrectionQuery, setSearchCorrectionQuery] = useState('');
+  const [isLoadingCorrections, setIsLoadingCorrections] = useState(false);
+  const [ragDocInfo, setRagDocInfo] = useState<any>(null);
+  const [isLoadingRagDoc, setIsLoadingRagDoc] = useState(false);
+  const [activeMobileTab, setActiveMobileTab] = useState<'editor' | 'reference'>('editor');
+  const [conversationContextSummary, setConversationContextSummary] = useState('');
+  const [isContextSummaryLoading, setIsContextSummaryLoading] = useState(false);
+
+  const getHumanizationScore = (text: string) => {
+    if (!text) return { score: 0, tips: [], level: 'Baixo', color: 'text-red-400', bg: 'bg-red-500/10' };
+    
+    let score = 30; // base score for writing anything
+    const tips: { type: 'good' | 'warning' | 'info'; text: string }[] = [];
+    
+    const trimmed = text.trim();
+    
+    // 1. Emojis
+    const emojiRegex = /[\uD800-\uDBFF][\uDC00-\uDFFF]|\p{Emoji_Presentation}|\p{Emoji}\uFE0F/gu;
+    const emojiMatches = trimmed.match(emojiRegex);
+    const emojiCount = emojiMatches ? emojiMatches.length : 0;
+    
+    if (emojiCount > 0) {
+      if (emojiCount > 5) {
+        score += 5;
+        tips.push({ type: 'warning', text: 'Muitos emojis! Tente usar de 1 a 3 para manter o profissionalismo.' });
+      } else {
+        score += 20;
+        tips.push({ type: 'good', text: 'Excelente! O uso de emojis deixa a resposta mais calorosa.' });
+      }
+    } else {
+      tips.push({ type: 'info', text: 'Adicione pelo menos um emoji amigável (ex: 😊, 👍, Combinado!).' });
+    }
+
+    // 2. Conversational words & Warm Greetings
+    const warmWords = [
+      'oi', 'ola', 'tudo bem', 'bom dia', 'boa tarde', 'boa noite', 
+      'com certeza', 'claro', 'perfeito', 'combinado', 'pode deixar', 
+      'sem problemas', 'deixa comigo', 'vou te ajudar', 'prazer', 
+      'obrigado', 'obrigada', 'valeu', 'abraço', 'disponha'
+    ];
+    const lowerText = trimmed.toLowerCase();
+    const foundWarm = warmWords.filter(w => lowerText.includes(w));
+    if (foundWarm.length > 0) {
+      score += Math.min(25, foundWarm.length * 10);
+      tips.push({ type: 'good', text: `Tom amigável detectado com: "${foundWarm.slice(0, 3).join(', ')}".` });
+    } else {
+      tips.push({ type: 'info', text: 'Use palavras calorosas como "Com certeza!", "Pode deixar!", ou "Olá, tudo bem?".' });
+    }
+
+    // 3. Empathy & Active Listening
+    const empathyWords = [
+      'entendo', 'compreendo', 'peço desculpas', 'desculpa', 'perdão', 
+      'sinto muito', 'vou resolver', 'verificando', 'ajudar'
+    ];
+    const foundEmpathy = empathyWords.filter(w => lowerText.includes(w));
+    if (foundEmpathy.length > 0) {
+      score += 15;
+      tips.push({ type: 'good', text: 'Empatia e escuta ativa presentes na resposta.' });
+    }
+
+    // 4. Robotic / Formal Words (Negative)
+    const roboticWords = [
+      { word: 'prezado', suggestion: 'usar o nome do cliente ou "olá"' },
+      { word: 'procedimento', suggestion: 'dizer "etapa" ou explicar o que será feito' },
+      { word: 'conforme solicitado', suggestion: 'dizer "como você pediu" ou "aqui está"' },
+      { word: 'estarei verificando', suggestion: 'dizer "já vou verificar" ou "estou verificando"' },
+      { word: 'aguarde um instante', suggestion: 'dizer "um segundinho, por favor" ou "só um momento"' },
+      { word: 'aguarde um momento', suggestion: 'dizer "só um minutinho"' },
+      { word: 'infelizmente não', suggestion: 'oferecer uma alternativa de forma positiva' },
+      { word: 'transferido', suggestion: 'dizer "vou te conectar com..."' },
+      { word: 'sistema', suggestion: 'evitar mencionar "o sistema"' }
+    ];
+    let foundRobotic = false;
+    roboticWords.forEach(rw => {
+      if (rw.word && lowerText.includes(rw.word)) {
+        score -= 15;
+        foundRobotic = true;
+        tips.push({ type: 'warning', text: `Evite "${rw.word}". Sugestão: ${rw.suggestion}.` });
+      }
+    });
+    if (!foundRobotic && trimmed.length > 10) {
+      score += 15;
+      tips.push({ type: 'good', text: 'Linguagem natural e livre de termos corporativos engessados.' });
+    }
+
+    // 5. Length
+    if (trimmed.length > 250) {
+      score -= 10;
+      tips.push({ type: 'info', text: 'Mensagem longa. Parágrafos curtos facilitam a leitura no WhatsApp.' });
+    } else if (trimmed.length > 20 && trimmed.length <= 180) {
+      score += 15;
+    }
+
+    // Bound score
+    score = Math.max(10, Math.min(100, score));
+
+    let level = 'Excelente';
+    let color = 'text-emerald-400';
+    let bg = 'bg-emerald-500/10';
+    
+    if (score < 50) {
+      level = 'Robótico / Frio';
+      color = 'text-red-400';
+      bg = 'bg-red-500/10';
+    } else if (score < 80) {
+      level = 'Neutro / Apenas OK';
+      color = 'text-yellow-400';
+      bg = 'bg-yellow-500/10';
+    }
+
+    return { score, tips, level, color, bg };
+  };
+
+  const loadCorrectionsAndRagStatus = async () => {
+    setIsLoadingCorrections(true);
+    setIsLoadingRagDoc(true);
+    try {
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+      const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+
+      const corrRes = await fetch(`${ENGINE_URL}/api/v1/knowledge/corrections?tenant_id=${tenantId}`, {
+        headers: { 'x-tenant-id': tenantId }
+      });
+      if (corrRes.ok) {
+        const data = await corrRes.json();
+        setCorrectionsList(data.corrections || []);
+      }
+
+      const docsRes = await fetch(`${ENGINE_URL}/api/v1/knowledge`, {
+        headers: { 'x-tenant-id': tenantId }
+      });
+      if (docsRes.ok) {
+        const docs = await docsRes.json();
+        const manualDoc = docs.find((d: any) => d.name === "Manual de Raciocínio e Ajustes da I.A");
+        setRagDocInfo(manualDoc || null);
+      }
+    } catch (e) {
+      console.error('Erro ao carregar dados do cockpit RAG:', e);
+    } finally {
+      setIsLoadingCorrections(false);
+      setIsLoadingRagDoc(false);
+    }
+  };
+
+  const handleDeleteCorrection = async (id: string) => {
+    if (!confirm('Deseja realmente excluir esta correção de raciocínio da IA?')) return;
+    try {
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+      const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+
+      const res = await fetch(`${ENGINE_URL}/api/v1/knowledge/corrections/${id}`, {
+        method: 'DELETE',
+        headers: { 'x-tenant-id': tenantId }
+      });
+
+      if (res.ok) {
+        setCorrectionsList(prev => prev.filter(c => c.id !== id));
+        loadCorrectionsAndRagStatus();
+      } else {
+        const err = await res.json();
+        alert(`Erro ao excluir correção: ${err.error || 'Erro desconhecido'}`);
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert(`Falha ao conectar com o servidor: ${e.message}`);
+    }
+  };
+
+  const getPrecedingContextMessages = () => {
+    if (!activeChat?.messages || !reasoningBotMessage) return [];
+    const idx = activeChat.messages.findIndex((m: any) => m.id === reasoningBotMessage.id);
+    if (idx === -1) return [];
+    const startIdx = Math.max(0, idx - 4);
+    return activeChat.messages.slice(startIdx, idx);
+  };
+
+  const handleHelperAction = async (action: string, tone?: string) => {
+    if (!reasoningUserQuery.trim() && action === 'suggest') {
+      alert('Escreva a pergunta do cliente primeiro para que a IA possa sugerir a resposta.');
+      return;
+    }
+    if (!reasoningCorrectedText.trim() && action !== 'suggest') {
+      alert('Escreva ou selecione uma resposta antes de usar esta ferramenta.');
+      return;
+    }
+
+    setIsHelperLoading(true);
+    setHelperActionActive(action + (tone ? `-${tone}` : ''));
+    try {
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+      const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+
+      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/corrections/helper`, {
+        method: 'POST',
+        headers: {
+          'x-tenant-id': tenantId,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text: reasoningCorrectedText || reasoningBotMessage?.text || '',
+          action,
+          tone,
+          user_query: reasoningUserQuery
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.text) {
+          setReasoningCorrectedText(data.text);
+        }
+      } else {
+        const errData = await response.json();
+        alert(`Erro do assistente de IA: ${errData.error || 'Erro desconhecido'}`);
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert(`Falha ao conectar com o assistente: ${e.message}`);
+    } finally {
+      setIsHelperLoading(false);
+      setHelperActionActive(null);
+    }
+  };
+
+  const handleOpenAlterarRaciocinio = (botMsg: any) => {
+    setReasoningBotMessage(botMsg);
+    setReasoningCorrectedText(botMsg.text || '');
+    setActiveLeftTab('context');
+    setActiveMobileTab('editor');
+    setConversationContextSummary('');
+    
+    // Encontra a mensagem do cliente que antecede a mensagem do robô na conversa atual
+    let query = '';
+    if (activeChat?.messages) {
+      const idx = activeChat.messages.findIndex((m: any) => m.id === botMsg.id);
+      if (idx > 0) {
+        for (let i = idx - 1; i >= 0; i--) {
+          const prevMsg = activeChat.messages[i];
+          if (prevMsg.sender !== 'bot' && prevMsg.sender !== 'human' && prevMsg.sender !== 'system' && prevMsg.text) {
+            query = prevMsg.text;
+            break;
+          }
+        }
+      }
+    }
+    setReasoningUserQuery(query);
+    setIsReasoningModalOpen(true);
+    loadCorrectionsAndRagStatus();
+
+    // Buscar resumo de contexto da conversa via helper API
+    if (activeChat?.id) {
+      setIsContextSummaryLoading(true);
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+      const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+      fetch(`${ENGINE_URL}/api/v1/knowledge/corrections/helper`, {
+        method: 'POST',
+        headers: {
+          'x-tenant-id': tenantId,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'summarize-context',
+          conversationId: activeChat.id
+        })
+      })
+      .then(res => {
+        if (res.ok) return res.json();
+        throw new Error('Response not ok');
+      })
+      .then(data => {
+        if (data.success && data.text) {
+          setConversationContextSummary(data.text);
+        }
+      })
+      .catch(err => console.error('Erro ao carregar sumário de contexto:', err))
+      .finally(() => setIsContextSummaryLoading(false));
+    }
+  };
+
+  useEffect(() => {
+    (window as any).debugOpenAlterarRaciocinio = handleOpenAlterarRaciocinio;
+  }, []);
+
+  const handleSaveReasoningCorrection = async () => {
+    if (!reasoningUserQuery.trim() || !reasoningCorrectedText.trim() || !reasoningBotMessage) return;
+    
+    setIsSavingReasoning(true);
+    try {
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+      const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+
+      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/corrections`, {
+        method: 'POST',
+        headers: {
+          'x-tenant-id': tenantId,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          user_query: reasoningUserQuery.trim(),
+          original_response: reasoningBotMessage.text || '',
+          corrected_response: reasoningCorrectedText.trim(),
+          context_summary: conversationContextSummary.trim() || null
+        })
+      });
+
+      if (response.ok) {
+        setIsReasoningModalOpen(false);
+        setReasoningBotMessage(null);
+        setReasoningUserQuery('');
+        setReasoningCorrectedText('');
+        alert('Raciocínio atualizado com sucesso! A IA aprenderá com este exemplo.');
+      } else {
+        const errData = await response.json();
+        alert(`Erro ao salvar correção: ${errData.error || 'Erro desconhecido'}`);
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert(`Falha ao conectar com o servidor: ${e.message}`);
+    } finally {
+      setIsSavingReasoning(false);
+    }
+  };
+
 
   // Estados de Paginação Local Virtual
   const [contactPageLimit, setContactPageLimit] = useState(20);
@@ -1444,12 +1777,7 @@ export default function ChatDashboard() {
   };
 
   const handleResolveConversation = async (contactId: string) => {
-    const contact = contacts.find(c => c.id === contactId);
-    if (contact && (contact.ai_paused || contact.ai_paused_manually)) {
-      setResolveAiConfirmContactId(contactId);
-    } else {
-      await executeResolve(contactId, true);
-    }
+    await executeResolve(contactId, true);
   };
 
   const handleStartChatWithSearchedNumber = async (phoneNumber: string) => {
@@ -2927,81 +3255,566 @@ export default function ChatDashboard() {
       <AgentSettingsModal isOpen={isAgentSettingsOpen} onClose={() => setIsAgentSettingsOpen(false)} />
       <SnoozedListModal isOpen={isSnoozedListOpen} onClose={() => setIsSnoozedListOpen(false)} />
 
-      {/* Modal Premium de Confirmação de IA ao Resolver Conversa */}
-      <AnimatePresence>
-        {resolveAiConfirmContactId && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              transition={{ duration: 0.25, ease: 'easeOut' }}
-              className="bg-white/95 dark:bg-[#1f2c34]/95 border border-black/10 dark:border-white/10 rounded-[32px] shadow-2xl max-w-md w-full overflow-hidden p-6 flex flex-col gap-6 relative"
-            >
-              <button
-                type="button"
-                onClick={() => setResolveAiConfirmContactId(null)}
-                className="absolute top-4 right-4 text-gray-400 hover:text-red-500 hover:bg-red-500/10 p-2 rounded-full transition-all hover:scale-105 active:scale-95"
-                title="Fechar"
+      {/* Cockpit Premium em Tela Cheia para Alterar Raciocínio da IA */}
+      {isReasoningModalOpen && reasoningBotMessage && (
+        <div className="fixed inset-0 z-[9999] flex flex-col bg-[#0b141a] text-left animate-in fade-in duration-300 font-sans">
+          
+          {/* Header Barra Superior */}
+          <div className="flex items-center justify-between px-6 py-4 bg-[#111b21] border-b border-white/10 shrink-0 shadow-md">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-2xl border border-emerald-500/20 shadow-inner">
+                <BrainCircuit size={24} className="animate-pulse" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-gray-100 flex items-center gap-2 tracking-wide">
+                  Cockpit de Sintonia Fina da I.A. 
+                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/20">Multi-Empresa</span>
+                </h3>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Ensine a IA a responder melhor fornecendo o comportamento/resposta ideal.
+                </p>
+              </div>
+            </div>
+            
+            {/* Mobile View Tab Switcher */}
+            <div className="flex lg:hidden bg-[#202c33] p-1 rounded-xl border border-white/5">
+              <button 
+                onClick={() => setActiveMobileTab('editor')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeMobileTab === 'editor' ? 'bg-[#005c4b] text-white' : 'text-gray-400'}`}
               >
-                <X size={16} strokeWidth={2.5} />
+                Ajuste & Prévia
               </button>
+              <button 
+                onClick={() => setActiveMobileTab('reference')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeMobileTab === 'reference' ? 'bg-[#005c4b] text-white' : 'text-gray-400'}`}
+              >
+                Histórico & RAG
+              </button>
+            </div>
 
-              <div className="flex gap-4 items-start mt-2">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-655 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 shrink-0">
-                  <BrainCircuit size={24} className="animate-pulse" />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <h3 className="text-base font-extrabold text-gray-900 dark:text-white leading-tight uppercase tracking-wider">
-                    Reativar Inteligência Artificial?
-                  </h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed font-semibold">
-                    Você está prestes a resolver a conversa com <span className="text-gray-900 dark:text-white font-black">{contacts.find(c => c.id === resolveAiConfirmContactId)?.custom_name || contacts.find(c => c.id === resolveAiConfirmContactId)?.name}</span>.
-                  </p>
-                  <p className="text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed font-medium">
-                    Como a IA estava pausada, escolha se ela deve voltar a atender automaticamente caso o cliente envie novas mensagens.
-                  </p>
-                </div>
-              </div>
-
-              {/* Ações */}
-              <div className="flex flex-col sm:flex-row gap-2.5 mt-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const id = resolveAiConfirmContactId;
-                    setResolveAiConfirmContactId(null);
-                    executeResolve(id, true);
-                  }}
-                  className="flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-extrabold text-xs rounded-2xl shadow-md transition-all active:scale-[0.98] cursor-pointer hover:shadow-indigo-500/20 border border-indigo-650/15"
-                >
-                  <Bot size={15} />
-                  <span>Sim, Reativar IA</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const id = resolveAiConfirmContactId;
-                    setResolveAiConfirmContactId(null);
-                    executeResolve(id, false);
-                  }}
-                  className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white/40 dark:bg-black/20 hover:bg-black/5 dark:hover:bg-white/5 text-gray-700 dark:text-gray-300 font-extrabold text-xs rounded-2xl border border-gray-200 dark:border-white/10 shadow-sm transition-all active:scale-[0.98] cursor-pointer"
-                >
-                  <Ban size={15} className="text-amber-500" />
-                  <span>Não, Manter Pausada</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setResolveAiConfirmContactId(null)}
-                  className="sm:hidden flex items-center justify-center gap-2 px-5 py-2.5 bg-transparent text-gray-400 dark:text-gray-500 font-extrabold text-xs rounded-2xl transition-all active:scale-[0.98] cursor-pointer hover:bg-black/5 dark:hover:bg-white/5"
-                >
-                  Cancelar
-                </button>
-              </div>
-            </motion.div>
+            <button 
+              onClick={() => {
+                setIsReasoningModalOpen(false);
+                setReasoningBotMessage(null);
+              }}
+              className="p-2.5 text-white/40 hover:text-white/80 hover:bg-white/5 rounded-xl transition-all"
+              title="Fechar Cockpit"
+            >
+              <X size={22} />
+            </button>
           </div>
-        )}
-      </AnimatePresence>
+
+          {/* Corpo do Cockpit */}
+          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+            
+            {/* Coluna de Referência (Esquerda no Desktop, Ocultável no Mobile) */}
+            <div className={`${
+              activeMobileTab === 'reference' ? 'flex' : 'hidden lg:flex'
+            } w-full lg:w-[32%] xl:w-[28%] min-w-[320px] max-w-[420px] bg-[#111b21]/40 border-r border-white/5 flex flex-col overflow-hidden`}>
+              
+              {/* Tabs do Painel Esquerdo */}
+              <div className="flex border-b border-white/5 bg-[#111b21]/20 shrink-0">
+                <button
+                  onClick={() => setActiveLeftTab('context')}
+                  className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-all ${
+                    activeLeftTab === 'context' 
+                      ? 'border-sky-500 text-sky-400 bg-white/5' 
+                      : 'border-transparent text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  <History size={14} /> Conversa & Contexto
+                </button>
+                <button
+                  onClick={() => setActiveLeftTab('manual')}
+                  className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-all ${
+                    activeLeftTab === 'manual' 
+                      ? 'border-emerald-500 text-emerald-400 bg-white/5' 
+                      : 'border-transparent text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  <Database size={14} /> Manual RAG da Empresa
+                </button>
+              </div>
+
+              {/* Conteúdo da Aba Esquerda */}
+              <div className="flex-grow overflow-y-auto p-4 scrollbar-thin">
+                
+                {activeLeftTab === 'context' ? (
+                  <div className="space-y-4 font-sans">
+                    {/* Informações do Contato Ativo */}
+                    {activeChat && (
+                      <div className="p-3 bg-[#202c33]/40 border border-white/5 rounded-2xl flex items-center gap-3 shadow-inner">
+                        <img 
+                          src={activeChat.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(activeChat.name || 'C')}&background=00a884&color=fff`}
+                          alt="Avatar"
+                          className="w-10 h-10 rounded-full object-cover border border-white/10"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-gray-200 truncate">{activeChat.name || activeChat.phone}</p>
+                          <p className="text-[11px] text-gray-400 font-mono mt-0.5">{activeChat.phone}</p>
+                        </div>
+                        {activeChat.ai_paused && (
+                          <span className="text-[9px] font-extrabold bg-amber-500/20 text-amber-400 border border-amber-500/25 px-2 py-0.5 rounded-full uppercase">
+                            I.A Pausada
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                      Últimas Mensagens do Chat
+                    </div>
+
+                    {/* Preceding Messages */}
+                    {getPrecedingContextMessages().map((msg: any, idx: number) => {
+                      const isClient = msg.sender !== 'bot' && msg.sender !== 'human' && msg.sender !== 'system';
+                      const isBot = msg.sender === 'bot';
+                      
+                      return (
+                        <div 
+                          key={idx} 
+                          className={`flex flex-col max-w-[85%] ${
+                            isClient ? 'mr-auto items-start' : 'ml-auto items-end'
+                          }`}
+                        >
+                          <span className="text-[10px] text-gray-500 mb-0.5 px-2">
+                            {isClient ? 'Cliente' : isBot ? 'I.A (Luna)' : 'Atendente'}
+                          </span>
+                          <div className={`rounded-2xl px-4 py-2 text-sm leading-relaxed ${
+                            isClient 
+                              ? 'bg-[#202c33] text-white rounded-tl-none border border-white/5 shadow-md' 
+                              : 'bg-[#005c4b]/30 text-white rounded-tr-none border border-[#005c4b]/20 shadow-md'
+                          }`}>
+                            {msg.text}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Resposta Original (A que está sendo corrigida) */}
+                    <div className="pt-2">
+                      <div className="rounded-2xl p-4 bg-red-950/20 border border-red-500/25 shadow-lg relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-2 bg-red-500/10 rounded-bl-xl border-l border-b border-red-500/20 text-[9px] font-bold text-red-400 uppercase tracking-wider">
+                          Original Errada
+                        </div>
+                        <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider block mb-1">
+                          Resposta Gerada Pela I.A. (Original)
+                        </span>
+                        <div className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap select-text">
+                          {reasoningBotMessage.text}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  // Aba do Manual RAG (Lista de Ajustes Existentes)
+                  <div className="space-y-4 font-sans">
+                    {/* Status da Vectorização do Manual */}
+                    <div className="p-4 bg-[#111b21] border border-white/5 rounded-2xl space-y-2.5 relative overflow-hidden shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-gray-300 flex items-center gap-1.5 uppercase">
+                          <Database size={13} className="text-emerald-400" /> RAG: Documento Unificado
+                        </span>
+                        {isLoadingRagDoc ? (
+                          <Loader2 size={12} className="animate-spin text-emerald-400" />
+                        ) : (
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                            ragDocInfo?.status === 'ready' 
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20' 
+                              : ragDocInfo?.status === 'processing'
+                              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/20 animate-pulse'
+                              : 'bg-red-500/20 text-red-400 border border-red-500/20'
+                          }`}>
+                            {ragDocInfo?.status || 'Não Iniciado'}
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div className="space-y-1.5 text-xs text-gray-400 border-t border-white/5 pt-2 font-sans">
+                        <div className="flex justify-between">
+                          <span>Nome:</span> 
+                          <span className="text-gray-200 font-semibold">{ragDocInfo?.name || "Manual de Raciocínio e Ajustes da I.A"}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Blocos Vetoriais (Chunks):</span> 
+                          <span className="text-gray-200 font-mono">{ragDocInfo?.metadata?.chunks_total || 0}</span>
+                        </div>
+                        {ragDocInfo?.metadata?.current_status && (
+                          <p className="text-[10px] text-sky-400 mt-1 italic">
+                            Status atual: {ragDocInfo.metadata.current_status}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Barra de Pesquisa de Correções */}
+                    <div className="relative">
+                      <input 
+                        type="text"
+                        value={searchCorrectionQuery}
+                        onChange={(e) => setSearchCorrectionQuery(e.target.value)}
+                        placeholder="Pesquisar ajustes de raciocínio..."
+                        className="w-full bg-[#111b21] border border-white/5 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder:text-gray-500 outline-none focus:border-emerald-500 transition-all shadow-inner"
+                      />
+                      <Search size={14} className="absolute left-3 top-2.5 text-gray-500" />
+                    </div>
+
+                    {/* Lista de Correções */}
+                    <div className="space-y-3">
+                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
+                        Ajustes de Raciocínio ({correctionsList.length})
+                      </div>
+                      
+                      {isLoadingCorrections ? (
+                        <div className="flex flex-col items-center justify-center py-8 text-gray-500 gap-2">
+                          <Loader2 size={24} className="animate-spin text-emerald-400" />
+                          <span className="text-xs">Buscando banco de correções...</span>
+                        </div>
+                      ) : correctionsList.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500 text-xs italic">
+                          Nenhuma correção de raciocínio cadastrada ainda.
+                        </div>
+                      ) : (
+                        correctionsList
+                          .filter(c => 
+                            c.user_query?.toLowerCase().includes(searchCorrectionQuery.toLowerCase()) || 
+                            c.corrected_response?.toLowerCase().includes(searchCorrectionQuery.toLowerCase())
+                          )
+                          .map((corr) => (
+                            <div key={corr.id} className="p-3 bg-[#111b21] border border-white/5 rounded-2xl space-y-2 group shadow-md relative overflow-hidden">
+                              <div className="flex justify-between items-start">
+                                <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                                  Regra Ativa
+                                </span>
+                                <button
+                                  onClick={() => handleDeleteCorrection(corr.id)}
+                                  className="text-gray-500 hover:text-red-400 p-1 rounded hover:bg-white/5 opacity-0 group-hover:opacity-100 transition-all"
+                                  title="Excluir regra de raciocínio"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                              
+                              <div className="space-y-1.5 text-xs">
+                                {corr.context_summary && (
+                                  <div>
+                                    <span className="text-[10px] text-amber-500 font-bold block uppercase tracking-wider">Memória/Contexto da Conversa:</span>
+                                    <p className="text-amber-400/90 italic">"{corr.context_summary}"</p>
+                                  </div>
+                                )}
+                                <div>
+                                  <span className="text-[10px] text-gray-500 font-bold block uppercase tracking-wider">Se o cliente perguntar:</span>
+                                  <p className="text-gray-300 italic">"{corr.user_query}"</p>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-gray-500 font-bold block uppercase tracking-wider">A IA deve responder:</span>
+                                  <p className="text-gray-200 whitespace-pre-wrap">"{corr.corrected_response}"</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Coluna Direita: Studio de Correção (Visível no Desktop, Ocultável no Mobile) */}
+            <div className={`${
+              activeMobileTab === 'editor' ? 'flex' : 'hidden lg:flex'
+            } flex-grow flex-col overflow-y-auto p-6 bg-[#0b141a] scrollbar-thin`}>
+              
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+                
+                {/* Coluna Studio A: Entradas Principais */}
+                <div className="space-y-6">
+                  {/* Memória da Conversa (Contexto Recente) */}
+                  <div className="space-y-1.5 font-sans">
+                    <label className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <History size={14} /> Memória da Conversa (Contexto Recente)
+                    </label>
+                    <div className="relative">
+                      <textarea
+                        value={conversationContextSummary}
+                        onChange={(e) => setConversationContextSummary(e.target.value)}
+                        className="w-full bg-[#111b21] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder:text-gray-500 outline-none focus:border-amber-500 transition-all resize-none shadow-inner"
+                        rows={2}
+                        placeholder={isContextSummaryLoading ? "Gerando sumário de contexto..." : "Descreva o contexto ou resumo recente da conversa..."}
+                      />
+                      {isContextSummaryLoading && (
+                        <div className="absolute right-3 top-3">
+                          <Loader2 size={16} className="animate-spin text-amber-400" />
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-gray-500 block leading-normal">
+                      A IA usará esta memória para ter mais contexto em respostas curtas (como "Sim" ou "Não") do cliente.
+                    </span>
+                  </div>
+
+                  {/* Pergunta do Cliente (Gatilho) */}
+                  <div className="space-y-1.5 font-sans">
+                    <label className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <MessageSquare size={14} /> Pergunta do Cliente (Gatilho da Resposta)
+                    </label>
+                    <textarea
+                      value={reasoningUserQuery}
+                      onChange={(e) => setReasoningUserQuery(e.target.value)}
+                      className="w-full bg-[#111b21] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder:text-gray-500 outline-none focus:border-sky-500 transition-all resize-none shadow-inner"
+                      rows={2}
+                      placeholder="Pergunta do cliente..."
+                    />
+                    {conversationContextSummary && (
+                      <div className="p-3 bg-sky-500/10 border border-sky-500/20 rounded-xl space-y-1 animate-in slide-in-from-top-2 duration-300">
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-sky-400 uppercase tracking-wider">
+                          <History size={12} /> Contexto / Memória Vinculada
+                        </div>
+                        <p className="text-xs text-sky-200/90 italic truncate">
+                          "{conversationContextSummary}"
+                        </p>
+                      </div>
+                    )}
+                    <span className="text-[10px] text-gray-500 block leading-normal">
+                      A IA usará a semântica dessa frase para identificar quando aplicar a sua nova resposta corrigida.
+                    </span>
+                  </div>
+
+                  {/* Resposta Ajustada Esperada */}
+                  <div className="space-y-1.5 font-sans">
+                    <label className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Edit2 size={14} /> Resposta Ajustada Esperada (Instrução Correta)
+                    </label>
+                    <textarea
+                      value={reasoningCorrectedText}
+                      onChange={(e) => setReasoningCorrectedText(e.target.value)}
+                      className="w-full bg-[#111b21] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder:text-gray-500 outline-none focus:border-emerald-500 transition-all min-h-[150px] shadow-inner font-normal"
+                      placeholder="Escreva aqui como a IA deveria responder..."
+                    />
+                    
+                    {/* Realtime Humanization Meter Panel */}
+                    {(() => {
+                      const analysis = getHumanizationScore(reasoningCorrectedText);
+                      return (
+                        <div className={`mt-2 rounded-2xl p-4 ${analysis.bg} border border-white/5 space-y-3 transition-all duration-300`}>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-black uppercase tracking-wider text-gray-300 flex items-center gap-1.5">
+                              <Sparkles size={14} className="text-emerald-400 animate-pulse" /> Diagnóstico de Humanização
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] font-bold uppercase ${analysis.color}`}>
+                                {analysis.level}
+                              </span>
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${analysis.color} bg-black/20`}>
+                                {analysis.score}%
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div className="w-full h-1.5 bg-[#202c33] rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full transition-all duration-500 rounded-full ${
+                                analysis.score < 50 ? 'bg-red-500' : analysis.score < 80 ? 'bg-amber-500' : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${analysis.score}%` }}
+                            />
+                          </div>
+
+                          {analysis.tips.length > 0 && (
+                            <div className="space-y-1.5 pt-1 border-t border-white/5 max-h-[100px] overflow-y-auto scrollbar-thin">
+                              {analysis.tips.map((tip, tIdx) => (
+                                <div key={tIdx} className="flex items-start gap-1.5 text-xs text-gray-300">
+                                  <span className="mt-1 shrink-0">
+                                    {tip.type === 'good' ? (
+                                      <span className="text-emerald-400">●</span>
+                                    ) : tip.type === 'warning' ? (
+                                      <span className="text-amber-500">▲</span>
+                                    ) : (
+                                      <span className="text-sky-400">ℹ</span>
+                                    )}
+                                  </span>
+                                  <p className="leading-snug">{tip.text}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Coluna Studio B: Ferramentas & Preview */}
+                <div className="space-y-6">
+                  {/* Assistente de Inteligência Artificial */}
+                  <div className="bg-[#111b21]/60 border border-white/5 rounded-3xl p-5 space-y-4 shadow-inner relative overflow-hidden font-sans">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none"></div>
+                    
+                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                      <span className="text-xs font-extrabold text-emerald-400 flex items-center gap-1.5 uppercase tracking-wider">
+                        <Sparkles size={14} /> Assistente de Tom & Humanização (Gemini)
+                      </span>
+                      {isHelperLoading && (
+                        <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-semibold">
+                          <Loader2 size={12} className="animate-spin" /> Processando texto...
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-4">
+                      {/* Tons de Voz */}
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Mudar Tom de Voz:</label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { key: 'casual', label: 'Casual / Amigável', icon: Smile },
+                            { key: 'professional', label: 'Profissional / Cortês', icon: Briefcase },
+                            { key: 'empathetic', label: 'Super Empático', icon: HeartHandshake },
+                            { key: 'enthusiastic', label: 'Entusiasta', icon: Sparkles }
+                          ].map((t) => (
+                            <button
+                              key={t.key}
+                              onClick={() => handleHelperAction('tone', t.key)}
+                              disabled={isHelperLoading}
+                              className="px-3 py-1.5 bg-[#202c33]/80 hover:bg-[#202c33] disabled:opacity-50 text-gray-200 text-xs font-medium rounded-xl border border-white/5 hover:border-emerald-500/20 flex items-center gap-1.5 transition-all"
+                            >
+                              {helperActionActive === `tone-${t.key}` && <Loader2 size={12} className="animate-spin" />}
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Ações Rápidas */}
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Ferramentas Rápidas de Humanização:</label>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleHelperAction('suggest')}
+                            disabled={isHelperLoading}
+                            className="px-3 py-1.5 bg-[#005c4b] hover:bg-[#005c4b]/80 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-emerald-950/20"
+                          >
+                            {helperActionActive === 'suggest' ? <Loader2 size={12} className="animate-spin" /> : <Bot size={14} />}
+                            Sugerir Resposta Ideal
+                          </button>
+                          <button
+                            onClick={() => handleHelperAction('humanize')}
+                            disabled={isHelperLoading}
+                            className="px-3 py-1.5 bg-[#202c33]/80 hover:bg-[#202c33] disabled:opacity-50 text-gray-200 text-xs font-medium rounded-xl border border-white/5 flex items-center gap-1.5 transition-all"
+                          >
+                            {helperActionActive === 'humanize' ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={14} />}
+                            Humanizar
+                          </button>
+                          <button
+                            onClick={() => handleHelperAction('empathize')}
+                            disabled={isHelperLoading}
+                            className="px-3 py-1.5 bg-[#202c33]/80 hover:bg-[#202c33] disabled:opacity-50 text-gray-200 text-xs font-medium rounded-xl border border-white/5 flex items-center gap-1.5 transition-all"
+                          >
+                            {helperActionActive === 'empathize' ? <Loader2 size={12} className="animate-spin" /> : <HeartHandshake size={14} className="text-emerald-400" />}
+                            Aplicar Empatia
+                          </button>
+                          <button
+                            onClick={() => handleHelperAction('simplify')}
+                            disabled={isHelperLoading}
+                            className="px-3 py-1.5 bg-[#202c33]/80 hover:bg-[#202c33] disabled:opacity-50 text-gray-200 text-xs font-medium rounded-xl border border-white/5 flex items-center gap-1.5 transition-all"
+                          >
+                            {helperActionActive === 'simplify' ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={14} />}
+                            Simplificar Linguagem
+                          </button>
+                          <button
+                            onClick={() => handleHelperAction('emoji')}
+                            disabled={isHelperLoading}
+                            className="px-3 py-1.5 bg-[#202c33]/80 hover:bg-[#202c33] disabled:opacity-50 text-gray-200 text-xs font-medium rounded-xl border border-white/5 flex items-center gap-1.5 transition-all"
+                          >
+                            {helperActionActive === 'emoji' ? <Loader2 size={12} className="animate-spin" /> : <Smile size={14} />}
+                            Adicionar Emojis
+                          </button>
+                          <button
+                            onClick={() => handleHelperAction('grammar')}
+                            disabled={isHelperLoading}
+                            className="px-3 py-1.5 bg-[#202c33]/80 hover:bg-[#202c33] disabled:opacity-50 text-gray-200 text-xs font-medium rounded-xl border border-white/5 flex items-center gap-1.5 transition-all"
+                          >
+                            {helperActionActive === 'grammar' ? <Loader2 size={12} className="animate-spin" /> : <CheckCheck size={14} />}
+                            Corrigir Gramática
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Simulador WhatsApp Live Preview */}
+                  <div className="space-y-1.5 font-sans">
+                    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Smartphone size={14} /> Pré-visualização do WhatsApp
+                    </label>
+                    
+                    <div className="w-full rounded-3xl overflow-hidden border border-white/10 bg-[#0b141a] shadow-lg flex flex-col relative h-[200px]">
+                      <div className="absolute inset-0 bg-opacity-20 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] opacity-[0.04] pointer-events-none"></div>
+                      
+                      <div className="relative flex-1 overflow-y-auto p-4 flex flex-col justify-end space-y-3">
+                        {reasoningUserQuery && (
+                          <div className="flex flex-col max-w-[75%] mr-auto items-start animate-in slide-in-from-left duration-300">
+                            <div className="rounded-2xl rounded-tl-none px-3.5 py-1.5 text-xs bg-[#202c33] text-white shadow-md">
+                              {reasoningUserQuery}
+                            </div>
+                          </div>
+                        )}
+                        
+                        <div className="flex flex-col max-w-[75%] ml-auto items-end animate-in slide-in-from-right duration-300">
+                          <div className="rounded-2xl rounded-tr-none px-3.5 py-1.5 text-xs bg-[#005c4b] text-white shadow-md text-left whitespace-pre-wrap leading-relaxed select-text font-sans">
+                            {reasoningCorrectedText || "Digite a resposta acima para ver a prévia..."}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          {/* Footer Barra Inferior */}
+          <div className="px-6 py-4 bg-[#111b21] border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0 shadow-lg font-sans">
+            <span className="text-[11px] text-gray-400 flex items-center gap-1.5 max-w-xl text-center sm:text-left leading-normal">
+              <Database size={14} className="text-emerald-400 shrink-0" />
+              Esta correção é armazenada na tabela RAG de raciocínio da empresa e sincronizada automaticamente em um documento RAG exclusivo (Manual de Ajustes) para que a IA aprenda em novos atendimentos de forma humana e com inteligência distribuída.
+            </span>
+            
+            <div className="flex items-center gap-3 shrink-0">
+              <button 
+                onClick={() => {
+                  setIsReasoningModalOpen(false);
+                  setReasoningBotMessage(null);
+                }}
+                className="px-5 py-2.5 bg-white/5 hover:bg-white/10 text-gray-300 font-semibold rounded-xl text-sm transition-all"
+                disabled={isSavingReasoning || isHelperLoading}
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={handleSaveReasoningCorrection}
+                className="px-6 py-2.5 bg-[#00a884] hover:bg-[#008f72] text-white font-bold rounded-xl text-sm shadow-lg shadow-[#00a884]/20 hover:shadow-[#00a884]/30 hover:-translate-y-0.5 transition-all flex items-center gap-2 disabled:opacity-50"
+                disabled={isSavingReasoning || isHelperLoading || !reasoningCorrectedText.trim()}
+              >
+                {isSavingReasoning ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Enriquecendo I.A...
+                  </>
+                ) : (
+                  <>
+                    <Save size={16} />
+                    Salvar e Enriquecer IA
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
 
       <BlockModal 
         isOpen={!!contactToBlock}
@@ -3852,7 +4665,7 @@ export default function ChatDashboard() {
                     }
                   }}
                   className={cn(
-                    "group flex items-center gap-3 px-3 py-3 cursor-pointer transition-colors border-b border-[#f2f2f2] dark:border-[#222d34] overflow-visible",
+                    "group flex items-center gap-3 px-3 py-3 cursor-pointer transition-colors border-b border-[#f2f2f2] dark:border-[#222d34] overflow-visible select-none",
                     activeChatId === contact.id ? "bg-[#f0f2f5] dark:bg-[#2a3942]" : "hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]",
                     activeDropdown === contact.id ? "z-30 relative" : "relative z-0"
                   )}
@@ -4604,6 +5417,7 @@ export default function ChatDashboard() {
                     renderMessageText={renderMessageText}
                     showDateSeparator={showDateSeparator}
                     dateSeparatorText={dateSeparatorText}
+                    onAlterarRaciocinio={handleOpenAlterarRaciocinio}
                   />
                 );
               });

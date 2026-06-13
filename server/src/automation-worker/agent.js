@@ -96,19 +96,124 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 sanitizedHistory.push({ role: msg.role, parts: [{ text: msg.parts[0].text }] });
             }
         }
-
         return sanitizedHistory;
     }
 
-    async processMessage({ tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock, botDelay, botInstructions }) {
+    async processMessage(params) {
+        const { tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock, botDelay, botInstructions } = params;
+        const key = conversationId || jid;
+
+        if (!this.pendingJobs) {
+            this.pendingJobs = new Map();
+        }
+
+        let job = this.pendingJobs.get(key);
+        if (job) {
+            // Cancela os cronômetros pendentes (tanto geração quanto envio)
+            if (job.generationTimeout) clearTimeout(job.generationTimeout);
+            if (job.sendTimeout) clearTimeout(job.sendTimeout);
+
+            job.textMessages.push(textMessage);
+            job.params = params; // Atualiza parâmetros para usar os mais recentes
+
+            if (job.generating) {
+                // Se a IA está gerando agora, marca como obsoleta para regerar ao finalizar
+                job.obsolete = true;
+                console.log(`[AutomationWorker] Novas mensagens recebidas durante a geração para ${key}. Resposta atual marcada como obsoleta.`);
+            } else {
+                // Re-agenda a geração após 1.5s de silêncio (debounce de entrada)
+                job.generationTimeout = setTimeout(() => this.triggerGeneration(key), 1500);
+                console.log(`[AutomationWorker] Nova mensagem adicionada ao job ativo para ${key}. Reiniciando debounce de entrada de 1.5s.`);
+            }
+        } else {
+            job = {
+                textMessages: [textMessage],
+                params: params,
+                generationTimeout: null,
+                sendTimeout: null,
+                generating: false,
+                obsolete: false,
+                responseText: null
+            };
+            this.pendingJobs.set(key, job);
+            job.generationTimeout = setTimeout(() => this.triggerGeneration(key), 1500);
+            console.log(`[AutomationWorker] Iniciada nova fila de processamento pós-debounce para ${key}. Resposta será gerada após 1.5s.`);
+        }
+    }
+
+    cancelPendingMessage(conversationIdOrJid) {
+        if (!conversationIdOrJid) return;
+        const key = conversationIdOrJid;
+        if (this.pendingJobs && this.pendingJobs.has(key)) {
+            const job = this.pendingJobs.get(key);
+            console.log(`[AutomationWorker] Cancelando resposta automática pendente para ${key} devido a ação/mensagem do atendente humano.`);
+            if (job.generationTimeout) clearTimeout(job.generationTimeout);
+            if (job.sendTimeout) clearTimeout(job.sendTimeout);
+            this.pendingJobs.delete(key);
+        }
+    }
+
+    async triggerGeneration(key) {
+        const job = this.pendingJobs?.get(key);
+        if (!job) return;
+
+        job.generating = true;
+        job.obsolete = false;
+        job.generationTimeout = null;
+
+        const combinedText = job.textMessages.join('\n');
+        console.log(`[AutomationWorker] Iniciando geração da IA para ${key} com mensagens:\n"${combinedText}"`);
+
+        try {
+            const responseText = await this.generateResponse({
+                ...job.params,
+                textMessage: combinedText
+            });
+
+            // Se novas mensagens chegaram durante a geração, descarta e regera
+            if (job.obsolete) {
+                console.log(`[AutomationWorker] Geração finalizada para ${key}, mas nova mensagem chegou durante a chamada de API. Descartando resposta obsoleta.`);
+                job.generating = false;
+                job.generationTimeout = setTimeout(() => this.triggerGeneration(key), 1500);
+                return;
+            }
+
+            job.generating = false;
+            job.responseText = responseText;
+
+            console.log(`[AutomationWorker] Resposta gerada para ${key}. Aguardando 15s de silêncio para enviar.`);
+
+            if (job.sendTimeout) clearTimeout(job.sendTimeout);
+
+            job.sendTimeout = setTimeout(async () => {
+                try {
+                    console.log(`[AutomationWorker] Fim do cronômetro de 15s para ${key}. Enviando resposta final.`);
+                    const activeJob = this.pendingJobs?.get(key);
+                    if (activeJob && activeJob.responseText === responseText) {
+                        this.pendingJobs.delete(key);
+                        await this.sendFinalResponse(activeJob.params, responseText);
+                    }
+                } catch (sendErr) {
+                    console.error('[AutomationWorker] Erro ao enviar resposta após 15s:', sendErr);
+                }
+            }, 15000);
+
+        } catch (genErr) {
+            console.error('[AutomationWorker] Falha ao processar AI no triggerGeneration:', genErr);
+            job.generating = false;
+            this.pendingJobs.delete(key);
+        }
+    }
+
+    async generateResponse({ tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock, botDelay, botInstructions }) {
         try {
             this.init();
             if (!this.genAI) {
                 console.warn("[AutomationWorker] GEMINI_API_KEY não configurada.");
-                return;
+                return null;
             }
 
-            console.log(`[AutomationWorker] Processando mensagem para o bot: ${botSettings.name} | Tenant: ${tenantId}`);
+            console.log(`[AutomationWorker] Gerando resposta para o bot: ${botSettings.name} | Tenant: ${tenantId}`);
 
             // Carrega as variáveis globais da empresa
             let companyName = '';
@@ -152,9 +257,32 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                     .replace(/\[LINK_TIKTOK\]/g, vars.tiktok);
             };
 
+            // Query Expansion para buscas RAG
+            let expandedQueryText = textMessage;
+            if (textMessage.trim().length < 15) {
+                try {
+                    const { data: lastBotMsg } = await supabase
+                        .from('messages')
+                        .select('text_content')
+                        .eq('tenant_id', tenantId)
+                        .eq('conversation_id', conversationId)
+                        .eq('direction', 'outbound')
+                        .order('timestamp', { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+
+                    if (lastBotMsg && lastBotMsg.text_content) {
+                        expandedQueryText = `IA perguntou: ${lastBotMsg.text_content} -> Cliente respondeu: ${textMessage}`;
+                        console.log(`[AutomationWorker] Query Expansion ativada para busca semântica: "${expandedQueryText}"`);
+                    }
+                } catch (errExp) {
+                    console.error('[AutomationWorker] Erro ao buscar última mensagem da IA para query expansion:', errExp);
+                }
+            }
+
             // 1. Busca contexto no RAG
             const transformer = await LocalEmbeddingsPipeline.getInstance();
-            const output = await transformer(textMessage, { pooling: 'mean', normalize: true });
+            const output = await transformer(expandedQueryText, { pooling: 'mean', normalize: true });
             const queryEmbedding = Array.from(output.data);
 
             const { data: semanticMatches } = await supabase.rpc('match_knowledge_chunks', {
@@ -170,6 +298,34 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                               semanticMatches.map(m => m.content).join("\n---\n");
             }
 
+            // 1b. Busca correções de raciocínio / comportamento da IA
+            let correctionsText = '';
+            try {
+                const { data: reasoningAdjustments } = await supabase.rpc('match_ai_reasoning_adjustments', {
+                     query_embedding: queryEmbedding,
+                     match_threshold: 0.55, // Similaridade para correções
+                     match_count: 3,
+                     p_tenant_id: tenantId
+                });
+
+                if (reasoningAdjustments && reasoningAdjustments.length > 0) {
+                    correctionsText = "\n\n### EXEMPLOS DE CORREÇÕES DE COMPORTAMENTO ANTERIORES (OBRIGATÓRIO SEGUIR) ###\n" +
+                                      "O atendente corrigiu anteriormente respostas para perguntas similares de clientes. " +
+                                      "Você deve seguir estritamente as diretrizes de tom, comportamento e resposta esperada abaixo:\n" +
+                                      reasoningAdjustments.map((r, idx) => {
+                                        let text = `Correção ${idx + 1}:\n`;
+                                        if (r.context_summary) {
+                                            text += `- Contexto/Memória da Conversa: "${r.context_summary}"\n`;
+                                        }
+                                        text += `- Pergunta Similar do Cliente: "${r.user_query}"\n` +
+                                                `- Resposta Esperada Corrigida: "${r.corrected_response}"`;
+                                        return text;
+                                      }).join("\n---\n");
+                }
+            } catch (errCorr) {
+                console.error('[AutomationWorker] Erro ao buscar correções de IA:', errCorr);
+            }
+
             // 2. Prepara o System Prompt
             let basePrompt = botSettings.systemPrompt || botSettings.system_prompt || "Você é um assistente prestativo.";
             
@@ -180,10 +336,18 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `3. Jamais diga coisas como "posso chamar a Luna Pedido" ou "a Luna Menu vai te ajudar". Em vez disso, assuma toda a responsabilidade pela interação ou diga que você mesma (Luna) ajudará o cliente com o que for necessário (pedido, cardápio, agendamento, etc.).\n` +
                           `4. Para o cliente, você é única e seu nome é apenas Luna.\n`;
 
+            // Regra Global de Humanização do Atendimento (WhatsApp Brasil)
+            basePrompt += `\n\n### DIRETRIZES DE HUMANIZAÇÃO E TOM DE VOZ (ESTRITAS) ###\n` +
+                          `1. Você deve soar como um ser humano extremamente caloroso, empático, educado e prestativo no WhatsApp, não como um assistente corporativo frio ou robótico.\n` +
+                          `2. EVITE terminologias robóticas, jargões formais ou expressões engessadas (ex: "prezado", "prezada", "procedimento", "conforme solicitado", "estarei verificando", "atendimento transferido", "aguarde um instante/momento").\n` +
+                          `3. Use escuta ativa: valide as emoções do cliente. Se ele relatar um problema ou demonstrar urgência/ansiedade, responda com empatia profunda (ex: "Entendo perfeitamente", "Sinto muito por isso, deixa comigo que vou resolver", "Vou te ajudar agora mesmo").\n` +
+                          `4. Escreva com naturalidade: use parágrafos curtos, linguagem coloquial profissional fluida do Brasil e adicione de 1 a 3 emojis calorosos para humanizar a conversa, sem exagerar.\n` +
+                          `5. PRIORIZE E SIGA ESTRITAMENTE as instruções e exemplos de respostas corrigidas que constam no Manual de Raciocínio e Ajustes da I.A ou nas correções anteriores. Se houver uma correção registrada para uma pergunta similar do cliente, você deve replicar o estilo, o tom e a solução adotada pelo atendente humano.\n`;
+
             if (botInstructions && botInstructions.trim().length > 0) {
                 basePrompt += `\n\n### INSTRUÇÕES DE COMPORTAMENTO PERSONALIZADAS ###\nImportante: Siga estritamente as diretrizes e regras de personalidade a seguir em todas as interações:\n${botInstructions}\n`;
             }
-            const systemPrompt = replaceTokens(basePrompt + contextText);
+            const systemPrompt = replaceTokens(basePrompt + contextText + correctionsText);
             
             // 3. Obtem histórico da conversa
             let history = await this.getConversationHistory(tenantId, conversationId, 12);
@@ -401,7 +565,18 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 finalResponseText = finalResponseText || "Desculpe, encontrei uma dificuldade técnica. Em que posso ajudar?";
             }
 
-            // 4. Envia resposta final
+            return finalResponseText;
+
+        } catch (error) {
+            console.error('[AutomationWorker] Falha ao processar AI na geração:', error);
+            return null;
+        }
+    }
+
+    async sendFinalResponse(params, finalResponseText) {
+        const { tenantId, instanceId, conversationId, contactId, jid, botSettings, sock, botDelay } = params;
+        
+        try {
             if (finalResponseText && sock) {
                 // Simulação de digitação (Atraso Humano) baseada no botDelay
                 const delaySec = Number(botDelay) || 0;
@@ -419,50 +594,42 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
                 const msgResult = await sock.sendMessage(jid, { text: finalResponseText });
                 if (msgResult && msgResult.key) {
-                    try {
-                        const { data: savedMsg } = await supabase.from('messages').insert({
-                            tenant_id: tenantId,
-                            instance_id: instanceId,
-                            conversation_id: conversationId,
-                            direction: 'outbound',
-                            message_type: 'text',
-                            status: 'sent',
-                            text_content: finalResponseText,
-                            whatsapp_message_id: msgResult.key.id,
-                            sender_type: 'bot',
-                            raw_payload: {
-                                ...msgResult,
-                                bot_name: botSettings?.name || 'IA ChatBoot'
-                            }
-                        }).select('*').single();
-
-                        if (conversationId) {
-                            await supabase.from('conversations').update({
-                                updated_at: new Date().toISOString(),
-                                last_message_at: new Date().toISOString(),
-                                last_message_preview: finalResponseText.substring(0, 50)
-                            }).eq('id', conversationId);
+                    const { data: savedMsg } = await supabase.from('messages').insert({
+                        tenant_id: tenantId,
+                        instance_id: instanceId,
+                        conversation_id: conversationId,
+                        direction: 'outbound',
+                        message_type: 'text',
+                        status: 'sent',
+                        text_content: finalResponseText,
+                        whatsapp_message_id: msgResult.key.id,
+                        sender_type: 'bot',
+                        raw_payload: {
+                            ...msgResult,
+                            bot_name: botSettings?.name || 'IA ChatBoot'
                         }
+                    }).select('*').single();
 
-                        if (savedMsg) {
-                            const { default: realtime } = await import('../realtime-publisher/index.js');
-                            await realtime.publishInboxEvent(tenantId, 'message.new', {
-                                message: savedMsg,
-                                contact_phone: jid.split('@')[0],
-                                conversation_id: conversationId
-                            });
-                        }
-                    } catch(err) {
-                        console.error('[AutomationWorker] Falha ao registrar envio no BD:', err);
+                    if (conversationId) {
+                        await supabase.from('conversations').update({
+                            updated_at: new Date().toISOString(),
+                            last_message_at: new Date().toISOString(),
+                            last_message_preview: finalResponseText.substring(0, 50)
+                        }).eq('id', conversationId);
+                    }
+
+                    if (savedMsg) {
+                        const { default: realtime } = await import('../realtime-publisher/index.js');
+                        await realtime.publishInboxEvent(tenantId, 'message.new', {
+                            message: savedMsg,
+                            contact_phone: jid.split('@')[0],
+                            conversation_id: conversationId
+                        });
                     }
                 }
             }
-
-        } catch (error) {
-            console.error('[AutomationWorker] Falha ao processar AI:', error);
-            if (sock) {
-                // Notifica que ocorreu um erro? Melhor silenciar e registrar log.
-            }
+        } catch (err) {
+            console.error('[AutomationWorker] Falha ao registrar ou enviar resposta final no BD:', err);
         }
     }
 }

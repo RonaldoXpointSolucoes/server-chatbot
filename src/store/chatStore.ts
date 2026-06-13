@@ -7,7 +7,7 @@ export type MessageType = {
   id: string;
   whatsapp_id?: string;
   text: string;
-  sender: 'client' | 'bot' | 'human' | 'system' | 'internal_note';
+  sender: 'client' | 'bot' | 'human' | 'system' | 'internal_note' | 'automation';
   mediaUrl?: string;
   mediaType?: 'image' | 'video' | 'audio' | 'document' | 'contact' | 'location' | 'interactive' | string;
   status?: string; // PENDING, SENT, DELIVERY_ACK, READ
@@ -2045,11 +2045,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // 2. Sincroniza o status da IA no contato
         await supabase
           .from('contacts')
-          .update({ ai_paused: nextAiPaused, ai_paused_manually: nextAiPaused })
+          .update({ bot_status: nextAiPaused ? 'paused' : 'active' })
           .eq('id', realContactId);
 
         // 3. Remove o assignment direto na tabela certa (conversations)
-        await supabase.from('conversations').update({ assigned_to: null, status: 'resolved', ai_paused: nextAiPaused }).eq('id', conv.id);
+        await supabase.from('conversations').update({ 
+          assigned_to: null, 
+          status: 'resolved', 
+          ai_paused: nextAiPaused,
+          ai_paused_manually: nextAiPaused 
+        }).eq('id', conv.id);
 
         // 4. Atualização local do estado para sumir da lista e fechar o chat ativo
         set((state) => ({
@@ -2261,7 +2266,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const { error } = await supabase.from('conversations').update({ unread_count: newUnread }).eq('contact_id', getRealContactId(contactId));
+      const realContactId = getRealContactId(contactId);
+      const instId = getInstanceIdFromContact(contactId);
+      let query = supabase.from('conversations').update({ unread_count: newUnread }).eq('contact_id', realContactId);
+      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      const { error } = await query;
       if (error) throw error;
     } catch (e) {
       console.error('Erro ao alternar unread:', e);
@@ -2309,7 +2318,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      await supabase.from('conversations').update({ unread_count: 0 }).eq('contact_id', getRealContactId(contactId));
+      const realContactId = getRealContactId(contactId);
+      const instId = getInstanceIdFromContact(contactId);
+      let query = supabase.from('conversations').update({ unread_count: 0 }).eq('contact_id', realContactId);
+      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      await query;
 
       if (unreadIds.length > 0) {
           const { data: currentRecords } = await supabase.from('messages').select('id, raw_payload').in('id', unreadIds);
@@ -2992,9 +3005,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         const handleMapping = (messagesArray: any[]) => {
+            const filteredArray = messagesArray.filter(m => m.sender_type !== 'automation');
             // 2. Ordenar cronologicamente ASCENDENTE e extrair timestamp real
             // O array bruto pode vir fora de ordem. Convertendo para ms caso haja epoch.
-            const mappedMsgs = messagesArray.map(m => {
+            const mappedMsgs = filteredArray.map(m => {
                 const advanced = parseAdvancedMsgMetadata(m);
                 const realTimestamp = new Date(m.timestamp);
  
@@ -3508,7 +3522,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const m = payload.new as any;
         console.log('[Realtime] Message INSERT:', m);
 
-        if (m.sender_type === 'system') return; // Ignore echoes that don't need realtime sync
+        if (m.sender_type === 'system' || m.sender_type === 'automation') return; // Ignore echoes that don't need realtime sync
 
         let targetContactId = m.conversation_id ? null : m.contact_id;
         let convInstanceId = m.instance_id || null;
@@ -3789,7 +3803,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
          for (const c of currentContacts) {
             const realId = getRealContactId(c.id);
-            if (realId === conv.contact_id) {
+            const contactInstance = getInstanceIdFromContact(c.id) || c.instance_id || 'default';
+            const convInstance = conv.instance_id || 'default';
+            if (realId === conv.contact_id && contactInstance === convInstance) {
                contactName = c.custom_name || c.name || c.phone;
                if ((c.conv_status === 'resolved' || c.conv_status === 'closed') && conv.status === 'open') {
                   shouldToast = true;
@@ -3828,7 +3844,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
          set((s: any) => {
             const updatedContacts = s.contacts.map((c: any) => {
                const realId = getRealContactId(c.id);
-               if (realId === conv.contact_id) {
+               const contactInstance = getInstanceIdFromContact(c.id) || c.instance_id || 'default';
+               const convInstance = conv.instance_id || 'default';
+               if (realId === conv.contact_id && contactInstance === convInstance) {
                   return {
                      ...c,
                      conv_status: conv.status,

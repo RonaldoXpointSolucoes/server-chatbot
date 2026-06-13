@@ -10,6 +10,8 @@ class SessionManager {
         this.sessions = new Map();
         this.connectingState = new Map();
         this.reconnectAttempts = new Map();
+        this.conflictAttempts = new Map();
+        this.conflictTimeouts = new Map();
         this.queues = new Map();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
@@ -130,9 +132,26 @@ class SessionManager {
                 const { connection, lastDisconnect } = update;
                 if (connection === 'open') {
                     this.reconnectAttempts.delete(instanceId);
+                    
+                    // Defer clearing conflictAttempts until connection is stable for 5 minutes
+                    if (this.conflictTimeouts.has(instanceId)) {
+                        clearTimeout(this.conflictTimeouts.get(instanceId));
+                    }
+                    const timeout = setTimeout(() => {
+                        this.conflictAttempts.delete(instanceId);
+                        this.conflictTimeouts.delete(instanceId);
+                        console.log(`[SessionManager] Conexão estável estabelecida na instância ${instanceId}. Histórico de conflitos limpo.`);
+                    }, 300000); // 5 minutos
+                    this.conflictTimeouts.set(instanceId, timeout);
                 }
 
                 if (connection === 'close') {
+                    // Clear stable connection timeout if it disconnected early
+                    if (this.conflictTimeouts.has(instanceId)) {
+                        clearTimeout(this.conflictTimeouts.get(instanceId));
+                        this.conflictTimeouts.delete(instanceId);
+                    }
+
                     const status = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.message || '';
                     const loggedOut = status === DisconnectReason.loggedOut;
@@ -150,10 +169,28 @@ class SessionManager {
                         // Tentar reconectar limpo após 5s
                         setTimeout(() => this.createSession(tenantId, instanceId), 5000);
                     } else if (isConflict) {
-                        console.warn(`[SessionManager] CONFLITO detectado na instância ${instanceId}. Outro dispositivo conectou? Aguardando 30s antes de tentar novamente...`);
+                        const cAttempts = (this.conflictAttempts.get(instanceId) || 0) + 1;
+                        this.conflictAttempts.set(instanceId, cAttempts);
                         this.reconnectAttempts.delete(instanceId);
-                        // Delay maior para conflitos (30s) para evitar ban ou loops infinitos
-                        setTimeout(() => this.createSession(tenantId, instanceId), 30000);
+
+                        if (cAttempts >= 3) {
+                            console.error(`[SessionManager] Limite de conflitos atingido na instância ${instanceId}. Interrompendo reconexão automática para evitar banimento.`);
+                            await supabase.from('whatsapp_instances')
+                                .update({ 
+                                    status: 'offline', 
+                                    last_error: 'Desconectado por conflito. Outro dispositivo se conectou a esta conta de WhatsApp. O sistema interrompeu as reconexões automáticas para evitar banimento. Reconecte manualmente no painel.' 
+                                })
+                                .eq('id', instanceId);
+                            
+                            // Publica evento de status offline para o frontend
+                            await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
+                                connection: 'close', 
+                                lastDisconnect: { error: { output: { statusCode: 409 } } } 
+                            });
+                        } else {
+                            console.warn(`[SessionManager] CONFLITO detectado na instância ${instanceId} (Tentativa ${cAttempts}/3). Outro dispositivo conectou? Aguardando 30s antes de tentar novamente...`);
+                            setTimeout(() => this.createSession(tenantId, instanceId), 30000);
+                        }
                     } else {
                         const attempts = this.reconnectAttempts.get(instanceId) || 0;
                         const nextAttempt = attempts + 1;

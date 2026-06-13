@@ -1,5 +1,6 @@
 import { config } from 'dotenv';
 config({ path: '../.env' });
+import pg from 'pg';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -64,7 +65,7 @@ process.on('unhandledRejection', (reason, promise) => {
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'x-agent-id', 'apikey']
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'x-agent-id', 'apikey', 'x-asts-test', 'X-Asts-Test']
 }));
 app.use(helmet());
 app.use(express.json());
@@ -138,8 +139,69 @@ app.use((err, req, res, next) => {
     return res.status(500).json({ error: err.message || 'Erro interno no servidor' });
 });
 
+async function runMigrations() {
+    console.log("[Migration] Iniciando verificação de migrações DDL...");
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+        console.warn("[Migration] DATABASE_URL não configurada no .env. Ignorando migração.");
+        return;
+    }
+    const client = new pg.Client({
+        connectionString,
+        ssl: connectionString.includes('supabase') ? { rejectUnauthorized: false } : false
+    });
+    try {
+        await client.connect();
+        console.log("[Migration] Conectado ao banco de dados via pg client.");
+        const migrationSQL = `
+          ALTER TABLE ai_reasoning_adjustments ADD COLUMN IF NOT EXISTS context_summary text;
+          CREATE OR REPLACE FUNCTION match_ai_reasoning_adjustments(
+            query_embedding vector(384),
+            match_threshold float,
+            match_count int,
+            p_tenant_id uuid
+          )
+          RETURNS TABLE (
+            id uuid,
+            user_query text,
+            original_response text,
+            corrected_response text,
+            context_summary text,
+            similarity float
+          )
+          LANGUAGE plpgsql
+          AS $$
+          BEGIN
+            RETURN QUERY
+            SELECT
+              ara.id,
+              ara.user_query,
+              ara.original_response,
+              ara.corrected_response,
+              ara.context_summary,
+              1 - (ara.embedding <=> query_embedding) AS similarity
+            FROM ai_reasoning_adjustments ara
+            WHERE ara.tenant_id = p_tenant_id
+              AND 1 - (ara.embedding <=> query_embedding) > match_threshold
+            ORDER BY ara.embedding <=> query_embedding
+            LIMIT match_count;
+          END;
+          $$;
+        `;
+        await client.query(migrationSQL);
+        console.log("[Migration] Migração DDL executada com sucesso!");
+    } catch (err) {
+        console.warn("[Migration] Falha ao executar migração de banco local (conexão direta IPv6 indisponível nesta rede). Erro:", err.message);
+    } finally {
+        try {
+            await client.end();
+        } catch(e) {}
+    }
+}
+
 app.listen(PORT, '0.0.0.0', async () => {
     console.log(`[Antigravity V2] Node.js Server online na porta ${PORT}`);
+    await runMigrations();
     
     // Registrar o deploy no banco Supabase
     try {
@@ -165,19 +227,23 @@ app.listen(PORT, '0.0.0.0', async () => {
     }
 
     try {
-        console.log("[Worker Boot] Buscando instâncias pendentes...");
-        const { data: activeLeases } = await supabase
-            .from('whatsapp_instances')
-            .select('id, tenant_id')
-            .in('status', ['connected', 'connecting', 'qr_ready']);
-            
-        if (activeLeases && activeLeases.length > 0) {
-            console.log(`[Worker Boot] Retomando ${activeLeases.length} sockets...`);
-            for (const instance of activeLeases) {
-                sessionManager.createSession(instance.tenant_id, instance.id).catch(e => {
-                    console.error(`Falha Auto-Restart: ${instance.id}`, e);
-                });
-                await new Promise(r => setTimeout(r, 1500));
+        if (process.env.DISABLE_AUTO_START_SESSIONS === 'true') {
+            console.log("[Worker Boot] Auto-start de instâncias desabilitado via configuração (DISABLE_AUTO_START_SESSIONS=true).");
+        } else {
+            console.log("[Worker Boot] Buscando instâncias pendentes...");
+            const { data: activeLeases } = await supabase
+                .from('whatsapp_instances')
+                .select('id, tenant_id')
+                .in('status', ['connected', 'connecting', 'qr_ready']);
+                
+            if (activeLeases && activeLeases.length > 0) {
+                console.log(`[Worker Boot] Retomando ${activeLeases.length} sockets...`);
+                for (const instance of activeLeases) {
+                    sessionManager.createSession(instance.tenant_id, instance.id).catch(e => {
+                        console.error(`Falha Auto-Restart: ${instance.id}`, e);
+                    });
+                    await new Promise(r => setTimeout(r, 1500));
+                }
             }
         }
     } catch(err) {

@@ -2,6 +2,7 @@ import express from 'express';
 import sessionManager from '../session-manager/index.js';
 import { supabase } from '../supabase.js';
 import realtime from '../realtime-publisher/index.js';
+import AutomationWorker from '../automation-worker/agent.js';
 
 const router = express.Router();
 
@@ -14,7 +15,7 @@ const requireTenant = async (req, res, next) => {
 
 router.post('/messages/send', requireTenant, async (req, res) => {
     try {
-        const { instanceId, text, contactPhone, conversationId } = req.body;
+        const { instanceId, text, contactPhone, conversationId, senderType, is_automation, sender_type } = req.body;
         const tenantId = req.tenantId;
 
         if (!instanceId || !text || !contactPhone || !conversationId) {
@@ -43,6 +44,24 @@ router.post('/messages/send', requireTenant, async (req, res) => {
 
         const msgResult = await sock.sendMessage(remoteJid, { text });
 
+        const isAuto = senderType === 'automation' || is_automation === true || sender_type === 'automation';
+        const dbSenderType = isAuto ? 'automation' : 'human';
+
+        try {
+            const { EventProcessor } = await import('../event-processor/index.js');
+            if (EventProcessor && msgResult?.key?.id) {
+                if (isAuto) {
+                    if (!EventProcessor.automationMessagesCache) EventProcessor.automationMessagesCache = new Map();
+                    EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
+                    setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
+                } else {
+                    if (!EventProcessor.humanMessagesCache) EventProcessor.humanMessagesCache = new Map();
+                    EventProcessor.humanMessagesCache.set(msgResult.key.id, true);
+                    setTimeout(() => EventProcessor.humanMessagesCache.delete(msgResult.key.id), 60000);
+                }
+            }
+        } catch(e) {}
+
         const { data: savedMsg, error: dbError } = await supabase.from('messages').insert({
             tenant_id: tenantId,
             instance_id: instanceId,
@@ -52,16 +71,29 @@ router.post('/messages/send', requireTenant, async (req, res) => {
             status: 'sent',
             text_content: text,
             whatsapp_message_id: msgResult?.key?.id,
-            sender_type: 'human',
+            sender_type: dbSenderType,
             raw_payload: msgResult
         }).select('*').single();
 
         if (dbError) throw dbError;
 
-        await supabase.from('conversations').update({
-            updated_at: new Date().toISOString(),
-            unread_count: 0
-        }).eq('id', conversationId);
+        if (!isAuto) {
+            try {
+                AutomationWorker.cancelPendingMessage(conversationId);
+                AutomationWorker.cancelPendingMessage(remoteJid);
+            } catch (cancelErr) {
+                console.error('[Messages API] Erro ao cancelar mensagem pendente:', cancelErr);
+            }
+
+            await supabase.from('conversations').update({
+                updated_at: new Date().toISOString(),
+                unread_count: 0
+            }).eq('id', conversationId);
+        } else {
+            await supabase.from('conversations').update({
+                updated_at: new Date().toISOString()
+            }).eq('id', conversationId);
+        }
 
         await realtime.publishInboxEvent(tenantId, 'message.new_outbound', {
             message: savedMsg,

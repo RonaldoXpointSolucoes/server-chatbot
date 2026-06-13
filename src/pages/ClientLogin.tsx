@@ -595,28 +595,8 @@ export default function ClientLogin() {
       storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
       storage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
 
-      // Checa se o usuário tem Face ID cadastrado no banco de dados para sugerir cadastro pós-login
-      addDevLog('CHECK_FACE_EXISTENCE', 'Verificando se o usuário já possui cadastro de Face ID...', 'info');
-      const { data: faceRecord, error: faceCheckError } = await supabase
-        .from('face_auth')
-        .select('id')
-        .eq('email', email.trim().toLowerCase())
-        .maybeSingle();
-
-      if (faceCheckError) {
-        addDevLog('CHECK_FACE_ERROR', faceCheckError.message, 'warning');
-      }
-
-      if (!faceRecord) {
-        addDevLog('FACE_AUTH_OFFER', `Usuário logado com sucesso. Sugerindo Face ID...`, 'info');
-        setFaceVerifyError('');
-        setCameraActive(false);
-        setFaceRegisterModal({ email: email.trim().toLowerCase(), pwdPlain: password.trim() });
-        setIsLoading(false);
-      } else {
-        addDevLog('LOGIN_SUCCESS_FINAL', 'Processo de login concluído com sucesso. Redirecionando...', 'success');
-        navigate('/chat', { replace: true });
-      }
+      addDevLog('LOGIN_SUCCESS_FINAL', 'Processo de login concluído com sucesso. Redirecionando...', 'success');
+      navigate('/chat', { replace: true });
     } catch (err) {
       addDevLog('UNHANDLED_EXCEPTION', err, 'error');
       console.error(err);

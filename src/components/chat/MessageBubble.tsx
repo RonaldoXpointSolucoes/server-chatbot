@@ -34,6 +34,7 @@ interface MessageBubbleProps {
   renderMessageText: (text: string | undefined) => React.ReactNode;
   showDateSeparator: boolean;
   dateSeparatorText: string;
+  onAlterarRaciocinio?: (msg: any) => void;
 }
 
 export const MessageBubble = memo(({
@@ -55,7 +56,8 @@ export const MessageBubble = memo(({
   handleOpenVCardContact,
   renderMessageText,
   showDateSeparator,
-  dateSeparatorText
+  dateSeparatorText,
+  onAlterarRaciocinio
 }: MessageBubbleProps) => {
   const agents = useChatStore(state => state.agents);
   const toggleChecklistItem = useChatStore(state => state.toggleChecklistItem);
@@ -426,6 +428,20 @@ export const MessageBubble = memo(({
                   >
                     <Sparkles size={16} className="text-[#00a884] animate-pulse" /> Responder com I.A
                   </button>
+                  {msg.sender === 'bot' && (
+                    <button 
+                      onClick={() => {
+                        if (onAlterarRaciocinio) {
+                          onAlterarRaciocinio(msg);
+                        }
+                        setActiveMsgDropdown(null);
+                      }}
+                      className="w-full text-left px-4 py-2 hover:bg-[#e0f2fe] dark:hover:bg-sky-950/30 flex items-center gap-3 transition-all duration-300 text-[14px] text-sky-600 dark:text-sky-400 font-medium"
+                    >
+                      <ClipboardList size={16} /> Alterar Raciocínio
+                    </button>
+                  )}
+                  
                   <button 
                     onClick={() => {
                       setMessageToForward(msg);

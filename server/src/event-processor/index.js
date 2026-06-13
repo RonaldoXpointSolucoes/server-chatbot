@@ -278,12 +278,15 @@ class EventProcessor {
                 const isSelfChat = (ownerPhone && phone === ownerPhone);
 
                 const isHuman = EventProcessor.humanMessagesCache && EventProcessor.humanMessagesCache.has(msg.key.id);
+                const isAutomation = EventProcessor.automationMessagesCache && EventProcessor.automationMessagesCache.has(msg.key.id);
                 // Se for isSelfChat (enviado para si mesmo), apenas processe o evento "fromMe: true" para evitar duplicar a mensagem recebida e enviada
                 if (isSelfChat && !msg.key.fromMe) {
                      console.info(`[Message Tracker] ℹ️ Ignorando evento fromMe:false em self-chat (evita duplicidade). JID: ${jid}`);
                      continue;
                 }
-                const senderType = msg.key.fromMe ? (isHuman ? 'human' : 'bot') : 'client';
+                const senderType = msg.key.fromMe 
+                    ? (isAutomation ? 'automation' : (isHuman ? 'human' : 'bot')) 
+                    : 'client';
                 const direction = msg.key.fromMe ? 'outbound' : 'inbound';
                 
                 // Se for outbound (fromMe), o msg.pushName é o nome do PRÓPRIO aparelho (ex: Burguer Plus).
@@ -487,7 +490,9 @@ class EventProcessor {
                       conv.has_inbound = true;
                   }
                   if (b.direction === 'outbound' && b.senderType === 'human') {
-                      conv.has_human_outbound = true;
+                       conv.has_human_outbound = true;
+                       AutomationWorker.cancelPendingMessage(b.conversationId);
+                       AutomationWorker.cancelPendingMessage(b.jid);
                   }
               }
              
@@ -1411,4 +1416,5 @@ class EventProcessor {
 export { EventProcessor };
 EventProcessor.pendingMediaCache = new Map();
 EventProcessor.humanMessagesCache = new Map();
+EventProcessor.automationMessagesCache = new Map();
 export default new EventProcessor();
