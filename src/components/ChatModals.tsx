@@ -875,10 +875,11 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
 
   useEffect(() => {
     if (isOpen) {
-      setActiveLabels(contactLabels.map((l: any) => l.id));
+      const currentLabels = contact?.conv_labels || [];
+      setActiveLabels(currentLabels.map((l: any) => l.id));
       setSearchQuery('');
     }
-  }, [isOpen, contactId, contactLabels]);
+  }, [isOpen, contactId]);
 
   const toggleLabel = (labelId: string) => {
     setActiveLabels(prev => 
