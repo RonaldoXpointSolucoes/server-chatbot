@@ -71,6 +71,25 @@ export interface AppointmentType {
 export const getRealContactId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
 export const getInstanceIdFromContact = (id: string) => id.includes('_') ? id.split('_')[1] : null;
 
+export const resolveInstanceUuid = async (tenantId: string, identifier: string | null | undefined): Promise<string | null> => {
+  if (!identifier || identifier === 'default' || identifier === 'all') return null;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRegex.test(identifier)) return identifier;
+  try {
+     const { data } = await supabase
+        .from('whatsapp_instances')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('display_name', identifier)
+        .limit(1);
+     if (data && data.length > 0) return data[0].id;
+  } catch (e) {
+     console.error('[resolveInstanceUuid] Error:', e);
+  }
+  return null;
+};
+
+
 export function stringToDeterministicUUID(str: string): string {
   const hashString = (s: string, seed: number) => {
     let hash = seed + 5381;
@@ -623,14 +642,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       const activeChannel = state.activeChannelFilter;
+      const resolvedActiveChannel = await resolveInstanceUuid(tenantInfo.id, activeChannel);
       
       let query = supabase.from('conversations')
         .select('id, contact_id, status, assigned_to, instance_id')
         .eq('tenant_id', tenantInfo.id)
         .neq('status', 'resolved');
 
-      if (activeChannel) {
-        query = query.eq('instance_id', activeChannel);
+      if (resolvedActiveChannel) {
+        query = query.eq('instance_id', resolvedActiveChannel);
       }
 
       if (onlyMine && agentId) {
@@ -850,8 +870,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const realContactId = getRealContactId(contactId);
       const instId = getInstanceIdFromContact(contactId);
+      const resolvedInstId = await resolveInstanceUuid(tenantInfo.id, instId);
       let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenantInfo.id);
-      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
       const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
 
       if (!conv) {
@@ -868,7 +889,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
          text_content: msgText,
          sender_type: 'system',
          direction: 'outgoing',
-         instance_id: get().contacts.find(c => c.id === contactId)?.instance_id
+         instance_id: resolvedInstId
       };
 
       const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
@@ -1151,13 +1172,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const expectedInstance = compositeInstance || contact.instance_id;
     const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
 
+    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', finalTargetInstance);
+    const resolvedExpectedInstance = await resolveInstanceUuid(state.tenantInfo?.id || '', expectedInstance);
+
     // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
-    if (expectedInstance && finalTargetInstance !== expectedInstance) {
-       console.warn(`[Security Guard] Bloqueada tentativa de envio por canal incorreto! Esperado: ${expectedInstance}, Recebido: ${finalTargetInstance}. Forçando canal da conversa.`);
+    if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
+       console.warn(`[Security Guard] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
     }
     
     // Verifica a conexão da instância específica da conversa
-    if (finalTargetInstance && state.instancesStatus[finalTargetInstance] && state.instancesStatus[finalTargetInstance] !== 'connected') {
+    if (resolvedInstanceId && state.instancesStatus[resolvedInstanceId] && state.instancesStatus[resolvedInstanceId] !== 'connected') {
        set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar mensagens.' });
        return;
     }
@@ -1216,10 +1240,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // 1. Manda pra Baileys Engine Local
       if (!state.tenantInfo) return;
       
-      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', finalTargetInstance).single();
+      const { data: instDataDB } = resolvedInstanceId ? await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single() : { data: null };
       const apiKey = instDataDB?.api_key || '';
 
-      await sendTextMessage(state.tenantInfo.id, finalTargetInstance, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), finalMessageText, apiKey);
+      if (resolvedInstanceId) {
+         await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), finalMessageText, apiKey);
+      }
       
     } catch(err: any) {
       console.error(err);
@@ -1245,34 +1271,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   editHumanMessage: async (contactId, messageId, newText, instanceName) => {
-    const state = get();
-    if (!instanceName || !state.instancesStatus[instanceName] || state.instancesStatus[instanceName] !== 'connected') {
-       set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para editar mensagens.' });
-       return;
-    }
-    
-    const contact = state.contacts.find(c => c.id === contactId);
-    if (!contact || !state.tenantInfo) return;
-    
-    const msgToEdit = contact.messages.find(m => m.id === messageId);
-    if (!msgToEdit || !msgToEdit.whatsapp_id) {
-       alert('Não é possível editar esta mensagem pois a chave nativa não foi encontrada.');
-       return;
-    }
-
-    try {
-      const { editNativeMessage } = await import('../services/whatsappEngine');
-      
-      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
-      const apiKey = instDataDB?.api_key || '';
-
-      const messageKey = {
-         remoteJid: contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'),
-         fromMe: true,
-         id: msgToEdit.whatsapp_id
-      };
-
-      await editNativeMessage(state.tenantInfo.id, instanceName, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), newText, messageKey, apiKey);
+     const state = get();
+     const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', instanceName);
+     
+     if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
+        set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para editar mensagens.' });
+        return;
+     }
+     
+     const contact = state.contacts.find(c => c.id === contactId);
+     if (!contact || !state.tenantInfo) return;
+     
+     const msgToEdit = contact.messages.find(m => m.id === messageId);
+     if (!msgToEdit || !msgToEdit.whatsapp_id) {
+        alert('Não é possível editar esta mensagem pois a chave nativa não foi encontrada.');
+        return;
+     }
+ 
+     try {
+       const { editNativeMessage } = await import('../services/whatsappEngine');
+       
+       const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single();
+       const apiKey = instDataDB?.api_key || '';
+ 
+       const messageKey = {
+          remoteJid: contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'),
+          fromMe: true,
+          id: msgToEdit.whatsapp_id
+       };
+ 
+       await editNativeMessage(state.tenantInfo.id, resolvedInstanceId, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), newText, messageKey, apiKey);
       
       // Update Database
       const finalNewText = newText.endsWith(' *(Editado)*') ? newText : newText + ' *(Editado)*';
@@ -1304,7 +1332,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   deleteHumanMessage: async (contactId, messageId, instanceName) => {
     const state = get();
-    if (!instanceName || !state.instancesStatus[instanceName] || state.instancesStatus[instanceName] !== 'connected') {
+    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', instanceName);
+
+    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
        set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para apagar mensagens.' });
        return;
     }
@@ -1343,7 +1373,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (msgToDelete && msgToDelete.whatsapp_id) {
          const { deleteNativeMessage } = await import('../services/whatsappEngine');
          
-         const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+         const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single();
          const apiKey = instDataDB?.api_key || '';
 
          const messageKey = {
@@ -1352,7 +1382,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             id: msgToDelete.whatsapp_id
          };
 
-         await deleteNativeMessage(state.tenantInfo.id, instanceName, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), messageKey, apiKey);
+         await deleteNativeMessage(state.tenantInfo.id, resolvedInstanceId, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), messageKey, apiKey);
       }
       
       // Update Database
@@ -1397,12 +1427,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const expectedInstance = compositeInstance || contact.instance_id;
     const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
 
+    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
+    const resolvedExpectedInstance = await resolveInstanceUuid(state.tenantInfo.id, expectedInstance);
+
     // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
-    if (expectedInstance && finalTargetInstance !== expectedInstance) {
-       console.warn(`[Security Guard - Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${expectedInstance}, Recebido: ${finalTargetInstance}. Forçando canal da conversa.`);
+    if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
+       console.warn(`[Security Guard - Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
     }
 
-    if (!finalTargetInstance || !state.instancesStatus[finalTargetInstance] || state.instancesStatus[finalTargetInstance] !== 'connected') {
+    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
         set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar arquivos.' });
         return;
     }
@@ -1480,10 +1513,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Chamada HTTP pro Node (único dono do upload Supabase e Baileys)
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', finalTargetInstance).single();
+      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single();
       const apiKey = instDataDB?.api_key || '';
 
-      const res = await fetch(`${API_URL}/api/v1/instances/${finalTargetInstance}/send-media`, {
+      const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/send-media`, {
         method: 'POST',
         headers: {
           'x-tenant-id': state.tenantInfo.id,
@@ -1564,9 +1597,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const expectedInstance = compositeInstance || contact.instance_id;
     const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
 
+    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
+    const resolvedExpectedInstance = await resolveInstanceUuid(state.tenantInfo.id, expectedInstance);
+
     // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
-    if (expectedInstance && finalTargetInstance !== expectedInstance) {
-       console.warn(`[Security Guard - Canned Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${expectedInstance}, Recebido: ${finalTargetInstance}. Forçando canal da conversa.`);
+    if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
+       console.warn(`[Security Guard - Canned Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
+    }
+
+    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
+        set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar mídias.' });
+        return;
     }
 
     // Injeção Mágica de Assinatura Síncrona na mídia para evitar atrasos na UI
@@ -1630,7 +1671,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', finalTargetInstance).single();
+      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single();
       const apiKey = instDataDB?.api_key || '';
 
       let mimetype = 'application/octet-stream';
@@ -1646,7 +1687,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       console.log(`[sendMediaFromUrl] Disparando webhook para URL: ${mediaUrl} com nome: ${cleanFileName}`);
 
-      const res = await fetch(`${API_URL}/api/v1/instances/${finalTargetInstance}/send-media-url`, {
+      const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/send-media-url`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1689,23 +1730,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
        return;
     }
 
-    if (!instanceName || !state.instancesStatus[instanceName] || state.instancesStatus[instanceName] !== 'connected') {
+    if (!state.tenantInfo) return;
+    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, instanceName);
+
+    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
        return; // Previne requisições 400 previsiveis caso o socket esteja offline
     }
     
     // Atualiza o lock IMEDIATAMENTE (mesmo se falhar depois)
     set((s) => ({ pictureFetchLocks: { ...s.pictureFetchLocks, [contactId]: now } }));
     
-    if (!state.tenantInfo) return;
     try {
-      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single();
       const apiKey = instDataDB?.api_key || '';
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
       
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3500);
 
-      const res = await fetch(`${API_URL}/api/v1/instances/${instanceName}/invoke`, {
+      const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/invoke`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-tenant-id': state.tenantInfo.id, 'apikey': apiKey },
         body: JSON.stringify({ method: 'profilePictureUrl', args: [jid, 'image'] }),
@@ -1767,7 +1810,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const tenant = get().tenantInfo;
       if (tenant) {
         let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
-        if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+        const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
+        if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
         const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
         if (conv) {
           await supabase.from('conversations').update({ ai_paused: status === 'paused' }).eq('id', conv.id);
@@ -2022,8 +2066,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Descobre a Conversation vinculada para update do Status/Assigned_to e Insert de Message
         const realContactId = getRealContactId(contactId);
         const instId = getInstanceIdFromContact(contactId);
+        const resolvedInstId = await resolveInstanceUuid(tenantInfo.id, instId);
         let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenantInfo.id);
-        if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+        if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
         const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
 
         if (!conv) {
@@ -2040,7 +2085,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
            text_content: msgText, // Correto Schema: text_content e não text
            sender_type: 'system', // Correto Schema: sender_type e não sender
            direction: 'outgoing', // Coluna NOT NULL obrigatória no schema
-           instance_id: get().contacts.find(c => c.id === contactId)?.instance_id
+           instance_id: resolvedInstId
         };
 
         const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
@@ -2149,12 +2194,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (tenant) {
          const realContactId = getRealContactId(contactId);
          const instId = getInstanceIdFromContact(contactId);
+         const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
          let query = supabase.from('conversations')
             .select('id')
             .eq('contact_id', realContactId)
             .eq('tenant_id', tenant.id);
             
-         if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+         if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
 
          const { data: conv } = await query
             .order('last_message_at', { ascending: false })
@@ -2194,8 +2240,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       try {
         const realContactId = getRealContactId(contactId);
         const instId = getInstanceIdFromContact(contactId);
+        const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
         let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
-        if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+        if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
         const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
         if(conv) {
           await supabase.from('conversations').update({ is_favorite: newStatus }).eq('id', conv.id);
@@ -2270,9 +2317,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       try {
          let query = supabase.from('conversations').update({ unread_count: 0 }).eq('tenant_id', tenant.id).gt('unread_count', 0);
          
-         if (activeChannelFilter) {
-             // Opcional fallback de OR com name caso seja preciso, mas geralmente o DB é o ID:
-             query = query.eq('instance_id', activeChannelFilter);
+         const resolvedActiveChannel = await resolveInstanceUuid(tenant.id, activeChannelFilter);
+         if (resolvedActiveChannel) {
+             query = query.eq('instance_id', resolvedActiveChannel);
          }
          
          await query;
@@ -2293,8 +2340,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const realContactId = getRealContactId(contactId);
       const instId = getInstanceIdFromContact(contactId);
+      const resolvedInstId = await resolveInstanceUuid(get().tenantInfo?.id || '', instId);
       let query = supabase.from('conversations').update({ unread_count: newUnread }).eq('contact_id', realContactId);
-      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
       const { error } = await query;
       if (error) throw error;
     } catch (e) {
@@ -2345,8 +2393,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const realContactId = getRealContactId(contactId);
       const instId = getInstanceIdFromContact(contactId);
+      const resolvedInstId = await resolveInstanceUuid(get().tenantInfo?.id || '', instId);
       let query = supabase.from('conversations').update({ unread_count: 0 }).eq('contact_id', realContactId);
-      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
       await query;
 
       if (unreadIds.length > 0) {
@@ -2385,8 +2434,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const realContactId = getRealContactId(contactId);
       const instId = getInstanceIdFromContact(contactId);
+      const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
       let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
-      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
       const { data: convRecord } = await query.maybeSingle();
       if (!convRecord) return;
 
@@ -2407,8 +2457,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const realContactId = getRealContactId(contactId);
       const instId = getInstanceIdFromContact(contactId);
+      const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
       let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
-      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
       const { data: convRecord } = await query.maybeSingle();
       if (!convRecord) return;
 
@@ -3013,19 +3064,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const conv_id = localContact?.conv_id;
         let conv = null;
 
+        const resolvedInstanceId = await resolveInstanceUuid(tenant.id, instanceName);
+
         if (conv_id) {
            const { data: convs } = await supabase.from('conversations').select('id, status').eq('id', conv_id).limit(1);
            if (convs && convs.length > 0) conv = convs[0];
         }
 
         if (!conv) {
-            const { data: convs } = await supabase.from('conversations')
-                  .select('id, status')
-                  .eq('tenant_id', tenant.id)
-                  .eq('contact_id', getRealContactId(contactId))
-                  .eq('instance_id', instanceName)
-                  .order('last_message_at', { ascending: false, nullsFirst: false })
-                  .limit(1);
+             let query = supabase.from('conversations')
+                   .select('id, status')
+                   .eq('tenant_id', tenant.id)
+                   .eq('contact_id', getRealContactId(contactId));
+                   
+             if (resolvedInstanceId) {
+                 query = query.eq('instance_id', resolvedInstanceId);
+             }
+             
+             const { data: convs } = await query
+                   .order('last_message_at', { ascending: false, nullsFirst: false })
+                   .limit(1);
             
             conv = convs && convs.length > 0 ? convs[0] : null;
         }
@@ -3114,7 +3172,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: true } }));
                 try {
                     const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-                    const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', instanceName).single();
+                    const { data: instDataDB } = resolvedInstanceId ? await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single() : { data: null };
                     const res = await fetch(`${API_URL}/api/v1/conversations/${conv.id}/sync-history`, {
                         method: 'POST',
                         headers: { 
@@ -3122,7 +3180,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                            'x-tenant-id': tenant.id,
                            'apikey': instDataDB?.api_key || ''
                         },
-                        body: JSON.stringify({ instanceId: instanceName, count: 100, limit: 100 })
+                        body: JSON.stringify({ instanceId: resolvedInstanceId, count: 100, limit: 100 })
                     });
                     
                     const result = await res.json();
@@ -3409,8 +3467,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const realContactId = getRealContactId(contactId);
       const instId = getInstanceIdFromContact(contactId);
+      const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
       let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
-      if (instId && instId !== 'default') query = query.eq('instance_id', instId);
+      if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
       const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
       if (!conv) return;
 
