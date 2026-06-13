@@ -3421,8 +3421,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         await supabase.from('contacts').update({ bot_status: payload.ai_paused ? 'paused' : 'active' }).eq('id', realContactId);
 
         const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+        const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
         const me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
-        const operatorName = me?.full_name || me?.email || 'Atendente';
+        const operatorName = currentUserName || me?.full_name || me?.email || 'Atendente';
 
         const statusText = payload.ai_paused ? '⏸️ IA Luna Pausada' : '▶️ IA Luna Retomada';
         const msgText = `${statusText} por ${operatorName}`;
@@ -3450,8 +3451,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if (contact && contact.conv_status === 'snoozed' && payload.status === 'open') {
          const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+         const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
          const me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
-         const operatorName = me?.full_name || me?.email || 'Sistema';
+         const operatorName = currentUserName || me?.full_name || me?.email || 'Sistema';
 
          const formatDateSystem = (dateInput: any) => {
            if (!dateInput) return 'Data Indisponível';
