@@ -413,7 +413,7 @@ class EventProcessor {
                  }
              }
              
-             // BULK UPSERT CONTACTS
+            // BULK UPSERT CONTACTS
              const contactsArray = Array.from(contactsMap.values());
              
              // Proteger contra overwrite de nomes e custom_names
@@ -421,6 +421,7 @@ class EventProcessor {
              const tenantIdTarget = contactsArray[0]?.tenant_id;
              
              let existingMap = new Map();
+             const contactBotStatusMap = new Map();
              if (tenantIdTarget && phonesToSeek.length > 0) {
                  const { data: existingDbContacts } = await supabase.from('contacts')
                      .select('*')
@@ -430,6 +431,7 @@ class EventProcessor {
                  if (existingDbContacts) {
                      for (const e of existingDbContacts) {
                          existingMap.set(e.phone, e);
+                         contactBotStatusMap.set(e.id, e.bot_status);
                      }
                  }
              }
@@ -555,7 +557,7 @@ class EventProcessor {
                          last_message_at: new Date(data.last_message_at).toISOString(),
                          updated_at: new Date().toISOString(),
                          status: nextStatus,
-                         ...(data.has_human_outbound && { ai_paused: true })
+                         ai_paused: nextAiPaused
                      });
                  } else {
                      let initialStatus = 'resolved';
@@ -578,7 +580,7 @@ class EventProcessor {
                          unread_count: data.unread_count,
                          last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
                          last_message_at: data.last_message_at.toISOString(),
-                         ...(data.has_human_outbound && { ai_paused: true })
+                         ai_paused: initialAiPaused
                      });
                  }
                  
@@ -651,7 +653,10 @@ class EventProcessor {
                  b.conversationId = finalConvIdMap.get(`${b.tenantId}_${b.instanceId}_${cid}`) || finalConvIdMap.get(`${b.tenantId}_null_instance_${cid}`);
                  const mapKey = `${b.tenantId}_${b.instanceId || 'null_instance'}_${cid}`;
                  b.convStatus = updatedStatusMap.get(mapKey) || existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.status || existingConvMap.get(`${b.tenantId}_null_instance_${cid}`)?.status || 'bot';
-                 b.aiPaused = updatedAiPausedMap.has(mapKey) ? updatedAiPausedMap.get(mapKey) : (existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.ai_paused || false);
+                 const isConvPaused = updatedAiPausedMap.has(mapKey) ? updatedAiPausedMap.get(mapKey) : (existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.ai_paused || false);
+                 const contactBotStatus = contactBotStatusMap.get(cid) || 'active';
+                 const isContactPaused = contactBotStatus === 'paused';
+                 b.aiPaused = isConvPaused || isContactPaused;
                  
                  if (!b.conversationId) return; // ignora falha bruta
                  
