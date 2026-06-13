@@ -1931,9 +1931,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let foundAny = false;
       const updatedContacts = state.contacts.map((c) => {
          const cRealId = getRealContactId(c.id);
-         const isMatch = cRealId === realContactId ||
-                         (c.whatsapp_jid && contact.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) ||
-                         (c.phone && contactPhoneMatch && c.phone === contactPhoneMatch);
+         
+         // Se o payload do contato possuir uma instância específica, 
+         // só deve bater com a conversa se for daquela mesma instância.
+         // Se o payload NÃO possuir instância (ex: update global da tabela 'contacts'),
+         // atualiza todas as instâncias existentes daquele contato.
+         const instanceMatches = !contact.instance_id || !c.instance_id || c.instance_id === contact.instance_id;
+         
+         const isMatch = instanceMatches && (
+                          cRealId === realContactId ||
+                          (c.whatsapp_jid && contact.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) ||
+                          (c.phone && contactPhoneMatch && c.phone === contactPhoneMatch)
+                         );
                          
          if (isMatch) {
             foundAny = true;
