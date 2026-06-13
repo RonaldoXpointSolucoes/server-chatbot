@@ -3443,6 +3443,23 @@ export default function ChatDashboard() {
                           <span>Blocos Vetoriais (Chunks):</span> 
                           <span className="text-gray-200 font-mono">{ragDocInfo?.metadata?.chunks_total || 0}</span>
                         </div>
+                        <div className="flex justify-between">
+                          <span>Última Atualização:</span> 
+                          <span className="text-gray-200 font-mono">
+                            {(() => {
+                              if (ragDocInfo?.metadata?.last_update) {
+                                return new Date(ragDocInfo.metadata.last_update).toLocaleString('pt-BR');
+                              }
+                              if (correctionsList.length > 0) {
+                                const dates = correctionsList.map(c => c.created_at ? new Date(c.created_at).getTime() : 0).filter(t => t > 0);
+                                if (dates.length > 0) {
+                                  return new Date(Math.max(...dates)).toLocaleString('pt-BR');
+                                }
+                              }
+                              return 'Sem atualizações';
+                            })()}
+                          </span>
+                        </div>
                         {ragDocInfo?.metadata?.current_status && (
                           <p className="text-[10px] text-sky-400 mt-1 italic">
                             Status atual: {ragDocInfo.metadata.current_status}
@@ -3514,6 +3531,10 @@ export default function ChatDashboard() {
                                   <span className="text-[10px] text-gray-500 font-bold block uppercase tracking-wider">A IA deve responder:</span>
                                   <p className="text-gray-200 whitespace-pre-wrap">"{corr.corrected_response}"</p>
                                 </div>
+                              </div>
+                              <div className="flex flex-wrap justify-between items-center text-[9px] text-gray-500 border-t border-white/5 pt-1.5 mt-2 font-mono gap-1">
+                                <span>Base: Manual de Raciocínio</span>
+                                <span>Atualizado: {corr.created_at ? new Date(corr.created_at).toLocaleString('pt-BR') : 'Sem data'}</span>
                               </div>
                             </div>
                           ))

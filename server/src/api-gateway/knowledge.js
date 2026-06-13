@@ -660,7 +660,8 @@ router.post('/corrections', async (req, res) => {
                     original_response: original_response || '',
                     corrected_response: corrected_response.trim(),
                     context_summary: context_summary ? context_summary.trim() : null,
-                    embedding
+                    embedding,
+                    created_at: new Date().toISOString()
                 })
                 .eq('id', existingAdjust.id)
                 .select('*')
