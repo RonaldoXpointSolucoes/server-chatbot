@@ -188,9 +188,10 @@ export default function ContactsManager() {
     }
 
     if (editingContact) {
-       const { data, error } = await supabase.from('contacts').update(dataToSave).eq('id', editingContact.id).select().single();
-       if (!error && data) {
-         setContacts(prev => {
+        const { data, error } = await supabase.from('contacts').update(dataToSave).eq('id', editingContact.id).select().single();
+        if (!error && data) {
+          await useChatStore.getState().syncConversationLabelsWithTags(data.id, data.tags || []);
+          setContacts(prev => {
            const filtered = prev.filter(c => c.id !== data.id);
            return [data, ...filtered];
          });
@@ -216,9 +217,10 @@ export default function ContactsManager() {
        }
 
        if (existing) {
-          const { data, error } = await supabase.from('contacts').update(dataToSave).eq('id', existing.id).select().single();
-          if (!error && data) {
-            setContacts(prev => {
+           const { data, error } = await supabase.from('contacts').update(dataToSave).eq('id', existing.id).select().single();
+           if (!error && data) {
+             await useChatStore.getState().syncConversationLabelsWithTags(data.id, data.tags || []);
+             setContacts(prev => {
               const filtered = prev.filter(c => c.id !== data.id);
               return [data, ...filtered];
             });
@@ -229,9 +231,10 @@ export default function ContactsManager() {
           return;
        }
 
-       const { data, error } = await supabase.from('contacts').insert([dataToSave]).select().single();
-       if (!error && data) {
-         setContacts(prev => [data, ...prev]);
+        const { data, error } = await supabase.from('contacts').insert([dataToSave]).select().single();
+        if (!error && data) {
+          await useChatStore.getState().syncConversationLabelsWithTags(data.id, data.tags || []);
+          setContacts(prev => [data, ...prev]);
          setTotalCount(prev => prev + 1);
        } else if (error) {
          if (error.code === '23505') {

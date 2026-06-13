@@ -229,6 +229,7 @@ interface ChatState {
   fetchTenantLabels: () => Promise<void>;
   assignLabelToConversation: (contactId: string, labelId: string) => Promise<void>;
   removeLabelFromConversation: (contactId: string, labelId: string) => Promise<void>;
+  syncConversationLabelsWithTags: (realContactId: string, tags: string[]) => Promise<void>;
   
   // Quick Replies
   quickReplies: QuickReply[];
@@ -1925,72 +1926,79 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => {
       // 1. Resolvemos os dois principais identificadores unicos independentes (JID ou Telefone Formatado/Puro)
       const contactPhoneMatch = contact.phone || (contact.whatsapp_jid ? contact.whatsapp_jid.split('@')[0] : null);
+      const realContactId = getRealContactId(contact.id);
 
-      const effectiveInstanceId = contact.instance_id || 'default';
-      const compositeId = contact.id.includes('_') ? contact.id : `${contact.id}_${effectiveInstanceId}`;
+      let foundAny = false;
+      const updatedContacts = state.contacts.map((c) => {
+         const cRealId = getRealContactId(c.id);
+         const isMatch = cRealId === realContactId ||
+                         (c.whatsapp_jid && contact.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) ||
+                         (c.phone && contactPhoneMatch && c.phone === contactPhoneMatch);
+                         
+         if (isMatch) {
+            foundAny = true;
+            const isExistingTemp = c.id.includes('temp-');
+            const isNewTemp = contact.id.includes('temp-');
+            
+            const baseId = (!isExistingTemp) ? getRealContactId(c.id) : (!isNewTemp ? getRealContactId(contact.id) : c.id);
+            // Preserva o composite ID original daquela caixa (se já tinha)
+            const effectiveInstanceId = c.instance_id || contact.instance_id || 'default';
+            const finalId = c.id.includes('_') ? c.id : (baseId.includes('temp-') ? baseId : `${baseId}_${effectiveInstanceId}`);
+            
+            const finalCustomName = c.custom_name || contact.custom_name;
+            const fallbackName = c.name !== c.phone && c.name ? c.name : contact.name;
+            
+            const tname = get().tenantInfo?.name || '';
+            let finalName = finalCustomName || fallbackName;
+            finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
 
-      const targetIndex = state.contacts.findIndex(c => 
-         c.id === compositeId ||
-         c.id === contact.id ||
-         (((c.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) || 
-         (c.phone && c.phone === contactPhoneMatch)) && 
-         (c.instance_id === contact.instance_id || (!c.instance_id && !contact.instance_id)))
-      );
+            // Converter a coluna tags (array de IDs) em conv_labels usando tenantLabels da store
+            const updatedTags = Array.isArray(contact.tags) ? contact.tags : (Array.isArray(c.tags) ? c.tags : []);
+            const conv_labels = get().tenantLabels.filter(tl => updatedTags.includes(tl.id));
 
-      let newContacts = [...state.contacts];
+            return {
+              ...c,
+              ...contact,
+              id: finalId,
+              custom_name: finalCustomName,
+              name: finalName,
+              avatar: contact.profile_picture_url || contact.avatar || c.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contactPhoneMatch || 'U')}&background=random&color=fff`,
+              conv_labels: conv_labels
+            };
+         }
+         return c;
+      });
 
-      if (targetIndex !== -1) {
-        // Encontrou existente! Vamos preservar o ID real do banco caso um deles seja temporário
-        const existing = state.contacts[targetIndex];
-        const isExistingTemp = existing.id.includes('temp-');
-        const isNewTemp = contact.id.includes('temp-');
-        
-        const baseId = (!isExistingTemp) ? getRealContactId(existing.id) : (!isNewTemp ? getRealContactId(contact.id) : existing.id);
-        const finalId = baseId.includes('temp-') ? baseId : (baseId.includes('_') ? baseId : `${baseId}_${effectiveInstanceId}`);
-        
-        const finalCustomName = existing.custom_name || contact.custom_name;
-        const fallbackName = existing.name !== existing.phone && existing.name ? existing.name : contact.name;
-        
-        const tname = get().tenantInfo?.name || '';
-        let finalName = finalCustomName || fallbackName;
-        finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
+      if (!foundAny) {
+         // Contato novinho folha
+         const effectiveInstanceId = contact.instance_id || 'default';
+         const compositeId = contact.id.includes('_') ? contact.id : `${contact.id}_${effectiveInstanceId}`;
+         const tname = get().tenantInfo?.name || '';
+         let finalName = contact.custom_name || contact.name;
+         finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
+         
+         const updatedTags = Array.isArray(contact.tags) ? contact.tags : [];
+         const conv_labels = get().tenantLabels.filter(tl => updatedTags.includes(tl.id));
 
-        const updatedContact: ContactType = {
-          ...existing,
-          ...contact,
-          id: finalId,
-          custom_name: finalCustomName,
-          name: finalName,
-          // Preserva o fallback avatar se a api ou realtime nao devolver algo util
-          avatar: (contact as any).profile_picture_url || (contact as any).avatar || existing.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contactPhoneMatch || 'U')}&background=random&color=fff`,
-        };
-
-        newContacts[targetIndex] = updatedContact;
-      } else {
-        // Contato novinho folha
-        const tname = get().tenantInfo?.name || '';
-        let finalName = contact.custom_name || contact.name;
-        finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
-        
-        const newContact: ContactType = {
-          ...contact,
-          id: compositeId,
-          name: finalName,
-          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contact.phone)}&background=random&color=fff`, // Avatar ui-avatars idêntico ao Chatwoot
-          messages: [],
-          unread: 0,
-          instance_id: contact.instance_id || null,
-          // usa lastMsgTimestamp para a sidebar saber quem eh primeiro
-          lastMsgTimestamp: new Date(contact.created_at || Date.now()).getTime()
-        };
-        newContacts.push(newContact);
+         const newContact: ContactType = {
+           ...contact,
+           id: compositeId,
+           name: finalName,
+           avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contact.phone)}&background=random&color=fff`,
+           messages: [],
+           unread: 0,
+           instance_id: contact.instance_id || null,
+           lastMsgTimestamp: new Date(contact.created_at || Date.now()).getTime(),
+           conv_labels: conv_labels
+         };
+         updatedContacts.push(newContact);
       }
 
       // DEDUPLICAÇÃO RÍGIDA DE SEGURANÇA: Garante que NUNCA existam dois contatos com o mesmo ID
       const seen = new Set();
       const deduped: any[] = [];
       
-      newContacts.forEach(c => {
+      updatedContacts.forEach(c => {
          const key = c.id;
          if (!seen.has(key)) {
             seen.add(key);
@@ -2005,13 +2013,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   updateContactCRM: async (contactId, payload) => {
+    const realContactId = getRealContactId(contactId);
     const currentState = get().contacts.find(c => c.id === contactId);
     const beforeState = currentState ? { ...currentState } : null;
 
-    // UI Otimista: caso seja passado 'name', garantimos custom_name = name e name renderizado
+    // UI Otimista: atualiza todas as caixas/conversas correspondentes a este contato no state
     set((state) => ({
       contacts: state.contacts.map((c) => {
-         if (c.id === contactId) {
+         if (getRealContactId(c.id) === realContactId) {
              const customNameUpdate = payload.name ? { custom_name: payload.name, name: payload.name } : {};
              return { ...c, ...payload, ...customNameUpdate };
          }
@@ -2033,17 +2042,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Recupera o estado original puro do banco para o log
       let rawBeforeState = null;
       try {
-        const { data } = await supabase.from('contacts').select('*').eq('id', getRealContactId(contactId)).single();
+        const { data } = await supabase.from('contacts').select('*').eq('id', realContactId).single();
         if (data) rawBeforeState = data;
       } catch (e) {}
 
-      const { error } = await supabase.from('contacts').update(dbPayload).eq('id', getRealContactId(contactId));
+      const { error } = await supabase.from('contacts').update(dbPayload).eq('id', realContactId);
       if (error) throw error;
 
       // Log Operation
       if (rawBeforeState) {
         const rawAfterState = { ...rawBeforeState, ...dbPayload };
-        await get().logOperation('UPDATE', 'contacts', getRealContactId(contactId), rawBeforeState, rawAfterState);
+        await get().logOperation('UPDATE', 'contacts', realContactId, rawBeforeState, rawAfterState);
       }
     } catch (e) {
       console.error('Erro ao editar contato no DB (CRM):', e);
@@ -2425,51 +2434,103 @@ export const useChatStore = create<ChatState>((set, get) => ({
      }
    },
    
-   assignLabelToConversation: async (contactId: string, labelId: string) => {
+   syncConversationLabelsWithTags: async (realContactId: string, tags: string[]) => {
       const state = get();
       const tenant = state.tenantInfo;
       if (!tenant) return;
-      const conv = state.contacts.find(c => c.id === contactId);
-      if (!conv) return;
+      try {
+        const { data: convs } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('contact_id', realContactId)
+          .eq('tenant_id', tenant.id);
 
-      const realContactId = getRealContactId(contactId);
-      const instId = getInstanceIdFromContact(contactId);
-      const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
-      let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
-      if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
-      const { data: convRecord } = await query.maybeSingle();
-      if (!convRecord) return;
+        if (convs && convs.length > 0) {
+          const convIds = convs.map(c => c.id);
+          
+          await supabase
+            .from('conversation_labels')
+            .delete()
+            .in('conversation_id', convIds);
 
-      const { error } = await supabase.from('conversation_labels').insert({
-         conversation_id: convRecord.id,
-         label_id: labelId
-      });
-
-      if (!error) {
-         await state.fetchInitialData(); // Reload para atualizar as labels
+          if (tags && tags.length > 0) {
+            const insertRows = convIds.flatMap(convId => 
+              tags.map(tagId => ({
+                conversation_id: convId,
+                label_id: tagId
+              }))
+            );
+            if (insertRows.length > 0) {
+              await supabase.from('conversation_labels').insert(insertRows);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Erro ao sincronizar labels de conversas', e);
       }
-   },
+    },
 
-   removeLabelFromConversation: async (contactId: string, labelId: string) => {
-      const state = get();
-      const tenant = state.tenantInfo;
-      if (!tenant) return;
+    assignLabelToConversation: async (contactId: string, labelId: string) => {
+       const state = get();
+       const tenant = state.tenantInfo;
+       if (!tenant) return;
+       const conv = state.contacts.find(c => c.id === contactId);
+       if (!conv) return;
 
-      const realContactId = getRealContactId(contactId);
-      const instId = getInstanceIdFromContact(contactId);
-      const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
-      let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
-      if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
-      const { data: convRecord } = await query.maybeSingle();
-      if (!convRecord) return;
+       const realContactId = getRealContactId(contactId);
 
-      const { error } = await supabase.from('conversation_labels').delete()
-         .match({ conversation_id: convRecord.id, label_id: labelId });
+       const { data: contactData } = await supabase
+         .from('contacts')
+         .select('tags')
+         .eq('id', realContactId)
+         .single();
 
-      if (!error) {
-         await state.fetchInitialData();
-      }
-   },
+       let currentTags: string[] = [];
+       if (contactData && Array.isArray(contactData.tags)) {
+         currentTags = contactData.tags;
+       }
+
+       if (!currentTags.includes(labelId)) {
+         currentTags = [...currentTags, labelId];
+         await supabase
+           .from('contacts')
+           .update({ tags: currentTags })
+           .eq('id', realContactId);
+         
+         await state.syncConversationLabelsWithTags(realContactId, currentTags);
+       }
+
+       await state.fetchInitialData();
+    },
+
+    removeLabelFromConversation: async (contactId: string, labelId: string) => {
+       const state = get();
+       const tenant = state.tenantInfo;
+       if (!tenant) return;
+
+       const realContactId = getRealContactId(contactId);
+
+       const { data: contactData } = await supabase
+         .from('contacts')
+         .select('tags')
+         .eq('id', realContactId)
+         .single();
+
+       if (contactData && Array.isArray(contactData.tags)) {
+         const currentTags = contactData.tags;
+         if (currentTags.includes(labelId)) {
+           const updatedTags = currentTags.filter((t: string) => t !== labelId);
+           await supabase
+             .from('contacts')
+             .update({ tags: updatedTags })
+             .eq('id', realContactId);
+           
+           await state.syncConversationLabelsWithTags(realContactId, updatedTags);
+         }
+       }
+
+       await state.fetchInitialData();
+    },
 
   searchGlobalContacts: async (term: string) => {
     const state = get();
