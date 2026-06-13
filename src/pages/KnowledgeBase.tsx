@@ -437,10 +437,16 @@ export default function KnowledgeBase() {
                        </div>
                        
                        <div className="relative z-10 flex-1">
-                          <h3 className="text-gray-200 font-bold text-lg truncate mb-1" title={doc.name}>{doc.name}</h3>
-                          <p className="text-gray-500 text-sm flex items-center gap-2">
-                              {sizeFormatted} • Adicionado em {new Date(doc.created_at).toLocaleDateString()}
-                          </p>
+                           <h3 className="text-gray-200 font-bold text-lg truncate mb-1" title={doc.name}>{doc.name}</h3>
+                           <div className="text-gray-500 text-xs flex flex-col gap-1">
+                               <div>{sizeFormatted} • Adicionado em {new Date(doc.created_at).toLocaleDateString()}</div>
+                               {doc.metadata?.last_update && (
+                                  <div className="text-emerald-400/90 font-bold flex items-center gap-1">
+                                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block"></span>
+                                     Último Update: {new Date(doc.metadata.last_update).toLocaleString('pt-BR')}
+                                  </div>
+                               )}
+                           </div>
                        </div>
 
                        {/* Barra de Progresso Real */}

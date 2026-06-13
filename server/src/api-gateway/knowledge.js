@@ -550,11 +550,11 @@ async function syncCorrectionsToRagDocument(tenantId) {
             const { data: newDoc, error: createErr } = await supabase
                 .from('knowledge_documents')
                 .insert([{
-                    tenant_id,
+                    tenant_id: tenantId,
                     name: docName,
                     type: 'text/markdown',
                     status: 'processing',
-                    metadata: { size: content.length, source: 'corrections_system' }
+                    metadata: { size: content.length, source: 'corrections_system', last_update: new Date().toISOString() }
                 }])
                 .select('*')
                 .single();
@@ -567,7 +567,7 @@ async function syncCorrectionsToRagDocument(tenantId) {
                 .from('knowledge_documents')
                 .update({ 
                     status: 'processing',
-                    metadata: { size: content.length, source: 'corrections_system' }
+                    metadata: { size: content.length, source: 'corrections_system', last_update: new Date().toISOString() }
                 })
                 .eq('id', doc.id);
         }
@@ -591,7 +591,7 @@ async function syncCorrectionsToRagDocument(tenantId) {
 
             dbChunks.push({
                 document_id: docId,
-                tenant_id,
+                tenant_id: tenantId,
                 content: chunkText,
                 embedding: embeddingVector,
                 chunk_index: i
@@ -617,7 +617,8 @@ async function syncCorrectionsToRagDocument(tenantId) {
                     source: 'corrections_system',
                     chunks_total: chunks.length,
                     chunks_processed: chunks.length,
-                    current_status: 'Concluído com sucesso!'
+                    current_status: 'Concluído com sucesso!',
+                    last_update: new Date().toISOString()
                 }
             })
             .eq('id', docId);
