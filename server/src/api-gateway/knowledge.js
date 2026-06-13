@@ -768,11 +768,37 @@ router.post('/corrections/helper', async (req, res) => {
             if (!conversationId) {
                 return res.status(400).json({ error: 'conversationId is required for summarize-context' });
             }
+
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            let finalConvId = conversationId;
+
+            if (!uuidRegex.test(finalConvId)) {
+                const parts = conversationId.split('_');
+                const contactIdPart = parts[0];
+                if (uuidRegex.test(contactIdPart)) {
+                    const { data: conv } = await supabase
+                        .from('conversations')
+                        .select('id')
+                        .eq('tenant_id', tenant_id)
+                        .eq('contact_id', contactIdPart)
+                        .order('last_message_at', { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+                    if (conv) {
+                        finalConvId = conv.id;
+                    } else {
+                        return res.json({ success: true, text: 'Sem contexto disponível' });
+                    }
+                } else {
+                    return res.json({ success: true, text: 'ID de conversa inválido' });
+                }
+            }
+
             const { data: msgs, error: msgsErr } = await supabase
                 .from('messages')
                 .select('text_content, sender_type')
                 .eq('tenant_id', tenant_id)
-                .eq('conversation_id', conversationId)
+                .eq('conversation_id', finalConvId)
                 .order('timestamp', { ascending: false })
                 .limit(10);
             

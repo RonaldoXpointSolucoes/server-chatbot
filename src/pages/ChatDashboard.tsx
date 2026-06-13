@@ -1687,7 +1687,7 @@ export default function ChatDashboard() {
         },
         body: JSON.stringify({
           action: 'summarize-context',
-          conversationId: activeChat.id
+          conversationId: activeChat.conv_id || activeChat.id
         })
       })
       .then(res => {
@@ -3595,6 +3595,55 @@ export default function ChatDashboard() {
                       className="w-full bg-[#111b21] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder:text-gray-500 outline-none focus:border-emerald-500 transition-all min-h-[150px] shadow-inner font-normal"
                       placeholder="Escreva aqui como a IA deveria responder..."
                     />
+                    
+                    {/* Atalhos Rápidos do Assistente de I.A */}
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        onClick={() => handleHelperAction('suggest')}
+                        disabled={isHelperLoading}
+                        className="px-2.5 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 disabled:opacity-50 text-[11px] font-bold rounded-lg border border-emerald-500/20 flex items-center gap-1 transition-all"
+                        title="Sugerir resposta ideal baseada na pergunta"
+                      >
+                        {helperActionActive === 'suggest' ? <Loader2 size={11} className="animate-spin" /> : <Bot size={12} />}
+                        Sugerir Resposta
+                      </button>
+                      <button
+                        onClick={() => handleHelperAction('humanize')}
+                        disabled={isHelperLoading}
+                        className="px-2.5 py-1 bg-[#202c33]/85 hover:bg-[#202c33] disabled:opacity-50 text-gray-200 text-[11px] font-medium rounded-lg border border-white/5 flex items-center gap-1 transition-all"
+                        title="Deixar o texto mais humano e natural"
+                      >
+                        {helperActionActive === 'humanize' ? <Loader2 size={11} className="animate-spin" /> : <Wand2 size={12} />}
+                        Humanizar
+                      </button>
+                      <button
+                        onClick={() => handleHelperAction('grammar')}
+                        disabled={isHelperLoading}
+                        className="px-2.5 py-1 bg-[#202c33]/85 hover:bg-[#202c33] disabled:opacity-50 text-gray-200 text-[11px] font-medium rounded-lg border border-white/5 flex items-center gap-1 transition-all"
+                        title="Corrigir erros ortográficos"
+                      >
+                        {helperActionActive === 'grammar' ? <Loader2 size={11} className="animate-spin" /> : <CheckCheck size={12} />}
+                        Corrigir Gramática
+                      </button>
+                      <button
+                        onClick={() => handleHelperAction('simplify')}
+                        disabled={isHelperLoading}
+                        className="px-2.5 py-1 bg-[#202c33]/85 hover:bg-[#202c33] disabled:opacity-50 text-gray-200 text-[11px] font-medium rounded-lg border border-white/5 flex items-center gap-1 transition-all"
+                        title="Simplificar o texto"
+                      >
+                        {helperActionActive === 'simplify' ? <Loader2 size={11} className="animate-spin" /> : <Wand2 size={12} />}
+                        Simplificar
+                      </button>
+                      <button
+                        onClick={() => handleHelperAction('emoji')}
+                        disabled={isHelperLoading}
+                        className="px-2.5 py-1 bg-[#202c33]/85 hover:bg-[#202c33] disabled:opacity-50 text-gray-200 text-[11px] font-medium rounded-lg border border-white/5 flex items-center gap-1 transition-all"
+                        title="Adicionar emojis amigáveis"
+                      >
+                        {helperActionActive === 'emoji' ? <Loader2 size={11} className="animate-spin" /> : <Smile size={12} />}
+                        Emojis
+                      </button>
+                    </div>
                     
                     {/* Realtime Humanization Meter Panel */}
                     {(() => {
