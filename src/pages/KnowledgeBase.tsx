@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrainCircuit, UploadCloud, FileText, File, Trash2, CheckCircle2, AlertCircle, Loader2, Search, Zap, Info, Server, ArrowLeft, Eye, Save } from 'lucide-react';
+import { BrainCircuit, UploadCloud, FileText, File, Trash2, CheckCircle2, AlertCircle, Loader2, Search, Zap, Info, Server, ArrowLeft, Eye, Save, Database, X } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
 
