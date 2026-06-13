@@ -1391,7 +1391,10 @@ class EventProcessor {
                     payload.status = 'connecting';
                     payload.reason = reason;
                 } else {
-                    await supabase.from('whatsapp_instances').update({ status: 'offline', last_error: `Code: ${reason}` }).eq('id', instanceId);
+                    const errMsg = reason === 409
+                        ? 'Desconectado por conflito: Outro dispositivo se conectou a esta conta de WhatsApp. O sistema suspendeu reconexões automáticas.'
+                        : `Code: ${reason}`;
+                    await supabase.from('whatsapp_instances').update({ status: 'offline', last_error: errMsg }).eq('id', instanceId);
                     payload.status = 'offline';
                     payload.reason = reason;
                     if(loggedOut) payload.loggedOut = true;
