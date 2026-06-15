@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { playNotificationSound } from '../utils/AudioEngine';
@@ -923,6 +923,7 @@ export default function ChatDashboard() {
   const [isSnoozedListOpen, setIsSnoozedListOpen] = useState(false);
   const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen || isSnoozedListOpen;
   const [inputText, setInputText] = useState('');
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [quickReplyFilter, setQuickReplyFilter] = useState('');
   const quickReplies = useChatStore(state => state.quickReplies);
@@ -1298,6 +1299,7 @@ export default function ChatDashboard() {
   const draftsRef = useRef<Record<string, string>>({});
   const prevActiveChatId = useRef<string | null>(null);
   const currentInputText = useRef(inputText);
+  const isSendingRef = useRef(false);
   
   useEffect(() => {
     currentInputText.current = inputText;
@@ -1342,6 +1344,10 @@ export default function ChatDashboard() {
   const [showSnoozeModal, setShowSnoozeModal] = useState<string | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [activeChatDropdown, setActiveChatDropdown] = useState(false);
+
+  // Estados para Drag and Drop de Arquivos
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const dragCounter = useRef(0);
 
   // Estados para Extração e Validação do RAG
   const [isRagModalOpen, setIsRagModalOpen] = useState(false);
@@ -2352,6 +2358,11 @@ export default function ChatDashboard() {
 
   const handleSendHuman = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSendingRef.current) {
+      console.warn("[handleSendHuman] Blocked! One message is already sending.");
+      return;
+    }
+
     const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
     console.log("[handleSendHuman] Attempting to send. Values:", { inputText, activeChatId, activeChatInstance: activeChat?.instance_id, connectedInstanceName, properTargetInstance });
     
@@ -2367,127 +2378,136 @@ export default function ChatDashboard() {
        return;
     }
     
-    if (chatMode === 'internal_note') {
-      const noteText = !inputText.trim() && isTaskMode ? "📋 Checklist de Tarefa CRM criado." : inputText;
-      const formattedChecklist = isTaskMode 
-        ? checklistDraft
-            .filter(item => item.trim() !== '')
-            .map((item, idx) => ({ id: `item-${Date.now()}-${idx}`, text: item, completed: false }))
-        : [];
+    isSendingRef.current = true;
+    setIsSendingMessage(true);
 
-      let uploadedMediaUrl = null;
-      if (noteAttachedFile) {
-        try {
-          // Upload da mídia de anotação privada via bucket do Supabase
-          const fileExt = noteAttachedFile.name.split('.').pop();
-          const fileName = `${Date.now()}_note_attachment.${fileExt}`;
-          const filePath = `${activeChatId}/${fileName}`;
-          
-          const { data, error } = await supabase.storage
-            .from('chat-media')
-            .upload(filePath, noteAttachedFile);
+    try {
+      if (chatMode === 'internal_note') {
+        const noteText = !inputText.trim() && isTaskMode ? "📋 Checklist de Tarefa CRM criado." : inputText;
+        const formattedChecklist = isTaskMode 
+          ? checklistDraft
+              .filter(item => item.trim() !== '')
+              .map((item, idx) => ({ id: `item-${Date.now()}-${idx}`, text: item, completed: false }))
+          : [];
+
+        let uploadedMediaUrl = null;
+        if (noteAttachedFile) {
+          try {
+            // Upload da mídia de anotação privada via bucket do Supabase
+            const fileExt = noteAttachedFile.name.split('.').pop();
+            const fileName = `${Date.now()}_note_attachment.${fileExt}`;
+            const filePath = `${activeChatId}/${fileName}`;
             
-          if (error) throw error;
-          
-          const { data: { publicUrl } } = supabase.storage
-            .from('chat-media')
-            .getPublicUrl(filePath);
+            const { data, error } = await supabase.storage
+              .from('chat-media')
+              .upload(filePath, noteAttachedFile);
+              
+            if (error) throw error;
             
-          uploadedMediaUrl = publicUrl;
-        } catch (mediaError) {
-          console.error('[handleSendHuman] Erro ao fazer upload de anexo de nota:', mediaError);
-          alert('Erro ao fazer upload da mídia anexada.');
-          return;
+            const { data: { publicUrl } } = supabase.storage
+              .from('chat-media')
+              .getPublicUrl(filePath);
+              
+            uploadedMediaUrl = publicUrl;
+          } catch (mediaError) {
+            console.error('[handleSendHuman] Erro ao fazer upload de anexo de nota:', mediaError);
+            alert('Erro ao fazer upload da mídia anexada.');
+            return;
+          }
         }
-      }
+          
+        // Chamada ao backend para criar nota
+        await useChatStore.getState().createInternalNote(
+          activeChatId,
+          noteText,
+          uploadedMediaUrl || undefined,
+          noteAttachedType || undefined,
+          noteAttachedFile ? { name: noteAttachedFile.name, size: noteAttachedFile.size } : undefined,
+          isTaskMode,
+          taskAssignedTo,
+          formattedChecklist
+        );
+
+        // Criar compromisso na Agenda se estiver agendado
+        if (scheduleNote && scheduleNoteDate && scheduleNoteTime) {
+          try {
+            const startDateTime = new Date(`${scheduleNoteDate}T${scheduleNoteTime}:00`);
+            const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000); // 1 hora de duração
+            
+            const { getRealContactId } = await import('../store/chatStore');
+            await useChatStore.getState().createAppointment({
+              contact_id: getRealContactId(activeChatId),
+              title: scheduleNoteTitle.trim() || noteText.substring(0, 50) || "Lembrete de Nota Interna",
+              notes: noteText,
+              start_time: startDateTime.toISOString(),
+              end_time: endDateTime.toISOString(),
+              status: 'scheduled',
+              checklist_items: formattedChecklist.map(i => ({ id: i.id, text: i.text, completed: false }))
+            });
+          } catch (e) {
+            console.error("Erro ao criar compromisso associado à nota interna:", e);
+          }
+        }
         
-      // Chamada ao backend para criar nota
-      await useChatStore.getState().createInternalNote(
-        activeChatId,
-        noteText,
-        uploadedMediaUrl || undefined,
-        noteAttachedType || undefined,
-        noteAttachedFile ? { name: noteAttachedFile.name, size: noteAttachedFile.size } : undefined,
-        isTaskMode,
-        taskAssignedTo,
-        formattedChecklist
-      );
-
-      // Criar compromisso na Agenda se estiver agendado
-      if (scheduleNote && scheduleNoteDate && scheduleNoteTime) {
-        try {
-          const startDateTime = new Date(`${scheduleNoteDate}T${scheduleNoteTime}:00`);
-          const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000); // 1 hora de duração
-          
-          const { getRealContactId } = await import('../store/chatStore');
-          await useChatStore.getState().createAppointment({
-            contact_id: getRealContactId(activeChatId),
-            title: scheduleNoteTitle.trim() || noteText.substring(0, 50) || "Lembrete de Nota Interna",
-            notes: noteText,
-            start_time: startDateTime.toISOString(),
-            end_time: endDateTime.toISOString(),
-            status: 'scheduled',
-            checklist_items: formattedChecklist.map(i => ({ id: i.id, text: i.text, completed: false }))
-          });
-        } catch (e) {
-          console.error("Erro ao criar compromisso associado à nota interna:", e);
+        // Reseta estados locais
+        setInputText('');
+        setChecklistDraft([]);
+        setIsTaskMode(false);
+        setTaskAssignedTo(null);
+        setNoteAttachedFile(null);
+        setNoteAttachedPreview(null);
+        setNoteAttachedType(null);
+        setNotePreviewMode(false);
+        setScheduleNote(false);
+        setScheduleNoteTitle('');
+        setScheduleNoteDate('');
+        setScheduleNoteTime('');
+      } else {
+        let finalMessageText = inputText;
+        if (replyMessage) {
+            const shortQuote = replyMessage.text.length > 80 ? replyMessage.text.substring(0, 80) + '...' : replyMessage.text;
+            finalMessageText = `> *Mensagem Citada:* "${shortQuote}"\n\n${inputText}`;
         }
+
+        if (pendingMediaToSend) {
+          try {
+            await useChatStore.getState().sendMediaFromUrl(
+              activeChatId, 
+              pendingMediaToSend.url, 
+              pendingMediaToSend.type, 
+              properTargetInstance as string, 
+              finalMessageText,
+              pendingMediaToSend.name
+            );
+            setPendingMediaToSend(null);
+            setQuickReplyToast({ shortcut: 'Mídia', type: 'sent' });
+            setTimeout(() => setQuickReplyToast(null), 3500);
+          } catch (mediaError) {
+            console.error('[handleSendHuman] Erro ao enviar mídia engatilhada:', mediaError);
+            alert('Erro ao enviar a mídia anexada.');
+            return;
+          }
+        } else {
+          await sendHumanMessage(activeChatId, finalMessageText, properTargetInstance as string);
+        }
+
+        setInputText('');
+        setReplyMessage(null);
+        if (activeChatId) draftsRef.current[activeChatId] = '';
       }
       
-      // Reseta estados locais
-      setInputText('');
-      setChecklistDraft([]);
-      setIsTaskMode(false);
-      setTaskAssignedTo(null);
-      setNoteAttachedFile(null);
-      setNoteAttachedPreview(null);
-      setNoteAttachedType(null);
-      setNotePreviewMode(false);
-      setScheduleNote(false);
-      setScheduleNoteTitle('');
-      setScheduleNoteDate('');
-      setScheduleNoteTime('');
-    } else {
-      let finalMessageText = inputText;
-      if (replyMessage) {
-          const shortQuote = replyMessage.text.length > 80 ? replyMessage.text.substring(0, 80) + '...' : replyMessage.text;
-          finalMessageText = `> *Mensagem Citada:* "${shortQuote}"\n\n${inputText}`;
+      if (textareaRef.current) {
+         textareaRef.current.style.height = 'auto';
       }
-
-      if (pendingMediaToSend) {
-        try {
-          await useChatStore.getState().sendMediaFromUrl(
-            activeChatId, 
-            pendingMediaToSend.url, 
-            pendingMediaToSend.type, 
-            properTargetInstance as string, 
-            finalMessageText,
-            pendingMediaToSend.name
-          );
-          setPendingMediaToSend(null);
-          setQuickReplyToast({ shortcut: 'Mídia', type: 'sent' });
-          setTimeout(() => setQuickReplyToast(null), 3500);
-        } catch (mediaError) {
-          console.error('[handleSendHuman] Erro ao enviar mídia engatilhada:', mediaError);
-          alert('Erro ao enviar a mídia anexada.');
-          return;
-        }
-      } else {
-        sendHumanMessage(activeChatId, finalMessageText, properTargetInstance as string);
-      }
-
-      setInputText('');
-      setReplyMessage(null);
-      if (activeChatId) draftsRef.current[activeChatId] = '';
-    }
-    
-    if (textareaRef.current) {
-       textareaRef.current.style.height = 'auto';
+    } catch (error) {
+      console.error('[handleSendHuman] Erro inesperado durante o envio:', error);
+    } finally {
+      isSendingRef.current = false;
+      setIsSendingMessage(false);
     }
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
+  const processFiles = async (files: FileList | File[]) => {
     const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
     if (!files || files.length === 0 || !activeChatId || !properTargetInstance) return;
     
@@ -2517,7 +2537,48 @@ export default function ChatDashboard() {
         await useChatStore.getState().uploadAndSendMedia(activeChatId, file, mediaType, properTargetInstance as string);
       }
     }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files) {
+      await processFiles(files);
+    }
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDraggingFile(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDraggingFile(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(false);
+    dragCounter.current = 0;
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      await processFiles(e.dataTransfer.files);
+    }
   };
 
   const formatAudioTime = (seconds: number) => {
@@ -3987,13 +4048,23 @@ export default function ChatDashboard() {
         originalText={geminiModalState.originalText}
         suggestedText={geminiModalState.suggestedText}
         intent={geminiModalState.intent}
-        onSend={(finalText) => {
+        onSend={async (finalText) => {
+           if (isSendingRef.current) return;
            const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
            if (activeChatId && properTargetInstance) {
-             sendHumanMessage(activeChatId, finalText, properTargetInstance as string);
-             setInputText('');
-             if (textareaRef.current) {
-                textareaRef.current.style.height = 'auto';
+             isSendingRef.current = true;
+             setIsSendingMessage(true);
+             try {
+               await sendHumanMessage(activeChatId, finalText, properTargetInstance as string);
+               setInputText('');
+               if (textareaRef.current) {
+                  textareaRef.current.style.height = 'auto';
+               }
+             } catch (err) {
+               console.error('[GeminiEditorModal onSend] Erro ao enviar mensagem:', err);
+             } finally {
+               isSendingRef.current = false;
+               setIsSendingMessage(false);
              }
            }
         }}
@@ -4092,7 +4163,7 @@ export default function ChatDashboard() {
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
           {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '3.0.9'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '13/06/2026, 17:02'}`}</span>
+          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '3.1.5'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '13/06/2026, 17:02'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
@@ -5118,6 +5189,10 @@ export default function ChatDashboard() {
       {activeChat ? (
         <div 
           onClick={() => setActiveChatDropdown(false)}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
           className={cn("flex-1 flex flex-col relative w-full h-full max-w-[100vw] overflow-hidden min-w-0 bg-[#efeae2] dark:bg-[#0b141a]", !activeChatId && "hidden md:flex")} 
           style={{
            backgroundImage: 'url("https://w7.pngwing.com/pngs/946/407/png-transparent-whatsapp-background-theme-pattern-design.png")',
@@ -5125,6 +5200,21 @@ export default function ChatDashboard() {
            backgroundBlendMode: 'overlay',
            opacity: 0.95
         }}>
+          
+          {/* Overlay Premium de Drag & Drop */}
+          {isDraggingFile && (
+            <div className="absolute inset-0 bg-[#efeae2]/45 dark:bg-[#0b141a]/45 backdrop-blur-[6px] z-[99] flex items-center justify-center p-6 animate-in fade-in duration-200 pointer-events-none">
+              <div className="w-full max-w-md bg-white/95 dark:bg-[#222d34]/95 backdrop-blur-xl rounded-[32px] border-2 border-dashed border-[#00a884] p-10 flex flex-col items-center justify-center gap-6 shadow-[0_16px_48px_rgba(0,168,132,0.15)] transform scale-100 animate-in zoom-in-95 duration-200">
+                <div className="w-20 h-20 rounded-full bg-[#00a884]/10 flex items-center justify-center text-[#00a884] animate-bounce duration-1000">
+                  <UploadCloud size={40} className="stroke-[1.5]" />
+                </div>
+                <div className="text-center">
+                  <h3 className="font-extrabold text-lg text-[#111b21] dark:text-[#e9edef] tracking-tight">Solte o arquivo para enviar</h3>
+                  <p className="text-xs text-[#54656f] dark:text-[#8696a0] mt-1.5 font-medium">Imagens, vídeos, áudios ou documentos serão anexados automaticamente.</p>
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* Chat Header */}
           <div className="relative h-16 shrink-0 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5">
@@ -6635,16 +6725,27 @@ export default function ChatDashboard() {
                     {/* Botão de Enviar da Direita */}
                     <div className="flex items-center shrink-0">
                       {(inputText.trim() || (chatMode === 'internal_note' && isTaskMode)) ? (
-                        <button 
+                         <button 
                           type="submit"
+                          disabled={isSendingMessage}
                           className={cn(
-                            "w-10 h-10 flex items-center justify-center text-white rounded-full shadow-md hover:scale-105 transition-all active:scale-95 shrink-0 animate-in fade-in zoom-in-95 duration-200",
+                            "w-10 h-10 flex items-center justify-center text-white rounded-full shadow-md transition-all shrink-0 animate-in fade-in zoom-in-95 duration-200",
+                            isSendingMessage 
+                              ? "opacity-50 cursor-not-allowed" 
+                              : "hover:scale-105 active:scale-95",
                             chatMode === 'internal_note'
                               ? "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-lg shadow-amber-500/20 hover:shadow-amber-500/35 border border-amber-600/10"
                               : "bg-[#00a884] hover:bg-[#00a884]/90 shadow-emerald-500/20"
                           )}
                         >
-                          <Send size={16} className="translate-x-0.5" />
+                          {isSendingMessage ? (
+                            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                          ) : (
+                            <Send size={16} className="translate-x-0.5" />
+                          )}
                         </button>
                       ) : (
                         chatMode !== 'internal_note' && (

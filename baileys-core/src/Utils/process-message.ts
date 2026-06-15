@@ -513,6 +513,24 @@ const processMessage = async (
 	} else if (message.messageStubType) {
 		const jid = message.key?.remoteJid!
 		//let actor = whatsappID (message.participant)
+		const safeParseParticipant = (a: any): any => {
+			if (typeof a !== 'string') return a
+			try {
+				const parsed = JSON.parse(a)
+				if (typeof parsed === 'string') {
+					return { id: parsed }
+				}
+				if (parsed && typeof parsed === 'object') {
+					if (!parsed.id && parsed.lid) {
+						parsed.id = parsed.lid
+					}
+					return parsed
+				}
+				return { id: a }
+			} catch (e) {
+				return { id: a }
+			}
+		}
 		let participants: GroupParticipant[]
 		const emitParticipantsUpdate = (action: ParticipantAction) =>
 			ev.emit('group-participants.update', {
@@ -544,12 +562,12 @@ const processMessage = async (
 
 		switch (message.messageStubType) {
 			case WAMessageStubType.GROUP_PARTICIPANT_CHANGE_NUMBER:
-				participants = message.messageStubParameters.map((a: any) => JSON.parse(a as string)) || []
+				participants = message.messageStubParameters.map((a: any) => safeParseParticipant(a)) || []
 				emitParticipantsUpdate('modify')
 				break
 			case WAMessageStubType.GROUP_PARTICIPANT_LEAVE:
 			case WAMessageStubType.GROUP_PARTICIPANT_REMOVE:
-				participants = message.messageStubParameters.map((a: any) => JSON.parse(a as string)) || []
+				participants = message.messageStubParameters.map((a: any) => safeParseParticipant(a)) || []
 				emitParticipantsUpdate('remove')
 				// mark the chat read only if you left the group
 				if (participantsIncludesMe()) {
@@ -560,7 +578,7 @@ const processMessage = async (
 			case WAMessageStubType.GROUP_PARTICIPANT_ADD:
 			case WAMessageStubType.GROUP_PARTICIPANT_INVITE:
 			case WAMessageStubType.GROUP_PARTICIPANT_ADD_REQUEST_JOIN:
-				participants = message.messageStubParameters.map((a: any) => JSON.parse(a as string)) || []
+				participants = message.messageStubParameters.map((a: any) => safeParseParticipant(a)) || []
 				if (participantsIncludesMe()) {
 					chat.readOnly = false
 				}
@@ -568,11 +586,11 @@ const processMessage = async (
 				emitParticipantsUpdate('add')
 				break
 			case WAMessageStubType.GROUP_PARTICIPANT_DEMOTE:
-				participants = message.messageStubParameters.map((a: any) => JSON.parse(a as string)) || []
+				participants = message.messageStubParameters.map((a: any) => safeParseParticipant(a)) || []
 				emitParticipantsUpdate('demote')
 				break
 			case WAMessageStubType.GROUP_PARTICIPANT_PROMOTE:
-				participants = message.messageStubParameters.map((a: any) => JSON.parse(a as string)) || []
+				participants = message.messageStubParameters.map((a: any) => safeParseParticipant(a)) || []
 				emitParticipantsUpdate('promote')
 				break
 			case WAMessageStubType.GROUP_CHANGE_ANNOUNCE:
@@ -606,7 +624,7 @@ const processMessage = async (
 				emitGroupUpdate({ joinApprovalMode: approvalMode === 'on' })
 				break
 			case WAMessageStubType.GROUP_MEMBERSHIP_JOIN_APPROVAL_REQUEST_NON_ADMIN_ADD: // TODO: Add other events
-				const participant = JSON.parse(message.messageStubParameters?.[0]) as LIDMapping
+				const participant = safeParseParticipant(message.messageStubParameters?.[0]) as LIDMapping
 				const action = message.messageStubParameters?.[1] as RequestJoinAction
 				const method = message.messageStubParameters?.[2] as RequestJoinMethod
 				emitGroupRequestJoin(participant, action, method)

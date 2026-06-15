@@ -10,7 +10,7 @@ fetch(url, {
     'Prefer': 'return=representation'
   },
   body: JSON.stringify({
-    version: '3.0.9',
+    version: '3.1.5',
     deploy_date: new Date().toISOString()
   })
 })
@@ -22,7 +22,7 @@ fetch(url, {
   return res.json();
 })
 .then(data => {
-  console.log('Versão 3.0.9 registrada com sucesso no Supabase!', data);
+  console.log('Versão 3.1.5 registrada com sucesso no Supabase!', data);
   process.exit(0);
 })
 .catch(err => {

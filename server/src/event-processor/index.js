@@ -1,4 +1,4 @@
-import { supabase } from '../supabase.js';
+import { supabase, NODE_ID } from '../supabase.js';
 import realtime from '../realtime-publisher/index.js';
 import qrcode from 'qrcode';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
@@ -1417,14 +1417,20 @@ class EventProcessor {
                 const isTransient = [408, 428, 440, 503, 515].includes(reason);
 
                 if (isTransient) {
-                    await supabase.from('whatsapp_instances').update({ status: 'connecting', last_error: `Reconnecting (Code: ${reason})` }).eq('id', instanceId);
+                    await supabase.from('whatsapp_instances')
+                        .update({ status: 'connecting', last_error: `Reconnecting (Code: ${reason})` })
+                        .eq('id', instanceId)
+                        .eq('assigned_node_id', NODE_ID);
                     payload.status = 'connecting';
                     payload.reason = reason;
                 } else {
                     const errMsg = reason === 409
                         ? 'Desconectado por conflito: Outro dispositivo se conectou a esta conta de WhatsApp. O sistema suspendeu reconexões automáticas.'
                         : `Code: ${reason}`;
-                    await supabase.from('whatsapp_instances').update({ status: 'offline', last_error: errMsg }).eq('id', instanceId);
+                    await supabase.from('whatsapp_instances')
+                        .update({ status: 'offline', last_error: errMsg })
+                        .eq('id', instanceId)
+                        .eq('assigned_node_id', NODE_ID);
                     payload.status = 'offline';
                     payload.reason = reason;
                     if(loggedOut) payload.loggedOut = true;
@@ -1432,7 +1438,10 @@ class EventProcessor {
             }
 
             if (connection === 'open') {
-                await supabase.from('whatsapp_instances').update({ status: 'connected', last_error: null }).eq('id', instanceId);
+                await supabase.from('whatsapp_instances')
+                    .update({ status: 'connected', last_error: null })
+                    .eq('id', instanceId)
+                    .eq('assigned_node_id', NODE_ID);
                 await supabase.from('whatsapp_instance_runtime').upsert({ instance_id: instanceId, tenant_id: tenantId, qr_code: null }, { onConflict: 'instance_id' });
                 payload.status = 'connected';
             }

@@ -444,36 +444,7 @@ export function MainSidebar() {
 
       <div className={cn("flex-1 overflow-y-auto w-full styled-scrollbar", reopenedTicketToast ? "pb-32" : "pb-20")}>
         
-        {/* Search */}
-        <div className="px-3 py-3">
-          <div className="relative flex items-center w-full h-8 bg-gray-200/50 dark:bg-[#202c33] rounded-md border border-gray-250 dark:border-transparent focus-within:border-[#00a884]/50 focus-within:ring-1 focus-within:ring-[#00a884]/50 transition-all overflow-hidden">
-            <Search size={14} className="absolute left-2.5 text-[#8696a0] shrink-0" />
-            <input 
-              type="text" 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Pesquisar..." 
-              className={cn(
-                "w-full h-full bg-transparent border-none focus:outline-none focus:ring-0 text-[#111b21] dark:text-[#d1d7db] text-[13px] pl-8 pr-8 placeholder-[#8696a0] transition-opacity duration-200",
-                "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100"
-              )}
-            />
-            {searchQuery && (
-              <button 
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 text-[#8696a0] hover:text-[#d1d7db]"
-              >
-                <X size={14} />
-              </button>
-            )}
-            {!searchQuery && (
-              <div className={cn(
-                "absolute right-2 px-1.5 py-0.5 rounded bg-gray-200 dark:bg-black/20 font-mono text-[9px] text-[#8696a0] tracking-tighter transition-opacity duration-200",
-                "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100"
-              )}>/</div>
-            )}
-          </div>
-        </div>
+
 
         {/* Switch Robo I.A Global */}
         <div className="px-3 pb-3">

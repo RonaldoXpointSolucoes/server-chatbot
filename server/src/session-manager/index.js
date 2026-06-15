@@ -3,7 +3,7 @@ import { useSupabaseAuthState } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
 import pino from 'pino';
-import { supabase } from '../supabase.js';
+import { supabase, NODE_ID } from '../supabase.js';
 
 class SessionManager {
     constructor() {
@@ -13,6 +13,7 @@ class SessionManager {
         this.conflictAttempts = new Map();
         this.conflictTimeouts = new Map();
         this.queues = new Map();
+        this.watchdogs = new Map();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -61,6 +62,23 @@ class SessionManager {
         };
 
         this.logger = pino({ level: 'info' }, pinoStream);
+
+        // Loop de renovação do Lease (Heartbeat) - roda a cada 30 segundos
+        setInterval(async () => {
+            const activeIds = Array.from(this.sessions.keys());
+            if (activeIds.length > 0) {
+                try {
+                    await supabase.from('whatsapp_instances')
+                        .update({
+                            lease_until: new Date(Date.now() + 60000).toISOString()
+                        })
+                        .in('id', activeIds)
+                        .eq('assigned_node_id', NODE_ID);
+                } catch (e) {
+                    console.error("[SessionManager/Heartbeat] Erro ao renovar leases:", e.message);
+                }
+            }
+        }, 30000);
     }
 
     async createSession(tenantId, instanceId) {
@@ -87,6 +105,12 @@ class SessionManager {
 
     async _createSessionInner(tenantId, instanceId) {
         try {
+            // Assume o lease e trava a posse do worker antes de iniciar
+            await supabase.from('whatsapp_instances').update({
+                assigned_node_id: NODE_ID,
+                lease_until: new Date(Date.now() + 60000).toISOString()
+            }).eq('id', instanceId);
+
             const { state, saveCreds } = await useSupabaseAuthState(tenantId, instanceId);
             const { version, isLatest } = await fetchLatestBaileysVersion();
             
@@ -108,14 +132,14 @@ class SessionManager {
                 logger: this.logger,
                 printQRInTerminal: false,
                 auth: state,
-                browser: Browsers.ubuntu('Chrome'),
+                browser: Browsers.macOS('Desktop'),
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: false,
                 markOnlineOnConnect: true,
                 emitOwnEvents: true,
-                connectTimeoutMs: 60000,
-                keepAliveIntervalMs: 25000,
-                defaultQueryTimeoutMs: 120000,
+                connectTimeoutMs: 90000,
+                keepAliveIntervalMs: 15000,
+                defaultQueryTimeoutMs: 90000,
                 retryRequestDelayMs: 10000,
                 maxMsgRetryCount: 0, // Desativado para evitar loops de retry em grupos que causam BAN
                 msgRetryCounterCache,
@@ -131,6 +155,7 @@ class SessionManager {
 
                 const { connection, lastDisconnect } = update;
                 if (connection === 'open') {
+                    this.startWatchdog(tenantId, instanceId, sock);
                     this.reconnectAttempts.delete(instanceId);
                     
                     // Defer clearing conflictAttempts until connection is stable for 5 minutes
@@ -146,6 +171,7 @@ class SessionManager {
                 }
 
                 if (connection === 'close') {
+                    this.clearWatchdog(instanceId);
                     // Clear stable connection timeout if it disconnected early
                     if (this.conflictTimeouts.has(instanceId)) {
                         clearTimeout(this.conflictTimeouts.get(instanceId));
@@ -180,7 +206,8 @@ class SessionManager {
                                     status: 'offline', 
                                     last_error: 'Desconectado por conflito. Outro dispositivo se conectou a esta conta de WhatsApp. O sistema interrompeu as reconexões automáticas para evitar banimento. Reconecte manualmente no painel.' 
                                 })
-                                .eq('id', instanceId);
+                                .eq('id', instanceId)
+                                .eq('assigned_node_id', NODE_ID);
                             
                             // Publica evento de status offline para o frontend
                             await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
@@ -293,7 +320,7 @@ class SessionManager {
             this.sessions.set(instanceId, { sock, tenantId });
 
             await supabase.from('whatsapp_instances').update({
-                assigned_node_id: 'worker-1',
+                assigned_node_id: NODE_ID,
                 lease_until: new Date(Date.now() + 60000).toISOString()
             }).eq('id', instanceId);
 
@@ -341,6 +368,7 @@ class SessionManager {
     }
 
     async closeSession(instanceId) {
+        this.clearWatchdog(instanceId);
         const data = this.sessions.get(instanceId);
         if (data && data.sock) {
             try { data.sock.ws.close(); } catch(e){}
@@ -349,7 +377,45 @@ class SessionManager {
             await supabase.from('whatsapp_instances').update({
                 status: 'offline',
                 assigned_node_id: null
-            }).eq('id', instanceId);
+            }).eq('id', instanceId)
+            .eq('assigned_node_id', NODE_ID);
+        }
+    }
+
+    startWatchdog(tenantId, instanceId, sock) {
+        this.clearWatchdog(instanceId);
+        
+        let lastActivity = Date.now();
+        
+        const updateListener = () => {
+            lastActivity = Date.now();
+        };
+        
+        sock.ev.on('connection.update', updateListener);
+        
+        const interval = setInterval(() => {
+            if (Date.now() - lastActivity > 120000) {
+                console.warn(`[SessionManager/Watchdog] Instância ${instanceId} inativa/zumbi detectada (sem atividade por 120s). Forçando reinicialização do socket...`);
+                this.clearWatchdog(instanceId);
+                try {
+                    sock.end(new Error("Zombie connection detected by watchdog"));
+                } catch(e) {
+                    try { sock.ws.close(); } catch(err){}
+                }
+            }
+        }, 30000);
+        
+        this.watchdogs.set(instanceId, { interval, updateListener, sock });
+    }
+
+    clearWatchdog(instanceId) {
+        if (this.watchdogs.has(instanceId)) {
+            const { interval, updateListener, sock } = this.watchdogs.get(instanceId);
+            clearInterval(interval);
+            try {
+                sock.ev.off('connection.update', updateListener);
+            } catch(e) {}
+            this.watchdogs.delete(instanceId);
         }
     }
 }

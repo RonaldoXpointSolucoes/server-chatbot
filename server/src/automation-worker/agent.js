@@ -380,6 +380,24 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 console.error('[AutomationWorker] Erro ao buscar correções de IA:', errCorr);
             }
 
+            // Determina se é a primeira mensagem do bot nesta conversa
+            let isFirstMessage = false;
+            if (conversationId) {
+                try {
+                    const { count } = await supabase
+                        .from('messages')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('tenant_id', tenantId)
+                        .eq('conversation_id', conversationId)
+                        .eq('direction', 'outbound');
+                    isFirstMessage = (count === 0);
+                } catch (errFirstMsg) {
+                    console.error('[AutomationWorker] Erro ao verificar primeira mensagem:', errFirstMsg);
+                }
+            } else {
+                isFirstMessage = true; // Se não houver conversa ativa ainda no BD, considera como a primeira
+            }
+
             // 2. Prepara o System Prompt
             let basePrompt = botSettings.systemPrompt || botSettings.system_prompt || "Você é um assistente prestativo.";
             
@@ -397,6 +415,16 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `3. Use escuta ativa: valide as emoções do cliente. Se ele relatar um problema ou demonstrar urgência/ansiedade, responda com empatia profunda (ex: "Entendo perfeitamente", "Sinto muito por isso, deixa comigo que vou resolver", "Vou te ajudar agora mesmo").\n` +
                           `4. Escreva com naturalidade: use parágrafos curtos, linguagem coloquial profissional fluida do Brasil e adicione de 1 a 3 emojis calorosos para humanizar a conversa, sem exagerar.\n` +
                           `5. PRIORIZE E SIGA ESTRITAMENTE as instruções e exemplos de respostas corrigidas que constam no Manual de Raciocínio e Ajustes da I.A ou nas correções anteriores. Se houver uma correção registrada para uma pergunta similar do cliente, você deve replicar o estilo, o tom e a solução adotada pelo atendente humano.\n`;
+
+            // Regra de Prioridade do Cardápio Digital e Envio na Primeira Mensagem
+            basePrompt += `\n\n### DIRETRIZES DO CARDÁPIO DIGITAL (ESTRITAS E OBRIGATÓRIAS) ###\n` +
+                          `1. O link oficial do cardápio digital da empresa é: [LINK_CARDAPIO]. Você DEVE usar e enviar exatamente este link: [LINK_CARDAPIO] sempre que se referir ao cardápio digital, site, menu ou onde fazer pedidos.\n` +
+                          `2. PRIORIDADE ABSOLUTA: NUNCA sob nenhuma circunstância use ou informe qualquer outro link ou URL de cardápio/site que você encontrar na Base de Conhecimento (RAG) ou no contexto dos arquivos. O link [LINK_CARDAPIO] é soberano e anula qualquer outro link divergente encontrado nos documentos.\n` +
+                          `3. Quando o cliente pedir o link do cardápio, envie apenas e exatamente o link [LINK_CARDAPIO].\n`;
+
+            if (isFirstMessage) {
+                basePrompt += `\n⚠️ AVISO DE PRIMEIRA MENSAGEM (URGENTE/OBRIGATÓRIO): Esta é a PRIMEIRA mensagem desta conversa. Você DEVE saudar o cliente com carinho e OBRIGATORIAMENTE incluir o link do cardápio digital [LINK_CARDAPIO] nesta resposta inicial.\n`;
+            }
 
             if (botInstructions && botInstructions.trim().length > 0) {
                 basePrompt += `\n\n### INSTRUÇÕES DE COMPORTAMENTO PERSONALIZADAS ###\nImportante: Siga estritamente as diretrizes e regras de personalidade a seguir em todas as interações:\n${botInstructions}\n`;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrainCircuit, UploadCloud, FileText, File, Trash2, CheckCircle2, AlertCircle, Loader2, Search, Zap, Info, Server, ArrowLeft, Eye, Save, Database, X, Plus, Edit3, PlusCircle } from 'lucide-react';
+import { BrainCircuit, UploadCloud, FileText, File, Trash2, CheckCircle2, AlertCircle, Loader2, Search, Zap, Info, Server, ArrowLeft, Eye, Save, Database, X, Plus, Edit3, PlusCircle, List, Grid, ChevronLeft, ChevronRight, Square, CheckSquare, ChevronDown } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
 
@@ -259,6 +259,16 @@ export default function KnowledgeBase() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState<'all' | 'pdf' | 'text'>('all');
 
+  // Estados para paginação, visualização e seleção em massa
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(12);
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+
+  // Estados de busca avançada
+  const [matchingChunkDocIds, setMatchingChunkDocIds] = useState<string[]>([]);
+  const [isSearchingContent, setIsSearchingContent] = useState(false);
+
   // Estados para Gerenciamento Estruturado de Correções (Manual RAG)
   const [corrections, setCorrections] = useState<any[]>([]);
   const [editingCorrection, setEditingCorrection] = useState<any | null>(null);
@@ -271,6 +281,44 @@ export default function KnowledgeBase() {
   });
 
   const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId') || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
+
+  // Resetar página quando os filtros mudarem
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedType]);
+
+  // Busca avançada de conteúdo nos chunks
+  useEffect(() => {
+    const delayDebounce = setTimeout(async () => {
+      const trimmedSearch = searchTerm.trim();
+      if (trimmedSearch.length >= 3) {
+        setIsSearchingContent(true);
+        try {
+          const { data, error } = await supabase
+            .from('knowledge_chunks')
+            .select('document_id')
+            .eq('tenant_id', tenantId)
+            .ilike('content', `%${trimmedSearch}%`);
+          
+          if (!error && data) {
+            const ids = Array.from(new Set(data.map(item => item.document_id).filter(Boolean))) as string[];
+            setMatchingChunkDocIds(ids);
+          } else {
+            setMatchingChunkDocIds([]);
+          }
+        } catch (err) {
+          console.error("Erro pesquisando conteúdo nos chunks:", err);
+          setMatchingChunkDocIds([]);
+        } finally {
+          setIsSearchingContent(false);
+        }
+      } else {
+        setMatchingChunkDocIds([]);
+      }
+    }, 400);
+
+    return () => clearTimeout(delayDebounce);
+  }, [searchTerm, tenantId]);
 
   useEffect(() => {
     fetchDocuments();
@@ -553,6 +601,67 @@ export default function KnowledgeBase() {
       }
   };
 
+  // Filtros de documentos e paginação (ordenado do mais recente para o mais antigo)
+  const filteredDocuments = documents
+    .filter(doc => {
+      const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            matchingChunkDocIds.includes(doc.id);
+      const matchesType = selectedType === 'all' 
+        ? true 
+        : selectedType === 'pdf' 
+          ? doc.type === 'application/pdf' 
+          : doc.type !== 'application/pdf';
+      return matchesSearch && matchesType;
+    })
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  const totalPages = Math.ceil(filteredDocuments.length / pageSize) || 1;
+  const effectiveCurrentPage = Math.min(currentPage, totalPages);
+  const paginatedDocuments = filteredDocuments.slice((effectiveCurrentPage - 1) * pageSize, effectiveCurrentPage * pageSize);
+
+  // Seleção e exclusão em lote
+  const isAllSelected = paginatedDocuments.length > 0 && paginatedDocuments.every(doc => selectedDocIds.includes(doc.id));
+  
+  const toggleSelectDoc = (id: string) => {
+    setSelectedDocIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      const idsToRemove = paginatedDocuments.map(doc => doc.id);
+      setSelectedDocIds(prev => prev.filter(id => !idsToRemove.includes(id)));
+    } else {
+      const idsToAdd = paginatedDocuments.map(doc => doc.id).filter(id => !selectedDocIds.includes(id));
+      setSelectedDocIds(prev => [...prev, ...idsToAdd]);
+    }
+  };
+
+  const deleteSelectedDocuments = async () => {
+    if (selectedDocIds.length === 0) return;
+    if (!confirm(`Tem certeza de que deseja excluir os ${selectedDocIds.length} documentos selecionados? Isso removerá permanentemente todos os vetores e dados associados.`)) return;
+    
+    setIsSavingContent(true);
+    try {
+      const { error } = await supabase
+        .from('knowledge_documents')
+        .delete()
+        .in('id', selectedDocIds)
+        .eq('tenant_id', tenantId);
+
+      if (error) throw error;
+
+      setDocuments(prev => prev.filter(d => !selectedDocIds.includes(d.id)));
+      setSelectedDocIds([]);
+      setCurrentPage(1);
+    } catch (err: any) {
+      alert(`Erro ao excluir em lote: ${err.message}`);
+    } finally {
+      setIsSavingContent(false);
+    }
+  };
+
   return (
     <div className="flex-1 p-6 md:p-10 overflow-y-auto animate-in fade-in slide-in-from-bottom-4 duration-500 rounded-3xl bg-[#0b141a]/40 m-4 border border-white/5 shadow-2xl relative">
       <div className="absolute -top-40 -left-40 w-96 h-96 bg-emerald-600/20 rounded-full blur-[120px] pointer-events-none"></div>
@@ -761,25 +870,27 @@ export default function KnowledgeBase() {
                  </div>
                )}
             </div>
-            
-        </div>
-
-        {/* Lista de Documentos com Busca e Filtros */}
+         </div>
+          {/* Lista de Documentos com Busca e Filtros */}
         <div className="mt-4 flex flex-col gap-6">
            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/5 pb-4">
               <h2 className="text-xl font-bold text-gray-200 flex items-center gap-2">
                  Arquivos Globais da Empresa <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2.5 py-0.5 rounded-full">{documents.length}</span>
               </h2>
               
-              <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
                  {/* Input de Busca */}
                  <div className="relative w-full sm:w-60">
-                    <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                    {isSearchingContent ? (
+                       <Loader2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-400 animate-spin" />
+                    ) : (
+                       <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                    )}
                     <input 
                        type="text" 
                        value={searchTerm}
                        onChange={e => setSearchTerm(e.target.value)}
-                       placeholder="Buscar base por nome..."
+                       placeholder="Buscar por nome ou conteúdo..."
                        className="w-full bg-black/40 border border-gray-700/50 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-gray-200 focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-gray-600"
                     />
                     {searchTerm && (
@@ -808,120 +919,326 @@ export default function KnowledgeBase() {
                        TXTs / Manuais
                     </button>
                  </div>
+
+                 {/* Seletor de visualização (Grid / Lista) */}
+                 <div className="flex bg-black/40 border border-gray-700/30 p-1 rounded-2xl">
+                    <button
+                       onClick={() => setViewMode('grid')}
+                       className={`p-1.5 rounded-xl transition-all ${viewMode === 'grid' ? 'bg-emerald-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}
+                       title="Visualização em Grade"
+                    >
+                       <Grid size={16} />
+                    </button>
+                    <button
+                       onClick={() => setViewMode('list')}
+                       className={`p-1.5 rounded-xl transition-all ${viewMode === 'list' ? 'bg-emerald-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}
+                       title="Visualização em Lista"
+                    >
+                       <List size={16} />
+                    </button>
+                 </div>
+
+                 {/* Seletor de tamanho de página */}
+                 <div className="relative">
+                    <select
+                       value={pageSize}
+                       onChange={e => {
+                          setPageSize(Number(e.target.value));
+                          setCurrentPage(1);
+                       }}
+                       className="bg-black/40 border border-gray-700/50 rounded-2xl px-3.5 py-2.5 text-xs text-gray-200 focus:outline-none focus:border-emerald-500/50 appearance-none pr-8 cursor-pointer font-bold"
+                    >
+                       <option value={12}>12 por pág.</option>
+                       <option value={24}>24 por pág.</option>
+                       <option value={48}>48 por pág.</option>
+                       <option value={96}>96 por pág.</option>
+                    </select>
+                    <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                 </div>
               </div>
            </div>
-           
-           {(() => {
-              const filteredDocuments = documents.filter(doc => {
-                const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase());
-                const matchesType = selectedType === 'all' 
-                  ? true 
-                  : selectedType === 'pdf' 
-                    ? doc.type === 'application/pdf' 
-                    : doc.type !== 'application/pdf';
-                return matchesSearch && matchesType;
-              });
 
-              return (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in duration-500">
-                   {filteredDocuments.length === 0 && !isUploading && (
-                       <div className="col-span-full py-12 flex flex-col items-center justify-center opacity-50 bg-black/10 border border-dashed border-gray-700 rounded-3xl">
-                          <FileText size={48} className="mb-4 text-gray-500" />
-                          <p className="text-sm">Nenhum documento encontrado para este filtro.</p>
-                       </div>
-                   )}
-                   
-                   {filteredDocuments.map((doc) => {
-                       const sizeFormatted = doc.metadata?.size 
-                         ? (doc.metadata.size / 1024).toFixed(1) + ' KB' 
-                         : 'TXT Manual';
+           {/* Barra de Ações em Massa */}
+           {selectedDocIds.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-3xl backdrop-blur-md animate-in slide-in-from-top-4 duration-300 text-left">
+                 <div className="flex items-center gap-2 text-emerald-400">
+                    <CheckSquare size={18} />
+                    <span className="text-xs font-bold">
+                       {selectedDocIds.length} {selectedDocIds.length === 1 ? 'documento selecionado' : 'documentos selecionados'}
+                    </span>
+                 </div>
+                 
+                 <div className="flex items-center gap-2.5 w-full sm:w-auto">
+                    <button
+                       onClick={deleteSelectedDocuments}
+                       className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/40 px-4 py-2 rounded-xl text-xs font-bold transition-all"
+                    >
+                       <Trash2 size={14} /> Excluir Selecionados
+                    </button>
+                    <button
+                       onClick={() => setSelectedDocIds([])}
+                       className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 hover:border-white/10 px-4 py-2 rounded-xl text-xs font-bold transition-all"
+                    >
+                       <X size={14} /> Limpar Seleção
+                    </button>
+                 </div>
+              </div>
+           )}
 
-                       const chunksTotal = doc.metadata?.chunks_total || 0;
-                       const chunksProcessed = doc.metadata?.chunks_processed || 0;
-                       const percent = chunksTotal > 0 ? Math.round((chunksProcessed / chunksTotal) * 100) : 0;
-                       const statusMsg = doc.metadata?.current_status || 'Vetorizando...';
+           {filteredDocuments.length === 0 && !isUploading ? (
+              <div className="py-12 flex flex-col items-center justify-center opacity-50 bg-black/10 border border-dashed border-gray-700 rounded-3xl">
+                 <FileText size={48} className="mb-4 text-gray-500" />
+                 <p className="text-sm">Nenhum documento encontrado para este filtro.</p>
+              </div>
+           ) : (
+              <>
+                 {viewMode === 'grid' ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in duration-500">
+                       {paginatedDocuments.map((doc) => {
+                          const sizeFormatted = doc.metadata?.size 
+                            ? (doc.metadata.size / 1024).toFixed(1) + ' KB' 
+                            : 'TXT Manual';
 
-                       return (
-                         <div key={doc.id} className="bg-black/30 backdrop-blur-md rounded-3xl p-5 border border-white/5 hover:border-emerald-500/30 transition-all group relative overflow-hidden shadow-xl hover:shadow-2xl flex flex-col gap-4 text-left">
-                            <div className="absolute -right-10 -top-10 bg-white/5 w-32 h-32 rounded-full blur-2xl group-hover:bg-emerald-500/10 transition-colors pointer-events-none"></div>
-                            
-                            <div className="flex justify-between items-start relative z-10">
-                               <div className={`p-3 rounded-2xl flex items-center justify-center shadow-lg border border-white/10
-                                   ${doc.type === 'application/pdf' ? 'bg-red-500/20 text-red-400' : 'bg-blue-500/20 text-blue-400'}
-                               `}>
-                                  <File size={24} />
+                          const chunksTotal = doc.metadata?.chunks_total || 0;
+                          const chunksProcessed = doc.metadata?.chunks_processed || 0;
+                          const percent = chunksTotal > 0 ? Math.round((chunksProcessed / chunksTotal) * 100) : 0;
+                          const statusMsg = doc.metadata?.current_status || 'Vetorizando...';
+                          const isSelected = selectedDocIds.includes(doc.id);
+
+                          return (
+                            <div key={doc.id} className={`bg-black/30 backdrop-blur-md rounded-3xl p-5 border hover:border-emerald-500/30 transition-all group relative overflow-hidden shadow-xl hover:shadow-2xl flex flex-col gap-4 text-left ${isSelected ? 'border-emerald-500/40 ring-1 ring-emerald-500/20' : 'border-white/5'}`}>
+                               <div className="absolute -right-10 -top-10 bg-white/5 w-32 h-32 rounded-full blur-2xl group-hover:bg-emerald-500/10 transition-colors pointer-events-none"></div>
+                               
+                               <div className="flex justify-between items-start relative z-10">
+                                  <div className="flex items-center gap-2">
+                                     <button 
+                                        onClick={(e) => {
+                                           e.stopPropagation();
+                                           toggleSelectDoc(doc.id);
+                                        }} 
+                                        className="text-gray-400 hover:text-emerald-400 transition-colors bg-white/5 hover:bg-white/10 p-2.5 rounded-2xl border border-white/10"
+                                        title={isSelected ? "Desmarcar" : "Selecionar"}
+                                     >
+                                        {isSelected ? <CheckSquare size={16} className="text-emerald-400" /> : <Square size={16} />}
+                                     </button>
+                                     <div className={`p-2.5 rounded-2xl flex items-center justify-center shadow-lg border border-white/10
+                                         ${doc.type === 'application/pdf' ? 'bg-red-500/20 text-red-400' : 'bg-blue-500/20 text-blue-400'}
+                                     `}>
+                                        <File size={16} />
+                                     </div>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-1.5">
+                                     {doc.status === 'processing' && (
+                                        <span className="flex items-center gap-1.5 bg-orange-500/20 text-orange-400 px-3 py-1 rounded-full text-xs font-bold animate-pulse border border-orange-500/30">
+                                          <Loader2 size={12} className="animate-spin" /> Vetorizando
+                                        </span>
+                                     )}
+                                     {(doc.status === 'ready' || doc.status === 'processed') && (
+                                        <span className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full text-xs font-bold border border-emerald-500/20">
+                                          <CheckCircle2 size={14} /> Pronto
+                                        </span>
+                                     )}
+                                     {doc.status === 'error' && (
+                                        <span className="flex items-center gap-1 bg-red-500/20 text-red-400 px-3 py-1 rounded-full text-xs font-bold border border-red-500/30 animate-pulse" title={doc.metadata?.err}>
+                                          <AlertCircle size={14} /> Falha
+                                        </span>
+                                     )}
+                                  </div>
                                </div>
                                
-                               <div className="flex items-center gap-1.5">
-                                  {doc.status === 'processing' && (
-                                     <span className="flex items-center gap-1.5 bg-orange-500/20 text-orange-400 px-3 py-1 rounded-full text-xs font-bold animate-pulse border border-orange-500/30">
-                                       <Loader2 size={12} className="animate-spin" /> Vetorizando
-                                     </span>
-                                  )}
-                                  {(doc.status === 'ready' || doc.status === 'processed') && (
-                                     <span className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full text-xs font-bold border border-emerald-500/20">
-                                       <CheckCircle2 size={14} /> Pronto
-                                     </span>
-                                  )}
-                                  {doc.status === 'error' && (
-                                     <span className="flex items-center gap-1 bg-red-500/20 text-red-400 px-3 py-1 rounded-full text-xs font-bold border border-red-500/30 animate-pulse" title={doc.metadata?.err}>
-                                       <AlertCircle size={14} /> Falha
-                                     </span>
-                                  )}
+                               <div className="relative z-10 flex-1">
+                                   <h3 className="text-gray-200 font-bold text-lg truncate mb-1" title={doc.name}>{doc.name}</h3>
+                                   <div className="text-gray-500 text-xs flex flex-col gap-1">
+                                       <div>{sizeFormatted} • Adicionado em {new Date(doc.created_at).toLocaleDateString('pt-BR')} às {new Date(doc.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
+                                       {doc.metadata?.last_update && (
+                                          <div className="text-emerald-400/90 font-bold flex items-center gap-1">
+                                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block"></span>
+                                             Último Update: {new Date(doc.metadata.last_update).toLocaleString('pt-BR')}
+                                          </div>
+                                       )}
+                                   </div>
                                </div>
-                            </div>
-                            
-                            <div className="relative z-10 flex-1">
-                                <h3 className="text-gray-200 font-bold text-lg truncate mb-1" title={doc.name}>{doc.name}</h3>
-                                <div className="text-gray-500 text-xs flex flex-col gap-1">
-                                    <div>{sizeFormatted} • Adicionado em {new Date(doc.created_at).toLocaleDateString()}</div>
-                                    {doc.metadata?.last_update && (
-                                       <div className="text-emerald-400/90 font-bold flex items-center gap-1">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block"></span>
-                                          Último Update: {new Date(doc.metadata.last_update).toLocaleString('pt-BR')}
-                                       </div>
-                                    )}
+
+                               {doc.status === 'processing' && (
+                                  <div className="w-full bg-black/40 p-3 rounded-xl border border-white/5 relative z-10 animate-in slide-in-from-top-2 duration-300">
+                                     <div className="flex justify-between items-center mb-1 text-[10px] text-orange-400 font-bold uppercase tracking-wider">
+                                        <span className="truncate max-w-[80%]">{statusMsg}</span>
+                                        <span>{percent}%</span>
+                                     </div>
+                                     <div className="w-full bg-orange-500/10 border border-orange-500/20 rounded-full h-1.5 overflow-hidden">
+                                        <div 
+                                           className="bg-gradient-to-r from-orange-500 to-amber-400 h-full rounded-full transition-all duration-300" 
+                                           style={{ width: `${percent}%` }}
+                                        />
+                                     </div>
+                                  </div>
+                               )}
+
+                               <div className="mt-4 flex gap-2 relative z-10">
+                                  {(doc.status === 'ready' || doc.status === 'processed') && (
+                                     <button 
+                                        onClick={() => handleViewContent(doc)} 
+                                        className="flex-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 hover:text-indigo-300 py-2.5 rounded-xl text-sm font-bold transition-all border border-indigo-500/20 hover:border-indigo-500/40 flex items-center justify-center gap-2"
+                                     >
+                                        <Eye size={16} /> Acessar Dados
+                                     </button>
+                                  )}
+                                  <button 
+                                     onClick={() => deleteDocument(doc.id)} 
+                                     className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 py-2.5 rounded-xl text-sm font-bold transition-all border border-red-500/20 hover:border-red-500/40 flex items-center justify-center gap-2"
+                                  >
+                                     <Trash2 size={16} /> Excluir Base
+                                  </button>
                                 </div>
                             </div>
+                          );
+                       })}
+                    </div>
+                 ) : (
+                    <div className="w-full overflow-x-auto rounded-3xl border border-white/5 bg-black/20 backdrop-blur-md shadow-xl custom-scrollbar">
+                       <table className="w-full border-collapse text-left text-xs">
+                          <thead>
+                             <tr className="border-b border-white/5 bg-white/[0.02] text-gray-400 font-bold uppercase tracking-wider">
+                                <th className="p-4 w-12 text-center">
+                                   <button onClick={toggleSelectAll} className="text-gray-400 hover:text-emerald-400 transition-colors">
+                                      {isAllSelected ? <CheckSquare size={16} className="text-emerald-400" /> : <Square size={16} />}
+                                   </button>
+                                </th>
+                                <th className="p-4">Nome</th>
+                                <th className="p-4">Formato</th>
+                                <th className="p-4">Tamanho</th>
+                                <th className="p-4">Adicionado em</th>
+                                <th className="p-4">Status</th>
+                                <th className="p-4 text-right">Ações</th>
+                             </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5 text-gray-300">
+                             {paginatedDocuments.map(doc => {
+                                const isSelected = selectedDocIds.includes(doc.id);
+                                const sizeFormatted = doc.metadata?.size 
+                                  ? (doc.metadata.size / 1024).toFixed(1) + ' KB' 
+                                  : 'TXT Manual';
+                                const isPdf = doc.type === 'application/pdf';
 
-                            {doc.status === 'processing' && (
-                               <div className="w-full bg-black/40 p-3 rounded-xl border border-white/5 relative z-10 animate-in slide-in-from-top-2 duration-300">
-                                  <div className="flex justify-between items-center mb-1 text-[10px] text-orange-400 font-bold uppercase tracking-wider">
-                                     <span className="truncate max-w-[80%]">{statusMsg}</span>
-                                     <span>{percent}%</span>
-                                  </div>
-                                  <div className="w-full bg-orange-500/10 border border-orange-500/20 rounded-full h-1.5 overflow-hidden">
-                                     <div 
-                                        className="bg-gradient-to-r from-orange-500 to-amber-400 h-full rounded-full transition-all duration-300" 
-                                        style={{ width: `${percent}%` }}
-                                     />
-                                  </div>
-                               </div>
-                            )}
+                                return (
+                                   <tr key={doc.id} className={`hover:bg-white/[0.02] transition-colors ${isSelected ? 'bg-emerald-500/[0.02]' : ''}`}>
+                                      <td className="p-4 text-center">
+                                         <button onClick={() => toggleSelectDoc(doc.id)} className="text-gray-400 hover:text-emerald-400 transition-colors">
+                                            {isSelected ? <CheckSquare size={16} className="text-emerald-400" /> : <Square size={16} />}
+                                         </button>
+                                      </td>
+                                      <td className="p-4 font-bold text-gray-200">
+                                         <div className="flex items-center gap-2 max-w-xs md:max-w-md truncate" title={doc.name}>
+                                            <div className={`p-1.5 rounded-lg flex-shrink-0 ${isPdf ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'}`}>
+                                               <File size={14} />
+                                            </div>
+                                            <span className="truncate">{doc.name}</span>
+                                         </div>
+                                      </td>
+                                      <td className="p-4 text-gray-400">{isPdf ? 'PDF' : 'TXT'}</td>
+                                      <td className="p-4 text-gray-400">{sizeFormatted}</td>
+                                      <td className="p-4 text-gray-400">
+                                          {new Date(doc.created_at).toLocaleDateString('pt-BR')} às {new Date(doc.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                      </td>
+                                      <td className="p-4">
+                                         {doc.status === 'processing' && (
+                                            <span className="inline-flex items-center gap-1 bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full text-[10px] font-bold animate-pulse border border-orange-500/30">
+                                               <Loader2 size={10} className="animate-spin" /> Vetorizando
+                                            </span>
+                                         )}
+                                         {(doc.status === 'ready' || doc.status === 'processed') && (
+                                            <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/20">
+                                               <CheckCircle2 size={11} /> Pronto
+                                            </span>
+                                         )}
+                                         {doc.status === 'error' && (
+                                            <span className="inline-flex items-center gap-1 bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full text-[10px] font-bold border border-red-500/30" title={doc.metadata?.err}>
+                                               <AlertCircle size={11} /> Falha
+                                            </span>
+                                         )}
+                                      </td>
+                                      <td className="p-4 text-right">
+                                         <div className="flex items-center justify-end gap-1.5">
+                                            {(doc.status === 'ready' || doc.status === 'processed') && (
+                                               <button 
+                                                  onClick={() => handleViewContent(doc)} 
+                                                  className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 hover:text-indigo-300 rounded-lg border border-indigo-500/20 transition-all"
+                                                  title="Acessar Dados"
+                                               >
+                                                  <Eye size={13} />
+                                               </button>
+                                            )}
+                                            <button 
+                                               onClick={() => deleteDocument(doc.id)} 
+                                               className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-lg border border-red-500/20 transition-all"
+                                               title="Excluir Base"
+                                            >
+                                               <Trash2 size={13} />
+                                            </button>
+                                         </div>
+                                      </td>
+                                   </tr>
+                                );
+                             })}
+                          </tbody>
+                       </table>
+                    </div>
+                 )}
 
-                            <div className="mt-4 flex gap-2 relative z-10">
-                               {(doc.status === 'ready' || doc.status === 'processed') && (
-                                  <button 
-                                     onClick={() => handleViewContent(doc)} 
-                                     className="flex-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 hover:text-indigo-300 py-2.5 rounded-xl text-sm font-bold transition-all border border-indigo-500/20 hover:border-indigo-500/40 flex items-center justify-center gap-2"
-                                  >
-                                     <Eye size={16} /> Acessar Dados
-                                  </button>
-                               )}
-                               <button 
-                                  onClick={() => deleteDocument(doc.id)} 
-                                  className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 py-2.5 rounded-xl text-sm font-bold transition-all border border-red-500/20 hover:border-red-500/40 flex items-center justify-center gap-2"
-                               >
-                                  <Trash2 size={16} /> Excluir Base
-                               </button>
-                            </div>
-                         </div>
-                       );
-                   })}
-                </div>
-              );
-           })()}
-        </div>
+                 {/* Controles de Paginação */}
+                 {totalPages > 1 && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 bg-black/20 border border-white/5 p-4 rounded-3xl backdrop-blur-md">
+                       <div className="text-xs text-gray-400">
+                          Exibindo <span className="font-bold text-gray-200">{paginatedDocuments.length}</span> de <span className="font-bold text-gray-200">{filteredDocuments.length}</span> documentos
+                       </div>
+                       
+                       <div className="flex items-center gap-1.5">
+                          <button
+                             onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                             disabled={effectiveCurrentPage === 1}
+                             className="p-2 bg-white/5 hover:bg-white/10 disabled:opacity-40 text-gray-300 rounded-xl transition-all border border-white/5"
+                          >
+                             <ChevronLeft size={16} />
+                          </button>
+                          
+                          {Array.from({ length: totalPages }).map((_, idx) => {
+                             const pageNum = idx + 1;
+                             if (totalPages > 5 && Math.abs(pageNum - effectiveCurrentPage) > 2 && pageNum !== 1 && pageNum !== totalPages) {
+                                if (pageNum === 2 || pageNum === totalPages - 1) {
+                                   return <span key={pageNum} className="text-gray-600 px-1 text-xs">...</span>;
+                                }
+                                return null;
+                             }
+                             
+                             return (
+                                <button
+                                   key={pageNum}
+                                   onClick={() => setCurrentPage(pageNum)}
+                                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                                      pageNum === effectiveCurrentPage 
+                                        ? 'bg-emerald-600 border-emerald-500 text-white shadow-md' 
+                                        : 'bg-white/5 border-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10'
+                                   }`}
+                                >
+                                   {pageNum}
+                                </button>
+                             );
+                          })}
+                          
+                          <button
+                             onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                             disabled={effectiveCurrentPage === totalPages}
+                             className="p-2 bg-white/5 hover:bg-white/10 disabled:opacity-40 text-gray-300 rounded-xl transition-all border border-white/5"
+                          >
+                             <ChevronRight size={16} />
+                          </button>
+                       </div>
+                    </div>
+                 )}
+              </>
+            )}
+         </div>
       </div>
 
       {/* Modal Premium para Acessar e Editar Dados de Conhecimento */}
