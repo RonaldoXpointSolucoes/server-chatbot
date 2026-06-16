@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useChatStore } from '../../store/chatStore';
-import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video } from 'lucide-react';
+import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface HorarioPeriodo {
@@ -61,6 +61,8 @@ export default function AccountSettings() {
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
   const [testError, setTestError] = useState('');
+  const [activeResultTab, setActiveResultTab] = useState<'preview' | 'json'>('preview');
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
 
   useEffect(() => {
     console.log("AccountSettings montou. tenantInfo:", tenantInfo);
@@ -151,6 +153,12 @@ export default function AccountSettings() {
 
       const resData = await res.json();
       setTestResult(resData);
+
+      if (resData && resData.data && Array.isArray(resData.data.grupos) && resData.data.grupos.length > 0) {
+        setActiveGroupId(resData.data.grupos[0].id);
+      } else {
+        setActiveGroupId(null);
+      }
     } catch (err: any) {
       setTestError(err.message || 'Ocorreu um erro desconhecido ao testar a requisição.');
     } finally {
@@ -550,20 +558,216 @@ export default function AccountSettings() {
               )}
 
               {testResult && (
-                <div className="bg-slate-100 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-4 rounded-xl text-xs font-mono text-gray-700 dark:text-[#d1d7db] space-y-2 animate-in fade-in duration-300">
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-[#222d34]/60">
-                    <span className="font-bold">Retorno da API</span>
-                    <span className={cn(
-                      "px-2 py-0.5 rounded text-[10px] font-bold",
-                      testResult.status === 200 ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
-                    )}>
-                      Status: {testResult.status}
-                    </span>
-                  </div>
+                <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
                   
-                  <div className="max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed">
-                    {JSON.stringify(testResult.data, null, 2)}
+                  {/* Cabeçalho de Status e Abas */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado do Teste:</span>
+                      <span className={cn(
+                        "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider",
+                        testResult.status === 200 ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
+                      )}>
+                        Status: {testResult.status}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center bg-gray-200/50 dark:bg-black/20 p-1 rounded-xl w-fit font-sans">
+                      <button
+                        type="button"
+                        onClick={() => setActiveResultTab('preview')}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                          activeResultTab === 'preview'
+                            ? "bg-white dark:bg-[#2a3942] text-gray-800 dark:text-gray-100 shadow-sm"
+                            : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                        )}
+                      >
+                        Visualização do Cardápio
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveResultTab('json')}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                          activeResultTab === 'json'
+                            ? "bg-white dark:bg-[#2a3942] text-gray-800 dark:text-gray-100 shadow-sm"
+                            : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                        )}
+                      >
+                        JSON Bruto
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Aba de Visualização do Cardápio */}
+                  {activeResultTab === 'preview' && (
+                    <div className="flex justify-center py-4 bg-slate-100/50 dark:bg-black/30 rounded-2xl">
+                      {testResult.data && Array.isArray(testResult.data.grupos) && Array.isArray(testResult.data.produtos) ? (
+                        <div className="w-[360px] h-[560px] bg-white text-gray-800 rounded-[36px] border-[8px] border-slate-800 dark:border-slate-700 shadow-2xl overflow-hidden flex flex-col relative font-sans">
+                          {/* Barra de Status */}
+                          <div className="h-6 bg-white flex justify-between items-center px-6 pt-1 text-[10px] font-bold text-gray-500 z-10 select-none flex-shrink-0">
+                            <span>12:00</span>
+                            <div className="flex items-center gap-1">
+                              <Signal size={10} />
+                              <Wifi size={10} />
+                              <Battery size={10} className="rotate-90" />
+                            </div>
+                          </div>
+
+                          {/* Cabeçalho do Cardápio Fiel ao Layout da Loja */}
+                          <div className="bg-white px-4 pt-2 pb-4 text-center border-b border-gray-100 flex-shrink-0 flex flex-col items-center">
+                            <div className="flex items-center gap-4 justify-center mb-1 text-emerald-600">
+                              <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[10px] font-bold">W</div>
+                              <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-yellow-500 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold">I</div>
+                            </div>
+                            <h3 className="text-base font-black text-gray-900 tracking-tight uppercase">
+                              {nomeIa || 'BURGUER PLUS'}
+                            </h3>
+                            <span className="text-[10px] text-gray-500 flex items-center gap-1 mt-0.5 justify-center">
+                              <MapPin size={10} />
+                              {endereco ? (endereco.split('-')[0].trim()) : 'Taboão da Serra - SP'}
+                            </span>
+                            <span className="mt-2 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase tracking-wider">
+                              LOJA ABERTA
+                            </span>
+                          </div>
+
+                          {/* Categorias (Navegação Horizontal) */}
+                          <div className="flex items-center gap-5 overflow-x-auto px-4 pb-2 pt-3 border-b border-gray-100 scrollbar-none flex-shrink-0 bg-white">
+                            {testResult.data.grupos.map((g: any) => {
+                              const isActive = activeGroupId === g.id;
+                              return (
+                                <button
+                                  key={g.id}
+                                  type="button"
+                                  onClick={() => setActiveGroupId(g.id)}
+                                  className={cn(
+                                    "pb-1.5 text-xs font-black tracking-wider uppercase whitespace-nowrap transition-all border-b-2 relative",
+                                    isActive 
+                                      ? "border-red-600 text-red-600 font-extrabold"
+                                      : "border-transparent text-gray-400 hover:text-gray-600"
+                                  )}
+                                >
+                                  {g.description}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* Lista de Produtos do Grupo */}
+                          <div className="flex-1 overflow-y-auto px-4 divide-y divide-gray-100 bg-white">
+                            {(() => {
+                              const filtered = (testResult.data.produtos || []).filter((p: any) => p.groupId === activeGroupId);
+                              if (filtered.length === 0) {
+                                return (
+                                  <div className="text-center py-12 text-xs text-gray-400">
+                                    Nenhum produto cadastrado neste grupo.
+                                  </div>
+                                );
+                              }
+                              return filtered.map((p: any) => {
+                                const imageUrl = p.image ? p.image.split('|')[0] : '';
+                                const hasPromo = p.name.toLowerCase().includes('costela') || p.name.toLowerCase().includes('combo');
+                                const originalPrice = p.price * 1.35;
+
+                                return (
+                                  <div 
+                                    key={p.id} 
+                                    className="flex items-start justify-between gap-4 py-4"
+                                  >
+                                    <div className="flex-1 space-y-1">
+                                      <h4 className="text-sm font-bold text-gray-900 uppercase tracking-tight">
+                                        {p.name}
+                                      </h4>
+                                      {p.description && (
+                                        <p className="text-xs text-gray-400 line-clamp-3 leading-relaxed">
+                                          {p.description}
+                                        </p>
+                                      )}
+                                      <div className="pt-1.5 flex flex-col gap-0.5">
+                                        {hasPromo ? (
+                                          <div className="text-xs text-gray-400 flex items-center gap-1">
+                                            <span>De</span>
+                                            <span className="line-through">
+                                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(originalPrice)}
+                                            </span>
+                                            <span>por</span>
+                                            <span className="text-sm font-extrabold text-emerald-600">
+                                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)}
+                                            </span>
+                                          </div>
+                                        ) : (
+                                          <span className="text-sm font-extrabold text-gray-900">
+                                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)}
+                                          </span>
+                                        )}
+                                        {p.active === false && (
+                                          <span className="w-fit bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider mt-1">
+                                            Pausado
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Imagem */}
+                                    {imageUrl ? (
+                                      <div className="w-20 h-20 rounded-2xl overflow-hidden bg-gray-50 border border-gray-100 flex-shrink-0 flex items-center justify-center shadow-sm">
+                                        <img 
+                                          src={imageUrl} 
+                                          alt={p.name} 
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => {
+                                            (e.target as HTMLElement).style.display = 'none';
+                                          }}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div className="w-20 h-20 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-400 flex-shrink-0 border border-gray-200/50">
+                                        <Utensils size={18} />
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              });
+                            })()}
+                          </div>
+
+                          {/* Barra de Navegação Inferior Mockada */}
+                          <div className="h-14 bg-white border-t border-gray-100 flex items-center justify-around text-gray-400 px-2 flex-shrink-0">
+                            <button type="button" className="flex flex-col items-center justify-center gap-0.5 text-red-600">
+                              <Home size={18} />
+                              <span className="text-[9px] font-bold">Início</span>
+                            </button>
+                            <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
+                              <Search size={18} />
+                              <span className="text-[9px] font-bold">Buscar</span>
+                            </button>
+                            <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
+                              <ClipboardList size={18} />
+                              <span className="text-[9px] font-bold">Pedidos</span>
+                            </button>
+                            <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
+                              <User size={18} />
+                              <span className="text-[9px] font-bold">Perfil</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-xs text-amber-500 font-mono">
+                          A estrutura do JSON retornado não possui "grupos" e "produtos" válidos para visualização.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Aba de JSON Bruto */}
+                  {activeResultTab === 'json' && (
+                    <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30 animate-in fade-in duration-250">
+                      {JSON.stringify(testResult.data, null, 2)}
+                    </div>
+                  )}
+
                 </div>
               )}
             </div>
