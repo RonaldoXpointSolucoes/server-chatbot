@@ -83,32 +83,29 @@ export default function InstancesDashboard() {
       
       // Validação Cirúrgica NATIVA (Corrige os Falsos Positivos do Banco)
       const liveInstances = await Promise.all(instancesData.map(async (inst) => {
-          // Se o banco acha que está online/conectado, nós vamos duvidar e validar na Engine.
-          if (inst.status === 'online' || inst.status === 'connected' || inst.status === 'connecting') {
-              try {
-                  const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/status`, {
-                      headers: { 
-                        'x-tenant-id': tenantId!,
-                        'apikey': inst.api_key || '' 
-                      }
-                  });
-                  if (res.ok) {
-                     const statusData = await res.json();
-                     if (statusData.data?.status === 'connected' || statusData.data?.status === 'open') {
-                         return { ...inst, status: 'connected' };
-                     } else if (statusData.data?.status === 'connecting') {
-                         return { ...inst, status: 'connecting' };
-                     } else {
-                         return { ...inst, status: 'offline' };
-                     }
-                  } else {
-                     return inst; // Se engine não responder 200, confia no Supabase
+          // Sempre checa na Engine para limpar falsos positivos de online/offline do banco de dados.
+          try {
+              const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/status`, {
+                  headers: { 
+                    'x-tenant-id': tenantId!,
+                    'apikey': inst.api_key || '' 
                   }
-              } catch(e) {
-                 return { ...inst, status: 'server_offline' }; // Fallback to server_offline to indicate Node is down
+              });
+              if (res.ok) {
+                 const statusData = await res.json();
+                 if (statusData.data?.status === 'connected' || statusData.data?.status === 'open') {
+                      return { ...inst, status: 'connected' };
+                 } else if (statusData.data?.status === 'connecting') {
+                      return { ...inst, status: 'connecting' };
+                 } else {
+                      return { ...inst, status: 'offline' };
+                 }
+              } else {
+                 return inst; // Se engine não responder 200, confia no Supabase
               }
+          } catch(e) {
+              return { ...inst, status: inst.status === 'connected' ? 'server_offline' : inst.status }; // Fallback
           }
-          return inst;
       }));
 
       setInstances(liveInstances);

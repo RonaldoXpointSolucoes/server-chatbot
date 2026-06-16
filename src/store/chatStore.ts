@@ -71,18 +71,66 @@ export interface AppointmentType {
 export const getRealContactId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
 export const getInstanceIdFromContact = (id: string) => id.includes('_') ? id.split('_')[1] : null;
 
+// Cache em memória para evitar requisições redundantes de rede ao Supabase para instâncias
+export const instanceCache = {
+  byName: {} as Record<string, string>,   // display_name.toLowerCase() -> id
+  apiKeys: {} as Record<string, string>,  // id -> api_key
+  
+  set(id: string, name: string, apiKey: string) {
+    if (name) this.byName[name.toLowerCase()] = id;
+    if (apiKey) this.apiKeys[id] = apiKey;
+  },
+  
+  getId(name: string): string | null {
+    return this.byName[name.toLowerCase()] || null;
+  },
+  
+  getApiKey(id: string): string | null {
+    return this.apiKeys[id] || null;
+  }
+};
+
+export const getOrFetchApiKey = async (instanceId: string | null | undefined): Promise<string> => {
+  if (!instanceId) return '';
+  const cachedKey = instanceCache.getApiKey(instanceId);
+  if (cachedKey) return cachedKey;
+  
+  try {
+    const { data: instDataDB } = await supabase
+      .from('whatsapp_instances')
+      .select('api_key, display_name')
+      .eq('id', instanceId)
+      .single();
+    if (instDataDB) {
+      instanceCache.set(instanceId, instDataDB.display_name || '', instDataDB.api_key || '');
+      return instDataDB.api_key || '';
+    }
+  } catch (e) {
+    console.error('[getOrFetchApiKey] Error fetching API Key:', e);
+  }
+  return '';
+};
+
 export const resolveInstanceUuid = async (tenantId: string, identifier: string | null | undefined): Promise<string | null> => {
   if (!identifier || identifier === 'default' || identifier === 'all') return null;
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (uuidRegex.test(identifier)) return identifier;
+  
+  const cachedId = instanceCache.getId(identifier);
+  if (cachedId) return cachedId;
+  
   try {
      const { data } = await supabase
         .from('whatsapp_instances')
-        .select('id')
+        .select('id, display_name, api_key')
         .eq('tenant_id', tenantId)
         .eq('display_name', identifier)
         .limit(1);
-     if (data && data.length > 0) return data[0].id;
+     if (data && data.length > 0) {
+        const inst = data[0];
+        instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '');
+        return inst.id;
+     }
   } catch (e) {
      console.error('[resolveInstanceUuid] Error:', e);
   }
@@ -478,25 +526,58 @@ export const useChatStore = create<ChatState>((set, get) => ({
   instancesStatus: {},
   realtimeStatus: 'disconnected',
   setInstanceStatus: (id, status) => {
-    // Implementa regra moderna de consulta: Aguarda alguns segundos antes de setar offline/connecting
-    // Se a conexão piscar, o timeout é limpo pelo status 'connected'
     if (status === 'connected') {
       if (instanceStatusTimeouts[id]) {
         clearTimeout(instanceStatusTimeouts[id]);
         delete instanceStatusTimeouts[id];
       }
+      if ((window as any)[`_offline_checks_${id}`]) {
+         clearInterval((window as any)[`_offline_checks_${id}`]);
+         delete (window as any)[`_offline_checks_${id}`];
+      }
       set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
     } else {
-      // offline ou connecting
       const currentState = get().instancesStatus[id];
-      if (currentState !== status) {
-        if (!instanceStatusTimeouts[id]) {
-          // Aguarda 10 segundos. Se a conexão voltar nesse período, o 'connected' cancela essa execução.
-          instanceStatusTimeouts[id] = setTimeout(() => {
-            set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
-            delete instanceStatusTimeouts[id];
-          }, 10000);
-        }
+      if (currentState === 'connected' || !currentState) {
+         if ((window as any)[`_offline_checks_${id}`] || instanceStatusTimeouts[id]) {
+            return;
+         }
+
+         let checkCount = 0;
+         const maxChecks = 3;
+         const checkIntervalMs = 30000; // 30s
+         
+         console.log(`[Status Debounce] Instância ${id} sinalizou status ${status}. Iniciando verificação de 3 etapas a cada 30s.`);
+         
+         const intervalId = setInterval(async () => {
+            checkCount++;
+            try {
+               const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', id).maybeSingle();
+               const dbStatus = data?.status || 'offline';
+               
+               console.log(`[Status Debounce] Checagem ${checkCount}/${maxChecks} para ${id}: status no banco = ${dbStatus}`);
+               
+               if (dbStatus === 'connected') {
+                  console.log(`[Status Debounce] Instância ${id} restabelecida como conectada. Cancelando checagens.`);
+                  clearInterval(intervalId);
+                  delete (window as any)[`_offline_checks_${id}`];
+                  return;
+               }
+               
+               if (checkCount >= maxChecks) {
+                  console.warn(`[Status Debounce] Instância ${id} confirmada como desconectada após 3 checagens (90s). Atualizando UI.`);
+                  set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
+                  clearInterval(intervalId);
+                  delete (window as any)[`_offline_checks_${id}`];
+               }
+            } catch (err) {
+               console.error(`[Status Debounce] Erro ao checar status da instância ${id}:`, err);
+            }
+         }, checkIntervalMs);
+         
+         (window as any)[`_offline_checks_${id}`] = intervalId;
+      } else {
+         set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
       }
     }
   },
@@ -1241,8 +1322,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // 1. Manda pra Baileys Engine Local
       if (!state.tenantInfo) return;
       
-      const { data: instDataDB } = resolvedInstanceId ? await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single() : { data: null };
-      const apiKey = instDataDB?.api_key || '';
+      const apiKey = resolvedInstanceId ? await getOrFetchApiKey(resolvedInstanceId) : '';
 
       if (resolvedInstanceId) {
          await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), finalMessageText, apiKey);
@@ -1292,8 +1372,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
      try {
        const { editNativeMessage } = await import('../services/whatsappEngine');
        
-       const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single();
-       const apiKey = instDataDB?.api_key || '';
+       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
  
        const messageKey = {
           remoteJid: contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'),
@@ -1374,8 +1453,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (msgToDelete && msgToDelete.whatsapp_id) {
          const { deleteNativeMessage } = await import('../services/whatsappEngine');
          
-         const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single();
-         const apiKey = instDataDB?.api_key || '';
+         const apiKey = await getOrFetchApiKey(resolvedInstanceId);
 
          const messageKey = {
             remoteJid: contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'),
@@ -1514,8 +1592,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Chamada HTTP pro Node (único dono do upload Supabase e Baileys)
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single();
-      const apiKey = instDataDB?.api_key || '';
+      const apiKey = await getOrFetchApiKey(resolvedInstanceId);
 
       const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/send-media`, {
         method: 'POST',
@@ -1672,8 +1749,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single();
-      const apiKey = instDataDB?.api_key || '';
+      const apiKey = await getOrFetchApiKey(resolvedInstanceId);
 
       let mimetype = 'application/octet-stream';
       if (mediaType === 'video') mimetype = 'video/mp4';
@@ -1742,8 +1818,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({ pictureFetchLocks: { ...s.pictureFetchLocks, [contactId]: now } }));
     
     try {
-      const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single();
-      const apiKey = instDataDB?.api_key || '';
+      const apiKey = await getOrFetchApiKey(resolvedInstanceId);
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
       
       const controller = new AbortController();
@@ -2136,17 +2211,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
           .update({ bot_status: nextAiPaused ? 'paused' : 'active' })
           .eq('id', realContactId);
 
-        // 3. Remove o assignment direto na tabela certa (conversations)
+        // 3. Remove o assignment direto na tabela certa (conversations) e limpa o snooze
         await supabase.from('conversations').update({ 
           assigned_to: null, 
           status: 'resolved', 
           ai_paused: nextAiPaused,
-          ai_paused_manually: nextAiPaused 
+          ai_paused_manually: nextAiPaused,
+          snoozed_until: null,
+          snoozed_at: null,
+          snoozed_by: null
         }).eq('id', conv.id);
 
         // 4. Atualização local do estado para sumir da lista e fechar o chat ativo
         set((state) => ({
-            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, assigned_to: null, conv_status: 'resolved', ai_paused: nextAiPaused, ai_paused_manually: nextAiPaused } : c),
+            contacts: state.contacts.map((c) => c.id === contactId ? { 
+                ...c, 
+                assigned_to: null, 
+                conv_status: 'resolved', 
+                ai_paused: nextAiPaused, 
+                ai_paused_manually: nextAiPaused,
+                snoozed_until: null,
+                snoozed_at: null,
+                snoozed_by: null
+            } : c),
             activeChatId: state.activeChatId === contactId ? null : state.activeChatId
         }));
 
@@ -3003,6 +3090,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
            globalAiEnabled: tenantData.global_ai_enabled ?? true
         });
 
+        // Pré-popular cache com todas as instâncias do tenant para máxima performance de mensagens
+        try {
+           const { data: instances } = await supabase
+              .from('whatsapp_instances')
+              .select('id, display_name, api_key, status')
+              .eq('tenant_id', currentTenantId);
+
+           if (instances) {
+              const statusUpdates: Record<string, string> = {};
+              instances.forEach(inst => {
+                 instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '');
+                 if (inst.status === 'connected') {
+                    statusUpdates[inst.id] = 'connected';
+                 } else if (inst.status) {
+                    // Aciona a checagem inteligente para instâncias offline inicialmente
+                    get().setInstanceStatus(inst.id, inst.status);
+                 }
+              });
+              set(s => ({ instancesStatus: { ...s.instancesStatus, ...statusUpdates } }));
+           }
+        } catch (cacheErr) {
+           console.warn("[fetchTenantConfig] Falha ao pré-popular cache de instâncias:", cacheErr);
+        }
+
         if (tenantData.evolution_api_instance) {
            const { fetchEngineStatus, createInstance } = await import('../services/whatsappEngine');
            
@@ -3099,18 +3210,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
         const tenant = get().tenantInfo;
         if (!tenant) return;
-        
-        // Puxar todas as anotações e tarefas históricas deste contato para a timeline!
-        let dbNotes: any[] = [];
-        try {
-           const { data } = await supabase.from('contact_notes')
-              .select('*')
-              .eq('tenant_id', tenant.id)
-              .eq('contact_id', getRealContactId(contactId))
-              .order('created_at', { ascending: true });
-           if (data) dbNotes = data;
-        } catch (e) {
-           console.error("[loadHistoricalMessages] Erro ao carregar notas do contato:", e);
+
+        const realContactId = getRealContactId(contactId);
+        const localContact = get().contacts.find(c => c.id === contactId);
+        const conv_id = localContact?.conv_id;
+
+        // Paralelizar a busca de notas, resolução do UUID da instância e a busca inicial de conversas
+        const [notesRes, resolvedInstanceId, initialConvRes] = await Promise.all([
+             supabase.from('contact_notes')
+                .select('id, content, media_url, media_type, media_metadata, is_task, assigned_to, checklist_items, task_completed, created_by_name, created_at')
+                .eq('tenant_id', tenant.id)
+                .eq('contact_id', realContactId)
+                .order('created_at', { ascending: true }),
+             resolveInstanceUuid(tenant.id, instanceName),
+             conv_id 
+                ? supabase.from('conversations').select('id, status').eq('id', conv_id).limit(1).maybeSingle()
+                : Promise.resolve({ data: null, error: null })
+         ]);
+
+        let dbNotes: any[] = notesRes.data || [];
+        let conv = initialConvRes?.data || null;
+
+        if (!conv) {
+             let query = supabase.from('conversations')
+                   .select('id, status')
+                   .eq('tenant_id', tenant.id)
+                   .eq('contact_id', realContactId);
+                   
+             if (resolvedInstanceId) {
+                 query = query.eq('instance_id', resolvedInstanceId);
+             }
+             
+             const { data: convs } = await query
+                   .order('last_message_at', { ascending: false, nullsFirst: false })
+                   .limit(1);
+            
+            conv = convs && convs.length > 0 ? convs[0] : null;
         }
 
         const mappedNotes = dbNotes.map(n => ({
@@ -3128,35 +3263,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
            created_by_name: n.created_by_name || null,
            timestamp: new Date(n.created_at)
         }));
-        
-        // Puxa conversa pra este contato respeitando a instância!
-        const localContact = get().contacts.find(c => c.id === contactId);
-        const conv_id = localContact?.conv_id;
-        let conv = null;
-
-        const resolvedInstanceId = await resolveInstanceUuid(tenant.id, instanceName);
-
-        if (conv_id) {
-           const { data: convs } = await supabase.from('conversations').select('id, status').eq('id', conv_id).limit(1);
-           if (convs && convs.length > 0) conv = convs[0];
-        }
-
-        if (!conv) {
-             let query = supabase.from('conversations')
-                   .select('id, status')
-                   .eq('tenant_id', tenant.id)
-                   .eq('contact_id', getRealContactId(contactId));
-                   
-             if (resolvedInstanceId) {
-                 query = query.eq('instance_id', resolvedInstanceId);
-             }
-             
-             const { data: convs } = await query
-                   .order('last_message_at', { ascending: false, nullsFirst: false })
-                   .limit(1);
-            
-            conv = convs && convs.length > 0 ? convs[0] : null;
-        }
 
         const handleMapping = (messagesArray: any[]) => {
             const filteredArray = messagesArray.filter(m => m.sender_type !== 'automation');
@@ -3227,7 +3333,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
         
         const { data: msgs } = await supabase.from('messages')
-               .select('*')
+               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                .eq('tenant_id', tenant.id)
                .eq('conversation_id', conv.id)
                .order('timestamp', { ascending: false })
@@ -3242,13 +3348,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: true } }));
                 try {
                     const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-                    const { data: instDataDB } = resolvedInstanceId ? await supabase.from('whatsapp_instances').select('api_key').eq('id', resolvedInstanceId).single() : { data: null };
+                    const apiKey = resolvedInstanceId ? await getOrFetchApiKey(resolvedInstanceId) : '';
                     const res = await fetch(`${API_URL}/api/v1/conversations/${conv.id}/sync-history`, {
                         method: 'POST',
                         headers: { 
                            'Content-Type': 'application/json',
                            'x-tenant-id': tenant.id,
-                           'apikey': instDataDB?.api_key || ''
+                           'apikey': apiKey
                         },
                         body: JSON.stringify({ instanceId: resolvedInstanceId, count: 100, limit: 100 })
                     });
@@ -3291,7 +3397,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                         // Atualiza a vista atual caso algo não tenha vindo pelo realtime ou pra forçar atualização
                         const { data: fetchNewMsgs, error: fetchErr } = await supabase.from('messages')
-                           .select('*')
+                           .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                            .eq('tenant_id', tenant.id)
                            .eq('conversation_id', conv.id)
                            .order('timestamp', { ascending: false })
@@ -3540,8 +3646,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
       let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
       if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
-      const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
-      if (!conv) return;
+      const { data: conv, error: convErr } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
+      
+      if (convErr) {
+        console.error('Erro ao buscar conversa no Supabase:', convErr.message);
+        throw convErr;
+      }
+      if (!conv) {
+        console.warn('Nenhuma conversa encontrada para o contato:', realContactId);
+        return;
+      }
 
       const { error } = await supabase.from('conversations').update(dbPayload).eq('id', conv.id);
       if (error) throw error;
@@ -4028,7 +4142,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
          const t = get().tenantInfo;
          if (!t || !t.evolution_api_instance) return;
          const inst = payload.new as any;
-         
+         if (inst.id) {
+            instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '');
+         }
          get().setInstanceStatus(inst.id, inst.status);
 
          // Sincroniza estado de conexao com o banco via Realtime

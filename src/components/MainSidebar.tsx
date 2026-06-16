@@ -127,6 +127,7 @@ export function MainSidebar() {
   const contacts = useChatStore(state => state.contacts);
   const agents = useChatStore(state => state.agents);
   const tenantLabels = useChatStore(state => state.tenantLabels);
+  const instancesStatus = useChatStore(state => state.instancesStatus);
   
   const currentAgent = agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
   const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to === currentAgent.id && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
@@ -217,6 +218,21 @@ export function MainSidebar() {
                  } catch(e) {}
               }
              setInstances(finalData);
+
+             // Inicializa o status de cada instância no store para reatividade
+             const store = useChatStore.getState();
+             data.forEach(inst => {
+                if (inst.status !== 'connected') {
+                   store.setInstanceStatus(inst.id, inst.status);
+                } else {
+                   useChatStore.setState(state => ({
+                      instancesStatus: {
+                         ...state.instancesStatus,
+                         [inst.id]: 'connected'
+                      }
+                   }));
+                }
+             });
 
              // Auto-seleciona a única caixa disponível
              const { activeChannelFilter, setActiveChannelFilter, fetchInitialData } = useChatStore.getState();
@@ -544,6 +560,7 @@ export function MainSidebar() {
                <div className="pl-1 border-l-2 border-[#2a3942]/50 ml-5 my-1 py-0.5 space-y-0.5">
                  {instances.map(inst => {
                     const unreadCount = contacts.filter(c => c.instance_id === inst.id && c.unread > 0 && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length;
+                    const status = instancesStatus[inst.id] ?? 'connected';
                     return (
                       <div 
                         key={inst.id} 
@@ -558,7 +575,7 @@ export function MainSidebar() {
                             <div className="flex items-center gap-2 relative">
                               {inst.color && <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: inst.color }}></div>}
                               <Brands.WhatsApp size={12} />
-                              {inst.status !== 'connected' && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
+                              {status !== 'connected' && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
                             </div>
                           } 
                           title={inst.display_name || 'Sem nome'} 

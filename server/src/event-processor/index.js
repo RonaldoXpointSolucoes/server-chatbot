@@ -528,37 +528,45 @@ class EventProcessor {
                      let nextStatus = exist.status || 'bot';
                      let nextAiPaused = exist.ai_paused || false;
                      
-                     if ((exist.status === 'resolved' || exist.status === 'closed') && (data.has_inbound || data.has_human_outbound)) {
-                         if (data.has_inbound && !exist.ai_paused) {
-                             nextStatus = 'bot';
-                         } else {
-                             nextStatus = 'open';
-                         }
-                     }
+                     if ((exist.status === 'resolved' || exist.status === 'closed' || exist.status === 'snoozed') && (data.has_inbound || data.has_human_outbound)) {
+                          if (data.has_inbound && !exist.ai_paused) {
+                              nextStatus = 'bot';
+                          } else {
+                              nextStatus = 'open';
+                          }
+                      }
 
-                     // Transição automática de open para bot se receber inbound e a IA estiver ativa
-                     if (exist.status === 'open' && data.has_inbound && !exist.ai_paused) {
-                         nextStatus = 'bot';
-                     }
-                     
-                     if (data.has_human_outbound) {
-                         nextAiPaused = true;
-                     }
-                     
-                     finalStatus = nextStatus;
-                     finalAiPaused = nextAiPaused;
-                     
-                     toUpdateConvs.push({
-                         id: exist.id,
-                         tenant_id: data.tenant_id,
-                         contact_id: data.contact_id,
-                         unread_count: Number(exist.unread_count || 0) + Number(data.unread_count || 0),
-                         last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
-                         last_message_at: new Date(data.last_message_at).toISOString(),
-                         updated_at: new Date().toISOString(),
-                         status: nextStatus,
-                         ai_paused: nextAiPaused
-                     });
+                      // Transição automática de open para bot se receber inbound e a IA estiver ativa
+                      if (exist.status === 'open' && data.has_inbound && !exist.ai_paused) {
+                          nextStatus = 'bot';
+                      }
+                      
+                      if (data.has_human_outbound) {
+                          nextAiPaused = true;
+                      }
+                      
+                      finalStatus = nextStatus;
+                      finalAiPaused = nextAiPaused;
+                      
+                      const updatePayload = {
+                          id: exist.id,
+                          tenant_id: data.tenant_id,
+                          contact_id: data.contact_id,
+                          unread_count: Number(exist.unread_count || 0) + Number(data.unread_count || 0),
+                          last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
+                          last_message_at: new Date(data.last_message_at).toISOString(),
+                          updated_at: new Date().toISOString(),
+                          status: nextStatus,
+                          ai_paused: nextAiPaused
+                      };
+
+                      if (exist.status === 'snoozed' && nextStatus !== 'snoozed') {
+                          updatePayload.snoozed_until = null;
+                          updatePayload.snoozed_at = null;
+                          updatePayload.snoozed_by = null;
+                      }
+
+                      toUpdateConvs.push(updatePayload);
                  } else {
                      let initialStatus = 'resolved';
                      let initialAiPaused = false;
