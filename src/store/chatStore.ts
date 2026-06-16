@@ -1907,7 +1907,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const targetContact = currentState.contacts.find(c => c.id === contactId);
     let shouldWakeUp = false;
 
-    if (targetContact && msg.sender === 'client' && targetContact.conv_status !== 'open' && !targetContact.is_blocked) {
+    const isAiPaused = targetContact ? (targetContact.ai_paused === true || targetContact.bot_status === 'paused') : false;
+    if (targetContact && msg.sender === 'client' && targetContact.conv_status !== 'open' && !targetContact.is_blocked && isAiPaused) {
         shouldWakeUp = true;
     }
 
