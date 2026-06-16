@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useChatStore } from '../../store/chatStore';
-import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User } from 'lucide-react';
+import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface HorarioPeriodo {
@@ -54,7 +54,6 @@ export default function AccountSettings() {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  // Estados para Cardápio JSON Online
   const [cardapioJsonUrl, setCardapioJsonUrl] = useState('');
   const [cardapioJsonToken, setCardapioJsonToken] = useState('');
   const [cardapioJsonPayload, setCardapioJsonPayload] = useState('');
@@ -63,6 +62,13 @@ export default function AccountSettings() {
   const [testError, setTestError] = useState('');
   const [activeResultTab, setActiveResultTab] = useState<'preview' | 'json'>('preview');
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  
+  // Estados para Detalhes do Produto & Passos (Adicionais)
+  const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
+  const [productSteps, setProductSteps] = useState<any | null>(null);
+  const [loadingSteps, setLoadingSteps] = useState(false);
+  const [stepsError, setStepsError] = useState('');
+  const [detailQty, setDetailQty] = useState(1);
 
   useEffect(() => {
     console.log("AccountSettings montou. tenantInfo:", tenantInfo);
@@ -163,6 +169,66 @@ export default function AccountSettings() {
       setTestError(err.message || 'Ocorreu um erro desconhecido ao testar a requisição.');
     } finally {
       setTestLoading(false);
+    }
+  };
+
+  const handleProductClick = async (product: any) => {
+    setSelectedProduct(product);
+    setProductSteps(null);
+    setLoadingSteps(true);
+    setStepsError('');
+    setDetailQty(1);
+
+    try {
+      if (!cardapioJsonUrl) {
+        throw new Error('A URL do endpoint é necessária.');
+      }
+
+      // Calcula a URL ProdutoComPassos com base na URL cadastrada
+      let stepsUrl = cardapioJsonUrl;
+      if (stepsUrl.includes('/ProdutoPdvService/GetCardapioCompleto')) {
+        stepsUrl = stepsUrl.replace('/ProdutoPdvService/GetCardapioCompleto', '/ProdutoCardapioService/ProdutoComPassos');
+      } else {
+        try {
+          const urlObj = new URL(stepsUrl);
+          urlObj.pathname = '/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos';
+          stepsUrl = urlObj.toString();
+        } catch (e) {
+          stepsUrl = stepsUrl.replace(/\/v6\/server\/nuvem\/.*$/, '/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos');
+        }
+      }
+
+      const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
+      const res = await fetch(`${apiBase}/api/v1/utils/test-cardapio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: stepsUrl,
+          token: cardapioJsonToken,
+          payload: {
+            AIdProduto: product.id
+          }
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `Erro. Status: ${res.status}`);
+      }
+
+      const resData = await res.json();
+      if (resData.status === 200) {
+        setProductSteps(resData.data);
+      } else {
+        throw new Error(resData.data?.error || `Erro retornado pelo servidor: Status ${resData.status}`);
+      }
+    } catch (err: any) {
+      console.error('Erro ao buscar passos do produto:', err);
+      setStepsError(err.message || 'Erro ao carregar os adicionais.');
+    } finally {
+      setLoadingSteps(false);
     }
   };
 
@@ -604,7 +670,7 @@ export default function AccountSettings() {
                   {activeResultTab === 'preview' && (
                     <div className="flex justify-center py-4 bg-slate-100/50 dark:bg-black/30 rounded-2xl">
                       {testResult.data && Array.isArray(testResult.data.grupos) && Array.isArray(testResult.data.produtos) ? (
-                        <div className="w-[360px] h-[560px] bg-white text-gray-800 rounded-[36px] border-[8px] border-slate-800 dark:border-slate-700 shadow-2xl overflow-hidden flex flex-col relative font-sans">
+                        <div className="w-[390px] h-[740px] bg-white text-gray-800 rounded-[36px] border-[8px] border-slate-800 dark:border-slate-700 shadow-2xl overflow-hidden flex flex-col relative font-sans">
                           {/* Barra de Status */}
                           <div className="h-6 bg-white flex justify-between items-center px-6 pt-1 text-[10px] font-bold text-gray-500 z-10 select-none flex-shrink-0">
                             <span>12:00</span>
@@ -615,143 +681,313 @@ export default function AccountSettings() {
                             </div>
                           </div>
 
-                          {/* Cabeçalho do Cardápio Fiel ao Layout da Loja */}
-                          <div className="bg-white px-4 pt-2 pb-4 text-center border-b border-gray-100 flex-shrink-0 flex flex-col items-center">
-                            <div className="flex items-center gap-4 justify-center mb-1 text-emerald-600">
-                              <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[10px] font-bold">W</div>
-                              <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-yellow-500 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold">I</div>
-                            </div>
-                            <h3 className="text-base font-black text-gray-900 tracking-tight uppercase">
-                              {nomeIa || 'BURGUER PLUS'}
-                            </h3>
-                            <span className="text-[10px] text-gray-500 flex items-center gap-1 mt-0.5 justify-center">
-                              <MapPin size={10} />
-                              {endereco ? (endereco.split('-')[0].trim()) : 'Taboão da Serra - SP'}
-                            </span>
-                            <span className="mt-2 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase tracking-wider">
-                              LOJA ABERTA
-                            </span>
-                          </div>
-
-                          {/* Categorias (Navegação Horizontal) */}
-                          <div className="flex items-center gap-5 overflow-x-auto px-4 pb-2 pt-3 border-b border-gray-100 scrollbar-none flex-shrink-0 bg-white">
-                            {testResult.data.grupos.map((g: any) => {
-                              const isActive = activeGroupId === g.id;
-                              return (
-                                <button
-                                  key={g.id}
+                          {selectedProduct ? (
+                            /* Tela de Detalhes do Produto */
+                            <div className="flex-grow flex flex-col overflow-hidden bg-slate-50 relative">
+                              {/* Botão de Voltar Flutuante */}
+                              <div className="absolute top-8 left-4 z-20">
+                                <button 
                                   type="button"
-                                  onClick={() => setActiveGroupId(g.id)}
-                                  className={cn(
-                                    "pb-1.5 text-xs font-black tracking-wider uppercase whitespace-nowrap transition-all border-b-2 relative",
-                                    isActive 
-                                      ? "border-red-600 text-red-600 font-extrabold"
-                                      : "border-transparent text-gray-400 hover:text-gray-600"
-                                  )}
+                                  onClick={() => setSelectedProduct(null)}
+                                  className="w-8 h-8 rounded-full bg-black/40 text-white flex items-center justify-center backdrop-blur-sm hover:bg-black/60 transition-colors shadow-md"
                                 >
-                                  {g.description}
+                                  <ChevronLeft size={20} />
                                 </button>
-                              );
-                            })}
-                          </div>
+                              </div>
 
-                          {/* Lista de Produtos do Grupo */}
-                          <div className="flex-1 overflow-y-auto px-4 divide-y divide-gray-100 bg-white">
-                            {(() => {
-                              const filtered = (testResult.data.produtos || []).filter((p: any) => p.groupId === activeGroupId);
-                              if (filtered.length === 0) {
-                                return (
-                                  <div className="text-center py-12 text-xs text-gray-400">
-                                    Nenhum produto cadastrado neste grupo.
+                              {/* Imagem do Produto no Topo */}
+                              {selectedProduct.image ? (
+                                <div className="h-44 w-full bg-gray-100 flex-shrink-0 relative">
+                                  <img 
+                                    src={selectedProduct.image.split('|')[0]} 
+                                    alt={selectedProduct.name} 
+                                    className="w-full h-full object-cover"
+                                  />
+                                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
+                                </div>
+                              ) : (
+                                <div className="h-28 w-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center text-slate-400 border-b border-gray-200 flex-shrink-0">
+                                  <Utensils size={32} />
+                                </div>
+                              )}
+
+                              {/* Informações Básicas do Produto */}
+                              <div className="bg-white p-4 space-y-1.5 border-b border-gray-100 flex-shrink-0 text-left">
+                                <h4 className="text-base font-extrabold text-gray-900 uppercase tracking-tight">
+                                  {selectedProduct.name}
+                                </h4>
+                                {selectedProduct.description && (
+                                  <p className="text-xs text-gray-500 leading-relaxed">
+                                    {selectedProduct.description}
+                                  </p>
+                                )}
+                                <span className="text-base font-black text-gray-950 block">
+                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedProduct.price)}
+                                </span>
+                              </div>
+
+                              {/* Listagem de Passos / Adicionais */}
+                              <div className="flex-1 overflow-y-auto pb-4 space-y-4">
+                                {loadingSteps ? (
+                                  <div className="flex flex-col items-center justify-center py-20 gap-3 text-gray-400">
+                                    <div className="w-8 h-8 rounded-full border-4 border-indigo-500/20 border-t-indigo-600 animate-spin" />
+                                    <span className="text-[11px] font-bold">Carregando adicionais...</span>
                                   </div>
-                                );
-                              }
-                              return filtered.map((p: any) => {
-                                const imageUrl = p.image ? p.image.split('|')[0] : '';
-                                const hasPromo = p.name.toLowerCase().includes('costela') || p.name.toLowerCase().includes('combo');
-                                const originalPrice = p.price * 1.35;
+                                ) : stepsError ? (
+                                  <div className="p-6 text-center text-xs text-rose-500 font-bold bg-white rounded-2xl mx-4 mt-4 shadow-sm border border-rose-100">
+                                    {stepsError}
+                                  </div>
+                                ) : productSteps && Array.isArray(productSteps.passos) && productSteps.passos.length > 0 ? (
+                                  productSteps.passos.map((passo: any) => {
+                                    const isObrigatorio = passo.QtdMin > 0;
+                                    const isSingle = passo.QtdMax === 1;
 
-                                return (
-                                  <div 
-                                    key={p.id} 
-                                    className="flex items-start justify-between gap-4 py-4"
+                                    return (
+                                      <div key={passo.IdProdutoPassos} className="space-y-1">
+                                        {/* Cabeçalho do Passo */}
+                                        <div className="bg-slate-100 dark:bg-slate-200/50 px-4 py-2 text-left flex flex-col gap-0.5">
+                                          <div className="flex items-center justify-between">
+                                            <span className="text-xs font-black text-gray-700 tracking-tight">
+                                              {passo.Pergunta}
+                                            </span>
+                                            {isObrigatorio && (
+                                              <span className="text-[8px] bg-red-500 text-white font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider scale-90">
+                                                Obrigatório
+                                              </span>
+                                            )}
+                                          </div>
+                                          {passo.SubTitulo && (
+                                            <span className="text-[9px] text-gray-400 font-bold leading-none">
+                                              {passo.SubTitulo}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* Opções do Passo */}
+                                        <div className="bg-white divide-y divide-gray-100">
+                                          {Array.isArray(passo.ListaProdutos) && passo.ListaProdutos.map((opt: any) => {
+                                            const precoAdicional = opt.ListaPreco?.[0]?.Preco || 0;
+                                            const imageUrl = opt.Imagem ? opt.Imagem.split('|')[0] : '';
+
+                                            return (
+                                              <div 
+                                                key={opt.IdProduto}
+                                                className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer"
+                                              >
+                                                <div className="flex items-center flex-1 min-w-0">
+                                                  {imageUrl && (
+                                                    <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-50 border border-gray-100 mr-3 flex-shrink-0">
+                                                      <img src={imageUrl} alt={opt.Descricao} className="w-full h-full object-cover" />
+                                                    </div>
+                                                  )}
+                                                  <span className="text-xs font-semibold text-gray-800 truncate">
+                                                    {opt.Descricao}
+                                                  </span>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                  {precoAdicional > 0 && (
+                                                    <span className="text-[11px] font-extrabold text-emerald-600">
+                                                      +{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(precoAdicional)}
+                                                    </span>
+                                                  )}
+                                                  {isSingle ? (
+                                                    <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0">
+                                                      <div className="w-2 h-2 rounded-full bg-red-600 opacity-0 hover:opacity-100 transition-opacity" />
+                                                    </div>
+                                                  ) : (
+                                                    <div className="w-4 h-4 rounded border-2 border-gray-300 flex items-center justify-center flex-shrink-0 text-red-600 font-black text-[10px]">
+                                                      +
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                ) : (
+                                  <div className="p-8 text-center text-xs text-gray-400 font-medium">
+                                    Nenhum opcional cadastrado para este produto.
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Rodapé de Ação Detalhada */}
+                              <div className="h-16 bg-white border-t border-gray-100 px-4 flex items-center justify-between gap-4 flex-shrink-0">
+                                <div className="flex items-center bg-gray-100 rounded-xl px-2 py-1 gap-3">
+                                  <button 
+                                    type="button" 
+                                    onClick={() => detailQty > 1 && setDetailQty(detailQty - 1)}
+                                    className="w-7 h-7 rounded-lg hover:bg-white text-gray-600 flex items-center justify-center transition-all"
                                   >
-                                    <div className="flex-1 space-y-1">
-                                      <h4 className="text-sm font-bold text-gray-900 uppercase tracking-tight">
-                                        {p.name}
-                                      </h4>
-                                      {p.description && (
-                                        <p className="text-xs text-gray-400 line-clamp-3 leading-relaxed">
-                                          {p.description}
-                                        </p>
+                                    <Minus size={14} />
+                                  </button>
+                                  <span className="text-xs font-black text-gray-800 w-4 text-center">{detailQty}</span>
+                                  <button 
+                                    type="button" 
+                                    onClick={() => setDetailQty(detailQty + 1)}
+                                    className="w-7 h-7 rounded-lg hover:bg-white text-gray-600 flex items-center justify-center transition-all"
+                                  >
+                                    <Plus size={14} />
+                                  </button>
+                                </div>
+
+                                <button 
+                                  type="button" 
+                                  onClick={() => setSelectedProduct(null)}
+                                  className="flex-1 h-11 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 uppercase tracking-wide"
+                                >
+                                  Adicionar
+                                  <span>•</span>
+                                  <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedProduct.price * detailQty)}</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Listagem Principal do Cardápio */
+                            <>
+                              {/* Cabeçalho do Cardápio Fiel ao Layout da Loja */}
+                              <div className="bg-white px-4 pt-2 pb-4 text-center border-b border-gray-100 flex-shrink-0 flex flex-col items-center">
+                                <div className="flex items-center gap-4 justify-center mb-1 text-emerald-600">
+                                  <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[10px] font-bold">W</div>
+                                  <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-yellow-500 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold">I</div>
+                                </div>
+                                <h3 className="text-base font-black text-gray-900 tracking-tight uppercase">
+                                  {nomeIa || 'BURGUER PLUS'}
+                                </h3>
+                                <span className="text-[10px] text-gray-500 flex items-center gap-1 mt-0.5 justify-center">
+                                  <MapPin size={10} />
+                                  {endereco ? (endereco.split('-')[0].trim()) : 'Taboão da Serra - SP'}
+                                </span>
+                                <span className="mt-2 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase tracking-wider">
+                                  LOJA ABERTA
+                                </span>
+                              </div>
+
+                              {/* Categorias (Navegação Horizontal) */}
+                              <div className="flex items-center gap-5 overflow-x-auto px-4 pb-2 pt-3 border-b border-gray-100 scrollbar-none flex-shrink-0 bg-white">
+                                {testResult.data.grupos.map((g: any) => {
+                                  const isActive = activeGroupId === g.id;
+                                  return (
+                                    <button
+                                      key={g.id}
+                                      type="button"
+                                      onClick={() => setActiveGroupId(g.id)}
+                                      className={cn(
+                                        "pb-1.5 text-xs font-black tracking-wider uppercase whitespace-nowrap transition-all border-b-2 relative",
+                                        isActive 
+                                          ? "border-red-600 text-red-600 font-extrabold"
+                                          : "border-transparent text-gray-400 hover:text-gray-600"
                                       )}
-                                      <div className="pt-1.5 flex flex-col gap-0.5">
-                                        {hasPromo ? (
-                                          <div className="text-xs text-gray-400 flex items-center gap-1">
-                                            <span>De</span>
-                                            <span className="line-through">
-                                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(originalPrice)}
-                                            </span>
-                                            <span>por</span>
-                                            <span className="text-sm font-extrabold text-emerald-600">
-                                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)}
-                                            </span>
+                                    >
+                                      {g.description}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Lista de Produtos do Grupo */}
+                              <div className="flex-1 overflow-y-auto px-4 divide-y divide-gray-100 bg-white">
+                                {(() => {
+                                  const filtered = (testResult.data.produtos || []).filter((p: any) => p.groupId === activeGroupId);
+                                  if (filtered.length === 0) {
+                                    return (
+                                      <div className="text-center py-12 text-xs text-gray-400">
+                                        Nenhum produto cadastrado neste grupo.
+                                      </div>
+                                    );
+                                  }
+                                  return filtered.map((p: any) => {
+                                    const imageUrl = p.image ? p.image.split('|')[0] : '';
+                                    const hasPromo = p.name.toLowerCase().includes('costela') || p.name.toLowerCase().includes('combo');
+                                    const originalPrice = p.price * 1.35;
+
+                                    return (
+                                      <div 
+                                        key={p.id} 
+                                        onClick={() => handleProductClick(p)}
+                                        className="flex items-start justify-between gap-4 py-4 cursor-pointer hover:bg-slate-50 transition-all rounded-lg px-1"
+                                      >
+                                        <div className="flex-1 space-y-1 text-left">
+                                          <h4 className="text-sm font-bold text-gray-900 uppercase tracking-tight">
+                                            {p.name}
+                                          </h4>
+                                          {p.description && (
+                                            <p className="text-xs text-gray-400 line-clamp-3 leading-relaxed">
+                                              {p.description}
+                                            </p>
+                                          )}
+                                          <div className="pt-1.5 flex flex-col gap-0.5">
+                                            {hasPromo ? (
+                                              <div className="text-xs text-gray-400 flex items-center gap-1">
+                                                <span>De</span>
+                                                <span className="line-through">
+                                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(originalPrice)}
+                                                </span>
+                                                <span>por</span>
+                                                <span className="text-sm font-extrabold text-emerald-600">
+                                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)}
+                                                </span>
+                                              </div>
+                                            ) : (
+                                              <span className="text-sm font-extrabold text-gray-900">
+                                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)}
+                                              </span>
+                                            )}
+                                            {p.active === false && (
+                                              <span className="w-fit bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider mt-1">
+                                                Pausado
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        
+                                        {/* Imagem */}
+                                        {imageUrl ? (
+                                          <div className="w-20 h-20 rounded-2xl overflow-hidden bg-gray-50 border border-gray-100 flex-shrink-0 flex items-center justify-center shadow-sm">
+                                            <img 
+                                              src={imageUrl} 
+                                              alt={p.name} 
+                                              className="w-full h-full object-cover"
+                                              onError={(e) => {
+                                                (e.target as HTMLElement).style.display = 'none';
+                                              }}
+                                            />
                                           </div>
                                         ) : (
-                                          <span className="text-sm font-extrabold text-gray-900">
-                                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)}
-                                          </span>
-                                        )}
-                                        {p.active === false && (
-                                          <span className="w-fit bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider mt-1">
-                                            Pausado
-                                          </span>
+                                          <div className="w-20 h-20 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-400 flex-shrink-0 border border-gray-200/50">
+                                            <Utensils size={18} />
+                                          </div>
                                         )}
                                       </div>
-                                    </div>
-                                    
-                                    {/* Imagem */}
-                                    {imageUrl ? (
-                                      <div className="w-20 h-20 rounded-2xl overflow-hidden bg-gray-50 border border-gray-100 flex-shrink-0 flex items-center justify-center shadow-sm">
-                                        <img 
-                                          src={imageUrl} 
-                                          alt={p.name} 
-                                          className="w-full h-full object-cover"
-                                          onError={(e) => {
-                                            (e.target as HTMLElement).style.display = 'none';
-                                          }}
-                                        />
-                                      </div>
-                                    ) : (
-                                      <div className="w-20 h-20 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-400 flex-shrink-0 border border-gray-200/50">
-                                        <Utensils size={18} />
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              });
-                            })()}
-                          </div>
+                                    );
+                                  });
+                                })()}
+                              </div>
 
-                          {/* Barra de Navegação Inferior Mockada */}
-                          <div className="h-14 bg-white border-t border-gray-100 flex items-center justify-around text-gray-400 px-2 flex-shrink-0">
-                            <button type="button" className="flex flex-col items-center justify-center gap-0.5 text-red-600">
-                              <Home size={18} />
-                              <span className="text-[9px] font-bold">Início</span>
-                            </button>
-                            <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
-                              <Search size={18} />
-                              <span className="text-[9px] font-bold">Buscar</span>
-                            </button>
-                            <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
-                              <ClipboardList size={18} />
-                              <span className="text-[9px] font-bold">Pedidos</span>
-                            </button>
-                            <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
-                              <User size={18} />
-                              <span className="text-[9px] font-bold">Perfil</span>
-                            </button>
-                          </div>
+                              {/* Barra de Navegação Inferior Mockada */}
+                              <div className="h-14 bg-white border-t border-gray-100 flex items-center justify-around text-gray-400 px-2 flex-shrink-0">
+                                <button type="button" className="flex flex-col items-center justify-center gap-0.5 text-red-600">
+                                  <Home size={18} />
+                                  <span className="text-[9px] font-bold">Início</span>
+                                </button>
+                                <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
+                                  <Search size={18} />
+                                  <span className="text-[9px] font-bold">Buscar</span>
+                                </button>
+                                <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
+                                  <ClipboardList size={18} />
+                                  <span className="text-[9px] font-bold">Pedidos</span>
+                                </button>
+                                <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
+                                  <User size={18} />
+                                  <span className="text-[9px] font-bold">Perfil</span>
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </div>
                       ) : (
                         <div className="text-center py-8 text-xs text-amber-500 font-mono">
