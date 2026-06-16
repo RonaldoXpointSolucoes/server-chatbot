@@ -391,11 +391,19 @@ class SessionManager {
             lastActivity = Date.now();
         };
         
+        // Assina múltiplos eventos comuns da Baileys para registrar atividade legítima da conexão
         sock.ev.on('connection.update', updateListener);
+        sock.ev.on('creds.update', updateListener);
+        sock.ev.on('messages.upsert', updateListener);
+        sock.ev.on('messages.update', updateListener);
+        sock.ev.on('presence.update', updateListener);
+        sock.ev.on('chats.update', updateListener);
         
+        // Aumenta o tempo limite de inatividade para 15 minutos (900.000 ms)
+        // Isso impede de reiniciar instâncias ociosas saudáveis
         const interval = setInterval(() => {
-            if (Date.now() - lastActivity > 120000) {
-                console.warn(`[SessionManager/Watchdog] Instância ${instanceId} inativa/zumbi detectada (sem atividade por 120s). Forçando reinicialização do socket...`);
+            if (Date.now() - lastActivity > 900000) {
+                console.warn(`[SessionManager/Watchdog] Instância ${instanceId} inativa/zumbi confirmada (sem atividade por 15 minutos). Forçando reinicialização do socket...`);
                 this.clearWatchdog(instanceId);
                 try {
                     sock.end(new Error("Zombie connection detected by watchdog"));
@@ -403,7 +411,7 @@ class SessionManager {
                     try { sock.ws.close(); } catch(err){}
                 }
             }
-        }, 30000);
+        }, 60000); // Checa a cada 1 minuto
         
         this.watchdogs.set(instanceId, { interval, updateListener, sock });
     }
@@ -414,6 +422,11 @@ class SessionManager {
             clearInterval(interval);
             try {
                 sock.ev.off('connection.update', updateListener);
+                sock.ev.off('creds.update', updateListener);
+                sock.ev.off('messages.upsert', updateListener);
+                sock.ev.off('messages.update', updateListener);
+                sock.ev.off('presence.update', updateListener);
+                sock.ev.off('chats.update', updateListener);
             } catch(e) {}
             this.watchdogs.delete(instanceId);
         }
