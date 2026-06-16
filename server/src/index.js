@@ -204,6 +204,64 @@ async function runMigrations() {
             is_active boolean DEFAULT true,
             created_at timestamp with time zone DEFAULT now()
           );
+
+          -- Tabelas do Cardápio (Gastrofood)
+          CREATE TABLE IF NOT EXISTS cardapio_grupos (
+            id text PRIMARY KEY,
+            tenant_id uuid NOT NULL,
+            ordem integer DEFAULT 0,
+            descricao text NOT NULL,
+            ativo boolean DEFAULT true,
+            created_at timestamp with time zone DEFAULT now()
+          );
+          ALTER TABLE cardapio_grupos ENABLE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS "Permitir tudo em cardapio_grupos" ON cardapio_grupos;
+          CREATE POLICY "Permitir tudo em cardapio_grupos" ON cardapio_grupos FOR ALL USING (true) WITH CHECK (true);
+
+          CREATE TABLE IF NOT EXISTS cardapio_produtos (
+            id text PRIMARY KEY,
+            tenant_id uuid NOT NULL,
+            grupo_id text REFERENCES cardapio_grupos(id) ON DELETE CASCADE,
+            name text NOT NULL,
+            description text,
+            price numeric(10,2) NOT NULL DEFAULT 0.00,
+            image text,
+            ativo boolean DEFAULT true,
+            created_at timestamp with time zone DEFAULT now()
+          );
+          ALTER TABLE cardapio_produtos ENABLE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS "Permitir tudo em cardapio_produtos" ON cardapio_produtos;
+          CREATE POLICY "Permitir tudo em cardapio_produtos" ON cardapio_produtos FOR ALL USING (true) WITH CHECK (true);
+
+          CREATE TABLE IF NOT EXISTS cardapio_passos (
+            id text PRIMARY KEY,
+            tenant_id uuid NOT NULL,
+            produto_id text REFERENCES cardapio_produtos(id) ON DELETE CASCADE,
+            pergunta text NOT NULL,
+            sub_titulo text,
+            qtd_min integer DEFAULT 0,
+            qtd_max integer DEFAULT 1,
+            ordem integer DEFAULT 0,
+            ativo boolean DEFAULT true,
+            created_at timestamp with time zone DEFAULT now()
+          );
+          ALTER TABLE cardapio_passos ENABLE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS "Permitir tudo em cardapio_passos" ON cardapio_passos;
+          CREATE POLICY "Permitir tudo em cardapio_passos" ON cardapio_passos FOR ALL USING (true) WITH CHECK (true);
+
+          CREATE TABLE IF NOT EXISTS cardapio_opcoes (
+            id text PRIMARY KEY,
+            tenant_id uuid NOT NULL,
+            passo_id text REFERENCES cardapio_passos(id) ON DELETE CASCADE,
+            descricao text NOT NULL,
+            preco numeric(10,2) NOT NULL DEFAULT 0.00,
+            imagem text,
+            ativo boolean DEFAULT true,
+            created_at timestamp with time zone DEFAULT now()
+          );
+          ALTER TABLE cardapio_opcoes ENABLE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS "Permitir tudo em cardapio_opcoes" ON cardapio_opcoes;
+          CREATE POLICY "Permitir tudo em cardapio_opcoes" ON cardapio_opcoes FOR ALL USING (true) WITH CHECK (true);
         `;
         await client.query(migrationSQL);
         console.log("[Migration] Migração DDL executada com sucesso!");

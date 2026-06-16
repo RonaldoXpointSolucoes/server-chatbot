@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useChatStore } from '../../store/chatStore';
 import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { supabase } from '../../services/supabase';
 
 interface HorarioPeriodo {
   inicio: string;
@@ -69,6 +70,342 @@ export default function AccountSettings() {
   const [loadingSteps, setLoadingSteps] = useState(false);
   const [stepsError, setStepsError] = useState('');
   const [detailQty, setDetailQty] = useState(1);
+
+  // Estados para Mapeamento no Supabase
+  const [isMapping, setIsMapping] = useState(false);
+  const [mappingProgress, setMappingProgress] = useState(0);
+  const [mappingLogs, setMappingLogs] = useState<string[]>([]);
+  const [estTimeRemaining, setEstTimeRemaining] = useState<number | null>(null);
+  const [loadSource, setLoadSource] = useState<'api' | 'supabase'>('api');
+  const [supabaseData, setSupabaseData] = useState<{ grupos: any[]; produtos: any[] } | null>(null);
+  
+  const cancelMappingRef = useRef(false);
+
+  const loadCardapioFromSupabase = async (tenantId: string) => {
+    try {
+      const { data: dbGrupos, error: errG } = await supabase
+        .from('cardapio_grupos')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('ordem', { ascending: true });
+
+      if (errG) throw errG;
+
+      const { data: dbProdutos, error: errP } = await supabase
+        .from('cardapio_produtos')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('name', { ascending: true });
+
+      if (errP) throw errP;
+
+      if (dbGrupos && dbGrupos.length > 0) {
+        const gruposMapeados = dbGrupos.map(g => ({
+          id: g.id,
+          description: g.descricao,
+          active: g.ativo
+        }));
+
+        const produtosMapeados = (dbProdutos || []).map(p => ({
+          id: p.id,
+          groupId: p.grupo_id,
+          name: p.name,
+          description: p.description,
+          price: Number(p.price),
+          image: p.image,
+          active: p.ativo
+        }));
+
+        setSupabaseData({
+          grupos: gruposMapeados,
+          produtos: produtosMapeados
+        });
+        
+        // Define o grupo ativo inicial se houver
+        if (gruposMapeados.length > 0) {
+          setActiveGroupId(gruposMapeados[0].id);
+        }
+      } else {
+        setSupabaseData(null);
+      }
+    } catch (err: any) {
+      console.error('Erro ao carregar dados do Supabase:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (tenantInfo?.id) {
+      loadCardapioFromSupabase(tenantInfo.id);
+    }
+  }, [tenantInfo?.id]);
+
+  const handleMapCardapio = async () => {
+    setIsMapping(true);
+    setMappingProgress(0);
+    setMappingLogs([]);
+    setEstTimeRemaining(null);
+    cancelMappingRef.current = false;
+
+    const addLog = (msg: string) => {
+      const time = new Date().toLocaleTimeString('pt-BR');
+      setMappingLogs(prev => [...prev, `[${time}] ${msg}`]);
+    };
+
+    addLog('Iniciando o mapeamento do cardápio...');
+
+    try {
+      const currentTenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (!currentTenantId) {
+        throw new Error('ID do Inquilino (tenant_id) não encontrado.');
+      }
+
+      if (!cardapioJsonUrl) {
+        throw new Error('A URL do endpoint é obrigatória.');
+      }
+
+      if (cardapioJsonPayload) {
+        try {
+          JSON.parse(cardapioJsonPayload);
+        } catch (e) {
+          throw new Error('O corpo da requisição (JSON Payload) não é um JSON válido.');
+        }
+      }
+
+      addLog('Buscando grupos e produtos do servidor externo Gastrofood...');
+      const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
+      const res = await fetch(`${apiBase}/api/v1/utils/test-cardapio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: cardapioJsonUrl,
+          token: cardapioJsonToken,
+          payload: cardapioJsonPayload ? JSON.parse(cardapioJsonPayload) : null
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `Erro na requisição. Status: ${res.status}`);
+      }
+
+      const resData = await res.json();
+      if (!resData.data || !Array.isArray(resData.data.grupos) || !Array.isArray(resData.data.produtos)) {
+        throw new Error('Estrutura de resposta inválida.');
+      }
+
+      const { grupos, produtos } = resData.data;
+      addLog(`Sucesso! Encontrados ${grupos.length} grupos e ${produtos.length} produtos.`);
+
+      // 1. Salvar os grupos no Supabase
+      addLog('Salvando grupos no Supabase...');
+      const gruposToUpsert = grupos.map((g: any, index: number) => ({
+        id: g.id,
+        tenant_id: currentTenantId,
+        ordem: index,
+        descricao: g.description,
+        ativo: g.active !== false
+      }));
+
+      const { error: errGrupos } = await supabase
+        .from('cardapio_grupos')
+        .upsert(gruposToUpsert, { onConflict: 'id' });
+
+      if (errGrupos) throw errGrupos;
+      addLog(`Grupos salvos com sucesso (${gruposToUpsert.length} itens).`);
+
+      // 2. Salvar os produtos no Supabase
+      addLog('Salvando produtos no Supabase...');
+      const produtosToUpsert = produtos.map((p: any) => ({
+        id: p.id,
+        tenant_id: currentTenantId,
+        grupo_id: p.groupId,
+        name: p.name,
+        description: p.description || null,
+        price: p.price || 0.00,
+        image: p.image || null,
+        ativo: p.active !== false
+      }));
+
+      const { error: errProdutos } = await supabase
+        .from('cardapio_produtos')
+        .upsert(produtosToUpsert, { onConflict: 'id' });
+
+      if (errProdutos) throw errProdutos;
+      addLog(`Produtos salvos com sucesso (${produtosToUpsert.length} itens).`);
+
+      // 3. Processamento sequencial e suave dos adicionais
+      addLog('Iniciando mapeamento de adicionais (1 item a cada 5 segundos para evitar sobrecarga)...');
+
+      // Calcula a URL de passos
+      let stepsUrl = cardapioJsonUrl;
+      if (stepsUrl.includes('/ProdutoPdvService/GetCardapioCompleto')) {
+        stepsUrl = stepsUrl.replace('/ProdutoPdvService/GetCardapioCompleto', '/ProdutoCardapioService/ProdutoComPassos');
+      } else {
+        try {
+          const urlObj = new URL(stepsUrl);
+          urlObj.pathname = '/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos';
+          stepsUrl = urlObj.toString();
+        } catch (e) {
+          stepsUrl = stepsUrl.replace(/\/v6\/server\/nuvem\/.*$/, '/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos');
+        }
+      }
+
+      const total = produtos.length;
+      for (let i = 0; i < total; i++) {
+        if (cancelMappingRef.current) {
+          addLog('Mapeamento cancelado pelo usuário.');
+          break;
+        }
+
+        const product = produtos[i];
+        const indexNum = i + 1;
+
+        // Atualiza progresso e estimativa
+        setMappingProgress(Math.round((i / total) * 100));
+        setEstTimeRemaining((total - i) * 5);
+
+        addLog(`[${indexNum}/${total}] Requisitando adicionais de "${product.name}"...`);
+
+        try {
+          const resSteps = await fetch(`${apiBase}/api/v1/utils/test-cardapio`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              url: stepsUrl,
+              token: cardapioJsonToken,
+              payload: {
+                AIdProduto: product.id
+              }
+            })
+          });
+
+          if (resSteps.ok) {
+            const stepsData = await resSteps.json();
+            if (stepsData.status === 200 && stepsData.data) {
+              const passosRaw = stepsData.data.passos || stepsData.data.Passos || [];
+              const passos = Array.isArray(passosRaw) ? passosRaw : [];
+
+              if (passos.length > 0) {
+                addLog(`  -> Encontrados ${passos.length} passos de adicionais. Salvando...`);
+
+                const passosToUpsert = passos.map((p: any, idx: number) => {
+                  const idPasso = p.IdProdutoPassos || p.id || p.Id;
+                  const pergunta = p.Pergunta || p.pergunta || p.SubTitulo || p.subTitulo || 'Opções';
+                  const subTitulo = p.SubTitulo || p.subTitulo || null;
+                  const qtdMin = p.QtdMin !== undefined ? p.QtdMin : (p.qtdMin !== undefined ? p.qtdMin : 0);
+                  const qtdMax = p.QtdMax !== undefined ? p.QtdMax : (p.qtdMax !== undefined ? p.qtdMax : 1);
+                  const ativo = p.Ativo !== false && p.ativo !== false;
+
+                  return {
+                    id: idPasso,
+                    tenant_id: currentTenantId,
+                    produto_id: product.id,
+                    pergunta: pergunta,
+                    sub_titulo: subTitulo,
+                    qtd_min: qtdMin,
+                    qtd_max: qtdMax,
+                    ordem: idx,
+                    ativo: ativo
+                  };
+                });
+
+                const { error: errPassos } = await supabase
+                  .from('cardapio_passos')
+                  .upsert(passosToUpsert, { onConflict: 'id' });
+
+                if (errPassos) throw errPassos;
+
+                const opcoesToUpsert: any[] = [];
+                passos.forEach((p: any) => {
+                  const rawLista = p.ListaProdutos || p.listaProdutos || p.produtos || p.Produtos || [];
+                  const idPasso = p.IdProdutoPassos || p.id || p.Id;
+
+                  if (Array.isArray(rawLista)) {
+                    rawLista.forEach((opt: any) => {
+                      const precoList = opt.ListaPreco || opt.listaPreco || [];
+                      const precoAdicional = precoList?.[0]?.Preco !== undefined 
+                        ? precoList[0].Preco 
+                        : (precoList?.[0]?.preco !== undefined 
+                          ? precoList[0].preco 
+                          : (opt.Preco !== undefined 
+                            ? opt.Preco 
+                            : (opt.preco !== undefined ? opt.preco : 0)));
+
+                      const idOpcao = opt.IdProduto || opt.id || opt.Id;
+                      const descricao = opt.Descricao || opt.descricao || 'Opção';
+                      const imagem = opt.Imagem || opt.imagem || opt.image || null;
+                      const ativoOpcao = opt.Ativo !== false && opt.ativo !== false;
+
+                      opcoesToUpsert.push({
+                        id: idOpcao,
+                        tenant_id: currentTenantId,
+                        passo_id: idPasso,
+                        descricao: descricao,
+                        preco: precoAdicional,
+                        imagem: imagem,
+                        ativo: ativoOpcao
+                      });
+                    });
+                  }
+                });
+
+                if (opcoesToUpsert.length > 0) {
+                  const { error: errOpcoes } = await supabase
+                    .from('cardapio_opcoes')
+                    .upsert(opcoesToUpsert, { onConflict: 'id' });
+
+                  if (errOpcoes) throw errOpcoes;
+                  addLog(`  -> ${opcoesToUpsert.length} opções salvas no Supabase.`);
+                }
+              } else {
+                addLog(`  -> Nenhum opcional cadastrado para este produto.`);
+              }
+            } else {
+              addLog(`  -> Aviso: Resposta de passos inválida ou vazia.`);
+            }
+          } else {
+            addLog(`  -> Falha na API para buscar passos de "${product.name}" (Status ${resSteps.status}).`);
+          }
+        } catch (prodErr: any) {
+          addLog(`  -> Erro ao processar passos de "${product.name}": ${prodErr.message}`);
+        }
+
+        // Aguarda 5 segundos de forma suave com contagem regressiva por segundo no log
+        if (i < total - 1 && !cancelMappingRef.current) {
+          for (let sec = 5; sec > 0; sec--) {
+            if (cancelMappingRef.current) break;
+            setEstTimeRemaining((total - i - 1) * 5 + sec);
+            const subProgress = ((i + (5 - sec) / 5) / total) * 100;
+            setMappingProgress(Math.round(subProgress));
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
+      }
+
+      if (cancelMappingRef.current) {
+        addLog('Sincronização abortada pelo usuário.');
+        setIsMapping(false);
+        setEstTimeRemaining(null);
+      } else {
+        setMappingProgress(100);
+        setEstTimeRemaining(0);
+        addLog('🎉 Mapeamento concluído com sucesso (100%)!');
+        await loadCardapioFromSupabase(currentTenantId);
+        setLoadSource('supabase');
+      }
+
+    } catch (err: any) {
+      console.error('Erro no mapeamento do cardápio:', err);
+      addLog(`❌ ERRO: ${err.message || 'Ocorreu um erro inesperado.'}`);
+      setEstTimeRemaining(null);
+    } finally {
+      setIsMapping(false);
+    }
+  };
 
   useEffect(() => {
     console.log("AccountSettings montou. tenantInfo:", tenantInfo);
@@ -172,6 +509,50 @@ export default function AccountSettings() {
     }
   };
 
+  const handleConsultSupabase = async () => {
+    setTestLoading(true);
+    setTestError('');
+    try {
+      const currentTenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (!currentTenantId) {
+        throw new Error('ID do Inquilino (tenant_id) não encontrado.');
+      }
+      
+      // Busca dados atuais do Supabase para fazer uma checagem local se há dados
+      const { data: dbGrupos, error: errG } = await supabase
+        .from('cardapio_grupos')
+        .select('id')
+        .eq('tenant_id', currentTenantId)
+        .limit(1);
+
+      if (errG) throw errG;
+
+      if (!dbGrupos || dbGrupos.length === 0) {
+        throw new Error('Nenhum dado de cardápio encontrado no Supabase para este estabelecimento. Por favor, execute o "Mapear Cardápio" primeiro.');
+      }
+
+      // Carrega os dados mais recentes do Supabase no estado local
+      await loadCardapioFromSupabase(currentTenantId);
+      
+      // Força a exibição da visualização do celular usando o modo Supabase
+      setTestResult({
+        status: 200,
+        fromSupabase: true,
+        data: {
+          grupos: [],
+          produtos: []
+        }
+      });
+      setLoadSource('supabase');
+      setActiveResultTab('preview');
+      
+    } catch (err: any) {
+      setTestError(err.message || 'Erro ao consultar o Supabase.');
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
   const handleProductClick = async (product: any) => {
     setSelectedProduct(product);
     setProductSteps(null);
@@ -179,12 +560,62 @@ export default function AccountSettings() {
     setStepsError('');
     setDetailQty(1);
 
+    if (loadSource === 'supabase') {
+      try {
+        const { data: dbPassos, error: errPassos } = await supabase
+          .from('cardapio_passos')
+          .select('*')
+          .eq('produto_id', product.id)
+          .order('ordem', { ascending: true });
+
+        if (errPassos) throw errPassos;
+
+        if (dbPassos && dbPassos.length > 0) {
+          const passosMapeados = [];
+          for (const passo of dbPassos) {
+            const { data: dbOpcoes, error: errOpcoes } = await supabase
+              .from('cardapio_opcoes')
+              .select('*')
+              .eq('passo_id', passo.id)
+              .order('descricao', { ascending: true });
+
+            if (errOpcoes) throw errOpcoes;
+
+            passosMapeados.push({
+              IdProdutoPassos: passo.id,
+              Pergunta: passo.pergunta || passo.sub_titulo || 'Opções',
+              SubTitulo: passo.sub_titulo,
+              QtdMin: passo.qtd_min,
+              QtdMax: passo.qtd_max,
+              Ativo: passo.ativo,
+              ListaProdutos: (dbOpcoes || []).map(opt => ({
+                IdProduto: opt.id,
+                Descricao: opt.descricao,
+                Imagem: opt.imagem,
+                Ativo: opt.ativo,
+                ListaPreco: [{ Preco: Number(opt.preco) }]
+              }))
+            });
+          }
+
+          setProductSteps({ passos: passosMapeados });
+        } else {
+          setProductSteps({ passos: [] });
+        }
+      } catch (err: any) {
+        console.error('Erro ao buscar passos do Supabase:', err);
+        setStepsError(err.message || 'Erro ao carregar os adicionais do banco.');
+      } finally {
+        setLoadingSteps(false);
+      }
+      return;
+    }
+
     try {
       if (!cardapioJsonUrl) {
         throw new Error('A URL do endpoint é necessária.');
       }
 
-      // Calcula a URL ProdutoComPassos com base na URL cadastrada
       let stepsUrl = cardapioJsonUrl;
       if (stepsUrl.includes('/ProdutoPdvService/GetCardapioCompleto')) {
         stepsUrl = stepsUrl.replace('/ProdutoPdvService/GetCardapioCompleto', '/ProdutoCardapioService/ProdutoComPassos');
@@ -219,8 +650,50 @@ export default function AccountSettings() {
       }
 
       const resData = await res.json();
-      if (resData.status === 200) {
-        setProductSteps(resData.data);
+      if (resData.status === 200 && resData.data) {
+        const rawPassos = resData.data.passos || resData.data.Passos || [];
+        const passos = Array.isArray(rawPassos) ? rawPassos : [];
+
+        const passosMapeados = passos.map((p: any) => {
+          const idPasso = p.IdProdutoPassos || p.id || p.Id;
+          const pergunta = p.Pergunta || p.pergunta || p.SubTitulo || p.subTitulo || 'Opções';
+          const subTitulo = p.SubTitulo || p.subTitulo || '';
+          const qtdMin = p.QtdMin !== undefined ? p.QtdMin : (p.qtdMin !== undefined ? p.qtdMin : 0);
+          const qtdMax = p.QtdMax !== undefined ? p.QtdMax : (p.qtdMax !== undefined ? p.qtdMax : 1);
+          const ativo = p.Ativo !== false && p.ativo !== false;
+
+          const rawLista = p.ListaProdutos || p.listaProdutos || p.produtos || p.Produtos || [];
+          const listaProdutos = Array.isArray(rawLista) ? rawLista : [];
+
+          return {
+            IdProdutoPassos: idPasso,
+            Pergunta: pergunta,
+            SubTitulo: subTitulo,
+            QtdMin: qtdMin,
+            QtdMax: qtdMax,
+            Ativo: ativo,
+            ListaProdutos: listaProdutos.map((opt: any) => {
+              const precoList = opt.ListaPreco || opt.listaPreco || [];
+              const precoAdicional = precoList?.[0]?.Preco !== undefined 
+                ? precoList[0].Preco 
+                : (precoList?.[0]?.preco !== undefined 
+                  ? precoList[0].preco 
+                  : (opt.Preco !== undefined 
+                    ? opt.Preco 
+                    : (opt.preco !== undefined ? opt.preco : 0)));
+
+              return {
+                IdProduto: opt.IdProduto || opt.id || opt.Id,
+                Descricao: opt.Descricao || opt.descricao || 'Opção',
+                Imagem: opt.Imagem || opt.imagem || opt.image || '',
+                Ativo: opt.Ativo !== false && opt.ativo !== false,
+                ListaPreco: [{ Preco: Number(precoAdicional) }]
+              };
+            })
+          };
+        });
+
+        setProductSteps({ passos: passosMapeados });
       } else {
         throw new Error(resData.data?.error || `Erro retornado pelo servidor: Status ${resData.status}`);
       }
@@ -606,16 +1079,83 @@ export default function AccountSettings() {
                 </div>
               </div>
 
-              <div className="pt-4 flex items-center gap-4">
+              <div className="pt-4 flex flex-wrap items-center gap-4">
                 <button
                   type="button"
                   onClick={handleTestRequest}
-                  disabled={testLoading || !cardapioJsonUrl}
+                  disabled={testLoading || isMapping || !cardapioJsonUrl}
                   className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-purple-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {testLoading ? 'Testando...' : 'Testar Requisição'}
+                  {testLoading && !testResult?.fromSupabase ? 'Testando...' : 'Testar Requisição'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConsultSupabase}
+                  disabled={testLoading || isMapping}
+                  className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {testLoading && testResult?.fromSupabase ? 'Consultando...' : 'Consultar Supabase'}
+                </button>
+                <button
+                  type="button"
+                  onClick={isMapping ? () => { cancelMappingRef.current = true; } : handleMapCardapio}
+                  disabled={testLoading || !cardapioJsonUrl}
+                  className={cn(
+                    "px-6 py-2.5 font-semibold rounded-xl shadow-lg flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed",
+                    isMapping
+                      ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/20 animate-pulse"
+                      : "bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-emerald-500/20"
+                  )}
+                >
+                  {isMapping ? 'Cancelar Mapeamento' : 'Mapear Cardápio'}
                 </button>
               </div>
+
+              {/* Painel de Logs e Progresso do Mapeamento */}
+              {(isMapping || mappingLogs.length > 0) && (
+                <div className="bg-slate-900 text-slate-100 p-6 rounded-2xl space-y-4 border border-slate-800 animate-in fade-in duration-300">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-xs font-bold font-mono tracking-wider text-emerald-400">STATUS DO MAPEAMENTO</span>
+                    </div>
+                    {estTimeRemaining !== null && estTimeRemaining > 0 && (
+                      <span className="text-[11px] font-semibold text-slate-400 font-mono">
+                        Tempo restante estimado: {Math.floor(estTimeRemaining / 60)}m {estTimeRemaining % 60}s
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Barra de Progresso */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-xs font-bold font-mono">
+                      <span>Progresso Geral</span>
+                      <span className="text-emerald-400">{mappingProgress}%</span>
+                    </div>
+                    <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-gradient-to-r from-emerald-400 to-teal-500 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${mappingProgress}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Terminal de Logs */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">Terminal Logs</span>
+                    <div className="bg-black/40 border border-slate-800/80 rounded-xl p-4 max-h-48 overflow-y-auto font-mono text-[11px] space-y-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+                      {mappingLogs.map((log, idx) => (
+                        <div key={idx} className={cn(
+                          "leading-relaxed whitespace-pre-wrap text-left",
+                          log.includes('❌') ? "text-rose-400" : log.includes('🎉') || log.includes('sucesso') || log.includes('concluído') ? "text-emerald-400" : "text-slate-300"
+                        )}>
+                          {log}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {testError && (
                 <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
@@ -629,12 +1169,14 @@ export default function AccountSettings() {
                   {/* Cabeçalho de Status e Abas */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado do Teste:</span>
+                      <span className="text-xs font-bold text-gray-500 dark:text-gray-400">
+                        {testResult.fromSupabase ? 'Consulta Banco de Dados:' : 'Resultado do Teste:'}
+                      </span>
                       <span className={cn(
                         "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider",
                         testResult.status === 200 ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
                       )}>
-                        Status: {testResult.status}
+                        {testResult.fromSupabase ? 'Supabase (Gravado)' : `Status: ${testResult.status}`}
                       </span>
                     </div>
 
@@ -667,10 +1209,56 @@ export default function AccountSettings() {
                   </div>
 
                   {/* Aba de Visualização do Cardápio */}
-                  {activeResultTab === 'preview' && (
-                    <div className="flex justify-center py-4 bg-slate-100/50 dark:bg-black/30 rounded-2xl">
-                      {testResult.data && Array.isArray(testResult.data.grupos) && Array.isArray(testResult.data.produtos) ? (
-                        <div className="w-[390px] h-[740px] bg-white text-gray-800 rounded-[36px] border-[8px] border-slate-800 dark:border-slate-700 shadow-2xl overflow-hidden flex flex-col relative font-sans">
+                  {activeResultTab === 'preview' && (() => {
+                    const cardapioExibido = loadSource === 'supabase' && supabaseData
+                      ? supabaseData
+                      : testResult?.data;
+                    const hasData = cardapioExibido && Array.isArray(cardapioExibido.grupos) && Array.isArray(cardapioExibido.produtos);
+
+                    return (
+                      <div className="flex flex-col items-center gap-4 py-4 bg-slate-100/50 dark:bg-black/30 rounded-2xl w-full">
+                        {/* Seletor de Origem (caso existam dados no Supabase) */}
+                        {supabaseData && (
+                          <div className="flex items-center bg-gray-200/50 dark:bg-black/20 p-1 rounded-xl w-fit font-sans shadow-sm">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setLoadSource('api');
+                                if (testResult?.data?.grupos?.length > 0) {
+                                  setActiveGroupId(testResult.data.grupos[0].id);
+                                }
+                              }}
+                              className={cn(
+                                "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                loadSource === 'api'
+                                  ? "bg-indigo-500 text-white shadow-sm"
+                                  : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                              )}
+                            >
+                              API Gastrofood (Bruto)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setLoadSource('supabase');
+                                if (supabaseData?.grupos?.length > 0) {
+                                  setActiveGroupId(supabaseData.grupos[0].id);
+                                }
+                              }}
+                              className={cn(
+                                "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                loadSource === 'supabase'
+                                  ? "bg-emerald-500 text-white shadow-sm"
+                                  : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                              )}
+                            >
+                              Supabase (Banco de Dados)
+                            </button>
+                          </div>
+                        )}
+
+                        {hasData ? (
+                          <div className="w-[390px] h-[740px] bg-white text-gray-800 rounded-[36px] border-[8px] border-slate-800 dark:border-slate-700 shadow-2xl overflow-hidden flex flex-col relative font-sans">
                           {/* Barra de Status */}
                           <div className="h-6 bg-white flex justify-between items-center px-6 pt-1 text-[10px] font-bold text-gray-500 z-10 select-none flex-shrink-0">
                             <span>12:00</span>
@@ -739,16 +1327,18 @@ export default function AccountSettings() {
                                   </div>
                                 ) : productSteps && Array.isArray(productSteps.passos) && productSteps.passos.length > 0 ? (
                                   productSteps.passos.map((passo: any) => {
-                                    const isObrigatorio = passo.QtdMin > 0;
-                                    const isSingle = passo.QtdMax === 1;
+                                    const perguntaExibir = passo.Pergunta || passo.pergunta || passo.SubTitulo || passo.sub_titulo || 'Opções';
+                                    const subTituloExibir = passo.SubTitulo || passo.sub_titulo || '';
+                                    const isObrigatorio = (passo.QtdMin !== undefined ? passo.QtdMin : (passo.qtd_min !== undefined ? passo.qtd_min : 0)) > 0;
+                                    const isSingle = (passo.QtdMax !== undefined ? passo.QtdMax : (passo.qtd_max !== undefined ? passo.qtd_max : 1)) === 1;
 
                                     return (
-                                      <div key={passo.IdProdutoPassos} className="space-y-1">
+                                      <div key={passo.IdProdutoPassos || passo.id} className="space-y-1">
                                         {/* Cabeçalho do Passo */}
                                         <div className="bg-slate-100 dark:bg-slate-200/50 px-4 py-2 text-left flex flex-col gap-0.5">
                                           <div className="flex items-center justify-between">
                                             <span className="text-xs font-black text-gray-700 tracking-tight">
-                                              {passo.Pergunta}
+                                              {perguntaExibir}
                                             </span>
                                             {isObrigatorio && (
                                               <span className="text-[8px] bg-red-500 text-white font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider scale-90">
@@ -756,9 +1346,9 @@ export default function AccountSettings() {
                                               </span>
                                             )}
                                           </div>
-                                          {passo.SubTitulo && (
+                                          {subTituloExibir && subTituloExibir !== perguntaExibir && (
                                             <span className="text-[9px] text-gray-400 font-bold leading-none">
-                                              {passo.SubTitulo}
+                                              {subTituloExibir}
                                             </span>
                                           )}
                                         </div>
@@ -766,22 +1356,27 @@ export default function AccountSettings() {
                                         {/* Opções do Passo */}
                                         <div className="bg-white divide-y divide-gray-100">
                                           {Array.isArray(passo.ListaProdutos) && passo.ListaProdutos.map((opt: any) => {
-                                            const precoAdicional = opt.ListaPreco?.[0]?.Preco || 0;
-                                            const imageUrl = opt.Imagem ? opt.Imagem.split('|')[0] : '';
+                                            const precoList = opt.ListaPreco || opt.listaPreco || [];
+                                            const precoAdicional = precoList?.[0]?.Preco !== undefined 
+                                              ? precoList[0].Preco 
+                                              : (precoList?.[0]?.preco !== undefined 
+                                                ? precoList[0].preco 
+                                                : (opt.preco !== undefined ? opt.preco : 0));
+                                            const imageUrl = opt.Imagem ? opt.Imagem.split('|')[0] : (opt.imagem ? opt.imagem.split('|')[0] : '');
 
                                             return (
                                               <div 
-                                                key={opt.IdProduto}
+                                                key={opt.IdProduto || opt.id}
                                                 className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer"
                                               >
                                                 <div className="flex items-center flex-1 min-w-0">
                                                   {imageUrl && (
                                                     <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-50 border border-gray-100 mr-3 flex-shrink-0">
-                                                      <img src={imageUrl} alt={opt.Descricao} className="w-full h-full object-cover" />
+                                                      <img src={imageUrl} alt={opt.Descricao || opt.descricao} className="w-full h-full object-cover" />
                                                     </div>
                                                   )}
                                                   <span className="text-xs font-semibold text-gray-800 truncate">
-                                                    {opt.Descricao}
+                                                    {opt.Descricao || opt.descricao}
                                                   </span>
                                                 </div>
                                                 <div className="flex items-center gap-3">
@@ -868,7 +1463,7 @@ export default function AccountSettings() {
 
                               {/* Categorias (Navegação Horizontal) */}
                               <div className="flex items-center gap-5 overflow-x-auto px-4 pb-2 pt-3 border-b border-gray-100 scrollbar-none flex-shrink-0 bg-white">
-                                {testResult.data.grupos.map((g: any) => {
+                                {cardapioExibido.grupos.map((g: any) => {
                                   const isActive = activeGroupId === g.id;
                                   return (
                                     <button
@@ -891,7 +1486,7 @@ export default function AccountSettings() {
                               {/* Lista de Produtos do Grupo */}
                               <div className="flex-1 overflow-y-auto px-4 divide-y divide-gray-100 bg-white">
                                 {(() => {
-                                  const filtered = (testResult.data.produtos || []).filter((p: any) => p.groupId === activeGroupId);
+                                  const filtered = (cardapioExibido.produtos || []).filter((p: any) => p.groupId === activeGroupId);
                                   if (filtered.length === 0) {
                                     return (
                                       <div className="text-center py-12 text-xs text-gray-400">
@@ -994,13 +1589,18 @@ export default function AccountSettings() {
                           A estrutura do JSON retornado não possui "grupos" e "produtos" válidos para visualização.
                         </div>
                       )}
-                    </div>
-                  )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Aba de JSON Bruto */}
                   {activeResultTab === 'json' && (
                     <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30 animate-in fade-in duration-250">
-                      {JSON.stringify(testResult.data, null, 2)}
+                      {JSON.stringify(
+                        loadSource === 'supabase' && supabaseData ? supabaseData : testResult.data, 
+                        null, 
+                        2
+                      )}
                     </div>
                   )}
 

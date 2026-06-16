@@ -422,6 +422,19 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `2. PRIORIDADE ABSOLUTA: NUNCA sob nenhuma circunstância use ou informe qualquer outro link ou URL de cardápio/site que você encontrar na Base de Conhecimento (RAG) ou no contexto dos arquivos. O link [LINK_CARDAPIO] é soberano e anula qualquer outro link divergente encontrado nos documentos.\n` +
                           `3. Quando o cliente pedir o link do cardápio, envie apenas e exatamente o link [LINK_CARDAPIO].\n`;
 
+            // Diretrizes de Vendas e Montagem de Pedido
+            basePrompt += `\n\n### DIRETRIZES DE VENDAS, CARDÁPIO E MONTAGEM DE PEDIDO (ESTRITAS) ###\n` +
+                          `1. Você possui ferramentas para consultar a lista de produtos do cardápio ("Consultar_produtos_cardapio") e consultar os adicionais/opcionais e passos de cada produto ("Consultar_adicionais_produto"). Use-as sempre que necessário para fornecer informações exatas ao cliente.\n` +
+                          `2. FLUXO DE MONTAGEM DO PEDIDO (ESTRITO):\n` +
+                          `   - Quando o cliente demonstrar interesse em um produto, você deve consultar os opcionais/adicionais desse produto usando a ferramenta "Consultar_adicionais_produto".\n` +
+                          `   - Identifique quais passos de adicionais são OBRIGATÓRIOS (onde qtd_minima > 0). Você DEVE perguntar ao cliente a preferência dele para cada passo obrigatório antes de prosseguir (ex: ponto da carne, tamanho, etc.).\n` +
+                          `   - Apresente também as opções extras/adicionais opcionais (ex: bacon, queijo extra, ovo, etc.) e pergunte de forma simpática se ele deseja adicionar alguma dessas opções no item.\n` +
+                          `   - Quando o cliente fechar o que deseja, faça um resumo claro de todos os itens e seus respectivos adicionais selecionados, mostrando o preço de cada um e o total acumulado do pedido.\n` +
+                          `   - Coleta de Dados do Cliente: Para concluir a montagem do pedido, peça de forma educada e humanizada o Nome do Cliente (se ainda não souber, use a ferramenta "Atualizar_nome_contato" para registrar), o CEP (use a ferramenta "Consultar_cep" para preencher o endereço) e o número da residência/complemento.\n` +
+                          `   - Ao final, após confirmar os detalhes do endereço e o resumo do pedido com os adicionais, informe o total e pergunte a forma de pagamento (Dinheiro, Cartão, Pix).\n` +
+                          `   - Nunca invente preços ou opções. Sempre baseie-se estritamente no retorno das ferramentas "Consultar_produtos_cardapio" e "Consultar_adicionais_produto".\n` +
+                          `3. Quando o cliente pedir o link do cardápio, envie apenas e exatamente o link [LINK_CARDAPIO].\n`;
+
             if (isFirstMessage) {
                 basePrompt += `\n⚠️ AVISO DE PRIMEIRA MENSAGEM (URGENTE/OBRIGATÓRIO): Esta é a PRIMEIRA mensagem desta conversa. Você DEVE saudar o cliente com carinho e OBRIGATORIAMENTE incluir o link do cardápio digital [LINK_CARDAPIO] nesta resposta inicial.\n`;
             }
@@ -544,6 +557,20 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     }
                                 }
                             }
+                        },
+                        {
+                            name: "Consultar_adicionais_produto",
+                            description: "Consulta as opções de adicionais, opcionais, preferências, passos obrigatórios ou grátis de um determinado produto do cardápio.",
+                            parameters: {
+                                type: "OBJECT",
+                                properties: {
+                                    nome_produto: {
+                                        type: "STRING",
+                                        description: "O nome completo ou termo de busca do produto (ex: Costela Burguer)."
+                                    }
+                                },
+                                required: ["nome_produto"]
+                            }
                         }
                     ]
                 }]
@@ -646,70 +673,204 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                             }
                         }
                         else if (call.name === "Consultar_produtos_cardapio") {
-                            const cardapioUrl = companySettings.cardapio_json_url;
-                            const cardapioToken = companySettings.cardapio_json_token;
-                            const cardapioPayload = companySettings.cardapio_json_payload;
+                            try {
+                                console.log(`[AutomationWorker - Cardápio] Consultando produtos do tenant ${tenantId} no Supabase...`);
+                                const { data: dbProdutos, error: errProd } = await supabase
+                                    .from('cardapio_produtos')
+                                    .select(`
+                                        id,
+                                        name,
+                                        description,
+                                        price,
+                                        image,
+                                        ativo,
+                                        grupo_id
+                                    `)
+                                    .eq('tenant_id', tenantId)
+                                    .eq('ativo', true);
 
-                            if (!cardapioUrl) {
-                                functionResult = { erro: "O cardápio JSON online não está configurado nas variáveis globais da empresa." };
+                                if (errProd) throw errProd;
+
+                                if (dbProdutos && dbProdutos.length > 0) {
+                                    // Carrega também os grupos para associar nomes de categorias
+                                    const { data: dbGrupos } = await supabase
+                                        .from('cardapio_grupos')
+                                        .select('id, descricao')
+                                        .eq('tenant_id', tenantId);
+
+                                    const gruposMap = {};
+                                    if (dbGrupos) {
+                                        dbGrupos.forEach(g => {
+                                            gruposMap[g.id] = g.descricao;
+                                        });
+                                    }
+
+                                    let productsList = dbProdutos;
+                                    const termo = call.args.termo_busca;
+                                    if (termo && termo.trim() !== '') {
+                                        const searchLower = termo.toLowerCase();
+                                        productsList = productsList.filter(p => 
+                                            (p.name && p.name.toLowerCase().includes(searchLower)) ||
+                                            (p.description && p.description.toLowerCase().includes(searchLower))
+                                        );
+                                    }
+
+                                    const formattedProducts = productsList.slice(0, 30).map(p => ({
+                                        produto_id: p.id,
+                                        categoria: gruposMap[p.grupo_id] || 'Outros',
+                                        nome: p.name,
+                                        descricao: p.description || 'Sem descrição',
+                                        preco: Number(p.price || 0),
+                                        link_imagem: p.image || ''
+                                    }));
+
+                                    functionResult = { 
+                                        origem: 'supabase',
+                                        total_encontrados: productsList.length,
+                                        produtos: formattedProducts 
+                                    };
+                                } else {
+                                    // Fallback para API Externa
+                                    console.log(`[AutomationWorker - Cardápio] Sem dados no Supabase. Utilizando fallback da API...`);
+                                    const cardapioUrl = companySettings.cardapio_json_url;
+                                    const cardapioToken = companySettings.cardapio_json_token;
+                                    const cardapioPayload = companySettings.cardapio_json_payload;
+
+                                    if (!cardapioUrl) {
+                                        functionResult = { erro: "O cardápio não está configurado nas variáveis da empresa e nenhuma tabela do Supabase contém produtos." };
+                                    } else {
+                                        let bodyObj = {};
+                                        if (cardapioPayload) {
+                                            try {
+                                                bodyObj = typeof cardapioPayload === 'string' ? JSON.parse(cardapioPayload) : cardapioPayload;
+                                            } catch (e) {
+                                                bodyObj = { AGuidEstab: cardapioPayload };
+                                            }
+                                        }
+
+                                        const headers = { 'Content-Type': 'application/json' };
+                                        if (cardapioToken) {
+                                            headers['Authorization'] = cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`;
+                                        }
+
+                                        const res = await fetch(cardapioUrl, {
+                                            method: 'POST',
+                                            headers,
+                                            body: JSON.stringify(bodyObj)
+                                        });
+
+                                        if (!res.ok) {
+                                            functionResult = { erro: `Falha ao carregar o cardápio. Status HTTP: ${res.status}` };
+                                        } else {
+                                            const data = await res.json();
+                                            let productsList = data.produtos || [];
+                                            productsList = productsList.filter(p => p.active !== false);
+
+                                            const termo = call.args.termo_busca;
+                                            if (termo && termo.trim() !== '') {
+                                                const searchLower = termo.toLowerCase();
+                                                productsList = productsList.filter(p => 
+                                                    (p.name && p.name.toLowerCase().includes(searchLower)) ||
+                                                    (p.description && p.description.toLowerCase().includes(searchLower))
+                                                );
+                                            }
+
+                                            const formattedProducts = productsList.slice(0, 30).map(p => ({
+                                                produto_id: p.id || p.code || '',
+                                                nome: p.name,
+                                                descricao: p.description || 'Sem descrição',
+                                                preco: p.price,
+                                                link_imagem: p.image || ''
+                                            }));
+
+                                            functionResult = { 
+                                                origem: 'api_fallback',
+                                                total_encontrados: productsList.length,
+                                                produtos: formattedProducts 
+                                            };
+                                        }
+                                    }
+                                }
+                            } catch (errCard) {
+                                console.error('[AutomationWorker - Cardápio] Erro na busca de produtos:', errCard);
+                                functionResult = { erro: `Erro ao processar cardápio: ${errCard.message}` };
+                            }
+                        }
+                        else if (call.name === "Consultar_adicionais_produto") {
+                            const nomeProduto = call.args.nome_produto;
+                            if (!nomeProduto || nomeProduto.trim() === '') {
+                                functionResult = { erro: "O nome do produto é obrigatório para consultar os adicionais." };
                             } else {
                                 try {
-                                    let bodyObj = {};
-                                    if (cardapioPayload) {
-                                        try {
-                                            bodyObj = typeof cardapioPayload === 'string' ? JSON.parse(cardapioPayload) : cardapioPayload;
-                                        } catch (e) {
-                                            bodyObj = { AGuidEstab: cardapioPayload };
-                                        }
-                                    }
+                                    console.log(`[AutomationWorker - Adicionais] Buscando adicionais de "${nomeProduto}" no Supabase...`);
+                                    
+                                    const { data: dbProdutos, error: errProd } = await supabase
+                                        .from('cardapio_produtos')
+                                        .select('id, name')
+                                        .eq('tenant_id', tenantId)
+                                        .ilike('name', `%${nomeProduto}%`)
+                                        .limit(5);
 
-                                    const headers = { 'Content-Type': 'application/json' };
-                                    if (cardapioToken) {
-                                        headers['Authorization'] = cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`;
-                                    }
+                                    if (errProd) throw errProd;
 
-                                    console.log(`[AutomationWorker - Cardápio] Buscando produtos em ${cardapioUrl}`);
-                                    const res = await fetch(cardapioUrl, {
-                                        method: 'POST',
-                                        headers,
-                                        body: JSON.stringify(bodyObj)
-                                    });
-
-                                    if (!res.ok) {
-                                        functionResult = { erro: `Falha ao carregar o cardápio. Status HTTP: ${res.status}` };
+                                    if (!dbProdutos || dbProdutos.length === 0) {
+                                        functionResult = { erro: `Produto "${nomeProduto}" não localizado no cardápio.` };
                                     } else {
-                                        const data = await res.json();
-                                        let productsList = data.produtos || [];
+                                        const produto = dbProdutos[0];
                                         
-                                        // Filtrar apenas ativos
-                                        productsList = productsList.filter(p => p.active !== false);
+                                        const { data: dbPassos, error: errPassos } = await supabase
+                                            .from('cardapio_passos')
+                                            .select('*')
+                                            .eq('produto_id', produto.id)
+                                            .eq('tenant_id', tenantId)
+                                            .order('ordem', { ascending: true });
 
-                                        const termo = call.args.termo_busca;
-                                        if (termo && termo.trim() !== '') {
-                                            const searchLower = termo.toLowerCase();
-                                            productsList = productsList.filter(p => 
-                                                (p.name && p.name.toLowerCase().includes(searchLower)) ||
-                                                (p.description && p.description.toLowerCase().includes(searchLower))
-                                            );
+                                        if (errPassos) throw errPassos;
+
+                                        if (!dbPassos || dbPassos.length === 0) {
+                                            functionResult = { 
+                                                produto_id: produto.id,
+                                                produto_nome: produto.name,
+                                                mensagem: "Este produto não possui adicionais ou opcionais cadastrados." 
+                                            };
+                                        } else {
+                                            const passosMapeados = [];
+                                            for (const passo of dbPassos) {
+                                                const { data: dbOpcoes, error: errOpcoes } = await supabase
+                                                    .from('cardapio_opcoes')
+                                                    .select('*')
+                                                    .eq('passo_id', passo.id)
+                                                    .eq('tenant_id', tenantId)
+                                                    .order('descricao', { ascending: true });
+
+                                                if (errOpcoes) throw errOpcoes;
+
+                                                passosMapeados.push({
+                                                    passo_id: passo.id,
+                                                    pergunta_titulo: passo.pergunta || passo.sub_titulo || 'Opções',
+                                                    sub_titulo: passo.sub_titulo || '',
+                                                    qtd_minima: passo.qtd_min || 0,
+                                                    qtd_maxima: passo.qtd_max || 1,
+                                                    obrigatorio: (passo.qtd_min || 0) > 0,
+                                                    opcoes: (dbOpcoes || []).map(opt => ({
+                                                        opcao_id: opt.id,
+                                                        descricao: opt.descricao,
+                                                        preco: Number(opt.preco || 0),
+                                                        ativo: opt.ativo
+                                                    }))
+                                                });
+                                            }
+
+                                            functionResult = {
+                                                produto_id: produto.id,
+                                                produto_nome: produto.name,
+                                                passos_adicionais: passosMapeados
+                                            };
                                         }
-
-                                        // Limitar a 20 itens para não estourar o limite de tokens
-                                        const formattedProducts = productsList.slice(0, 20).map(p => ({
-                                            codigo: p.code,
-                                            nome: p.name,
-                                            descricao: p.description || 'Sem descrição',
-                                            preco: p.price,
-                                            link_imagem: p.image || ''
-                                        }));
-
-                                        functionResult = { 
-                                            total_encontrados: productsList.length,
-                                            produtos: formattedProducts 
-                                        };
                                     }
-                                } catch (fetchErr) {
-                                    console.error('[AutomationWorker - Cardápio] Erro ao buscar produtos do cardápio:', fetchErr);
-                                    functionResult = { erro: `Erro ao buscar produtos: ${fetchErr.message}` };
+                                } catch (errAdd) {
+                                    console.error('[AutomationWorker - Adicionais] Erro ao buscar adicionais no BD:', errAdd);
+                                    functionResult = { erro: `Erro ao buscar opcionais: ${errAdd.message}` };
                                 }
                             }
                         }
