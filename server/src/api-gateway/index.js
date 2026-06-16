@@ -33,6 +33,56 @@ router.get('/v1/utils/link-preview', async (req, res) => {
     }
 });
 
+// Proxy para testar a requisição de Cardápio JSON Online sem bloqueios de CORS
+router.post('/v1/utils/test-cardapio', async (req, res) => {
+    try {
+        const { url, token, payload } = req.body;
+        if (!url) {
+            return res.status(400).json({ error: 'A URL do endpoint é obrigatória.' });
+        }
+
+        let bodyObj = {};
+        if (payload) {
+            try {
+                bodyObj = typeof payload === 'string' ? JSON.parse(payload) : payload;
+            } catch (e) {
+                return res.status(400).json({ error: 'O payload enviado não é um JSON válido.' });
+            }
+        }
+
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        if (token) {
+            headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+        }
+
+        console.log(`[test-cardapio] Fazendo requisição POST para ${url}`);
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(bodyObj)
+        });
+
+        const status = response.status;
+        let data;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            data = await response.text();
+        }
+
+        return res.json({
+            status,
+            data
+        });
+    } catch (e) {
+        console.error('[test-cardapio] Erro ao testar requisição:', e.message);
+        return res.status(500).json({ error: e.message });
+    }
+});
+
 // Fallback bypass endpoint para carregar detalhes da Company via Admin Role
 router.get('/v1/companies/:id', async (req, res) => {
     try {

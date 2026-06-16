@@ -531,6 +531,19 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                 },
                                 required: ["cep"]
                             }
+                        },
+                        {
+                            name: "Consultar_produtos_cardapio",
+                            description: "Consulta a lista de produtos, preços, descrições e detalhes do cardápio digital completo da empresa.",
+                            parameters: {
+                                type: "OBJECT",
+                                properties: {
+                                    termo_busca: {
+                                        type: "STRING",
+                                        description: "Termo, palavra-chave ou nome do produto para pesquisar e filtrar na lista (opcional)."
+                                    }
+                                }
+                            }
                         }
                     ]
                 }]
@@ -629,6 +642,74 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                 } catch (cepErr) {
                                     console.error("[AutomationWorker - CEP] Erro na requisição ViaCEP:", cepErr);
                                     functionResult = { erro: "Erro ao conectar-se ao servidor de CEP." };
+                                }
+                            }
+                        }
+                        else if (call.name === "Consultar_produtos_cardapio") {
+                            const cardapioUrl = companySettings.cardapio_json_url;
+                            const cardapioToken = companySettings.cardapio_json_token;
+                            const cardapioPayload = companySettings.cardapio_json_payload;
+
+                            if (!cardapioUrl) {
+                                functionResult = { erro: "O cardápio JSON online não está configurado nas variáveis globais da empresa." };
+                            } else {
+                                try {
+                                    let bodyObj = {};
+                                    if (cardapioPayload) {
+                                        try {
+                                            bodyObj = typeof cardapioPayload === 'string' ? JSON.parse(cardapioPayload) : cardapioPayload;
+                                        } catch (e) {
+                                            bodyObj = { AGuidEstab: cardapioPayload };
+                                        }
+                                    }
+
+                                    const headers = { 'Content-Type': 'application/json' };
+                                    if (cardapioToken) {
+                                        headers['Authorization'] = cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`;
+                                    }
+
+                                    console.log(`[AutomationWorker - Cardápio] Buscando produtos em ${cardapioUrl}`);
+                                    const res = await fetch(cardapioUrl, {
+                                        method: 'POST',
+                                        headers,
+                                        body: JSON.stringify(bodyObj)
+                                    });
+
+                                    if (!res.ok) {
+                                        functionResult = { erro: `Falha ao carregar o cardápio. Status HTTP: ${res.status}` };
+                                    } else {
+                                        const data = await res.json();
+                                        let productsList = data.produtos || [];
+                                        
+                                        // Filtrar apenas ativos
+                                        productsList = productsList.filter(p => p.active !== false);
+
+                                        const termo = call.args.termo_busca;
+                                        if (termo && termo.trim() !== '') {
+                                            const searchLower = termo.toLowerCase();
+                                            productsList = productsList.filter(p => 
+                                                (p.name && p.name.toLowerCase().includes(searchLower)) ||
+                                                (p.description && p.description.toLowerCase().includes(searchLower))
+                                            );
+                                        }
+
+                                        // Limitar a 20 itens para não estourar o limite de tokens
+                                        const formattedProducts = productsList.slice(0, 20).map(p => ({
+                                            codigo: p.code,
+                                            nome: p.name,
+                                            descricao: p.description || 'Sem descrição',
+                                            preco: p.price,
+                                            link_imagem: p.image || ''
+                                        }));
+
+                                        functionResult = { 
+                                            total_encontrados: productsList.length,
+                                            produtos: formattedProducts 
+                                        };
+                                    }
+                                } catch (fetchErr) {
+                                    console.error('[AutomationWorker - Cardápio] Erro ao buscar produtos do cardápio:', fetchErr);
+                                    functionResult = { erro: `Erro ao buscar produtos: ${fetchErr.message}` };
                                 }
                             }
                         }

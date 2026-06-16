@@ -54,6 +54,14 @@ export default function AccountSettings() {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
 
+  // Estados para Cardápio JSON Online
+  const [cardapioJsonUrl, setCardapioJsonUrl] = useState('');
+  const [cardapioJsonToken, setCardapioJsonToken] = useState('');
+  const [cardapioJsonPayload, setCardapioJsonPayload] = useState('');
+  const [testLoading, setTestLoading] = useState(false);
+  const [testResult, setTestResult] = useState<any>(null);
+  const [testError, setTestError] = useState('');
+
   useEffect(() => {
     console.log("AccountSettings montou. tenantInfo:", tenantInfo);
     if (tenantInfo?.settings) {
@@ -64,6 +72,9 @@ export default function AccountSettings() {
       setGoogleMaps(tenantInfo.settings.google_maps || '');
       setYoutube(tenantInfo.settings.youtube || '');
       setTiktok(tenantInfo.settings.tiktok || '');
+      setCardapioJsonUrl(tenantInfo.settings.cardapio_json_url || '');
+      setCardapioJsonToken(tenantInfo.settings.cardapio_json_token || '');
+      setCardapioJsonPayload(tenantInfo.settings.cardapio_json_payload || '');
       
       if (tenantInfo.settings.horarios_estrutura) {
         setDiasHorarios(tenantInfo.settings.horarios_estrutura);
@@ -88,7 +99,10 @@ export default function AccountSettings() {
         instagram,
         google_maps: googleMaps,
         youtube,
-        tiktok
+        tiktok,
+        cardapio_json_url: cardapioJsonUrl,
+        cardapio_json_token: cardapioJsonToken,
+        cardapio_json_payload: cardapioJsonPayload
       });
       console.log("Save concluído!");
       setSuccess(true);
@@ -97,6 +111,50 @@ export default function AccountSettings() {
       console.error('Erro ao salvar as configurações:', error);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestRequest = async () => {
+    setTestLoading(true);
+    setTestResult(null);
+    setTestError('');
+    try {
+      if (!cardapioJsonUrl) {
+        throw new Error('A URL do endpoint é obrigatória para realizar o teste.');
+      }
+
+      if (cardapioJsonPayload) {
+        try {
+          JSON.parse(cardapioJsonPayload);
+        } catch (e) {
+          throw new Error('O corpo da requisição (JSON Payload) não é um JSON válido. Verifique chaves, aspas duplas e vírgulas.');
+        }
+      }
+
+      const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
+      const res = await fetch(`${apiBase}/api/v1/utils/test-cardapio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: cardapioJsonUrl,
+          token: cardapioJsonToken,
+          payload: cardapioJsonPayload ? JSON.parse(cardapioJsonPayload) : null
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `Erro na requisição. Status: ${res.status}`);
+      }
+
+      const resData = await res.json();
+      setTestResult(resData);
+    } catch (err: any) {
+      setTestError(err.message || 'Ocorreu um erro desconhecido ao testar a requisição.');
+    } finally {
+      setTestLoading(false);
     }
   };
 
@@ -420,6 +478,97 @@ export default function AccountSettings() {
             </div>
           </div>
 
+          {/* Seção Cardápio JSON Online (Integração de Produtos) */}
+          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden p-8 animate-in fade-in zoom-in-95 duration-500">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-500">
+                <LinkIcon size={20} />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Cardápio JSON Online</h2>
+                <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a busca e consulta de produtos diretamente via API JSON.</p>
+              </div>
+            </div>
+
+            <div className="space-y-6 max-w-2xl">
+              <div>
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                  URL do Endpoint
+                </label>
+                <input 
+                  type="text"
+                  value={cardapioJsonUrl}
+                  onChange={(e) => setCardapioJsonUrl(e.target.value)}
+                  placeholder="Ex: https://service.xpointsolucoes.com.br:8443/v6/server/nuvem/ProdutoPdvService/GetCardapioCompleto"
+                  className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                    Token de Autorização (Bearer)
+                  </label>
+                  <input 
+                    type="text"
+                    value={cardapioJsonToken}
+                    onChange={(e) => setCardapioJsonToken(e.target.value)}
+                    placeholder="Bearer eyJ0eXAi..."
+                    className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                    Corpo da Requisição (JSON Payload)
+                  </label>
+                  <textarea 
+                    value={cardapioJsonPayload}
+                    onChange={(e) => setCardapioJsonPayload(e.target.value)}
+                    placeholder='{"AGuidEstab": "6D0187D9-E905-4479-AB15-B908F0222607"}'
+                    rows={3}
+                    className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-4 flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={handleTestRequest}
+                  disabled={testLoading || !cardapioJsonUrl}
+                  className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-purple-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {testLoading ? 'Testando...' : 'Testar Requisição'}
+                </button>
+              </div>
+
+              {testError && (
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                  <strong>Erro no teste:</strong> {testError}
+                </div>
+              )}
+
+              {testResult && (
+                <div className="bg-slate-100 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-4 rounded-xl text-xs font-mono text-gray-700 dark:text-[#d1d7db] space-y-2 animate-in fade-in duration-300">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-[#222d34]/60">
+                    <span className="font-bold">Retorno da API</span>
+                    <span className={cn(
+                      "px-2 py-0.5 rounded text-[10px] font-bold",
+                      testResult.status === 200 ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
+                    )}>
+                      Status: {testResult.status}
+                    </span>
+                  </div>
+                  
+                  <div className="max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                    {JSON.stringify(testResult.data, null, 2)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+ 
         </div>
       </div>
     </div>
