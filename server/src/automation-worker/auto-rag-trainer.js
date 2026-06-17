@@ -77,6 +77,7 @@ REGRAS DE EXTRAÇÃO:
 2. Escreva as regras de forma clara, em português brasileiro nativo, direta e sem menção a nomes de clientes específicos ou dados pessoais confidenciais (remova CPFs, telefones pessoais, nomes de clientes e links temporários).
 3. Ignore conversas informais, cumprimentos, reclamações sem solução ou bate-papo irrelevante.
 4. Se o diálogo não contiver nenhuma regra de negócios útil, fato duradouro ou informação comercial nova, você DEVE retornar absolutamente vazio.
+5. NUNCA extraia fatos sobre a existência, nomes ou preços de produtos, lanches, pratos, bebidas ou acompanhamentos do cardápio. A lista oficial de produtos é integrada e atualizada de forma externa e NÃO deve ser aprendida a partir de diálogos de chat. Ignore totalmente menções a pratos ou lanches específicos na transcrição.
 
 Retorne os fatos extraídos um por linha, iniciando diretamente pelo fato sem numeração, sem marcadores de tópicos (- ou *) e sem nenhuma introdução ou explicação adicional.`;
 
