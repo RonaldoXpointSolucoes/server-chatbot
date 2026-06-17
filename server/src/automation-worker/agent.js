@@ -424,7 +424,10 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
             // Diretrizes de Vendas e Montagem de Pedido
             basePrompt += `\n\n### DIRETRIZES DE VENDAS, CARDÁPIO E MONTAGEM DE PEDIDO (ESTRITAS) ###\n` +
-                          `1. Você possui ferramentas para consultar a lista de produtos do cardápio ("Consultar_produtos_cardapio") e consultar os adicionais/opcionais e passos de cada produto ("Consultar_adicionais_produto"). Use-as sempre que necessário para fornecer informações exatas ao cliente.\n` +
+                          `1. REGRA DE OURO DO CARDÁPIO (CRÍTICA E ABSOLUTA):\n` +
+                          `   - Você SÓ PODE sugerir, citar, recomendar ou adicionar ao pedido produtos que estejam retornados EXPLICITAMENTE pelas ferramentas "Consultar_produtos_cardapio" ou "Consultar_adicionais_produto" nesta conversa.\n` +
+                          `   - NUNCA, sob nenhuma circunstância, alucine, invente ou sugira pratos, saladas, wraps, bebidas, sobremesas ou adicionais (ex: Salada Caesar, Wrap de Frango, Sanduíche de Peito de Peru, Strogonoff) de sua própria imaginação ou baseados em conversas/conhecimentos de RAG antigos que não constem no retorno direto das ferramentas do cardápio.\n` +
+                          `   - Se o cliente solicitar pratos "leves", "saudáveis", "veganos", "doces", etc., e a busca no cardápio retornar vazia ou não tiver esses itens, informe de forma extremamente educada e simpática que a Burguer Plus é uma hamburgueria artesanal e que no momento não dispõe dessas opções específicas (ex: saladas/wraps), oferecendo e citando apenas os produtos reais que constam na resposta da ferramenta (como os hambúrgueres, batatas fritas e bebidas reais da casa) e convidando-o com carinho a escolher entre eles.\n` +
                           `2. FLUXO DE MONTAGEM DO PEDIDO (ESTRITO):\n` +
                           `   - Quando o cliente demonstrar interesse em um produto, você deve consultar os opcionais/adicionais desse produto usando a ferramenta "Consultar_adicionais_produto".\n` +
                           `   - Identifique quais passos de adicionais são OBRIGATÓRIOS (onde qtd_minima > 0). Você DEVE perguntar ao cliente a preferência dele para cada passo obrigatório antes de prosseguir (ex: ponto da carne, tamanho, etc.).\n` +
