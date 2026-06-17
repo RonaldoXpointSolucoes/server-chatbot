@@ -4,6 +4,7 @@ import messageRoutes from './messages.js';
 import knowledgeRoutes from './knowledge.js';
 import { supabase } from '../supabase.js';
 import { getUrlInfo } from '@whiskeysockets/baileys';
+import AutomationWorker from '../automation-worker/agent.js';
 
 const router = express.Router();
 
@@ -79,6 +80,17 @@ router.post('/v1/utils/test-cardapio', async (req, res) => {
         });
     } catch (e) {
         console.error('[test-cardapio] Erro ao testar requisição:', e.message);
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+// Invalida o cache em memória do cardápio de uma empresa específica ou de todas
+router.post('/v1/utils/clear-cardapio-cache', async (req, res) => {
+    try {
+        const { tenantId } = req.body;
+        AutomationWorker.clearCardapioCache(tenantId);
+        return res.json({ success: true, message: `Cache do cardápio limpo para o tenant ${tenantId || 'todos'}` });
+    } catch (e) {
         return res.status(500).json({ error: e.message });
     }
 });

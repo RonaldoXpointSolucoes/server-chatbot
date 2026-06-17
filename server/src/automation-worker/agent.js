@@ -16,6 +16,403 @@ class LocalEmbeddingsPipeline {
   }
 }
 
+// ==========================================
+// CACHE EM MEMÓRIA & AUTO-HEALING DO CARDÁPIO
+// ==========================================
+const cardapioInMemoryCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
+
+async function getOrUpdateCardapioCache(tenantId, companySettings) {
+    const now = Date.now();
+    let cache = cardapioInMemoryCache.get(tenantId);
+    
+    if (cache && (now - cache.timestamp < CACHE_TTL)) {
+        console.log(`[CardapioCache] Cache HIT para o tenant ${tenantId}`);
+        return cache;
+    }
+    
+    console.log(`[CardapioCache] Cache MISS ou expirado para o tenant ${tenantId}. Buscando do Supabase...`);
+    
+    // Tenta carregar do Supabase primeiro
+    try {
+        const { data: dbProdutos, error: errProd } = await supabase
+            .from('cardapio_produtos')
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .eq('ativo', true);
+            
+        if (errProd) throw errProd;
+        
+        if (dbProdutos && dbProdutos.length > 0) {
+            const { data: dbGrupos } = await supabase
+                .from('cardapio_grupos')
+                .select('*')
+                .eq('tenant_id', tenantId)
+                .eq('ativo', true);
+                
+            cache = {
+                produtos: dbProdutos,
+                grupos: dbGrupos || [],
+                adicionais: new Map(), // produtoId -> passos
+                timestamp: now,
+                origem: 'supabase'
+            };
+            cardapioInMemoryCache.set(tenantId, cache);
+            return cache;
+        }
+    } catch (dbErr) {
+        console.error(`[CardapioCache] Erro ao carregar cardápio do Supabase para o tenant ${tenantId}:`, dbErr);
+    }
+    
+    // Se não há dados no Supabase, tenta carregar da API externa do GastroFood (Fallback / Auto-Healing)
+    const cardapioUrl = companySettings.cardapio_json_url;
+    const cardapioToken = companySettings.cardapio_json_token;
+    const cardapioPayload = companySettings.cardapio_json_payload;
+    
+    if (cardapioUrl) {
+        try {
+            console.log(`[CardapioCache - Fallback API] Buscando cardápio da API externa para o tenant ${tenantId}...`);
+            let bodyObj = {};
+            if (cardapioPayload) {
+                try {
+                    bodyObj = typeof cardapioPayload === 'string' ? JSON.parse(cardapioPayload) : cardapioPayload;
+                } catch (e) {
+                    bodyObj = { AGuidEstab: cardapioPayload };
+                }
+            }
+            
+            const headers = { 'Content-Type': 'application/json' };
+            if (cardapioToken) {
+                headers['Authorization'] = cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`;
+            }
+            
+            const res = await fetch(cardapioUrl, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(bodyObj)
+            });
+            
+            if (res.ok) {
+                const apiResponse = await res.json();
+                
+                // O formato da API GastroFood retorna { grupos, produtos } encapsulado ou direto no root
+                const apiProdutos = apiResponse.produtos || apiResponse.data?.produtos || [];
+                const apiGrupos = apiResponse.grupos || apiResponse.data?.grupos || [];
+                
+                if (apiProdutos.length > 0) {
+                    const mappedProdutos = apiProdutos.map(p => ({
+                        id: p.id || p.code || '',
+                        tenant_id: tenantId,
+                        grupo_id: p.groupId || p.grupo_id || null,
+                        name: p.name,
+                        description: p.description || null,
+                        price: Number(p.price || p.preco || 0),
+                        image: p.image || null,
+                        ativo: p.active !== false && p.ativo !== false
+                    }));
+                    
+                    const mappedGrupos = apiGrupos.map((g, idx) => ({
+                        id: g.id || g.code || '',
+                        tenant_id: tenantId,
+                        descricao: g.description || g.descricao || '',
+                        ordem: idx,
+                        ativo: g.active !== false && g.ativo !== false
+                    }));
+                    
+                    cache = {
+                        produtos: mappedProdutos,
+                        grupos: mappedGrupos,
+                        adicionais: new Map(),
+                        timestamp: now,
+                        origem: 'api_fallback'
+                    };
+                    cardapioInMemoryCache.set(tenantId, cache);
+                    
+                    // Dispara Auto-Healing e Sincronização RAG em background (não bloqueante)
+                    autoHealAndIndexCardapio(tenantId, companySettings, {
+                        grupos: mappedGrupos,
+                        produtos: mappedProdutos
+                    }).catch(err => {
+                        console.error(`[CardapioCache - AutoHealing] Falha no background sync para o tenant ${tenantId}:`, err);
+                    });
+                    
+                    return cache;
+                }
+            }
+        } catch (apiErr) {
+            console.error(`[CardapioCache - Fallback API] Erro ao consultar API externa para o tenant ${tenantId}:`, apiErr);
+        }
+    }
+    
+    // Se tudo falhar, retorna um cache vazio temporário
+    return {
+        produtos: [],
+        grupos: [],
+        adicionais: new Map(),
+        timestamp: now - CACHE_TTL + 30000, // expira em 30 segundos
+        origem: 'empty'
+    };
+}
+
+async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
+    console.log(`[AutoHealing - Background Sync] Iniciando sincronização do cardápio para o tenant ${tenantId}...`);
+    
+    const { grupos, produtos } = data;
+    if (!produtos || produtos.length === 0) {
+        console.warn(`[AutoHealing] Nenhum produto para sincronizar.`);
+        return;
+    }
+    
+    // 1. Salvar os grupos no Supabase
+    if (grupos && grupos.length > 0) {
+        console.log(`[AutoHealing] Salvando ${grupos.length} grupos no Supabase...`);
+        const { error: errG } = await supabase
+            .from('cardapio_grupos')
+            .upsert(grupos, { onConflict: 'id' });
+        if (errG) {
+            console.error(`[AutoHealing] Erro ao salvar grupos no Supabase:`, errG);
+        }
+    }
+    
+    // 2. Salvar os produtos no Supabase
+    console.log(`[AutoHealing] Salvando ${produtos.length} produtos no Supabase...`);
+    const { error: errP } = await supabase
+        .from('cardapio_produtos')
+        .upsert(produtos, { onConflict: 'id' });
+    if (errP) {
+        console.error(`[AutoHealing] Erro ao salvar produtos no Supabase:`, errP);
+    }
+    
+    // 3. Sincronizar os adicionais (passos e opções) em background de forma suave
+    const cardapioUrl = companySettings.cardapio_json_url;
+    const cardapioToken = companySettings.cardapio_json_token;
+    
+    if (cardapioUrl && cardapioToken) {
+        let stepsUrl = cardapioUrl;
+        if (stepsUrl.includes('/ProdutoPdvService/GetCardapioCompleto')) {
+            stepsUrl = stepsUrl.replace('/ProdutoPdvService/GetCardapioCompleto', '/ProdutoCardapioService/ProdutoComPassos');
+        } else {
+            try {
+                const urlObj = new URL(stepsUrl);
+                urlObj.pathname = '/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos';
+                stepsUrl = urlObj.toString();
+            } catch (e) {
+                stepsUrl = stepsUrl.replace(/\/v6\/server\/nuvem\/.*$/, '/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos');
+            }
+        }
+        
+        console.log(`[AutoHealing] Sincronizando adicionais para os produtos...`);
+        
+        for (let i = 0; i < produtos.length; i++) {
+            const product = produtos[i];
+            
+            // Pequeno delay para não sobrecarregar as conexões
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            try {
+                const resSteps = await fetch(stepsUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`
+                    },
+                    body: JSON.stringify({ AIdProduto: product.id })
+                });
+                
+                if (resSteps.ok) {
+                    const stepsData = await resSteps.json();
+                    if (stepsData.status === 200 && stepsData.data) {
+                        const passosRaw = stepsData.data.passos || stepsData.data.Passos || [];
+                        const passos = Array.isArray(passosRaw) ? passosRaw : [];
+                        
+                        if (passos.length > 0) {
+                            const passosToUpsert = passos.map((p, idx) => {
+                                const idPasso = p.IdProdutoPassos || p.id || p.Id;
+                                const pergunta = p.Pergunta || p.pergunta || p.SubTitulo || p.subTitulo || 'Opções';
+                                const subTitulo = p.SubTitulo || p.subTitulo || null;
+                                const qtdMin = p.QtdMin !== undefined ? p.QtdMin : (p.qtdMin !== undefined ? p.qtdMin : 0);
+                                const qtdMax = p.QtdMax !== undefined ? p.QtdMax : (p.qtdMax !== undefined ? p.qtdMax : 1);
+                                const ativo = p.Ativo !== false && p.ativo !== false;
+                                return {
+                                    id: idPasso,
+                                    tenant_id: tenantId,
+                                    produto_id: product.id,
+                                    pergunta,
+                                    sub_titulo: subTitulo,
+                                    qtd_min: qtdMin,
+                                    qtd_max: qtdMax,
+                                    ordem: idx,
+                                    ativo
+                                };
+                            });
+                            
+                            await supabase.from('cardapio_passos').upsert(passosToUpsert, { onConflict: 'id' });
+                            
+                            const opcoesToUpsert = [];
+                            passos.forEach(p => {
+                                const rawLista = p.ListaProdutos || p.listaProdutos || p.produtos || p.Produtos || [];
+                                const idPasso = p.IdProdutoPassos || p.id || p.Id;
+                                if (Array.isArray(rawLista)) {
+                                    rawLista.forEach(opt => {
+                                        const precoList = opt.ListaPreco || opt.listaPreco || [];
+                                        const precoAdicional = precoList?.[0]?.Preco !== undefined 
+                                            ? precoList[0].Preco 
+                                            : (precoList?.[0]?.preco !== undefined 
+                                                ? precoList[0].preco 
+                                                : (opt.Preco !== undefined 
+                                                    ? opt.Preco 
+                                                    : (opt.preco !== undefined ? opt.preco : 0)));
+                                        const idOpcao = opt.IdProduto || opt.id || opt.Id;
+                                        const descricao = opt.Descricao || opt.descricao || 'Opção';
+                                        const imagem = opt.Imagem || opt.imagem || opt.image || null;
+                                        const ativoOpcao = opt.Ativo !== false && opt.ativo !== false;
+                                        
+                                        opcoesToUpsert.push({
+                                            id: idOpcao,
+                                            tenant_id: tenantId,
+                                            passo_id: idPasso,
+                                            descricao,
+                                            preco: precoAdicional,
+                                            imagem,
+                                            ativo: ativoOpcao
+                                        });
+                                    });
+                                }
+                            });
+                            
+                            if (opcoesToUpsert.length > 0) {
+                                await supabase.from('cardapio_opcoes').upsert(opcoesToUpsert, { onConflict: 'id' });
+                            }
+                        }
+                    }
+                }
+            } catch (stepErr) {
+                console.error(`[AutoHealing] Erro ao sincronizar adicionais para o produto ${product.name}:`, stepErr);
+            }
+        }
+    }
+    
+    // 4. Sincronizar com RAG (Vetorização)
+    try {
+        console.log(`[AutoHealing - RAG] Vetorizando o cardápio para RAG...`);
+        const docName = 'cardapio_digital_auto_healed.txt';
+        
+        let cardapioText = `LINK DO CARDÁPIO DIGITAL: ${companySettings.link_cardapio || 'https://www.burguerplus.com.br'}\n\n=== MENU DE PRODUTOS COMPLETO ===\n\n`;
+        
+        const categoriasMap = {};
+        if (grupos) {
+            grupos.forEach(g => {
+                categoriasMap[g.id] = g.descricao;
+            });
+        }
+        
+        const produtosAtivos = produtos.filter(p => p.ativo);
+        const gruposAtivos = grupos ? grupos.filter(g => g.ativo) : [];
+        
+        if (gruposAtivos.length > 0) {
+            for (const cat of gruposAtivos) {
+                const catProducts = produtosAtivos.filter(p => p.grupo_id === cat.id);
+                if (catProducts.length === 0) continue;
+                
+                cardapioText += `CATEGORIA: ${cat.descricao.toUpperCase()}\n`;
+                cardapioText += `------------------------------------------------\n`;
+                for (const p of catProducts) {
+                    cardapioText += `${p.name.toUpperCase()}\n`;
+                    if (p.description) {
+                        cardapioText += `Descrição: ${p.description}\n`;
+                    }
+                    cardapioText += `Preço: R$ ${parseFloat(p.price).toFixed(2).replace('.', ',')}\n\n`;
+                }
+                cardapioText += `\n`;
+            }
+        } else {
+            cardapioText += `PRODUTOS:\n`;
+            for (const p of produtosAtivos) {
+                cardapioText += `${p.name.toUpperCase()}\n`;
+                if (p.description) {
+                    cardapioText += `Descrição: ${p.description}\n`;
+                }
+                cardapioText += `Preço: R$ ${parseFloat(p.price).toFixed(2).replace('.', ',')}\n\n`;
+            }
+        }
+        
+        // Deleta documentos antigos
+        const { data: oldDocs } = await supabase
+            .from('knowledge_documents')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .in('name', [docName, 'cardapio_burguer_plus.txt']);
+            
+        if (oldDocs && oldDocs.length > 0) {
+            const docIds = oldDocs.map(d => d.id);
+            await supabase.from('knowledge_chunks').delete().in('document_id', docIds);
+            await supabase.from('knowledge_documents').delete().in('id', docIds);
+        }
+        
+        // Insere novo documento
+        const { data: docData, error: docError } = await supabase
+            .from('knowledge_documents')
+            .insert([{
+                tenant_id: tenantId,
+                name: docName,
+                type: 'text/plain',
+                status: 'processing',
+                metadata: { size: cardapioText.length }
+            }])
+            .select('*')
+            .single();
+            
+        if (docError) throw docError;
+        const documentId = docData.id;
+        
+        const splitTextIntoChunks = (text, chunkSize = 150, overlap = 20) => {
+            const words = text.split(/\s+/);
+            const chunks = [];
+            let i = 0;
+            while (i < words.length) {
+                const chunk = words.slice(i, i + chunkSize).join(' ');
+                chunks.push(chunk);
+                i += (chunkSize - overlap);
+            }
+            return chunks;
+        };
+        
+        const chunks = splitTextIntoChunks(cardapioText, 150, 20);
+        const transformer = await LocalEmbeddingsPipeline.getInstance();
+        const dbChunks = [];
+        
+        for (let i = 0; i < chunks.length; i++) {
+            const chunkText = chunks[i];
+            if (chunkText.trim().length < 5) continue;
+            
+            const output = await transformer(chunkText, { pooling: 'mean', normalize: true });
+            const embeddingVector = Array.from(output.data);
+            
+            dbChunks.push({
+                document_id: documentId,
+                tenant_id: tenantId,
+                content: chunkText,
+                embedding: embeddingVector,
+                chunk_index: i
+            });
+        }
+        
+        if (dbChunks.length > 0) {
+            await supabase.from('knowledge_chunks').insert(dbChunks);
+        }
+        
+        await supabase
+            .from('knowledge_documents')
+            .update({ status: 'ready' })
+            .eq('id', documentId);
+            
+        console.log(`[AutoHealing - RAG] Sincronização e vetorização RAG finalizadas com SUCESSO!`);
+        
+    } catch (ragErr) {
+        console.error(`[AutoHealing - RAG] Erro ao vetorizar cardápio para RAG:`, ragErr);
+    }
+}
+
 class AutomationWorker {
     constructor() {
         // As chaves são carregadas no ambiente via dotenv
@@ -26,6 +423,16 @@ class AutomationWorker {
         const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
         if (apiKey && !this.genAI) {
             this.genAI = new GoogleGenerativeAI(apiKey);
+        }
+    }
+
+    clearCardapioCache(tenantId) {
+        if (tenantId) {
+            cardapioInMemoryCache.delete(tenantId);
+            console.log(`[AutomationWorker - Cache] Cache do cardápio limpo para o tenant ${tenantId}`);
+        } else {
+            cardapioInMemoryCache.clear();
+            console.log(`[AutomationWorker - Cache] Todos os caches de cardápio foram limpos`);
         }
     }
 
@@ -679,123 +1086,41 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         }
                         else if (call.name === "Consultar_produtos_cardapio") {
                             try {
-                                console.log(`[AutomationWorker - Cardápio] Consultando produtos do tenant ${tenantId} no Supabase...`);
-                                const { data: dbProdutos, error: errProd } = await supabase
-                                    .from('cardapio_produtos')
-                                    .select(`
-                                        id,
-                                        name,
-                                        description,
-                                        price,
-                                        image,
-                                        ativo,
-                                        grupo_id
-                                    `)
-                                    .eq('tenant_id', tenantId)
-                                    .eq('ativo', true);
+                                console.log(`[AutomationWorker - Cardápio] Consultando produtos do tenant ${tenantId}...`);
+                                
+                                const cache = await getOrUpdateCardapioCache(tenantId, companySettings);
+                                const productsList = cache.produtos || [];
+                                const groupsList = cache.grupos || [];
+                                
+                                const gruposMap = {};
+                                groupsList.forEach(g => {
+                                    gruposMap[g.id] = g.descricao;
+                                });
 
-                                if (errProd) throw errProd;
-
-                                if (dbProdutos && dbProdutos.length > 0) {
-                                    // Carrega também os grupos para associar nomes de categorias
-                                    const { data: dbGrupos } = await supabase
-                                        .from('cardapio_grupos')
-                                        .select('id, descricao')
-                                        .eq('tenant_id', tenantId);
-
-                                    const gruposMap = {};
-                                    if (dbGrupos) {
-                                        dbGrupos.forEach(g => {
-                                            gruposMap[g.id] = g.descricao;
-                                        });
-                                    }
-
-                                    let productsList = dbProdutos;
-                                    const termo = call.args.termo_busca;
-                                    if (termo && termo.trim() !== '') {
-                                        const searchLower = termo.toLowerCase();
-                                        productsList = productsList.filter(p => 
-                                            (p.name && p.name.toLowerCase().includes(searchLower)) ||
-                                            (p.description && p.description.toLowerCase().includes(searchLower))
-                                        );
-                                    }
-
-                                    const formattedProducts = productsList.slice(0, 30).map(p => ({
-                                        produto_id: p.id,
-                                        categoria: gruposMap[p.grupo_id] || 'Outros',
-                                        nome: p.name,
-                                        descricao: p.description || 'Sem descrição',
-                                        preco: Number(p.price || 0),
-                                        link_imagem: p.image || ''
-                                    }));
-
-                                    functionResult = { 
-                                        origem: 'supabase',
-                                        total_encontrados: productsList.length,
-                                        produtos: formattedProducts 
-                                    };
-                                } else {
-                                    // Fallback para API Externa
-                                    console.log(`[AutomationWorker - Cardápio] Sem dados no Supabase. Utilizando fallback da API...`);
-                                    const cardapioUrl = companySettings.cardapio_json_url;
-                                    const cardapioToken = companySettings.cardapio_json_token;
-                                    const cardapioPayload = companySettings.cardapio_json_payload;
-
-                                    if (!cardapioUrl) {
-                                        functionResult = { erro: "O cardápio não está configurado nas variáveis da empresa e nenhuma tabela do Supabase contém produtos." };
-                                    } else {
-                                        let bodyObj = {};
-                                        if (cardapioPayload) {
-                                            try {
-                                                bodyObj = typeof cardapioPayload === 'string' ? JSON.parse(cardapioPayload) : cardapioPayload;
-                                            } catch (e) {
-                                                bodyObj = { AGuidEstab: cardapioPayload };
-                                            }
-                                        }
-
-                                        const headers = { 'Content-Type': 'application/json' };
-                                        if (cardapioToken) {
-                                            headers['Authorization'] = cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`;
-                                        }
-
-                                        const res = await fetch(cardapioUrl, {
-                                            method: 'POST',
-                                            headers,
-                                            body: JSON.stringify(bodyObj)
-                                        });
-
-                                        if (!res.ok) {
-                                            functionResult = { erro: `Falha ao carregar o cardápio. Status HTTP: ${res.status}` };
-                                        } else {
-                                            const data = await res.json();
-                                            let productsList = data.produtos || [];
-                                            productsList = productsList.filter(p => p.active !== false);
-
-                                            const termo = call.args.termo_busca;
-                                            if (termo && termo.trim() !== '') {
-                                                const searchLower = termo.toLowerCase();
-                                                productsList = productsList.filter(p => 
-                                                    (p.name && p.name.toLowerCase().includes(searchLower)) ||
-                                                    (p.description && p.description.toLowerCase().includes(searchLower))
-                                                );
-                                            }
-
-                                            const formattedProducts = productsList.slice(0, 30).map(p => ({
-                                                produto_id: p.id || p.code || '',
-                                                nome: p.name,
-                                                descricao: p.description || 'Sem descrição',
-                                                preco: p.price,
-                                                link_imagem: p.image || ''
-                                            }));
-
-                                            functionResult = { 
-                                                origem: 'api_fallback',
-                                                total_encontrados: productsList.length,
-                                                produtos: formattedProducts 
-                                            };
-                                        }
-                                    }
+                                let filteredProducts = productsList;
+                                const termo = call.args.termo_busca;
+                                if (termo && termo.trim() !== '') {
+                                    const searchLower = termo.toLowerCase();
+                                    filteredProducts = filteredProducts.filter(p => 
+                                        (p.name && p.name.toLowerCase().includes(searchLower)) ||
+                                        (p.description && p.description.toLowerCase().includes(searchLower))
+                                    );
                                 }
+
+                                const formattedProducts = filteredProducts.slice(0, 30).map(p => ({
+                                    produto_id: p.id,
+                                    categoria: gruposMap[p.grupo_id] || 'Outros',
+                                    nome: p.name,
+                                    descricao: p.description || 'Sem descrição',
+                                    preco: Number(p.price || 0),
+                                    link_imagem: p.image || ''
+                                }));
+
+                                functionResult = { 
+                                    origem: cache.origem,
+                                    total_encontrados: filteredProducts.length,
+                                    produtos: formattedProducts 
+                                };
                             } catch (errCard) {
                                 console.error('[AutomationWorker - Cardápio] Erro na busca de produtos:', errCard);
                                 functionResult = { erro: `Erro ao processar cardápio: ${errCard.message}` };
@@ -807,65 +1132,76 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                 functionResult = { erro: "O nome do produto é obrigatório para consultar os adicionais." };
                             } else {
                                 try {
-                                    console.log(`[AutomationWorker - Adicionais] Buscando adicionais de "${nomeProduto}" no Supabase...`);
+                                    console.log(`[AutomationWorker - Adicionais] Buscando adicionais de "${nomeProduto}"...`);
                                     
-                                    const { data: dbProdutos, error: errProd } = await supabase
-                                        .from('cardapio_produtos')
-                                        .select('id, name')
-                                        .eq('tenant_id', tenantId)
-                                        .ilike('name', `%${nomeProduto}%`)
-                                        .limit(5);
+                                    const cache = await getOrUpdateCardapioCache(tenantId, companySettings);
+                                    const productsList = cache.produtos || [];
+                                    
+                                    const searchLower = nomeProduto.toLowerCase();
+                                    const matchingProducts = productsList.filter(p => 
+                                        p.name && p.name.toLowerCase().includes(searchLower)
+                                    );
 
-                                    if (errProd) throw errProd;
-
-                                    if (!dbProdutos || dbProdutos.length === 0) {
+                                    if (matchingProducts.length === 0) {
                                         functionResult = { erro: `Produto "${nomeProduto}" não localizado no cardápio.` };
                                     } else {
-                                        const produto = dbProdutos[0];
+                                        const produto = matchingProducts[0];
                                         
-                                        const { data: dbPassos, error: errPassos } = await supabase
-                                            .from('cardapio_passos')
-                                            .select('*')
-                                            .eq('produto_id', produto.id)
-                                            .eq('tenant_id', tenantId)
-                                            .order('ordem', { ascending: true });
+                                        let passosMapeados = cache.adicionais.get(produto.id);
+                                        
+                                        if (!passosMapeados) {
+                                            console.log(`[AutomationWorker - Adicionais] Cache MISS para adicionais do produto ${produto.name} (${produto.id}). Buscando do BD...`);
+                                            const { data: dbPassos, error: errPassos } = await supabase
+                                                .from('cardapio_passos')
+                                                .select('*')
+                                                .eq('produto_id', produto.id)
+                                                .eq('tenant_id', tenantId)
+                                                .order('ordem', { ascending: true });
 
-                                        if (errPassos) throw errPassos;
+                                            if (errPassos) throw errPassos;
 
-                                        if (!dbPassos || dbPassos.length === 0) {
+                                            if (dbPassos && dbPassos.length > 0) {
+                                                passosMapeados = [];
+                                                for (const passo of dbPassos) {
+                                                    const { data: dbOpcoes, error: errOpcoes } = await supabase
+                                                        .from('cardapio_opcoes')
+                                                        .select('*')
+                                                        .eq('passo_id', passo.id)
+                                                        .eq('tenant_id', tenantId)
+                                                        .order('descricao', { ascending: true });
+
+                                                    if (errOpcoes) throw errOpcoes;
+
+                                                    passosMapeados.push({
+                                                        passo_id: passo.id,
+                                                        pergunta_titulo: passo.pergunta || passo.sub_titulo || 'Opções',
+                                                        sub_titulo: passo.sub_titulo || '',
+                                                        qtd_minima: passo.qtd_min || 0,
+                                                        qtd_maxima: passo.qtd_max || 1,
+                                                        obrigatorio: (passo.qtd_min || 0) > 0,
+                                                        opcoes: (dbOpcoes || []).map(opt => ({
+                                                            opcao_id: opt.id,
+                                                            descricao: opt.descricao,
+                                                            preco: Number(opt.preco || 0),
+                                                            ativo: opt.ativo
+                                                        }))
+                                                    });
+                                                }
+                                                cache.adicionais.set(produto.id, passosMapeados);
+                                            } else {
+                                                passosMapeados = [];
+                                            }
+                                        } else {
+                                            console.log(`[AutomationWorker - Adicionais] Cache HIT para adicionais do produto ${produto.name} (${produto.id})`);
+                                        }
+
+                                        if (passosMapeados.length === 0) {
                                             functionResult = { 
                                                 produto_id: produto.id,
                                                 produto_nome: produto.name,
                                                 mensagem: "Este produto não possui adicionais ou opcionais cadastrados." 
                                             };
                                         } else {
-                                            const passosMapeados = [];
-                                            for (const passo of dbPassos) {
-                                                const { data: dbOpcoes, error: errOpcoes } = await supabase
-                                                    .from('cardapio_opcoes')
-                                                    .select('*')
-                                                    .eq('passo_id', passo.id)
-                                                    .eq('tenant_id', tenantId)
-                                                    .order('descricao', { ascending: true });
-
-                                                if (errOpcoes) throw errOpcoes;
-
-                                                passosMapeados.push({
-                                                    passo_id: passo.id,
-                                                    pergunta_titulo: passo.pergunta || passo.sub_titulo || 'Opções',
-                                                    sub_titulo: passo.sub_titulo || '',
-                                                    qtd_minima: passo.qtd_min || 0,
-                                                    qtd_maxima: passo.qtd_max || 1,
-                                                    obrigatorio: (passo.qtd_min || 0) > 0,
-                                                    opcoes: (dbOpcoes || []).map(opt => ({
-                                                        opcao_id: opt.id,
-                                                        descricao: opt.descricao,
-                                                        preco: Number(opt.preco || 0),
-                                                        ativo: opt.ativo
-                                                    }))
-                                                });
-                                            }
-
                                             functionResult = {
                                                 produto_id: produto.id,
                                                 produto_nome: produto.name,
@@ -874,7 +1210,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                         }
                                     }
                                 } catch (errAdd) {
-                                    console.error('[AutomationWorker - Adicionais] Erro ao buscar adicionais no BD:', errAdd);
+                                    console.error('[AutomationWorker - Adicionais] Erro ao buscar adicionais:', errAdd);
                                     functionResult = { erro: `Erro ao buscar opcionais: ${errAdd.message}` };
                                 }
                             }

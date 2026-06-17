@@ -394,6 +394,15 @@ export default function AccountSettings() {
         setMappingProgress(100);
         setEstTimeRemaining(0);
         addLog('🎉 Mapeamento concluído com sucesso (100%)!');
+        
+        // Limpa cache no backend para refletir o novo mapeamento imediatamente
+        const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
+        fetch(`${apiBase}/api/v1/utils/clear-cardapio-cache`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tenantId: currentTenantId })
+        }).catch(err => console.error('Erro ao invalidar cache do cardápio pós-mapeamento:', err));
+
         await loadCardapioFromSupabase(currentTenantId);
         setLoadSource('supabase');
       }
@@ -451,6 +460,18 @@ export default function AccountSettings() {
       });
       console.log("Save concluído!");
       setSuccess(true);
+      
+      // Limpa cache no backend para refletir alterações globais e de cardápio instantaneamente
+      const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
+      const currentTenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (currentTenantId) {
+        fetch(`${apiBase}/api/v1/utils/clear-cardapio-cache`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tenantId: currentTenantId })
+        }).catch(err => console.error('Erro ao invalidar cache do cardápio:', err));
+      }
+
       setTimeout(() => setSuccess(false), 3000);
     } catch (error) {
       console.error('Erro ao salvar as configurações:', error);
