@@ -733,8 +733,14 @@ ${contextText || 'Nenhum contexto encontrado no RAG para esta pergunta.'}
         rawText = rawText.split('```')[1].split('```')[0].trim();
       }
 
-      const sanitizedText = sanitizeJsonString(rawText.trim());
-      const result = JSON.parse(sanitizedText);
+      let result;
+      try {
+        result = JSON.parse(rawText.trim());
+      } catch (parseErr) {
+        console.warn("Direct JSON parsing failed, attempting sanitization fallback:", parseErr);
+        const sanitizedText = sanitizeJsonString(rawText.trim());
+        result = JSON.parse(sanitizedText);
+      }
 
       const targetBot = activeBots.find(b => b.id === result.agentId) || activeBots[0];
       const intent = result.intent || 'indefinida';
