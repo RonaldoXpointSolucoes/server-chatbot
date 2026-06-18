@@ -3817,11 +3817,59 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         if (m.sender_type === 'system' || m.sender_type === 'automation') return; // Ignore echoes that don't need realtime sync
 
-        const targetContactId = m.contact_id;
+        let targetContactId = null;
         let convInstanceId = m.instance_id || null;
 
+        const currentState = get();
+        
+        // 1. Tenta achar o contato localmente pelo conv_id
+        let targetContactLocally = m.conversation_id 
+             ? currentState.contacts.find((c: any) => c.conv_id === m.conversation_id) 
+             : null;
+
+        if (targetContactLocally) {
+             targetContactId = targetContactLocally.id.split('_')[0];
+             convInstanceId = targetContactLocally.instance_id;
+        }
+
+        // 2. Se não achou localmente, busca o contact_id na tabela conversations
+        if (!targetContactId && m.conversation_id) {
+             try {
+                 const { data: conv } = await supabase
+                     .from('conversations')
+                     .select('contact_id, instance_id')
+                     .eq('id', m.conversation_id)
+                     .maybeSingle();
+                 if (conv) {
+                     targetContactId = conv.contact_id;
+                     convInstanceId = conv.instance_id;
+                 }
+             } catch (err) {
+                 console.error('[Realtime] Erro ao buscar conversa:', err);
+             }
+        }
+
+        // 3. Concorrência: se ainda não achou a conversa, aguarda 600ms e tenta novamente
+        if (!targetContactId && m.conversation_id) {
+             await new Promise(resolve => setTimeout(resolve, 600));
+             try {
+                 const { data: conv } = await supabase
+                     .from('conversations')
+                     .select('contact_id, instance_id')
+                     .eq('id', m.conversation_id)
+                     .maybeSingle();
+                 if (conv) {
+                     targetContactId = conv.contact_id;
+                     convInstanceId = conv.instance_id;
+                 }
+             } catch (err) {
+                 console.error('[Realtime Retry] Erro ao buscar conversa:', err);
+             }
+        }
+
+        // Se realmente não tem contato associado, ignora
         if (!targetContactId) {
-             console.warn('[Realtime] Ignorando msg INSERT por falta de contact_id:', m);
+             console.warn('[Realtime] Ignorando msg INSERT por falta de contact_id mapeado:', m);
              return;
         }
         
@@ -3834,18 +3882,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
         }
         
-        const currentState = get();
         const expectedCompositeId = targetContactId + '_' + (convInstanceId || 'default');
         
-        // Tenta encontrar o contato localmente
-        let targetContactLocally = currentState.contacts.find((c: any) => 
-             c.id === expectedCompositeId ||
-             (c.conv_id && m.conversation_id && c.conv_id === m.conversation_id) ||
-             (
-                 ((c.whatsapp_jid && m.whatsapp_jid && c.whatsapp_jid === m.whatsapp_jid) || (c.phone && m.phone && c.phone === m.phone)) &&
-                 (c.instance_id === convInstanceId || (!c.instance_id && convInstanceId === 'default'))
-             )
-        );
+        // Re-verifica localmente com o targetContactId e expectedCompositeId
+        if (!targetContactLocally) {
+             targetContactLocally = currentState.contacts.find((c: any) => 
+                 c.id === expectedCompositeId ||
+                 (c.conv_id && m.conversation_id && c.conv_id === m.conversation_id)
+             );
+        }
 
         let cData = null;
         if (!targetContactLocally) {
