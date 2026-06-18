@@ -1929,6 +1929,7 @@ export default function ChatDashboard() {
       } else {
         setInputText('');
       }
+      setReplyMessage(null); // Limpa rascunho de resposta (quote) ao trocar de conversa
       prevActiveChatId.current = activeChatId || null;
     }
   }, [activeChatId]);
@@ -2469,35 +2470,38 @@ export default function ChatDashboard() {
             finalMessageText = `> *Mensagem Citada:* "${shortQuote}"\n\n${inputText}`;
         }
 
-        if (pendingMediaToSend) {
-          try {
-            await useChatStore.getState().sendMediaFromUrl(
-              activeChatId, 
-              pendingMediaToSend.url, 
-              pendingMediaToSend.type, 
-              properTargetInstance as string, 
-              finalMessageText,
-              pendingMediaToSend.name
-            );
-            setPendingMediaToSend(null);
-            setQuickReplyToast({ shortcut: 'Mídia', type: 'sent' });
-            setTimeout(() => setQuickReplyToast(null), 3500);
-          } catch (mediaError) {
-            console.error('[handleSendHuman] Erro ao enviar mídia engatilhada:', mediaError);
-            alert('Erro ao enviar a mídia anexada.');
-            return;
-          }
-        } else {
-          await sendHumanMessage(activeChatId, finalMessageText, properTargetInstance as string);
-        }
-
+        // Reseta estados locais IMEDIATAMENTE para UX instantânea e responsiva
         setInputText('');
         setReplyMessage(null);
         if (activeChatId) draftsRef.current[activeChatId] = '';
-      }
-      
-      if (textareaRef.current) {
-         textareaRef.current.style.height = 'auto';
+        if (textareaRef.current) {
+           textareaRef.current.style.height = 'auto';
+        }
+
+        if (pendingMediaToSend) {
+          const mediaInfo = pendingMediaToSend;
+          setPendingMediaToSend(null);
+          
+          useChatStore.getState().sendMediaFromUrl(
+            activeChatId, 
+            mediaInfo.url, 
+            mediaInfo.type, 
+            properTargetInstance as string, 
+            finalMessageText,
+            mediaInfo.name
+          ).then(() => {
+            setQuickReplyToast({ shortcut: 'Mídia', type: 'sent' });
+            setTimeout(() => setQuickReplyToast(null), 3500);
+          }).catch(mediaError => {
+            console.error('[handleSendHuman] Erro ao enviar mídia engatilhada:', mediaError);
+            alert('Erro ao enviar a mídia anexada.');
+          });
+        } else {
+          // Envia em segundo plano (background) para não travar a digitação ou exibir loaders
+          sendHumanMessage(activeChatId, finalMessageText, properTargetInstance as string).catch(err => {
+             console.error('[handleSendHuman] Erro ao enviar mensagem:', err);
+          });
+        }
       }
     } catch (error) {
       console.error('[handleSendHuman] Erro inesperado durante o envio:', error);
@@ -2536,6 +2540,7 @@ export default function ChatDashboard() {
 
         await useChatStore.getState().uploadAndSendMedia(activeChatId, file, mediaType, properTargetInstance as string);
       }
+      setReplyMessage(null);
     }
   };
 
@@ -2728,6 +2733,7 @@ export default function ChatDashboard() {
       setAudioDuration(0);
       setIsRecordingPaused(false);
       setPlaybackRate(1);
+      setReplyMessage(null);
 
       if (localUrl) {
         URL.revokeObjectURL(localUrl);
@@ -4048,24 +4054,17 @@ export default function ChatDashboard() {
         originalText={geminiModalState.originalText}
         suggestedText={geminiModalState.suggestedText}
         intent={geminiModalState.intent}
-        onSend={async (finalText) => {
+        onSend={(finalText) => {
            if (isSendingRef.current) return;
            const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
            if (activeChatId && properTargetInstance) {
-             isSendingRef.current = true;
-             setIsSendingMessage(true);
-             try {
-               await sendHumanMessage(activeChatId, finalText, properTargetInstance as string);
-               setInputText('');
-               if (textareaRef.current) {
-                  textareaRef.current.style.height = 'auto';
-               }
-             } catch (err) {
-               console.error('[GeminiEditorModal onSend] Erro ao enviar mensagem:', err);
-             } finally {
-               isSendingRef.current = false;
-               setIsSendingMessage(false);
+             setInputText('');
+             if (textareaRef.current) {
+                textareaRef.current.style.height = 'auto';
              }
+             sendHumanMessage(activeChatId, finalText, properTargetInstance as string).catch(err => {
+                console.error('[GeminiEditorModal onSend] Erro ao enviar mensagem:', err);
+             });
            }
         }}
       />

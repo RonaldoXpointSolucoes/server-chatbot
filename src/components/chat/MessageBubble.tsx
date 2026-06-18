@@ -5,10 +5,11 @@ import {
   MessageSquareReply, Camera, Video, VideoOff, Mic, 
   FileText, MapPin, Sparkles, Check, CheckCheck, RefreshCw,
   LayoutTemplate, Smartphone, Eye, ClipboardList, CheckSquare,
-  UserCheck
+  UserCheck, Copy
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
-import { cn, getContactDisplayName } from '../../pages/ChatDashboard';
+import { cn, getContactDisplayName, formatPhoneNumber } from '../../pages/ChatDashboard';
+import { instanceCache } from '../../store/chatStore';
 import { ImageIcon, Download } from 'lucide-react';
 import { VideoPlayerPremium } from './VideoPlayerPremium';
 import { useChatStore } from '../../store/chatStore';
@@ -61,6 +62,7 @@ export const MessageBubble = memo(({
 }: MessageBubbleProps) => {
   const agents = useChatStore(state => state.agents);
   const toggleChecklistItem = useChatStore(state => state.toggleChecklistItem);
+  const contacts = useChatStore(state => state.contacts);
   
   const isMe = msg.sender === 'human' || msg.sender === 'bot' || msg.sender === 'me';
   
@@ -428,6 +430,17 @@ export const MessageBubble = memo(({
                   >
                     <Sparkles size={16} className="text-[#00a884] animate-pulse" /> Responder com I.A
                   </button>
+                  {msg.text && (
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(msg.text || '');
+                        setActiveMsgDropdown(null);
+                      }}
+                      className="w-full text-left px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors text-[14px] text-[#3b4a54] dark:text-[#d1d7db]"
+                    >
+                      <Copy size={16} className="text-[#00a884]" /> Copiar mensagem
+                    </button>
+                  )}
                   {msg.sender === 'bot' && (
                     <button 
                       onClick={() => {
@@ -518,6 +531,52 @@ export const MessageBubble = memo(({
           </div>
         )}
 
+        {!isMe && activeChat?.phone?.endsWith('@g.us') && (() => {
+           const participantJid = msg.payload?.key?.participant || msg.payload?.participant;
+           if (!participantJid) return null;
+           const cleanParticipant = participantJid.replace(/\D/g, '');
+           
+           const isInstance = Object.values(instanceCache.phoneNumbers).some(phone => {
+             const cleanPhone = phone?.replace(/\D/g, '');
+             return cleanPhone && cleanParticipant.includes(cleanPhone);
+           });
+           if (isInstance) return null;
+
+           const participantContact = contacts.find((c: any) => {
+             const cPhone = c.phone?.replace(/\D/g, '');
+             return cPhone && (cPhone === cleanParticipant || cleanParticipant.includes(cPhone));
+           });
+
+           const displayName = participantContact 
+             ? getContactDisplayName(participantContact.custom_name || participantContact.name, participantContact.push_name || participantContact.pushname, participantContact.phone)
+             : (msg.payload?.pushName || msg.payload?.pushname || formatPhoneNumber(cleanParticipant) || cleanParticipant);
+
+           const getParticipantColor = (name: string) => {
+             let hash = 0;
+             for (let i = 0; i < name.length; i++) {
+               hash = name.charCodeAt(i) + ((hash << 5) - hash);
+             }
+             const colors = [
+               'text-red-500 dark:text-red-400',
+               'text-blue-500 dark:text-blue-400',
+               'text-green-500 dark:text-green-400',
+               'text-yellow-600 dark:text-yellow-400',
+               'text-purple-500 dark:text-purple-400',
+               'text-pink-500 dark:text-pink-400',
+               'text-orange-500 dark:text-orange-400',
+               'text-teal-500 dark:text-teal-400',
+               'text-indigo-500 dark:text-indigo-400'
+             ];
+             return colors[Math.abs(hash) % colors.length];
+           };
+
+           return (
+             <div className={cn("flex items-center gap-1 mb-1 text-[11px] font-bold uppercase tracking-wide", getParticipantColor(displayName))}>
+               <User size={10} /> {displayName}
+             </div>
+           );
+         })()}
+
         {msg.status === 'deleted' ? (
             <div className="flex flex-col gap-1.5 py-2 animate-in fade-in slide-in-from-top-1 duration-300">
               <div className="flex items-center gap-2 text-[#54656f]/70 dark:text-[#8696a0]/70 select-none">
@@ -582,10 +641,33 @@ export const MessageBubble = memo(({
                     <div className="font-bold text-slate-500 dark:text-slate-400 text-xs mb-1 opacity-90 drop-shadow-sm flex items-center gap-1.5 select-none">
                       <MessageSquareReply size={12} className="opacity-80" />
                       <span>
-                        {msg.quoted.sender && activeChat?.phone && msg.quoted.sender.includes(activeChat.phone.replace(/\D/g, '')) 
-                          ? getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)
-                          : 'Você'
-                        }
+                        {(() => {
+                          if (!msg.quoted.sender) return 'Você';
+                          
+                          const isQuotedMe = Object.values(instanceCache.phoneNumbers).some(phone => {
+                            const cleanPhone = phone?.replace(/\D/g, '');
+                            const cleanSender = msg.quoted.sender.replace(/\D/g, '');
+                            return cleanPhone && cleanSender.includes(cleanPhone);
+                          });
+
+                          if (isQuotedMe) return 'Você';
+
+                          if (!activeChat?.phone?.endsWith('@g.us') && msg.quoted.sender.includes(activeChat?.phone?.replace(/\D/g, '') || '')) {
+                            return getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone);
+                          }
+
+                          const cleanSender = msg.quoted.sender.replace(/\D/g, '');
+                          const quotedContact = contacts.find((c: any) => {
+                            const cPhone = c.phone?.replace(/\D/g, '');
+                            return cPhone && (cPhone === cleanSender || cleanSender.includes(cPhone));
+                          });
+
+                          if (quotedContact) {
+                            return getContactDisplayName(quotedContact.custom_name || quotedContact.name, quotedContact.push_name || quotedContact.pushname, quotedContact.phone);
+                          }
+
+                          return formatPhoneNumber(cleanSender) || cleanSender;
+                        })()}
                       </span>
                     </div>
                     <div className="line-clamp-2 italic opacity-85 leading-relaxed pl-1 pr-6 border-l border-white/5">

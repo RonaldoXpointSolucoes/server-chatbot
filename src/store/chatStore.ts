@@ -75,10 +75,12 @@ export const getInstanceIdFromContact = (id: string) => id.includes('_') ? id.sp
 export const instanceCache = {
   byName: {} as Record<string, string>,   // display_name.toLowerCase() -> id
   apiKeys: {} as Record<string, string>,  // id -> api_key
+  phoneNumbers: {} as Record<string, string>, // id -> phone_number
   
-  set(id: string, name: string, apiKey: string) {
+  set(id: string, name: string, apiKey: string, phoneNumber?: string) {
     if (name) this.byName[name.toLowerCase()] = id;
     if (apiKey) this.apiKeys[id] = apiKey;
+    if (phoneNumber) this.phoneNumbers[id] = phoneNumber;
   },
   
   getId(name: string): string | null {
@@ -87,6 +89,10 @@ export const instanceCache = {
   
   getApiKey(id: string): string | null {
     return this.apiKeys[id] || null;
+  },
+
+  getPhoneNumber(id: string): string | null {
+    return this.phoneNumbers[id] || null;
   }
 };
 
@@ -98,11 +104,11 @@ export const getOrFetchApiKey = async (instanceId: string | null | undefined): P
   try {
     const { data: instDataDB } = await supabase
       .from('whatsapp_instances')
-      .select('api_key, display_name')
+      .select('api_key, display_name, phone_number')
       .eq('id', instanceId)
       .single();
     if (instDataDB) {
-      instanceCache.set(instanceId, instDataDB.display_name || '', instDataDB.api_key || '');
+      instanceCache.set(instanceId, instDataDB.display_name || '', instDataDB.api_key || '', instDataDB.phone_number || '');
       return instDataDB.api_key || '';
     }
   } catch (e) {
@@ -122,13 +128,13 @@ export const resolveInstanceUuid = async (tenantId: string, identifier: string |
   try {
      const { data } = await supabase
         .from('whatsapp_instances')
-        .select('id, display_name, api_key')
+        .select('id, display_name, api_key, phone_number')
         .eq('tenant_id', tenantId)
         .eq('display_name', identifier)
         .limit(1);
      if (data && data.length > 0) {
         const inst = data[0];
-        instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '');
+        instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '', inst.phone_number || '');
         return inst.id;
      }
   } catch (e) {
@@ -3095,13 +3101,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         try {
            const { data: instances } = await supabase
               .from('whatsapp_instances')
-              .select('id, display_name, api_key, status')
+              .select('id, display_name, api_key, status, phone_number')
               .eq('tenant_id', currentTenantId);
 
            if (instances) {
               const statusUpdates: Record<string, string> = {};
               instances.forEach(inst => {
-                 instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '');
+                 instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '', inst.phone_number || '');
                  if (inst.status === 'connected') {
                     statusUpdates[inst.id] = 'connected';
                  } else if (inst.status) {
@@ -3775,6 +3781,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     set({ isSubscribed: true, realtimeStatus: 'connecting' } as any);
 
+    // Inicia monitor Keep-Alive do Realtime
+    if (typeof window !== 'undefined') {
+        const win = window as any;
+        if (!win._realtimeCheckInterval) {
+            win._realtimeCheckInterval = setInterval(() => {
+                const currentStatus = get().realtimeStatus;
+                console.log('[Realtime Monitor] Status atual:', currentStatus);
+                if (currentStatus === 'disconnected') {
+                    console.log('[Realtime Monitor] Detectado canal desconectado. Forçando auto-reparo do realtime...');
+                    get().subscribeToNewMessages(true);
+                }
+            }, 30000); // 30 segundos
+        }
+    }
+
     const channelName = `realtime_chat_${tenantId}`;
     // HMR fallback: Remove o canal caso já exista no cache do Supabase Client para evitar "cannot add callback after subscribe"
     try {
@@ -3796,8 +3817,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         if (m.sender_type === 'system' || m.sender_type === 'automation') return; // Ignore echoes that don't need realtime sync
 
-        let targetContactId = m.conversation_id ? null : m.contact_id;
+        const targetContactId = m.contact_id;
         let convInstanceId = m.instance_id || null;
+
+        if (!targetContactId) {
+             console.warn('[Realtime] Ignorando msg INSERT por falta de contact_id:', m);
+             return;
+        }
         
         // BARREIRA DE INSTÂNCIA: Bloqueia injeção de mensagens de outras caixas na UI atual
         const currentActiveFilter = get().activeChannelFilter;
@@ -3809,34 +3835,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         
         const currentState = get();
-        let targetContactLocally = null;
-
-        // OTIMIZAÇÃO: Evita 2 requests HTTP REST síncronos na hora do render
-        if (m.conversation_id) {
-             targetContactLocally = currentState.contacts.find((c: any) => c.conv_id === m.conversation_id);
-             if (targetContactLocally) {
-                 targetContactId = targetContactLocally.id.split('_')[0]; // real id
-                 convInstanceId = targetContactLocally.instance_id;
-             } else {
-                 const { data: conv } = await supabase.from('conversations').select('contact_id, instance_id').eq('id', m.conversation_id).single();
-                 if (conv) {
-                     targetContactId = conv.contact_id;
-                     convInstanceId = conv.instance_id;
-                 }
-             }
-        }
-
-        if (!targetContactId && m.contact_id) targetContactId = m.contact_id;
-        if (!targetContactId) return;
+        const expectedCompositeId = targetContactId + '_' + (convInstanceId || 'default');
+        
+        // Tenta encontrar o contato localmente
+        let targetContactLocally = currentState.contacts.find((c: any) => 
+             c.id === expectedCompositeId ||
+             (c.conv_id && m.conversation_id && c.conv_id === m.conversation_id) ||
+             (
+                 ((c.whatsapp_jid && m.whatsapp_jid && c.whatsapp_jid === m.whatsapp_jid) || (c.phone && m.phone && c.phone === m.phone)) &&
+                 (c.instance_id === convInstanceId || (!c.instance_id && convInstanceId === 'default'))
+             )
+        );
 
         let cData = null;
         if (!targetContactLocally) {
-             const { data } = await supabase.from('contacts').select('*').eq('id', targetContactId).single();
-             cData = data;
-             if (!cData) return;
+             try {
+                 const { data } = await supabase.from('contacts').select('*').eq('id', targetContactId).single();
+                 cData = data;
+                 if (!cData) return;
+             } catch (err) {
+                 console.error('[Realtime] Erro ao buscar contato no Supabase:', err);
+                 return;
+             }
         } else {
              cData = { ...targetContactLocally };
              cData.id = targetContactId;
+             if (cData.conv_id === undefined || cData.conv_id === null) {
+                 cData.conv_id = m.conversation_id;
+             }
         }
 
         // CRITICAL FIX: O contato local deve assumir a instância da conversa ativa para não sumir da caixa correta
@@ -3862,11 +3888,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
         }
 
-        const expectedCompositeId = targetContactId + '_' + (effectiveInstanceId || 'default');
+        const expectedCompositeIdRefined = targetContactId + '_' + (effectiveInstanceId || 'default');
 
         if (!targetContactLocally) {
              targetContactLocally = currentState.contacts.find((c: any) => 
-                 c.id === expectedCompositeId ||
+                 c.id === expectedCompositeIdRefined ||
                  (
                      ((c.whatsapp_jid && c.whatsapp_jid === cData.whatsapp_jid) || (c.phone && c.phone === cData.phone)) &&
                      (c.instance_id === effectiveInstanceId || (!c.instance_id && effectiveInstanceId === 'default'))

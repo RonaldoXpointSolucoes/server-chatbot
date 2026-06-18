@@ -132,7 +132,9 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                             type: 'append'
                         };
                         
-                        await eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
+                        eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert).catch(e => {
+                            console.error("Erro assíncrono ao injetar a mensagem de saída no EventProcessor (invoke):", e);
+                        });
                     }
                 } catch(e) {
                     console.error("Erro ao injetar a mensagem de saída no EventProcessor (invoke):", e);
@@ -210,7 +212,9 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
                         type: 'append'
                     };
                     
-                    await eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
+                    eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert).catch(err => {
+                        console.error("Erro ao injetar a mensagem de saída no EventProcessor (send-media-url):", err);
+                    });
                 }
             } catch (err) {
                 console.error("Erro ao injetar a mensagem de saída no EventProcessor (send-media-url):", err);
@@ -364,7 +368,9 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                         type: 'append'
                     };
                     
-                    await eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert);
+                    eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert).catch(err => {
+                        console.error("Erro ao injetar a mensagem de saída no EventProcessor:", err);
+                    });
                 }
             } catch (err) {
                 console.error("Erro ao injetar a mensagem de saída no EventProcessor:", err);
