@@ -3,6 +3,7 @@ import {
   Search, 
   ChevronRight, 
   Bot, 
+  User,
   Sparkles, 
   BrainCircuit, 
   ChevronDown,
@@ -263,6 +264,64 @@ export default function BotsList() {
   const [isGeneratingRules, setIsGeneratingRules] = useState(false);
   const [promptModalMsg, setPromptModalMsg] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [simulatorContact, setSimulatorContact] = useState<any>(null);
+  const [isSearchingCepCRM, setIsSearchingCepCRM] = useState(false);
+  const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
+  const [tenantContacts, setTenantContacts] = useState<any[]>([]);
+  const [contactSearchQuery, setContactSearchQuery] = useState('');
+  const [isContactDropdownOpen, setIsContactDropdownOpen] = useState(false);
+  const searchTimeoutRef = useRef<any>(null);
+
+  const handleSearchContacts = async (query: string) => {
+    if (!tenantId) return;
+    try {
+      let supabaseQuery = supabase
+        .from('contacts')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('name', { ascending: true })
+        .limit(50);
+
+      if (query.trim().length > 0) {
+        supabaseQuery = supabaseQuery.or(`name.ilike.%${query}%,phone.ilike.%${query}%`);
+      }
+
+      const { data, error } = await supabaseQuery;
+      if (!error && data) {
+        setTenantContacts(data);
+      }
+    } catch (err) {
+      console.error("Erro ao buscar contatos:", err);
+    }
+  };
+
+  const debouncedSearchContacts = (query: string) => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      handleSearchContacts(query);
+    }, 250);
+  };
+
+  useEffect(() => {
+    if (isContactModalOpen && tenantId) {
+      handleSearchContacts('');
+    }
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [isContactModalOpen, tenantId]);
+
+  useEffect(() => {
+    if (!isContactModalOpen) {
+      setContactSearchQuery('');
+      setIsContactDropdownOpen(false);
+    }
+  }, [isContactModalOpen]);
 
   useEffect(() => {
     fetchBots();
@@ -310,6 +369,49 @@ export default function BotsList() {
       setExchangePolicy(tenantInfo.settings.exchangePolicy || '');
     }
   }, [tenantInfo]);
+
+  const fetchOrCreateSimulatorContact = async () => {
+    if (!tenantId) return;
+    if (simulatorContact) return; // Mantém o contato carregado atualmente se já existir
+    try {
+      const { data: contacts, error: fetchError } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .eq('phone', '5511999999999');
+
+      if (fetchError) throw fetchError;
+
+      if (contacts && contacts.length > 0) {
+        setSimulatorContact(contacts[0]);
+      } else {
+        const { data: newContact, error: insertError } = await supabase
+          .from('contacts')
+          .insert({
+            tenant_id: tenantId,
+            name: 'Cliente Simulador',
+            phone: '5511999999999',
+            whatsapp_jid: '5511999999999@s.whatsapp.net',
+            bot_status: 'active'
+          })
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+        if (newContact) {
+          setSimulatorContact(newContact);
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao carregar ou criar contato simulador:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'simulador' && tenantId) {
+      fetchOrCreateSimulatorContact();
+    }
+  }, [activeTab, tenantId]);
 
   const fetchBots = async () => {
     if (!tenantId) return;
@@ -657,8 +759,7 @@ export default function BotsList() {
       } catch (err) {
         console.warn("Erro ao buscar contexto RAG no simulador:", err);
       }
-
-      // 2. Montando o prompt do orquestrador com robôs do banco de dados e tokens substituídos
+      const isFirstMessage = chatMessages.filter(m => m.type === 'user').length === 0;
       const linkCardapio = tenantInfo?.settings?.link_cardapio || '';
       const addressText = street ? `${street}${number ? `, ${number}` : ''} - ${neighborhood} - ${city}/${state}` : '';
       const contextBase = `
@@ -669,6 +770,19 @@ Link do Cardápio: ${linkCardapio || 'Não configurado'}
 
 Regras Customizadas / Super Prompt do Usuário:
 ${customRules || 'Nenhuma regra customizada cadastrada.'}
+
+${simulatorContact ? `
+### DADOS DO CLIENTE ATUAL (CONVERSANDO NO CHAT) ###
+- Nome: ${simulatorContact.name || 'Cliente Simulador'}
+- Telefone: ${simulatorContact.phone || '5511999999999'}
+- CEP do Cliente: ${simulatorContact.cep || 'Não informado'}
+- Rua / Logradouro: ${simulatorContact.address_street || 'Não informado'}
+- Número da Residência: ${simulatorContact.address_number || 'Não informado'}
+- Bairro: ${simulatorContact.address_neighborhood || 'Não informado'}
+- Cidade: ${simulatorContact.address_city || 'Não informado'}
+- Estado (UF): ${simulatorContact.address_state || 'Não informado'}
+- Anotações Internas sobre o Cliente: ${simulatorContact.notes || 'Nenhuma anotação'}
+` : ''}
 
 Você tem a seguinte equipe de robôs especialistas (Agentes Ativos) disponíveis no banco:
 ${activeBots.length > 0 
@@ -689,11 +803,21 @@ INSTRUÇÕES DO ORQUESTRADOR:
      "reasoning": "Sua justificativa para ter escolhido esse robô",
      "reply": "O texto de resposta formatado como se você fosse o robô escolhido, pronto para enviar ao cliente."
    }
+   - IMPORTANTE: O campo "reply" deve conter apenas o texto da mensagem final. NUNCA coloque aspas de fechamento extras (como \" ou ') no final da mensagem e NUNCA repita pontuações ou caracteres finais (como ?\" ou ?\"? no final da mensagem).
 7. DIRETRIZ GLOBAL DE IDENTIDADE E CONFIDENCIALIDADE (ESTRITA):
    - Para o cliente (na resposta final "reply"), a sua identidade é unicamente "Luna". Você é uma única assistente chamada Luna.
    - Os nomes de robôs internos da sua equipe (como "Luna Menu", "Luna Pedido", "Luna SAC", "Luna Agendador", etc.) são de uso estritamente corporativo interno. NUNCA revele ou mencione nenhum desses nomes de robôs nas suas respostas ao cliente.
    - Por exemplo, em vez de dizer "posso chamar a Luna Pedido para montar o seu pedido", você deve dizer "posso te ajudar a montar o seu pedido" ou "eu mesma posso montar o seu pedido".
-
+8. DIRETRIZ GLOBAL DE USO DO NOME DO CLIENTE (ESTRITA):
+   - Se o nome do cliente atual estiver disponível/preenchido e NÃO for um nome genérico (como "Cliente Simulador", "Cliente", ou vazio), você DEVE OBRIGATORIAMENTE chamar o cliente pelo nome dele nas mensagens e saudações.
+   - Por exemplo, em saudações diga: Olá, tudo bem Vanessa? Seja bem-vinda!, ou Como posso te ajudar hoje, Vanessa?, ou Que bom falar com você, Vanessa!
+   - Mantenha esse tratamento personalizado chamando o cliente pelo nome durante a conversa de maneira natural.
+9. AVISO DE PRIMEIRA MENSAGEM:
+   - Esta ${isFirstMessage ? 'É' : 'NÃO É'} a primeira mensagem desta conversa.
+   - ${isFirstMessage ? "Se houver um bloco de texto com a tag '[PRIMEIRA MENSSAGEM A SER ENVIADA]' ou '[PRIMEIRA MENSAGEM A SER ENVIADA]' no prompt de sistema do robô escolhido, você DEVE responder EXATAMENTE com o texto contido nesse bloco (substituindo apenas as variáveis/links se necessário), sem adicionar outras frases, explicações ou emojis fora desse bloco." : "Como esta NÃO é a primeira mensagem, você deve responder às perguntas do cliente de forma natural, ignorando qualquer tag '[PRIMEIRA MENSSAGEM A SER ENVIADA]'."}
+10. ENTENDIMENTO DE SALADAS (ESTRITA):
+    - Se o cliente solicitar uma "salada", diferencie claramente entre "salada de verdade" (como a SALADA CAESAR ou Salada de Frutas) e "lanches/combos com salada" (como Lanche Plus Salada ou Combo Plus Salada, que são hambúrgueres).
+    - Se o cliente disser que quer comer uma salada (prato leve), apresente a SALADA CAESAR como o item principal e ideal de salada do cardápio, antes de citar lanches que apenas contêm salada em sua composição.
 
 Contexto RAG recuperado para esta pergunta:
 ${contextText || 'Nenhum contexto encontrado no RAG para esta pergunta.'}
@@ -1643,31 +1767,66 @@ Instruções importantes:
                       <p className="text-[10px] text-white/40 mt-0.5">Teste as intenções e fluxos em tempo real.</p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => {
-                      setChatMessages([
-                        {
-                          id: '1',
-                          type: 'agent',
-                          content: (
-                            <div className="flex gap-3 max-w-[80%]">
-                              <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 mt-1 border border-emerald-500/20">
-                                <Bot className="w-4 h-4 text-emerald-400" />
+                  <div className="flex items-center gap-1.5">
+                    {simulatorContact && (() => {
+                      const fullAddr = [
+                        simulatorContact.address_street,
+                        simulatorContact.address_number,
+                        simulatorContact.address_neighborhood,
+                        simulatorContact.address_city,
+                        simulatorContact.address_state
+                      ].filter(Boolean).join(', ') || 'Endereço não informado';
+                      return (
+                        <button
+                          onClick={() => setIsContactModalOpen(true)}
+                          className="px-3 py-1 text-white/50 hover:text-emerald-400 hover:bg-emerald-500/10 border border-white/5 hover:border-emerald-500/10 bg-white/[0.02] rounded-xl transition-all flex items-center gap-2.5 text-left min-w-0"
+                          title="Ficha do Contato"
+                        >
+                          <User className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-[11px] font-bold text-white/90 truncate max-w-[150px]">
+                              {simulatorContact.name || 'Cliente Simulador'}
+                            </span>
+                            <span className="text-[9px] text-white/40 truncate max-w-[180px] leading-tight mt-0.5">
+                              {fullAddr}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })()}
+                    <button
+                      onClick={() => setIsMemoryModalOpen(true)}
+                      className="p-2 text-white/30 hover:text-indigo-400 hover:bg-indigo-500/10 border border-transparent hover:border-indigo-500/10 rounded-xl transition-all flex items-center justify-center"
+                      title="Memória"
+                    >
+                      <BrainCircuit className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setChatMessages([
+                          {
+                            id: '1',
+                            type: 'agent',
+                            content: (
+                              <div className="flex gap-3 max-w-[80%]">
+                                <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 mt-1 border border-emerald-500/20">
+                                  <Bot className="w-4 h-4 text-emerald-400" />
+                                </div>
+                                <div className="bg-[#1c1d22]/80 border border-white/5 text-white/90 p-4 rounded-2xl rounded-tl-none">
+                                  <p className="text-sm font-semibold text-emerald-400 mb-1">{(businessName || 'Robô')} (Recepcionista)</p>
+                                  Olá! Seja bem-vindo à nossa central de atendimento. Como posso ajudar você hoje? Pode fazer perguntas para testar nossa I.A. e o RAG.
+                                </div>
                               </div>
-                              <div className="bg-[#1c1d22]/80 border border-white/5 text-white/90 p-4 rounded-2xl rounded-tl-none">
-                                <p className="text-sm font-semibold text-emerald-400 mb-1">{(businessName || 'Robô')} (Recepcionista)</p>
-                                Olá! Seja bem-vindo à nossa central de atendimento. Como posso ajudar você hoje? Pode fazer perguntas para testar nossa I.A. e o RAG.
-                              </div>
-                            </div>
-                          )
-                        }
-                      ])
-                    }}
-                    className="p-2 text-white/30 hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/10 rounded-xl transition-all"
-                    title="Limpar Conversa"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                            )
+                          }
+                        ])
+                      }}
+                      className="p-2 text-white/30 hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/10 rounded-xl transition-all"
+                      title="Limpar Conversa"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex-1 p-6 overflow-y-auto space-y-6 styled-scrollbar">
@@ -1753,6 +1912,445 @@ Instruções importantes:
             
             <div className="p-6 overflow-y-auto bg-black/40 text-slate-300 font-mono text-xs whitespace-pre-wrap flex-1 styled-scrollbar">
               {promptModalMsg}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Ficha do Contato - Simulador RAG */}
+      {isContactModalOpen && simulatorContact && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-[#0f1013]/80 backdrop-blur-[20px] animate-in fade-in duration-300">
+          <div className="bg-[#14151a]/95 border border-white/10 rounded-[2.5rem] shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.01]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                  <User className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white/90">Ficha do Contato</h2>
+                  <p className="text-xs text-white/40 mt-1">Dados e anotações do cliente</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsContactModalOpen(false)}
+                className="p-2 text-white/40 hover:text-white/90 hover:bg-white/10 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 styled-scrollbar">
+              {/* Seletor de Contato Existente */}
+              <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-4 relative">
+                <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-widest">Carregar Contato Existente</h3>
+                <div className="relative">
+                  <div className="relative">
+                    <input 
+                      type="text"
+                      placeholder="Pesquisar por nome ou telefone..."
+                      value={contactSearchQuery}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setContactSearchQuery(val);
+                        setIsContactDropdownOpen(true);
+                        debouncedSearchContacts(val);
+                      }}
+                      onFocus={() => setIsContactDropdownOpen(true)}
+                      className="w-full bg-[#1c1d22]/80 border border-white/10 rounded-xl pl-10 pr-10 py-3 text-sm text-white placeholder-white/30 focus:border-indigo-500/40 outline-none"
+                    />
+                    <Search className="w-4 h-4 text-white/30 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <button
+                      type="button"
+                      onClick={() => setIsContactDropdownOpen(!isContactDropdownOpen)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white"
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {isContactDropdownOpen && (
+                    <div className="absolute z-[130] left-0 right-0 mt-2 max-h-60 overflow-y-auto bg-[#17181c] border border-white/10 rounded-2xl shadow-2xl divide-y divide-white/5 styled-scrollbar">
+                      {tenantContacts.filter(c => 
+                        (c.name || '').toLowerCase().includes(contactSearchQuery.toLowerCase()) ||
+                        (c.phone || '').includes(contactSearchQuery)
+                      ).length === 0 ? (
+                        <div className="p-4 text-xs text-white/40 text-center">Nenhum contato encontrado</div>
+                      ) : (
+                        tenantContacts.filter(c => 
+                          (c.name || '').toLowerCase().includes(contactSearchQuery.toLowerCase()) ||
+                          (c.phone || '').includes(contactSearchQuery)
+                        ).map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              setSimulatorContact(c);
+                              setContactSearchQuery('');
+                              setIsContactDropdownOpen(false);
+                            }}
+                            className="w-full text-left px-4 py-3 hover:bg-white/[0.03] transition-colors flex items-center justify-between text-sm"
+                          >
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-white/90">{c.name || 'Sem nome'}</span>
+                              <span className="text-xs text-white/40">{c.phone}</span>
+                            </div>
+                            {simulatorContact?.id === c.id && (
+                              <span className="text-emerald-400 text-xs font-bold bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">Carregado</span>
+                            )}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Seção Dados Básicos */}
+              <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-4">
+                <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-widest">Identificação</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-white/60 uppercase tracking-wider block mb-1.5 ml-1">Telefone</label>
+                    <input 
+                      type="text" 
+                      value={simulatorContact.phone || ''} 
+                      disabled
+                      className="w-full bg-white/[0.02] border border-white/5 rounded-xl px-4 py-3 text-sm text-white/50 cursor-not-allowed" 
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-white/60 uppercase tracking-wider block mb-1.5 ml-1">Nome do Cliente</label>
+                    <input 
+                      type="text" 
+                      value={simulatorContact.name || ''} 
+                      onChange={e => setSimulatorContact({ ...simulatorContact, name: e.target.value })}
+                      className="w-full bg-[#1c1d22]/80 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-indigo-500/40 outline-none" 
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Seção Endereço */}
+              <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Endereço</h3>
+                  <button 
+                    type="button"
+                    onClick={async () => {
+                      const cepVal = String(simulatorContact.cep || '').replace(/\D/g, '');
+                      if (cepVal.length !== 8) {
+                        alert("Por favor, informe um CEP válido com 8 dígitos.");
+                        return;
+                      }
+                      setIsSearchingCepCRM(true);
+                      try {
+                        const res = await fetch(`https://viacep.com.br/ws/${cepVal}/json/`);
+                        const data = await res.json();
+                        if (data.erro) {
+                          alert("CEP não encontrado.");
+                        } else {
+                          setSimulatorContact({
+                            ...simulatorContact,
+                            address_street: data.logradouro || '',
+                            address_neighborhood: data.bairro || '',
+                            address_city: data.localidade || '',
+                            address_state: data.uf || ''
+                          });
+                        }
+                      } catch (err) {
+                        console.error(err);
+                        alert("Erro ao buscar CEP.");
+                      } finally {
+                        setIsSearchingCepCRM(false);
+                      }
+                    }}
+                    className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+                  >
+                    {isSearchingCepCRM ? 'Buscando...' : 'Buscar CEP'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="sm:col-span-1">
+                    <label className="text-[10px] font-bold text-white/60 uppercase tracking-wider block mb-1.5 ml-1">CEP</label>
+                    <input 
+                      type="text" 
+                      placeholder="00000-000"
+                      value={simulatorContact.cep || ''} 
+                      onChange={e => setSimulatorContact({ ...simulatorContact, cep: e.target.value })}
+                      className="w-full bg-[#1c1d22]/80 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-indigo-500/40 outline-none" 
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-[10px] font-bold text-white/60 uppercase tracking-wider block mb-1.5 ml-1">Rua / Logradouro</label>
+                    <input 
+                      type="text" 
+                      placeholder="Rua, Avenida..."
+                      value={simulatorContact.address_street || ''} 
+                      onChange={e => setSimulatorContact({ ...simulatorContact, address_street: e.target.value })}
+                      className="w-full bg-[#1c1d22]/80 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-indigo-500/40 outline-none" 
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                  <div className="sm:col-span-1">
+                    <label className="text-[10px] font-bold text-white/60 uppercase tracking-wider block mb-1.5 ml-1">Número</label>
+                    <input 
+                      type="text" 
+                      placeholder="Nº"
+                      value={simulatorContact.address_number || ''} 
+                      onChange={e => setSimulatorContact({ ...simulatorContact, address_number: e.target.value })}
+                      className="w-full bg-[#1c1d22]/80 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-indigo-500/40 outline-none" 
+                    />
+                  </div>
+                  <div className="sm:col-span-1.5">
+                    <label className="text-[10px] font-bold text-white/60 uppercase tracking-wider block mb-1.5 ml-1">Bairro</label>
+                    <input 
+                      type="text" 
+                      placeholder="Bairro"
+                      value={simulatorContact.address_neighborhood || ''} 
+                      onChange={e => setSimulatorContact({ ...simulatorContact, address_neighborhood: e.target.value })}
+                      className="w-full bg-[#1c1d22]/80 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-indigo-500/40 outline-none" 
+                    />
+                  </div>
+                  <div className="sm:col-span-1.5">
+                    <label className="text-[10px] font-bold text-white/60 uppercase tracking-wider block mb-1.5 ml-1">Cidade</label>
+                    <input 
+                      type="text" 
+                      placeholder="Cidade"
+                      value={simulatorContact.address_city || ''} 
+                      onChange={e => setSimulatorContact({ ...simulatorContact, address_city: e.target.value })}
+                      className="w-full bg-[#1c1d22]/80 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-indigo-500/40 outline-none" 
+                    />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="text-[10px] font-bold text-white/60 uppercase tracking-wider block mb-1.5 ml-1">UF</label>
+                    <input 
+                      type="text" 
+                      placeholder="SP"
+                      maxLength={2}
+                      value={simulatorContact.address_state || ''} 
+                      onChange={e => setSimulatorContact({ ...simulatorContact, address_state: e.target.value.toUpperCase() })}
+                      className="w-full bg-[#1c1d22]/80 border border-white/10 rounded-xl px-4 py-3 text-sm text-white text-center focus:border-indigo-500/40 outline-none" 
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Seção Anotações */}
+              <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-4">
+                <h3 className="text-xs font-bold text-purple-400 uppercase tracking-widest">Anotações Internas</h3>
+                <div>
+                  <textarea 
+                    rows={4}
+                    placeholder="Digite aqui anotações ou observações úteis sobre este contato..."
+                    value={simulatorContact.notes || ''} 
+                    onChange={e => setSimulatorContact({ ...simulatorContact, notes: e.target.value })}
+                    className="w-full bg-[#1c1d22]/80 border border-white/10 rounded-xl p-4 text-sm text-white focus:border-indigo-500/40 outline-none resize-none styled-scrollbar" 
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-white/5 bg-white/[0.01] flex items-center justify-between">
+              <button 
+                onClick={() => setIsContactModalOpen(false)}
+                className="px-6 py-3 border border-transparent text-sm font-bold text-white/50 hover:text-white transition-colors"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={async () => {
+                  try {
+                    const cleanCep = String(simulatorContact.cep || '').replace(/\D/g, '');
+                    const { error } = await supabase
+                      .from('contacts')
+                      .update({
+                        name: simulatorContact.name,
+                        cep: cleanCep,
+                        address_street: simulatorContact.address_street,
+                        address_number: simulatorContact.address_number,
+                        address_neighborhood: simulatorContact.address_neighborhood,
+                        address_city: simulatorContact.address_city,
+                        address_state: simulatorContact.address_state,
+                        notes: simulatorContact.notes
+                      })
+                      .eq('id', simulatorContact.id);
+
+                    if (error) throw error;
+                    
+                    // Atualiza a lista local de contatos para refletir as alterações imediatamente
+                    setTenantContacts(prev => prev.map(c => c.id === simulatorContact.id ? { ...c, ...simulatorContact, cep: cleanCep } : c));
+                    
+                    setIsContactModalOpen(false);
+                    setContactSearchQuery('');
+                    setIsContactDropdownOpen(false);
+                    alert("Dados do contato atualizados com sucesso!");
+                  } catch (err: any) {
+                    console.error(err);
+                    alert("Erro ao salvar alterações: " + err.message);
+                  }
+                }}
+                className="px-6 py-3 bg-[#00a884] hover:bg-[#008f70] text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/10 hover:-translate-y-0.5 active:translate-y-0"
+              >
+                Salvar Alterações
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Memória do Robô */}
+      {isMemoryModalOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-[#0f1013]/80 backdrop-blur-[20px] animate-in fade-in duration-300">
+          <div className="bg-[#14151a]/95 border border-white/10 rounded-[2.5rem] shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.01]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                  <BrainCircuit className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white/90">Memória do Robô</h2>
+                  <p className="text-xs text-white/40 mt-1">Dados operacionais e regras de negócios injetadas na I.A.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsMemoryModalOpen(false)}
+                className="p-2 text-white/40 hover:text-white/90 hover:bg-white/10 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 styled-scrollbar">
+              {/* Grid de Informações */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                {/* Bloco Identificação */}
+                <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-3.5">
+                  <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                    <Store className="w-3.5 h-3.5" /> Identificação
+                  </h3>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between py-1 border-b border-white/5">
+                      <span className="text-white/45">Nome Fantasia</span>
+                      <span className="font-semibold text-white/80">{businessName || 'Não cadastrado'}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-white/5">
+                      <span className="text-white/45">Razão Social</span>
+                      <span className="font-semibold text-white/80">{corporateName || 'Não cadastrado'}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-white/5">
+                      <span className="text-white/45">CNPJ</span>
+                      <span className="font-semibold text-white/80">{cnpj || 'Não cadastrado'}</span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span className="text-white/45">Senha Wi-Fi</span>
+                      <span className="font-semibold text-white/80">{wifiPassword || 'Não cadastrado'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bloco Horário */}
+                <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-3.5">
+                  <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-2">
+                    <Clock className="w-3.5 h-3.5" /> Funcionamento
+                  </h3>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between py-1 border-b border-white/5">
+                      <span className="text-white/45">Dias Operacionais</span>
+                      <span className="font-semibold text-white/80">{operatingDays || 'Não configurado'}</span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span className="text-white/45">Horário de Atendimento</span>
+                      <span className="font-semibold text-white/80">
+                        {openTime && closeTime ? `${openTime} às ${closeTime}` : 'Não configurado'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bloco Endereço */}
+                <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-3.5 md:col-span-2">
+                  <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest flex items-center gap-2">
+                    <MapPin className="w-3.5 h-3.5" /> Endereço Comercial
+                  </h3>
+                  <div className="text-xs text-white/80">
+                    {street ? (
+                      <p className="leading-relaxed">
+                        {street}, {number || 'S/N'}{neighborhood ? ` - ${neighborhood}` : ''} <br />
+                        {city}/{state} - CEP: {zipCode}
+                      </p>
+                    ) : (
+                      <span className="text-white/40 italic">Nenhum endereço cadastrado</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bloco Logística */}
+                <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-3.5">
+                  <h3 className="text-xs font-bold text-purple-400 uppercase tracking-widest flex items-center gap-2">
+                    <Bike className="w-3.5 h-3.5" /> Logística e Entrega
+                  </h3>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between py-1 border-b border-white/5">
+                      <span className="text-white/45">Tempo Médio de Preparo</span>
+                      <span className="font-semibold text-white/80">{averagePrepTime || 'Não cadastrado'}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-white/5">
+                      <span className="text-white/45">Cobrança de Taxa</span>
+                      <span className="font-semibold text-white/80">{hasDeliveryFee ? 'Sim' : 'Não'}</span>
+                    </div>
+                    <div className="flex flex-col py-1 space-y-1">
+                      <span className="text-white/45">Regras de Taxa</span>
+                      <span className="text-white/85 text-[11px] leading-relaxed bg-white/[0.02] p-2 rounded-lg border border-white/5">
+                        {deliveryFeeRules || 'Nenhuma regra configurada.'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bloco Financeiro */}
+                <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-3.5">
+                  <h3 className="text-xs font-bold text-rose-400 uppercase tracking-widest flex items-center gap-2">
+                    <CreditCard className="w-3.5 h-3.5" /> Financeiro e Pagamento
+                  </h3>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between py-1 border-b border-white/5">
+                      <span className="text-white/45">Aceita Pix</span>
+                      <span className="font-semibold text-white/80">{acceptsPix ? 'Sim' : 'Não'}</span>
+                    </div>
+                    <div className="flex flex-col py-1 space-y-1">
+                      <span className="text-white/45">Formas de Pagamento Aceitas</span>
+                      <span className="text-white/85 text-[11px] leading-relaxed bg-white/[0.02] p-2 rounded-lg border border-white/5">
+                        {paymentMethods || 'Não configurado.'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Bloco Regras Customizadas (Prompt livre) */}
+              <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-4">
+                <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                  <FileText className="w-3.5 h-3.5" /> Regras Customizadas (Super Prompt)
+                </h3>
+                <div className="bg-[#1c1d22] border border-white/5 rounded-xl p-4 text-xs font-mono text-white/70 overflow-x-auto max-h-60 overflow-y-auto styled-scrollbar whitespace-pre-wrap leading-relaxed">
+                  {customRules || 'Nenhuma regra customizada ou prompt livre cadastrado.'}
+                </div>
+              </div>
+
+            </div>
+
+            <div className="p-6 border-t border-white/5 bg-white/[0.01] flex justify-end">
+              <button 
+                onClick={() => setIsMemoryModalOpen(false)}
+                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-indigo-500/10 hover:-translate-y-0.5 active:translate-y-0"
+              >
+                Fechar Memória
+              </button>
             </div>
           </div>
         </div>

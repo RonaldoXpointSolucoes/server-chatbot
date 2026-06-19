@@ -47,7 +47,9 @@ import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 
-export function MainSidebar() {
+const SidebarContext = React.createContext<{ onClose?: () => void }>({});
+
+export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
   const isAppEmbedded = location.pathname.startsWith('/apps/');
@@ -154,6 +156,10 @@ export function MainSidebar() {
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
   const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
   const [instances, setInstances] = useState<any[]>([]);
+
+  useEffect(() => {
+    onClose?.();
+  }, [location.pathname, onClose]);
 
   useEffect(() => {
     if (!tenantId) return;
@@ -395,12 +401,13 @@ export function MainSidebar() {
   };
 
   return (
-    <div 
-      className={cn(
-        "h-full bg-[#f0f2f5] dark:bg-[#111b21] flex flex-col text-[#54656f] dark:text-[#d1d7db] font-sans text-sm border-r border-gray-250/85 dark:border-[#2a3942] z-50 shrink-0 shadow-lg relative transition-all duration-300 group/sidebar",
-        isAppEmbedded ? "w-[68px] hover:w-[260px] is-minimized" : "w-[260px]"
-      )}
-    >
+    <SidebarContext.Provider value={{ onClose }}>
+      <div 
+        className={cn(
+          "h-full bg-[#f0f2f5] dark:bg-[#111b21] flex flex-col text-[#54656f] dark:text-[#d1d7db] font-sans text-sm border-r border-gray-250/85 dark:border-[#2a3942] z-50 shrink-0 shadow-lg relative transition-all duration-300 group/sidebar",
+          isAppEmbedded ? "w-[68px] hover:w-[260px] is-minimized" : "w-[260px]"
+        )}
+      >
       
       {/* Workspace Header Premium */}
       <div 
@@ -573,13 +580,38 @@ export function MainSidebar() {
                         <NavItem 
                           icon={
                             <div className="flex items-center gap-2 relative">
-                              {inst.color && <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: inst.color }}></div>}
-                              <Brands.WhatsApp size={12} />
-                              {status !== 'connected' && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>}
+                              {inst.color && (
+                                <div 
+                                  className="w-1.5 h-1.5 rounded-full transition-colors" 
+                                  style={{ backgroundColor: status === 'connected' ? inst.color : '#6b7280' }}
+                                />
+                              )}
+                              <Brands.WhatsApp 
+                                size={12} 
+                                className={status === 'connected' ? "text-[#25D366]" : "text-gray-400 dark:text-gray-500"} 
+                              />
+                              {status !== 'connected' && (
+                                <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
+                              )}
                             </div>
                           } 
-                          title={inst.display_name || 'Sem nome'} 
+                          title={
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className={cn(
+                                "truncate transition-colors", 
+                                status !== 'connected' ? "text-gray-400 dark:text-gray-500 line-through decoration-red-500/40" : ""
+                              )}>
+                                {inst.display_name || 'Sem nome'}
+                              </span>
+                              {status !== 'connected' && (
+                                <span className="text-[8px] font-bold text-red-500 bg-red-500/10 border border-red-500/20 px-1 py-0.5 rounded uppercase tracking-wider shrink-0 animate-pulse">
+                                  Offline
+                                </span>
+                              )}
+                            </div>
+                          }
                           isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
+                          className={cn(status !== 'connected' ? "opacity-60 hover:opacity-100 hover:bg-red-500/5" : "")}
                           onClick={() => {
                             useChatStore.getState().setActiveChannelFilter(inst.id, inst.display_name);
                             useChatStore.getState().setFilterType('all');
@@ -944,7 +976,8 @@ export function MainSidebar() {
           background: ${theme === 'dark' ? '#3b4a54' : '#94a3b8'};
         }
       `}</style>
-    </div>
+      </div>
+    </SidebarContext.Provider>
   );
 }
 
@@ -958,24 +991,36 @@ function NavItem({
   isActive = false, 
   isSub = false, 
   actionNode,
+  className,
   onClick 
 }: { 
   icon?: React.ReactNode, 
-  title: string, 
+  title: React.ReactNode, 
   badge?: string, 
   isActive?: boolean, 
   isSub?: boolean,
   actionNode?: React.ReactNode,
+  className?: string,
   onClick?: () => void
 }) {
+  const { onClose } = React.useContext(SidebarContext);
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (onClick) {
+      onClick();
+    }
+    onClose?.();
+  };
+
   return (
     <div 
-      onClick={onClick}
+      onClick={handleClick}
       className={cn(
         "flex items-center justify-between px-3 py-1.5 rounded-md cursor-pointer transition-colors group relative",
         isActive ? "bg-gray-200 dark:bg-[#202c33]" : "hover:bg-gray-200/50 dark:hover:bg-[#202c33]/60",
         isSub ? "ml-4 pl-3 border-l border-gray-200 dark:border-[#2a3942] hover:border-gray-400 dark:hover:border-[#8696a0]" : "",
-        isActive && isSub ? "border-[#00a884] bg-gray-200 dark:bg-[#202c33]" : ""
+        isActive && isSub ? "border-[#00a884] bg-gray-200 dark:bg-[#202c33]" : "",
+        className
       )}
     >
       <div className="flex items-center min-w-0 gap-3 flex-1">

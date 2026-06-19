@@ -29,8 +29,6 @@ class EventProcessor {
         this.aiSendRateLimiter = new Map(); // Rastreio de taxa de disparos automáticos por conversa para anti-spam
         this.isFlushingStatus = false;
         
-        // Loop de processamento em lote a cada 2 segundos.
-        setInterval(() => this.flushQueue(), 2000);
         // Loop de reconciliation assíncrono para status (a cada 4s)
         setInterval(() => this.flushStatusQueue(), 4000);
         
@@ -786,6 +784,20 @@ class EventProcessor {
                          if (singleErr) {
                              if (singleErr.code !== '23505') {
                                  console.error(`[BatchProcessor] Erro na inserção individual falha para ID ${m.whatsapp_message_id}:`, singleErr);
+                                 // Re-enfileira a mensagem para tentar novamente se for erro transiente e não tiver excedido o limite de 5 tentativas
+                                 const originalItem = activeBatch.find(x => x.rawMsg?.key?.id === m.whatsapp_message_id);
+                                 if (originalItem) {
+                                     originalItem.retryCount = (originalItem.retryCount || 0) + 1;
+                                     if (originalItem.retryCount < 5) {
+                                         this.messageQueue.push(originalItem);
+                                         console.warn(`[BatchProcessor] Enfileirando individualmente mensagem ID ${m.whatsapp_message_id} para nova tentativa (${originalItem.retryCount}/5).`);
+                                     } else {
+                                         console.error(`[BatchProcessor] EXCEÇÃO CRÍTICA: Mensagem ID ${m.whatsapp_message_id} descartada individualmente após 5 falhas.`);
+                                         try {
+                                             fs.appendFileSync('discarded_messages.log', `${new Date().toISOString()} [INDIVIDUAL FAILED] MsgId: ${m.whatsapp_message_id} - Payload: ${JSON.stringify(originalItem.rawMsg)}\n`);
+                                         } catch (logErr) {}
+                                     }
+                                 }
                              }
                          } else if (singleInserted && singleInserted.length > 0) {
                              realInserted.push(singleInserted[0]);
@@ -1008,7 +1020,7 @@ class EventProcessor {
                                    const activeBot = botsData.find(bot => bot.status === 'active') || botsData[0];
                                    if (activeBot) {
                                        botData = { ...activeBot, autoReply: true };
-                                       console.log(`[EventProcessor] Fallback Geral: Utilizando o bot '${botData.name}' para a caixa de entrada ${b.instanceId} via ativação direta.`);
+                                       console.log(`[EventProcessor] Fallback Geral: Utilizando o bot '${activeBot.name}' para a caixa de entrada ${b.instanceId} via ativação direta.`);
                                    }
                                }
                            }
@@ -1070,6 +1082,22 @@ class EventProcessor {
              
         } catch (e) {
              console.error("[BatchProcessor] Flush Error Critico:", e);
+             // Re-enfileira os itens do lote para evitar perda de dados por falha temporária do banco de dados (ex: timeout)
+             if (batch && batch.length > 0) {
+                 console.log(`[BatchProcessor] Enfileirando novamente ${batch.length} mensagens para evitar perda de dados por falha crítica no lote.`);
+                 for (const b of batch) {
+                     b.retryCount = (b.retryCount || 0) + 1;
+                     if (b.retryCount < 5) {
+                         this.messageQueue.unshift(b); // Adiciona no início da fila para reprocessamento
+                     } else {
+                         const msgId = b.rawMsg?.key?.id || 'unknown';
+                         console.error(`[BatchProcessor] EXCEÇÃO CRÍTICA: Mensagem ID ${msgId} descartada definitivamente após 5 tentativas de lote falhas.`);
+                         try {
+                             fs.appendFileSync('discarded_messages.log', `${new Date().toISOString()} [LOTE FAILED] MsgId: ${msgId} - Payload: ${JSON.stringify(b.rawMsg)}\n`);
+                         } catch (logErr) {}
+                     }
+                 }
+             }
         } finally {
              this.isFlushing = false;
         }

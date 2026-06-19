@@ -1003,15 +1003,28 @@ export default function ChatDashboard() {
   const [showHealthPanel, setShowHealthPanel] = useState(false);
 
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
+    const handleOnline = () => {
+      setIsOnline(true);
+      console.log('[Network] Conexão restabelecida. Sincronizando mensagens perdidas...');
+      useChatStore.getState().syncMissedMessages().catch(e => console.error('[Network Sync] Falha:', e));
+    };
     const handleOffline = () => setIsOnline(false);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Tab Focus] Usuário retornou à aba. Sincronizando mensagens perdidas...');
+        useChatStore.getState().syncMissedMessages().catch(e => console.error('[Visibility Sync] Falha:', e));
+      }
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 

@@ -652,6 +652,41 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 console.error(`[AutomationWorker] Erro ao carregar variáveis globais do tenant ${tenantId}:`, err);
             }
 
+            // Carrega os dados do contato se houver
+            let contactInfo = null;
+            if (contactId) {
+                try {
+                    const { data: contactData } = await supabase
+                        .from('contacts')
+                        .select('*')
+                        .eq('id', contactId)
+                        .single();
+                    if (contactData) {
+                        contactInfo = contactData;
+                    }
+                } catch (errContact) {
+                    console.error(`[AutomationWorker] Erro ao carregar dados do contato ${contactId}:`, errContact);
+                }
+            } else if (jid) {
+                try {
+                    const cleanPhone = String(jid).replace(/\D/g, '');
+                    if (cleanPhone) {
+                        const { data: contactData } = await supabase
+                            .from('contacts')
+                            .select('*')
+                            .eq('tenant_id', tenantId)
+                            .eq('phone', cleanPhone)
+                            .limit(1)
+                            .maybeSingle();
+                        if (contactData) {
+                            contactInfo = contactData;
+                        }
+                    }
+                } catch (errContact) {
+                    console.error(`[AutomationWorker] Erro ao carregar dados do contato por jid ${jid}:`, errContact);
+                }
+            }
+
             const vars = {
                 nomeIa: companySettings.nome_ia || companyName || 'Luna',
                 endereco: companySettings.endereco || '',
@@ -835,6 +870,17 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `4. Escreva com naturalidade: use parágrafos curtos, linguagem coloquial profissional fluida do Brasil e adicione de 1 a 3 emojis calorosos para humanizar a conversa, sem exagerar.\n` +
                           `5. PRIORIZE E SIGA ESTRITAMENTE as instruções e exemplos de respostas corrigidas que constam no Manual de Raciocínio e Ajustes da I.A ou nas correções anteriores. Se houver uma correção registrada para uma pergunta similar do cliente, você deve replicar o estilo, o tom e a solução adotada pelo atendente humano.\n`;
 
+            // Regra Global de Uso do Nome do Cliente (ESTRITA)
+            basePrompt += `\n\n### DIRETRIZES DE USO DO NOME DO CLIENTE (ESTRITAS) ###\n` +
+                          `1. Se o nome do cliente estiver disponível nos dados do cliente atual e NÃO for um nome genérico (como "Cliente", "Cliente Simulador" ou vazio), você DEVE OBRIGATORIAMENTE chamar o cliente pelo nome nas suas respostas e saudações.\n` +
+                          `2. Por exemplo, em saudações diga: Olá, tudo bem Vanessa? Seja bem-vinda!, ou Como posso te ajudar hoje, Vanessa?, ou Que bom falar com você, Vanessa!\n` +
+                          `3. Mantenha essa personalização afetuosa, chamando-o pelo nome no decorrer da conversa de maneira natural.\n`;
+
+            // Regra Global de Entendimento de Saladas (ESTRITA)
+            basePrompt += `\n\n### DIRETRIZES DE ENTENDIMENTO DE SALADAS (ESTRITAS) ###\n` +
+                          `1. Se o cliente solicitar uma "salada", diferencie claramente entre "salada de verdade" (como a SALADA CAESAR ou Salada de Frutas) e "lanches/combos com salada" (como Lanche Plus Salada ou Combo Plus Salada, que são hambúrgueres).\n` +
+                          `2. Se o cliente disser que quer comer uma salada (prato leve), apresente a SALADA CAESAR como o item principal e ideal de salada do cardápio, antes de citar lanches que apenas contêm salada em sua composição.\n`;
+
             // Regra de Prioridade do Cardápio Digital e Envio na Primeira Mensagem
             basePrompt += `\n\n### DIRETRIZES DO CARDÁPIO DIGITAL (ESTRITAS E OBRIGATÓRIAS) ###\n` +
                           `1. O link oficial do cardápio digital da empresa é: [LINK_CARDAPIO]. Você DEVE usar e enviar exatamente este link: [LINK_CARDAPIO] sempre que se referir ao cardápio digital, site, menu ou onde fazer pedidos.\n` +
@@ -860,7 +906,8 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `3. Quando o cliente pedir o link do cardápio, envie apenas e exatamente o link [LINK_CARDAPIO].\n`;
 
             if (isFirstMessage) {
-                basePrompt += `\n⚠️ AVISO DE PRIMEIRA MENSAGEM (URGENTE/OBRIGATÓRIO): Esta é a PRIMEIRA mensagem desta conversa. Você DEVE saudar o cliente com carinho e OBRIGATORIAMENTE incluir o link do cardápio digital [LINK_CARDAPIO] nesta resposta inicial.\n`;
+                basePrompt += `\n⚠️ AVISO DE PRIMEIRA MENSAGEM (URGENTE/OBRIGATÓRIO): Esta é a PRIMEIRA mensagem desta conversa. Você DEVE saudar o cliente com carinho e OBRIGATORIAMENTE incluir o link do cardápio digital [LINK_CARDAPIO] nesta resposta inicial.` +
+                              ` Além disso, se houver um bloco de texto sob a tag '[PRIMEIRA MENSSAGEM A SER ENVIADA]' ou '[PRIMEIRA MENSAGEM A SER ENVIADA]' no seu prompt de sistema, você DEVE retornar EXATAMENTE o texto daquele bloco (substituindo apenas as variáveis/links como [LINK_CARDAPIO] se aplicável), sem adicionar comentários, explicações extras ou outros emojis além do que está contido no bloco. Se o bloco estiver presente, use-o de forma literal como sua resposta inicial.\n`;
             }
 
             if (botInstructions && botInstructions.trim().length > 0) {
@@ -900,6 +947,19 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                        `  * TikTok: ${vars.tiktok || 'Não cadastrado'}\n`;
 
             basePrompt += companyMemoryText;
+
+            if (contactInfo) {
+                basePrompt += `\n\n### DADOS DO CLIENTE ATUAL (CONVERSANDO NO CHAT) ###\n` +
+                              `- Nome: ${contactInfo.name || 'Cliente'}\n` +
+                              `- Telefone: ${contactInfo.phone || ''}\n` +
+                              `- CEP do Cliente: ${contactInfo.cep || 'Não informado'}\n` +
+                              `- Rua / Logradouro: ${contactInfo.address_street || 'Não informado'}\n` +
+                              `- Número da Residência: ${contactInfo.address_number || 'Não informado'}\n` +
+                              `- Bairro: ${contactInfo.address_neighborhood || 'Não informado'}\n` +
+                              `- Cidade: ${contactInfo.address_city || 'Não informado'}\n` +
+                              `- Estado (UF): ${contactInfo.address_state || 'Não informado'}\n` +
+                              `- Anotações Internas sobre o Cliente: ${contactInfo.notes || 'Nenhuma anotação'}\n`;
+            }
 
             const systemPrompt = replaceTokens(basePrompt + contextText + correctionsText);
             
@@ -976,6 +1036,22 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                             name: "Atualizar_nome_contato",
                             description: "Atualiza o nome do contato no sistema quando o cliente informar seu nome na conversa ou no resumo de pedidos.",
                             parameters: { type: "OBJECT", properties: { nome_cliente: { type: "STRING" } }, required: ["nome_cliente"] }
+                        },
+                        {
+                            name: "Atualizar_endereco_contato",
+                            description: "Salva ou atualiza os dados de endereço do cliente (CEP, rua, número, bairro, cidade, estado e anotações/referência) na ficha de contatos do sistema quando ele os informa na conversa.",
+                            parameters: {
+                                type: "OBJECT",
+                                properties: {
+                                    cep: { type: "STRING", description: "O CEP do cliente (opcional)." },
+                                    rua: { type: "STRING", description: "O nome da rua/logradouro (opcional)." },
+                                    numero: { type: "STRING", description: "O número da residência (opcional)." },
+                                    bairro: { type: "STRING", description: "O bairro (opcional)." },
+                                    cidade: { type: "STRING", description: "A cidade (opcional)." },
+                                    estado: { type: "STRING", description: "A sigla do estado/UF, ex: SP, RJ (opcional)." },
+                                    notes: { type: "STRING", description: "Pontos de referência, anotações ou observações úteis sobre este endereço (opcional)." }
+                                }
+                            }
                         },
                         {
                             name: "Consultar_cep",
@@ -1116,6 +1192,23 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                             }
                             functionResult = { status: "Nome do contato atualizado com sucesso no sistema para " + call.args.nome_cliente };
                         }
+                        else if (call.name === "Atualizar_endereco_contato") {
+                            if (contactId) {
+                                const updatePayload = {};
+                                if (call.args.cep !== undefined) updatePayload.cep = String(call.args.cep).replace(/\D/g, '');
+                                if (call.args.rua !== undefined) updatePayload.address_street = call.args.rua;
+                                if (call.args.numero !== undefined) updatePayload.address_number = call.args.numero;
+                                if (call.args.bairro !== undefined) updatePayload.address_neighborhood = call.args.bairro;
+                                if (call.args.cidade !== undefined) updatePayload.address_city = call.args.cidade;
+                                if (call.args.estado !== undefined) updatePayload.address_state = call.args.estado;
+                                if (call.args.notes !== undefined) updatePayload.notes = call.args.notes;
+
+                                if (Object.keys(updatePayload).length > 0) {
+                                    await supabase.from('contacts').update(updatePayload).eq('id', contactId);
+                                }
+                            }
+                            functionResult = { status: "Dados de endereço do contato atualizados com sucesso no sistema." };
+                        }
                         else if (call.name === "Consultar_cep") {
                             const rawCep = String(call.args.cep || '').replace(/\D/g, '');
                             if (rawCep.length !== 8) {
@@ -1184,6 +1277,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                                     estado: data.uf || '',
                                                     cep: data.cep || ''
                                                 };
+                                                cepSuccess = true;
                                             }
                                         } else {
                                             functionResult = { erro: "Serviço de busca de CEP temporariamente indisponível." };
@@ -1191,6 +1285,26 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     } catch (cepErr) {
                                         console.error("[AutomationWorker - CEP] Erro na requisição ViaCEP:", cepErr);
                                         functionResult = { erro: "Erro ao conectar-se ao servidor de CEP." };
+                                    }
+                                }
+
+                                // Auto-save address if contact does not have one
+                                if (contactId && cepSuccess && functionResult && !functionResult.erro) {
+                                    try {
+                                        const { data: contact } = await supabase.from('contacts').select('cep, address_street').eq('id', contactId).single();
+                                        if (contact && (!contact.address_street || !contact.cep)) {
+                                            const updatePayload = {
+                                                cep: rawCep,
+                                                address_street: functionResult.logradouro || '',
+                                                address_neighborhood: functionResult.bairro || '',
+                                                address_city: functionResult.cidade || '',
+                                                address_state: functionResult.estado || ''
+                                            };
+                                            await supabase.from('contacts').update(updatePayload).eq('id', contactId);
+                                            console.log(`[AutomationWorker - CEP] Endereço do contato ${contactId} atualizado automaticamente via CEP:`, updatePayload);
+                                        }
+                                    } catch (dbErr) {
+                                        console.error('[AutomationWorker - CEP] Erro ao atualizar endereço do contato:', dbErr);
                                     }
                                 }
                             }

@@ -218,11 +218,13 @@ interface ChatState {
   appVersion: { version: string, deploy_date: string } | null;
   isSearchingGlobally: boolean;
   realtimeStatus: 'connected' | 'connecting' | 'disconnected';
+  hasRealtimeConnectedOnce: boolean;
   isOffline: boolean;
   setOfflineStatus: (status: boolean) => void;
   globalAiEnabled: boolean;
   setGlobalAiEnabled: (enabled: boolean) => void;
   toggleGlobalAi: () => Promise<void>;
+  syncMissedMessages: () => Promise<void>;
   
   searchGlobalContacts: (term: string) => Promise<void>;
   openQRModal: (instanceId?: string | null) => void;
@@ -531,6 +533,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   evolutionConnected: false,
   instancesStatus: {},
   realtimeStatus: 'disconnected',
+  hasRealtimeConnectedOnce: false,
   setInstanceStatus: (id, status) => {
     if (status === 'connected') {
       if (instanceStatusTimeouts[id]) {
@@ -3459,6 +3462,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  syncMissedMessages: async () => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    
+    console.log('[Realtime Sync] Iniciando sincronização reativa de mensagens perdidas (Catch-up Sync)...');
+    
+    try {
+        // 1. Recarrega as conversas atuais (atualiza status, visualizações de mensagens, unread, etc)
+        await get().fetchInitialData();
+        
+        // 2. Se houver um chat ativo, recarrega as mensagens dele para preencher lacunas
+        const activeId = get().activeChatId;
+        if (activeId) {
+            const activeChannelName = localStorage.getItem('activeChannelName') || 'default';
+            await get().loadHistoricalMessages(activeId, activeChannelName, false);
+            console.log(`[Realtime Sync] Mensagens do chat ativo (${activeId}) sincronizadas com sucesso.`);
+        }
+        
+        console.log('[Realtime Sync] Sincronização reativa finalizada com sucesso.');
+    } catch (err) {
+        console.error('[Realtime Sync] Falha ao sincronizar mensagens perdidas:', err);
+    }
+  },
+
   fetchTenantAgents: async () => {
     const tenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
     if (!tenantId) return;
@@ -4274,7 +4301,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
          } else {
             console.log(`[Realtime status]: ${status}`);
             if (status === 'SUBSCRIBED') {
-               set({ realtimeStatus: 'connected' });
+               const connectedOnce = get().hasRealtimeConnectedOnce;
+               set({ realtimeStatus: 'connected', hasRealtimeConnectedOnce: true });
+               if (connectedOnce) {
+                   console.log('[Realtime] Conexão WebSocket restabelecida. Sincronizando mensagens perdidas durante a desconexão...');
+                   get().syncMissedMessages().catch(e => console.error('[Realtime Sync] Falha no syncMissedMessages:', e));
+               }
             } else if (status === 'CLOSED') {
                set({ realtimeStatus: 'disconnected' });
             } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
