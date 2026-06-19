@@ -40,6 +40,12 @@ const gerarTextoHorario = (dias: DiaTrabalho[]) => {
   return partes.join('. ');
 };
 
+const GASTROFOOD_BASE_URL = 'https://service.xpointsolucoes.com.br:8443';
+const CARDAPIO_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/server/nuvem/ProdutoPdvService/GetCardapioCompleto`;
+const CEP_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/ConsultaCepService/Execute`;
+const CLIENTE_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/LoginService/ValidaTelefone`;
+const PEDIDO_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/server/nuvem/PedidoCardapioService/FinalizeOrder`;
+
 const DEFAULT_CEP_PAYLOAD = `{
   "ACep": "06764365"
 }`;
@@ -135,7 +141,7 @@ export default function AccountSettings() {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  const [cardapioJsonUrl, setCardapioJsonUrl] = useState('');
+  const [cardapioJsonUrl, setCardapioJsonUrl] = useState(CARDAPIO_DEFAULT_URL);
   const [cardapioJsonToken, setCardapioJsonToken] = useState('');
   const [cardapioJsonPayload, setCardapioJsonPayload] = useState('');
   const [testLoading, setTestLoading] = useState(false);
@@ -167,7 +173,7 @@ export default function AccountSettings() {
   const [isPedidoExpanded, setIsPedidoExpanded] = useState(false);
 
   // Estados para Consulta de CEP
-  const [cepJsonUrl, setCepJsonUrl] = useState('');
+  const [cepJsonUrl, setCepJsonUrl] = useState(CEP_DEFAULT_URL);
   const [cepJsonToken, setCepJsonToken] = useState('');
   const [cepJsonPayload, setCepJsonPayload] = useState(DEFAULT_CEP_PAYLOAD);
   const [cepLoading, setCepLoading] = useState(false);
@@ -175,7 +181,7 @@ export default function AccountSettings() {
   const [cepError, setCepError] = useState('');
 
   // Estados para Consulta de Cliente
-  const [clienteJsonUrl, setClienteJsonUrl] = useState('');
+  const [clienteJsonUrl, setClienteJsonUrl] = useState(CLIENTE_DEFAULT_URL);
   const [clienteJsonToken, setClienteJsonToken] = useState('');
   const [clienteJsonPayload, setClienteJsonPayload] = useState(DEFAULT_CLIENTE_PAYLOAD);
   const [clienteLoading, setClienteLoading] = useState(false);
@@ -183,7 +189,7 @@ export default function AccountSettings() {
   const [clienteError, setClienteError] = useState('');
 
   // Estados para Envio de Pedido
-  const [pedidoJsonUrl, setPedidoJsonUrl] = useState('');
+  const [pedidoJsonUrl, setPedidoJsonUrl] = useState(PEDIDO_DEFAULT_URL);
   const [pedidoJsonToken, setPedidoJsonToken] = useState('');
   const [pedidoJsonPayload, setPedidoJsonPayload] = useState(DEFAULT_PEDIDO_PAYLOAD);
   const [pedidoLoading, setPedidoLoading] = useState(false);
@@ -589,19 +595,19 @@ export default function AccountSettings() {
       setGoogleMaps(tenantInfo.settings.google_maps || '');
       setYoutube(tenantInfo.settings.youtube || '');
       setTiktok(tenantInfo.settings.tiktok || '');
-      setCardapioJsonUrl(tenantInfo.settings.cardapio_json_url || '');
+      setCardapioJsonUrl(tenantInfo.settings.cardapio_json_url || CARDAPIO_DEFAULT_URL);
       setCardapioJsonToken(tenantInfo.settings.cardapio_json_token || '');
       setCardapioJsonPayload(tenantInfo.settings.cardapio_json_payload || '');
 
-      setCepJsonUrl(tenantInfo.settings.cep_json_url || '');
+      setCepJsonUrl(tenantInfo.settings.cep_json_url || CEP_DEFAULT_URL);
       setCepJsonToken(tenantInfo.settings.cep_json_token || '');
       setCepJsonPayload(tenantInfo.settings.cep_json_payload || DEFAULT_CEP_PAYLOAD);
 
-      setClienteJsonUrl(tenantInfo.settings.cliente_json_url || '');
+      setClienteJsonUrl(tenantInfo.settings.cliente_json_url || CLIENTE_DEFAULT_URL);
       setClienteJsonToken(tenantInfo.settings.cliente_json_token || '');
       setClienteJsonPayload(tenantInfo.settings.cliente_json_payload || DEFAULT_CLIENTE_PAYLOAD);
 
-      setPedidoJsonUrl(tenantInfo.settings.pedido_json_url || '');
+      setPedidoJsonUrl(tenantInfo.settings.pedido_json_url || PEDIDO_DEFAULT_URL);
       setPedidoJsonToken(tenantInfo.settings.pedido_json_token || '');
       setPedidoJsonPayload(tenantInfo.settings.pedido_json_payload || DEFAULT_PEDIDO_PAYLOAD);
       
@@ -1273,19 +1279,6 @@ export default function AccountSettings() {
             {isCardapioExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                      URL do Endpoint
-                    </label>
-                    <input 
-                      type="text"
-                      value={cardapioJsonUrl}
-                      onChange={(e) => setCardapioJsonUrl(e.target.value)}
-                      placeholder="Ex: https://service.xpointsolucoes.com.br:8443/v6/server/nuvem/ProdutoPdvService/GetCardapioCompleto"
-                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                    />
-                  </div>
-
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
@@ -1870,19 +1863,6 @@ export default function AccountSettings() {
             {isCepExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                      URL do Endpoint
-                    </label>
-                    <input 
-                      type="text"
-                      value={cepJsonUrl}
-                      onChange={(e) => setCepJsonUrl(e.target.value)}
-                      placeholder="Ex: https://service.xpointsolucoes.com.br:8443/v6/usuario_2.0/ConsultaCepService/Execute"
-                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                    />
-                  </div>
-
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
@@ -1970,19 +1950,6 @@ export default function AccountSettings() {
             {isClienteExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                      URL do Endpoint
-                    </label>
-                    <input 
-                      type="text"
-                      value={clienteJsonUrl}
-                      onChange={(e) => setClienteJsonUrl(e.target.value)}
-                      placeholder="Ex: https://service.xpointsolucoes.com.br:8443/v6/usuario_2.0/LoginService/ValidaTelefone"
-                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                    />
-                  </div>
-
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
@@ -2070,19 +2037,6 @@ export default function AccountSettings() {
             {isPedidoExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                      URL do Endpoint
-                    </label>
-                    <input 
-                      type="text"
-                      value={pedidoJsonUrl}
-                      onChange={(e) => setPedidoJsonUrl(e.target.value)}
-                      placeholder="Ex: https://service.xpointsolucoes.com.br:8443/v6/server/nuvem/PedidoCardapioService/FinalizeOrder"
-                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                    />
-                  </div>
-
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
