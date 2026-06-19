@@ -879,6 +879,28 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             
             basePrompt += storeStatusText;
 
+            // Memória Operacional da Empresa (vindas de /settings/account)
+            const companyMemoryText = `\n\n### MEMÓRIA OPERACIONAL DA EMPRESA (DADOS DE CONFIGURAÇÃO DO SISTEMA) ###\n` +
+                                       `- Razão Social: ${companySettings.corporateName || 'Não cadastrado'}\n` +
+                                       `- CNPJ: ${companySettings.cnpj || 'Não cadastrado'}\n` +
+                                       `- Nome Fantasia da I.A: ${vars.nomeIa}\n` +
+                                       `- Endereço Comercial Completo: ${vars.endereco || 'Não cadastrado'}\n` +
+                                       `- CEP Comercial: ${companySettings.zipCode || 'Não cadastrado'}\n` +
+                                       `- Wi-Fi da Loja (Senha): ${companySettings.wifiPassword || 'Não cadastrado'}\n` +
+                                       `- Formas de Pagamento Aceitas: ${companySettings.paymentMethods || 'Não cadastrado'}\n` +
+                                       `- Pix Ativo: ${companySettings.acceptsPix ? 'Sim' : 'Não'}\n` +
+                                       `- Possui Taxa de Entrega: ${companySettings.hasDeliveryFee ? 'Sim' : 'Não'}\n` +
+                                       `- Regras de Taxa de Entrega: ${companySettings.deliveryFeeRules || 'Não cadastrado'}\n` +
+                                       `- Tempo Médio de Preparo dos Pedidos: ${companySettings.averagePrepTime || 'Não cadastrado'}\n` +
+                                       `- Link Oficial do Cardápio Digital: ${vars.linkCardapio || 'Não cadastrado'}\n` +
+                                       `- Redes Sociais da Empresa:\n` +
+                                       `  * Instagram: ${vars.instagram || 'Não cadastrado'}\n` +
+                                       `  * Google Maps: ${vars.googleMaps || 'Não cadastrado'}\n` +
+                                       `  * YouTube: ${vars.youtube || 'Não cadastrado'}\n` +
+                                       `  * TikTok: ${vars.tiktok || 'Não cadastrado'}\n`;
+
+            basePrompt += companyMemoryText;
+
             const systemPrompt = replaceTokens(basePrompt + contextText + correctionsText);
             
             // 3. Obtem histórico da conversa
