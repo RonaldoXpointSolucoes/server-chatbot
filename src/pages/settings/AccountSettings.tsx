@@ -40,6 +40,86 @@ const gerarTextoHorario = (dias: DiaTrabalho[]) => {
   return partes.join('. ');
 };
 
+const DEFAULT_CEP_PAYLOAD = `{
+  "ACep": "06764365"
+}`;
+
+const DEFAULT_CLIENTE_PAYLOAD = `{
+  "ATelefone": "973933247"
+}`;
+
+const DEFAULT_PEDIDO_PAYLOAD = `{
+  "jsOrder": {
+    "module": 1,
+    "fkCustomer": "9EA3F679-5565-4DA0-930F-0971A8B8A3CD",
+    "fkStore": "6A728D2A-8612-4DC1-8676-0B10E4D38AD5",
+    "subTotal": 37,
+    "received": 41,
+    "txDelivery": 4,
+    "discount": 0,
+    "cpf": "51308379838",
+    "pagto": "Debito com Maquininha",
+    "address": {
+      "Cep": "06754-160",
+      "Logradouro": "Praça Miguel Ortega",
+      "Numero": "340",
+      "Bairro": "Parque Assuncao",
+      "Cidade": "Taboão da Serra",
+      "Complemento": "",
+      "Referencia": "",
+      "Uf": "SP",
+      "Bloco": "",
+      "Ap": "",
+      "Latitude": "-23.604002",
+      "Longitude": "-46.763923",
+      "Distancia": "2,5",
+      "Tempo": "10 mins"
+    },
+    "items": [
+      {
+        "code": "1",
+        "codePdv": "001489",
+        "name": "Plus Italiano",
+        "amount": 1,
+        "unitary": "UN",
+        "price": 37,
+        "complement": "",
+        "imgProd": "https://service.xpointsolucoes.com.br:8443/xpoint/arquivos/Imagens/39768487000192/produto/IDFD938165-1AC8-40D7-8126-20466FA71443-1.png",
+        "itemsCuston": [
+          {
+            "code": "1065",
+            "name": "Ao ponto",
+            "amount": 1,
+            "price": 0,
+            "typeCalc": 0,
+            "codePdv": "C31",
+            "fkPasso": "7D7FAF82-8EBD-4C94-9568-951F01ECBD89",
+            "numberPasso": 1
+          },
+          {
+            "code": "1861",
+            "name": "Sem molho",
+            "amount": 1,
+            "price": 0,
+            "typeCalc": 0,
+            "codePdv": "C",
+            "fkPasso": "F9CE4A1E-59D4-45A4-AA83-CBB677D7AD07",
+            "numberPasso": 2
+          }
+        ]
+      }
+    ],
+    "custumer": {
+      "IdUsuario": "9EA3F679-5565-4DA0-930F-0971A8B8A3CD",
+      "NomeRazao": "Valmir Teixeira",
+      "Ddi": "+55",
+      "Telefone": "11973933247"
+    },
+    "origin": 2,
+    "estimatedDeliveryInMinutes": "3 mins"
+  }
+}`;
+
 export default function AccountSettings() {
   const tenantInfo = useChatStore(state => state.tenantInfo);
   const updateTenantSettings = useChatStore(state => state.updateTenantSettings);
@@ -82,6 +162,85 @@ export default function AccountSettings() {
   // Estados para controle de colapso
   const [isHorariosExpanded, setIsHorariosExpanded] = useState(false);
   const [isCardapioExpanded, setIsCardapioExpanded] = useState(false);
+  const [isCepExpanded, setIsCepExpanded] = useState(false);
+  const [isClienteExpanded, setIsClienteExpanded] = useState(false);
+  const [isPedidoExpanded, setIsPedidoExpanded] = useState(false);
+
+  // Estados para Consulta de CEP
+  const [cepJsonUrl, setCepJsonUrl] = useState('');
+  const [cepJsonToken, setCepJsonToken] = useState('');
+  const [cepJsonPayload, setCepJsonPayload] = useState(DEFAULT_CEP_PAYLOAD);
+  const [cepLoading, setCepLoading] = useState(false);
+  const [cepResult, setCepResult] = useState<any>(null);
+  const [cepError, setCepError] = useState('');
+
+  // Estados para Consulta de Cliente
+  const [clienteJsonUrl, setClienteJsonUrl] = useState('');
+  const [clienteJsonToken, setClienteJsonToken] = useState('');
+  const [clienteJsonPayload, setClienteJsonPayload] = useState(DEFAULT_CLIENTE_PAYLOAD);
+  const [clienteLoading, setClienteLoading] = useState(false);
+  const [clienteResult, setClienteResult] = useState<any>(null);
+  const [clienteError, setClienteError] = useState('');
+
+  // Estados para Envio de Pedido
+  const [pedidoJsonUrl, setPedidoJsonUrl] = useState('');
+  const [pedidoJsonToken, setPedidoJsonToken] = useState('');
+  const [pedidoJsonPayload, setPedidoJsonPayload] = useState(DEFAULT_PEDIDO_PAYLOAD);
+  const [pedidoLoading, setPedidoLoading] = useState(false);
+  const [pedidoResult, setPedidoResult] = useState<any>(null);
+  const [pedidoError, setPedidoError] = useState('');
+
+  const handleTestGeneric = async (
+    url: string,
+    token: string,
+    payload: string,
+    setLoading: (l: boolean) => void,
+    setResult: (r: any) => void,
+    setError: (e: string) => void
+  ) => {
+    setLoading(true);
+    setResult(null);
+    setError('');
+    try {
+      if (!url) {
+        throw new Error('A URL do endpoint é obrigatória para realizar o teste.');
+      }
+
+      let parsedPayload = null;
+      if (payload) {
+        try {
+          parsedPayload = JSON.parse(payload);
+        } catch (e) {
+          throw new Error('O corpo da requisição (JSON Payload) não é um JSON válido. Verifique se aspas duplas, vírgulas e chaves estão corretas.');
+        }
+      }
+
+      const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
+      const res = await fetch(`${apiBase}/api/v1/utils/test-cardapio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url,
+          token,
+          payload: parsedPayload
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `Erro na requisição. Status: ${res.status}`);
+      }
+
+      const resData = await res.json();
+      setResult(resData);
+    } catch (err: any) {
+      setError(err.message || 'Ocorreu um erro desconhecido.');
+    } finally {
+      setLoading(false);
+    }
+  };
   
   const cancelMappingRef = useRef(false);
 
@@ -433,6 +592,18 @@ export default function AccountSettings() {
       setCardapioJsonUrl(tenantInfo.settings.cardapio_json_url || '');
       setCardapioJsonToken(tenantInfo.settings.cardapio_json_token || '');
       setCardapioJsonPayload(tenantInfo.settings.cardapio_json_payload || '');
+
+      setCepJsonUrl(tenantInfo.settings.cep_json_url || '');
+      setCepJsonToken(tenantInfo.settings.cep_json_token || '');
+      setCepJsonPayload(tenantInfo.settings.cep_json_payload || DEFAULT_CEP_PAYLOAD);
+
+      setClienteJsonUrl(tenantInfo.settings.cliente_json_url || '');
+      setClienteJsonToken(tenantInfo.settings.cliente_json_token || '');
+      setClienteJsonPayload(tenantInfo.settings.cliente_json_payload || DEFAULT_CLIENTE_PAYLOAD);
+
+      setPedidoJsonUrl(tenantInfo.settings.pedido_json_url || '');
+      setPedidoJsonToken(tenantInfo.settings.pedido_json_token || '');
+      setPedidoJsonPayload(tenantInfo.settings.pedido_json_payload || DEFAULT_PEDIDO_PAYLOAD);
       
       if (tenantInfo.settings.horarios_estrutura) {
         setDiasHorarios(tenantInfo.settings.horarios_estrutura);
@@ -460,7 +631,16 @@ export default function AccountSettings() {
         tiktok,
         cardapio_json_url: cardapioJsonUrl,
         cardapio_json_token: cardapioJsonToken,
-        cardapio_json_payload: cardapioJsonPayload
+        cardapio_json_payload: cardapioJsonPayload,
+        cep_json_url: cepJsonUrl,
+        cep_json_token: cepJsonToken,
+        cep_json_payload: cepJsonPayload,
+        cliente_json_url: clienteJsonUrl,
+        cliente_json_token: clienteJsonToken,
+        cliente_json_payload: clienteJsonPayload,
+        pedido_json_url: pedidoJsonUrl,
+        pedido_json_token: pedidoJsonToken,
+        pedido_json_payload: pedidoJsonPayload
       });
       console.log("Save concluído!");
       setSuccess(true);
@@ -1659,6 +1839,306 @@ export default function AccountSettings() {
                         </div>
                       )}
 
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Seção Consulta de CEP - Colapsável */}
+          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+            <button
+              type="button"
+              onClick={() => setIsCepExpanded(!isCepExpanded)}
+              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                  <MapPin size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Consulta de CEP</h2>
+                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a consulta de CEP e busca de endereços no Gastrofood.</p>
+                </div>
+              </div>
+              <div className="text-gray-400 dark:text-gray-500 pr-2">
+                {isCepExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+              </div>
+            </button>
+
+            {isCepExpanded && (
+              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="space-y-6 max-w-2xl">
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                      URL do Endpoint
+                    </label>
+                    <input 
+                      type="text"
+                      value={cepJsonUrl}
+                      onChange={(e) => setCepJsonUrl(e.target.value)}
+                      placeholder="Ex: https://service.xpointsolucoes.com.br:8443/v6/usuario_2.0/ConsultaCepService/Execute"
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Token de Autorização (Bearer)
+                      </label>
+                      <input 
+                        type="text"
+                        value={cepJsonToken}
+                        onChange={(e) => setCepJsonToken(e.target.value)}
+                        placeholder="Bearer eyJ0eXAi..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Corpo da Requisição (JSON Payload)
+                      </label>
+                      <textarea 
+                        value={cepJsonPayload}
+                        onChange={(e) => setCepJsonPayload(e.target.value)}
+                        placeholder='{"ACep": "06764365"}'
+                        rows={3}
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-4 flex flex-wrap items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => handleTestGeneric(cepJsonUrl, cepJsonToken, cepJsonPayload, setCepLoading, setCepResult, setCepError)}
+                      disabled={cepLoading || !cepJsonUrl}
+                      className="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-semibold rounded-xl shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {cepLoading ? 'Testando...' : 'Testar Requisição'}
+                    </button>
+                  </div>
+
+                  {cepError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro no teste:</strong> {cepError}
+                    </div>
+                  )}
+
+                  {cepResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado da Consulta:</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500">
+                          Status: {cepResult.status}
+                        </span>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
+                        {JSON.stringify(cepResult.data, null, 2)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Seção Consulta de Cliente - Colapsável */}
+          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+            <button
+              type="button"
+              onClick={() => setIsClienteExpanded(!isClienteExpanded)}
+              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500">
+                  <User size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Consulta de Cliente</h2>
+                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Valide se o cliente possui cadastro no Gastrofood via telefone.</p>
+                </div>
+              </div>
+              <div className="text-gray-400 dark:text-gray-500 pr-2">
+                {isClienteExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+              </div>
+            </button>
+
+            {isClienteExpanded && (
+              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="space-y-6 max-w-2xl">
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                      URL do Endpoint
+                    </label>
+                    <input 
+                      type="text"
+                      value={clienteJsonUrl}
+                      onChange={(e) => setClienteJsonUrl(e.target.value)}
+                      placeholder="Ex: https://service.xpointsolucoes.com.br:8443/v6/usuario_2.0/LoginService/ValidaTelefone"
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Token de Autorização (Bearer)
+                      </label>
+                      <input 
+                        type="text"
+                        value={clienteJsonToken}
+                        onChange={(e) => setClienteJsonToken(e.target.value)}
+                        placeholder="Bearer eyJ0eXAi..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Corpo da Requisição (JSON Payload)
+                      </label>
+                      <textarea 
+                        value={clienteJsonPayload}
+                        onChange={(e) => setClienteJsonPayload(e.target.value)}
+                        placeholder='{"ATelefone": "973933247"}'
+                        rows={3}
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-4 flex flex-wrap items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => handleTestGeneric(clienteJsonUrl, clienteJsonToken, clienteJsonPayload, setClienteLoading, setClienteResult, setClienteError)}
+                      disabled={clienteLoading || !clienteJsonUrl}
+                      className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {clienteLoading ? 'Testando...' : 'Testar Requisição'}
+                    </button>
+                  </div>
+
+                  {clienteError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro no teste:</strong> {clienteError}
+                    </div>
+                  )}
+
+                  {clienteResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado da Consulta:</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-500">
+                          Status: {clienteResult.status}
+                        </span>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
+                        {JSON.stringify(clienteResult.data, null, 2)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Seção Envio de Pedido - Colapsável */}
+          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+            <button
+              type="button"
+              onClick={() => setIsPedidoExpanded(!isPedidoExpanded)}
+              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center text-rose-500">
+                  <ClipboardList size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Envio de Pedido</h2>
+                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a finalização e integração de pedidos diretamente no Gastrofood.</p>
+                </div>
+              </div>
+              <div className="text-gray-400 dark:text-gray-500 pr-2">
+                {isPedidoExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+              </div>
+            </button>
+
+            {isPedidoExpanded && (
+              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="space-y-6 max-w-2xl">
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                      URL do Endpoint
+                    </label>
+                    <input 
+                      type="text"
+                      value={pedidoJsonUrl}
+                      onChange={(e) => setPedidoJsonUrl(e.target.value)}
+                      placeholder="Ex: https://service.xpointsolucoes.com.br:8443/v6/server/nuvem/PedidoCardapioService/FinalizeOrder"
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Token de Autorização (Bearer)
+                      </label>
+                      <input 
+                        type="text"
+                        value={pedidoJsonToken}
+                        onChange={(e) => setPedidoJsonToken(e.target.value)}
+                        placeholder="Bearer eyJ0eXAi..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Corpo da Requisição (JSON Payload)
+                      </label>
+                      <textarea 
+                        value={pedidoJsonPayload}
+                        onChange={(e) => setPedidoJsonPayload(e.target.value)}
+                        placeholder="Corpo da Requisição (JSON)"
+                        rows={10}
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-4 flex flex-wrap items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => handleTestGeneric(pedidoJsonUrl, pedidoJsonToken, pedidoJsonPayload, setPedidoLoading, setPedidoResult, setPedidoError)}
+                      disabled={pedidoLoading || !pedidoJsonUrl}
+                      className="px-6 py-2.5 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white font-semibold rounded-xl shadow-lg shadow-rose-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {pedidoLoading ? 'Testando...' : 'Testar Requisição'}
+                    </button>
+                  </div>
+
+                  {pedidoError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro no teste:</strong> {pedidoError}
+                    </div>
+                  )}
+
+                  {pedidoResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado do Envio:</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-500/10 text-rose-500">
+                          Status: {pedidoResult.status}
+                        </span>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
+                        {JSON.stringify(pedidoResult.data, null, 2)}
+                      </div>
                     </div>
                   )}
                 </div>
