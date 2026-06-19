@@ -3391,22 +3391,35 @@ export default function ChatDashboard() {
               ? []
               : (activeChat.company_ids || []).filter((id: string) => id !== companyDetailsOpen.id);
             
+            const updatePayload: any = { company_ids: newCompanyIds };
+            if (companyDetailsOpen.id === activeChat.id) {
+              updatePayload.fantasy_name = null;
+            }
+            
             const { error } = await supabase
               .from('contacts')
-              .update({ company_ids: newCompanyIds })
+              .update(updatePayload)
               .eq('id', cleanActiveChatId);
               
             if (error) throw error;
             
             // Update active chat locally
-            const updatedActiveChat = { ...activeChat, company_ids: newCompanyIds };
+            const updatedActiveChat = { 
+              ...activeChat, 
+              company_ids: newCompanyIds,
+              ...(companyDetailsOpen.id === activeChat.id ? { fantasy_name: null } : {})
+            };
             setActiveChat(updatedActiveChat);
             
             // Also update in the contacts list
             const currentContacts = useChatStore.getState().contacts;
             const updatedContacts = currentContacts.map((c: any) => {
               if (c.id === activeChat.id) {
-                return { ...c, company_ids: newCompanyIds };
+                return { 
+                  ...c, 
+                  company_ids: newCompanyIds,
+                  ...(companyDetailsOpen.id === activeChat.id ? { fantasy_name: null } : {})
+                };
               }
               return c;
             });
