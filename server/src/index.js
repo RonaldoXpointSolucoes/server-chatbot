@@ -1,5 +1,10 @@
 import { config } from 'dotenv';
-config({ path: '../.env' });
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+config({ path: path.resolve(__dirname, '../../.env') });
+
 import pg from 'pg';
 import express from 'express';
 import cors from 'cors';
@@ -15,8 +20,6 @@ import snoozeManager from './snooze-manager.js';
 import autoRagTrainer from './automation-worker/auto-rag-trainer.js';
 import { dispatchWebhookTriggers } from './event-processor/index.js';
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import pidusage from 'pidusage';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';

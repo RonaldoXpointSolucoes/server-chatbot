@@ -1,5 +1,10 @@
 import { config } from 'dotenv';
-config({ path: '../.env' });
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+config({ path: path.resolve(__dirname, '../../.env') });
+
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 
