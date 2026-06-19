@@ -34,8 +34,51 @@ export default function ContactsManager() {
   useEffect(() => {
     if (!tenantId) return;
     const loadCompanies = async () => {
-      const { data } = await supabase.from('contacts').select('id, name, fantasy_name, document_number, tags').eq('tenant_id', tenantId).eq('document_type', 'cnpj');
-      if (data) setAllCompanies(data);
+      // 1. Fetch explicit companies with document_type = 'cnpj'
+      const { data: explicitCompanies } = await supabase
+        .from('contacts')
+        .select('id, name, fantasy_name, document_number, tags, company_ids, document_type')
+        .eq('tenant_id', tenantId)
+        .eq('document_type', 'cnpj');
+
+      // 2. Fetch all contacts that have company_ids defined to find referenced company IDs
+      const { data: contactsWithCompanies } = await supabase
+        .from('contacts')
+        .select('company_ids')
+        .eq('tenant_id', tenantId)
+        .not('company_ids', 'is', null)
+        .neq('company_ids', '{}');
+
+      const referencedIds = new Set<string>();
+      if (contactsWithCompanies) {
+        contactsWithCompanies.forEach(c => {
+          if (Array.isArray(c.company_ids)) {
+            c.company_ids.forEach((id: string) => {
+              if (id) referencedIds.add(id);
+            });
+          }
+        });
+      }
+
+      let allMergedCompanies = explicitCompanies || [];
+      if (referencedIds.size > 0) {
+        const explicitIds = new Set(allMergedCompanies.map(c => c.id));
+        const idsToFetch = Array.from(referencedIds).filter(id => !explicitIds.has(id));
+        
+        if (idsToFetch.length > 0) {
+          const { data: linkedCompanies } = await supabase
+            .from('contacts')
+            .select('id, name, fantasy_name, document_number, tags, company_ids, document_type')
+            .eq('tenant_id', tenantId)
+            .in('id', idsToFetch);
+            
+          if (linkedCompanies) {
+            allMergedCompanies = [...allMergedCompanies, ...linkedCompanies];
+          }
+        }
+      }
+
+      setAllCompanies(allMergedCompanies);
     };
     loadCompanies();
   }, [tenantId]);
@@ -104,9 +147,21 @@ export default function ContactsManager() {
     }
 
     if (currentType === 'companies') {
-      query = query.eq('document_type', 'cnpj');
+      const companyIds = allCompanies.map(c => c.id);
+      if (companyIds.length > 0) {
+        query = query.or(`document_type.eq.cnpj,id.in.(${companyIds.join(',')})`);
+      } else {
+        query = query.eq('document_type', 'cnpj');
+      }
     } else if (currentType === 'contacts') {
-      query = query.or('document_type.neq.cnpj,document_type.is.null');
+      const companyIds = allCompanies.map(c => c.id);
+      if (companyIds.length > 0) {
+        query = query
+          .or('document_type.neq.cnpj,document_type.is.null')
+          .not('id', 'in', `(${companyIds.join(',')})`);
+      } else {
+        query = query.or('document_type.neq.cnpj,document_type.is.null');
+      }
     }
 
     if (currentGroup !== 'all') {

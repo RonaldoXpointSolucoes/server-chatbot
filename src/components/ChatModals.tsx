@@ -70,9 +70,55 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
   React.useEffect(() => {
     const fetchCompanies = async () => {
       const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
-      const { supabase } = await import('../services/supabase');
-      const { data } = await supabase.from('contacts').select('id, name, fantasy_name').eq('tenant_id', tenantId).eq('document_type', 'cnpj');
-      if (data) setCompanies(data);
+      if (!tenantId) return;
+      try {
+        const { supabase } = await import('../services/supabase');
+        // 1. Fetch explicit companies with document_type = 'cnpj'
+        const { data: explicitCompanies } = await supabase
+          .from('contacts')
+          .select('id, name, fantasy_name')
+          .eq('tenant_id', tenantId)
+          .eq('document_type', 'cnpj');
+
+        // 2. Fetch all contacts that have company_ids defined to find referenced company IDs
+        const { data: contactsWithCompanies } = await supabase
+          .from('contacts')
+          .select('company_ids')
+          .eq('tenant_id', tenantId)
+          .not('company_ids', 'is', null)
+          .neq('company_ids', '{}');
+
+        const referencedIds = new Set<string>();
+        if (contactsWithCompanies) {
+          contactsWithCompanies.forEach(c => {
+            if (Array.isArray(c.company_ids)) {
+              c.company_ids.forEach((id: string) => {
+                if (id) referencedIds.add(id);
+              });
+            }
+          });
+        }
+
+        let allMergedCompanies = explicitCompanies || [];
+        if (referencedIds.size > 0) {
+          const explicitIds = new Set(allMergedCompanies.map(c => c.id));
+          const idsToFetch = Array.from(referencedIds).filter(id => !explicitIds.has(id));
+          
+          if (idsToFetch.length > 0) {
+            const { data: linkedCompanies } = await supabase
+              .from('contacts')
+              .select('id, name, fantasy_name')
+              .eq('tenant_id', tenantId)
+              .in('id', idsToFetch);
+              
+            if (linkedCompanies) {
+              allMergedCompanies = [...allMergedCompanies, ...linkedCompanies];
+            }
+          }
+        }
+
+        setCompanies(allMergedCompanies);
+      } catch (e) {}
     };
     if (isOpen) fetchCompanies();
   }, [isOpen]);
@@ -1554,10 +1600,12 @@ export function AssociatedCompaniesModal({ isOpen, onClose, companies }: Associa
 
 export interface CompanyDetailsModalProps extends BaseModalProps {
   contact: any;
+  parentContact?: any;
   onUpdateCompany?: (updatedCompany: any) => void;
+  onClearAssociation?: () => void;
 }
 
-export function CompanyDetailsModal({ isOpen, onClose, contact, onUpdateCompany }: CompanyDetailsModalProps) {
+export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, onUpdateCompany, onClearAssociation }: CompanyDetailsModalProps) {
   const [copiedDoc, setCopiedDoc] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
   
@@ -1589,11 +1637,49 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, onUpdateCompany 
         const { supabase } = await import('../services/supabase');
         const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
         
-        const { data: companiesData } = await supabase
+        // 1. Fetch explicit companies with document_type = 'cnpj'
+        const { data: explicitCompanies } = await supabase
           .from('contacts')
           .select('id, name, fantasy_name, document_number, tags, company_ids')
           .eq('tenant_id', tenantId)
           .eq('document_type', 'cnpj');
+
+        // 2. Fetch all contacts that have company_ids defined to find referenced company IDs
+        const { data: contactsWithCompanies } = await supabase
+          .from('contacts')
+          .select('company_ids')
+          .eq('tenant_id', tenantId)
+          .not('company_ids', 'is', null)
+          .neq('company_ids', '{}');
+
+        const referencedIds = new Set<string>();
+        if (contactsWithCompanies) {
+          contactsWithCompanies.forEach(c => {
+            if (Array.isArray(c.company_ids)) {
+              c.company_ids.forEach((id: string) => {
+                if (id) referencedIds.add(id);
+              });
+            }
+          });
+        }
+
+        let companiesData = explicitCompanies || [];
+        if (referencedIds.size > 0) {
+          const explicitIds = new Set(companiesData.map(c => c.id));
+          const idsToFetch = Array.from(referencedIds).filter(id => !explicitIds.has(id));
+          
+          if (idsToFetch.length > 0) {
+            const { data: linkedCompanies } = await supabase
+              .from('contacts')
+              .select('id, name, fantasy_name, document_number, tags, company_ids')
+              .eq('tenant_id', tenantId)
+              .in('id', idsToFetch);
+              
+            if (linkedCompanies) {
+              companiesData = [...companiesData, ...linkedCompanies];
+            }
+          }
+        }
 
         if (!companiesData) return;
 
@@ -1691,10 +1777,11 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, onUpdateCompany 
     try {
       const { supabase } = await import('../services/supabase');
       const cleanDoc = cnpjInput.replace(/\D/g, '');
+      const realContactId = contact.id.includes('_') ? contact.id.split('_')[0] : contact.id;
       const { error } = await supabase
         .from('contacts')
         .update({ document_number: cleanDoc })
-        .eq('id', contact.id);
+        .eq('id', realContactId);
 
       if (error) throw error;
 
@@ -1839,7 +1926,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, onUpdateCompany 
         </div>
 
         {/* Action Button */}
-        <div className="mt-2">
+        <div className="mt-2 flex flex-col gap-2">
           <button 
             onClick={() => window.open(`https://mensalidadedatadivas.vercel.app/?e=${rawCnpj || ''}`, '_blank')}
             className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-[#00a884] hover:bg-emerald-600 active:scale-[0.98] text-white rounded-2xl font-semibold shadow-lg shadow-emerald-500/20 transition-all duration-200 group"
@@ -1848,6 +1935,15 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, onUpdateCompany 
             <span>Ver Faturamento (NF-e)</span>
             <ExternalLink size={16} className="ml-auto opacity-70 group-hover:opacity-100 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 transition-all" />
           </button>
+
+          {parentContact && parentContact.company_ids?.includes(contact.id) && onClearAssociation && (
+            <button 
+              onClick={onClearAssociation}
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl font-semibold transition-all duration-200"
+            >
+              <span>Desvincular desta Empresa</span>
+            </button>
+          )}
         </div>
 
         {/* Group Companies */}

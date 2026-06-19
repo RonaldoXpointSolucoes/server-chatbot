@@ -335,8 +335,51 @@ export default function ChatDashboard() {
       if (!tenantId) return;
       try {
         const { supabase } = await import('../services/supabase');
-        const { data } = await supabase.from('contacts').select('id, name, fantasy_name, document_number').eq('tenant_id', tenantId).eq('document_type', 'cnpj');
-        if (data) setAllCompanies(data);
+        // 1. Fetch explicit companies with document_type = 'cnpj'
+        const { data: explicitCompanies } = await supabase
+          .from('contacts')
+          .select('id, name, fantasy_name, document_number')
+          .eq('tenant_id', tenantId)
+          .eq('document_type', 'cnpj');
+
+        // 2. Fetch all contacts that have company_ids defined to find referenced company IDs
+        const { data: contactsWithCompanies } = await supabase
+          .from('contacts')
+          .select('company_ids')
+          .eq('tenant_id', tenantId)
+          .not('company_ids', 'is', null)
+          .neq('company_ids', '{}');
+
+        const referencedIds = new Set<string>();
+        if (contactsWithCompanies) {
+          contactsWithCompanies.forEach(c => {
+            if (Array.isArray(c.company_ids)) {
+              c.company_ids.forEach((id: string) => {
+                if (id) referencedIds.add(id);
+              });
+            }
+          });
+        }
+
+        let allMergedCompanies = explicitCompanies || [];
+        if (referencedIds.size > 0) {
+          const explicitIds = new Set(allMergedCompanies.map(c => c.id));
+          const idsToFetch = Array.from(referencedIds).filter(id => !explicitIds.has(id));
+          
+          if (idsToFetch.length > 0) {
+            const { data: linkedCompanies } = await supabase
+              .from('contacts')
+              .select('id, name, fantasy_name, document_number')
+              .eq('tenant_id', tenantId)
+              .in('id', idsToFetch);
+              
+            if (linkedCompanies) {
+              allMergedCompanies = [...allMergedCompanies, ...linkedCompanies];
+            }
+          }
+        }
+
+        setAllCompanies(allMergedCompanies);
       } catch (e) {}
     };
     fetchCompanies();
@@ -1806,16 +1849,19 @@ export default function ChatDashboard() {
   const handleResolveConversation = async (contactId: string) => {
     const contact = contacts.find(c => c.id === contactId);
     if (contact) {
-      // 1. Caso o próprio contato seja uma empresa e não tenha CNPJ
-      if (contact.fantasy_name && !contact.document_number) {
-        alert(`O CNPJ da empresa "${contact.fantasy_name}" é obrigatório para resolver o ticket. Por favor, cadastre o CNPJ na ficha da empresa.`);
+      const realContactId = contact.id.includes('_') ? contact.id.split('_')[0] : contact.id;
+
+      // 1. Caso o próprio contato seja uma empresa (está em allCompanies) e não tenha CNPJ
+      const isSelfCompany = allCompanies.some(c => c.id === realContactId);
+      if (isSelfCompany && !contact.document_number) {
+        alert(`O CNPJ da empresa "${contact.fantasy_name || contact.name}" é obrigatório para resolver o ticket. Por favor, cadastre o CNPJ na ficha da empresa.`);
         setCompanyDetailsOpen(contact);
         return;
       }
       
       // 2. Caso o contato tenha empresas vinculadas e alguma não tenha CNPJ cadastrado
-      const linkedCompanies = contact.company_ids
-        ?.map((id: string) => allCompanies.find((c: any) => c.id === id))
+      const linkedCompanies = (contact.company_ids || [])
+        .map((id: string) => allCompanies.find((c: any) => c.id === id))
         .filter(Boolean) || [];
       const companyWithMissingCnpj = linkedCompanies.find((c: any) => !c.document_number);
       
@@ -3327,10 +3373,47 @@ export default function ChatDashboard() {
         isOpen={!!companyDetailsOpen}
         onClose={() => setCompanyDetailsOpen(null)}
         contact={companyDetailsOpen}
+        parentContact={activeChat}
         onUpdateCompany={(updatedCompany) => {
           setAllCompanies(prev => prev.map(c => c.id === updatedCompany.id ? { ...c, ...updatedCompany } : c));
           if (activeChat && activeChat.id === updatedCompany.id) {
             setActiveChat({ ...activeChat, ...updatedCompany });
+          }
+        }}
+        onClearAssociation={async () => {
+          if (!activeChat) return;
+          try {
+            const { supabase } = await import('../services/supabase');
+            const cleanActiveChatId = activeChat.id.includes('_') ? activeChat.id.split('_')[0] : activeChat.id;
+            
+            // Remove the company ID from the parent contact's company_ids
+            const newCompanyIds = (activeChat.company_ids || []).filter((id: string) => id !== companyDetailsOpen?.id);
+            
+            const { error } = await supabase
+              .from('contacts')
+              .update({ company_ids: newCompanyIds })
+              .eq('id', cleanActiveChatId);
+              
+            if (error) throw error;
+            
+            // Update active chat locally
+            const updatedActiveChat = { ...activeChat, company_ids: newCompanyIds };
+            setActiveChat(updatedActiveChat);
+            
+            // Also update in the contacts list
+            const currentContacts = useChatStore.getState().contacts;
+            const updatedContacts = currentContacts.map((c: any) => {
+              if (c.id === activeChat.id) {
+                return { ...c, company_ids: newCompanyIds };
+              }
+              return c;
+            });
+            useChatStore.setState({ contacts: updatedContacts });
+            
+            setCompanyDetailsOpen(null);
+            alert('Associação removida com sucesso!');
+          } catch (err: any) {
+            alert('Erro ao remover associação: ' + (err.message || String(err)));
           }
         }}
       />
