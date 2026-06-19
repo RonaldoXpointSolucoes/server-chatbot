@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useChatStore } from '../../store/chatStore';
-import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus } from 'lucide-react';
+import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../services/supabase';
 
@@ -78,6 +78,10 @@ export default function AccountSettings() {
   const [estTimeRemaining, setEstTimeRemaining] = useState<number | null>(null);
   const [loadSource, setLoadSource] = useState<'api' | 'supabase'>('api');
   const [supabaseData, setSupabaseData] = useState<{ grupos: any[]; produtos: any[] } | null>(null);
+
+  // Estados para controle de colapso
+  const [isHorariosExpanded, setIsHorariosExpanded] = useState(false);
+  const [isCardapioExpanded, setIsCardapioExpanded] = useState(false);
   
   const cancelMappingRef = useRef(false);
 
@@ -945,13 +949,32 @@ export default function AccountSettings() {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
 
-              <div>
-                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-4">
-                  <Clock size={16} className="text-gray-400" />
-                  Horário de Funcionamento (Configurador Semanal)
-                </label>
-                
+          {/* Seção Horário de Funcionamento (Configurador Semanal) - Agora colapsável */}
+          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+            <button
+              type="button"
+              onClick={() => setIsHorariosExpanded(!isHorariosExpanded)}
+              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-500">
+                  <Clock size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Horário de Funcionamento (Configurador Semanal)</h2>
+                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure o cronograma semanal de funcionamento da sua empresa.</p>
+                </div>
+              </div>
+              <div className="text-gray-400 dark:text-gray-500 pr-2">
+                {isHorariosExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+              </div>
+            </button>
+
+            {isHorariosExpanded && (
+              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-4 bg-[#f8f9fa] dark:bg-[#182229] border border-gray-200/50 dark:border-[#222d34] rounded-2xl p-6 shadow-inner">
                   {diasHorarios.map((d, dIdx) => (
                     <div key={d.dia} className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-3 border-b border-gray-100 dark:border-[#222d34]/60 last:border-b-0">
@@ -1043,591 +1066,604 @@ export default function AccountSettings() {
                   Os horários configurados serão consolidados automaticamente em texto legível para a inteligência artificial substituir no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[HORARIO_FUNCIONAMENTO]</code>.
                 </p>
               </div>
-            </div>
+            )}
           </div>
 
-          {/* Seção Cardápio JSON Online (Integração de Produtos) */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden p-8 animate-in fade-in zoom-in-95 duration-500">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-500">
-                <LinkIcon size={20} />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Cardápio JSON Online</h2>
-                <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a busca e consulta de produtos diretamente via API JSON.</p>
-              </div>
-            </div>
-
-            <div className="space-y-6 max-w-2xl">
-              <div>
-                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                  URL do Endpoint
-                </label>
-                <input 
-                  type="text"
-                  value={cardapioJsonUrl}
-                  onChange={(e) => setCardapioJsonUrl(e.target.value)}
-                  placeholder="Ex: https://service.xpointsolucoes.com.br:8443/v6/server/nuvem/ProdutoPdvService/GetCardapioCompleto"
-                  className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                    Token de Autorização (Bearer)
-                  </label>
-                  <input 
-                    type="text"
-                    value={cardapioJsonToken}
-                    onChange={(e) => setCardapioJsonToken(e.target.value)}
-                    placeholder="Bearer eyJ0eXAi..."
-                    className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                  />
+          {/* Seção Cardápio JSON Online (Integração de Produtos) - Agora colapsável */}
+          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+            <button
+              type="button"
+              onClick={() => setIsCardapioExpanded(!isCardapioExpanded)}
+              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-500">
+                  <LinkIcon size={20} />
                 </div>
-
                 <div>
-                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                    Corpo da Requisição (JSON Payload)
-                  </label>
-                  <textarea 
-                    value={cardapioJsonPayload}
-                    onChange={(e) => setCardapioJsonPayload(e.target.value)}
-                    placeholder='{"AGuidEstab": "6D0187D9-E905-4479-AB15-B908F0222607"}'
-                    rows={3}
-                    className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                  />
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Cardápio JSON Online</h2>
+                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a busca e consulta de produtos diretamente via API JSON.</p>
                 </div>
               </div>
-
-              <div className="pt-4 flex flex-wrap items-center gap-4">
-                <button
-                  type="button"
-                  onClick={handleTestRequest}
-                  disabled={testLoading || isMapping || !cardapioJsonUrl}
-                  className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-purple-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {testLoading && !testResult?.fromSupabase ? 'Testando...' : 'Testar Requisição'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConsultSupabase}
-                  disabled={testLoading || isMapping}
-                  className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {testLoading && testResult?.fromSupabase ? 'Consultando...' : 'Consultar Supabase'}
-                </button>
-                <button
-                  type="button"
-                  onClick={isMapping ? () => { cancelMappingRef.current = true; } : handleMapCardapio}
-                  disabled={testLoading || !cardapioJsonUrl}
-                  className={cn(
-                    "px-6 py-2.5 font-semibold rounded-xl shadow-lg flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed",
-                    isMapping
-                      ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/20 animate-pulse"
-                      : "bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-emerald-500/20"
-                  )}
-                >
-                  {isMapping ? 'Cancelar Mapeamento' : 'Mapear Cardápio'}
-                </button>
+              <div className="text-gray-400 dark:text-gray-500 pr-2">
+                {isCardapioExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
               </div>
+            </button>
 
-              {/* Painel de Logs e Progresso do Mapeamento */}
-              {(isMapping || mappingLogs.length > 0) && (
-                <div className="bg-slate-900 text-slate-100 p-6 rounded-2xl space-y-4 border border-slate-800 animate-in fade-in duration-300">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="text-xs font-bold font-mono tracking-wider text-emerald-400">STATUS DO MAPEAMENTO</span>
-                    </div>
-                    {estTimeRemaining !== null && estTimeRemaining > 0 && (
-                      <span className="text-[11px] font-semibold text-slate-400 font-mono">
-                        Tempo restante estimado: {Math.floor(estTimeRemaining / 60)}m {estTimeRemaining % 60}s
-                      </span>
-                    )}
+            {isCardapioExpanded && (
+              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="space-y-6 max-w-2xl">
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                      URL do Endpoint
+                    </label>
+                    <input 
+                      type="text"
+                      value={cardapioJsonUrl}
+                      onChange={(e) => setCardapioJsonUrl(e.target.value)}
+                      placeholder="Ex: https://service.xpointsolucoes.com.br:8443/v6/server/nuvem/ProdutoPdvService/GetCardapioCompleto"
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                    />
                   </div>
 
-                  {/* Barra de Progresso */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs font-bold font-mono">
-                      <span>Progresso Geral</span>
-                      <span className="text-emerald-400">{mappingProgress}%</span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Token de Autorização (Bearer)
+                      </label>
+                      <input 
+                        type="text"
+                        value={cardapioJsonToken}
+                        onChange={(e) => setCardapioJsonToken(e.target.value)}
+                        placeholder="Bearer eyJ0eXAi..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                      />
                     </div>
-                    <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
-                      <div 
-                        className="bg-gradient-to-r from-emerald-400 to-teal-500 h-full rounded-full transition-all duration-300"
-                        style={{ width: `${mappingProgress}%` }}
+
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Corpo da Requisição (JSON Payload)
+                      </label>
+                      <textarea 
+                        value={cardapioJsonPayload}
+                        onChange={(e) => setCardapioJsonPayload(e.target.value)}
+                        placeholder='{"AGuidEstab": "6D0187D9-E905-4479-AB15-B908F0222607"}'
+                        rows={3}
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
                       />
                     </div>
                   </div>
 
-                  {/* Terminal de Logs */}
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">Terminal Logs</span>
-                    <div className="bg-black/40 border border-slate-800/80 rounded-xl p-4 max-h-48 overflow-y-auto font-mono text-[11px] space-y-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
-                      {mappingLogs.map((log, idx) => (
-                        <div key={idx} className={cn(
-                          "leading-relaxed whitespace-pre-wrap text-left",
-                          log.includes('❌') ? "text-rose-400" : log.includes('🎉') || log.includes('sucesso') || log.includes('concluído') ? "text-emerald-400" : "text-slate-300"
-                        )}>
-                          {log}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {testError && (
-                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
-                  <strong>Erro no teste:</strong> {testError}
-                </div>
-              )}
-
-              {testResult && (
-                <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
-                  
-                  {/* Cabeçalho de Status e Abas */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-gray-500 dark:text-gray-400">
-                        {testResult.fromSupabase ? 'Consulta Banco de Dados:' : 'Resultado do Teste:'}
-                      </span>
-                      <span className={cn(
-                        "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider",
-                        testResult.status === 200 ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
-                      )}>
-                        {testResult.fromSupabase ? 'Supabase (Gravado)' : `Status: ${testResult.status}`}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center bg-gray-200/50 dark:bg-black/20 p-1 rounded-xl w-fit font-sans">
-                      <button
-                        type="button"
-                        onClick={() => setActiveResultTab('preview')}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                          activeResultTab === 'preview'
-                            ? "bg-white dark:bg-[#2a3942] text-gray-800 dark:text-gray-100 shadow-sm"
-                            : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-                        )}
-                      >
-                        Visualização do Cardápio
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setActiveResultTab('json')}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                          activeResultTab === 'json'
-                            ? "bg-white dark:bg-[#2a3942] text-gray-800 dark:text-gray-100 shadow-sm"
-                            : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-                        )}
-                      >
-                        JSON Bruto
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Aba de Visualização do Cardápio */}
-                  {activeResultTab === 'preview' && (() => {
-                    const cardapioExibido = loadSource === 'supabase' && supabaseData
-                      ? supabaseData
-                      : testResult?.data;
-                    const hasData = cardapioExibido && Array.isArray(cardapioExibido.grupos) && Array.isArray(cardapioExibido.produtos);
-
-                    return (
-                      <div className="flex flex-col items-center gap-4 py-4 bg-slate-100/50 dark:bg-black/30 rounded-2xl w-full">
-                        {/* Seletor de Origem (caso existam dados no Supabase) */}
-                        {supabaseData && (
-                          <div className="flex items-center bg-gray-200/50 dark:bg-black/20 p-1 rounded-xl w-fit font-sans shadow-sm">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setLoadSource('api');
-                                if (testResult?.data?.grupos?.length > 0) {
-                                  setActiveGroupId(testResult.data.grupos[0].id);
-                                }
-                              }}
-                              className={cn(
-                                "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
-                                loadSource === 'api'
-                                  ? "bg-indigo-500 text-white shadow-sm"
-                                  : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-                              )}
-                            >
-                              API Gastrofood (Bruto)
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setLoadSource('supabase');
-                                if (supabaseData?.grupos?.length > 0) {
-                                  setActiveGroupId(supabaseData.grupos[0].id);
-                                }
-                              }}
-                              className={cn(
-                                "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
-                                loadSource === 'supabase'
-                                  ? "bg-emerald-500 text-white shadow-sm"
-                                  : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-                              )}
-                            >
-                              Supabase (Banco de Dados)
-                            </button>
-                          </div>
-                        )}
-
-                        {hasData ? (
-                          <div className="w-[390px] h-[740px] bg-white text-gray-800 rounded-[36px] border-[8px] border-slate-800 dark:border-slate-700 shadow-2xl overflow-hidden flex flex-col relative font-sans">
-                          {/* Barra de Status */}
-                          <div className="h-6 bg-white flex justify-between items-center px-6 pt-1 text-[10px] font-bold text-gray-500 z-10 select-none flex-shrink-0">
-                            <span>12:00</span>
-                            <div className="flex items-center gap-1">
-                              <Signal size={10} />
-                              <Wifi size={10} />
-                              <Battery size={10} className="rotate-90" />
-                            </div>
-                          </div>
-
-                          {selectedProduct ? (
-                            /* Tela de Detalhes do Produto */
-                            <div className="flex-grow flex flex-col overflow-hidden bg-slate-50 relative">
-                              {/* Botão de Voltar Flutuante */}
-                              <div className="absolute top-8 left-4 z-20">
-                                <button 
-                                  type="button"
-                                  onClick={() => setSelectedProduct(null)}
-                                  className="w-8 h-8 rounded-full bg-black/40 text-white flex items-center justify-center backdrop-blur-sm hover:bg-black/60 transition-colors shadow-md"
-                                >
-                                  <ChevronLeft size={20} />
-                                </button>
-                              </div>
-
-                              {/* Imagem do Produto no Topo */}
-                              {selectedProduct.image ? (
-                                <div className="h-44 w-full bg-gray-100 flex-shrink-0 relative">
-                                  <img 
-                                    src={selectedProduct.image.split('|')[0]} 
-                                    alt={selectedProduct.name} 
-                                    className="w-full h-full object-cover"
-                                  />
-                                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
-                                </div>
-                              ) : (
-                                <div className="h-28 w-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center text-slate-400 border-b border-gray-200 flex-shrink-0">
-                                  <Utensils size={32} />
-                                </div>
-                              )}
-
-                              {/* Informações Básicas do Produto */}
-                              <div className="bg-white p-4 space-y-1.5 border-b border-gray-100 flex-shrink-0 text-left">
-                                <h4 className="text-base font-extrabold text-gray-900 uppercase tracking-tight">
-                                  {selectedProduct.name}
-                                </h4>
-                                {selectedProduct.description && (
-                                  <p className="text-xs text-gray-500 leading-relaxed">
-                                    {selectedProduct.description}
-                                  </p>
-                                )}
-                                <span className="text-base font-black text-gray-950 block">
-                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedProduct.price)}
-                                </span>
-                              </div>
-
-                              {/* Listagem de Passos / Adicionais */}
-                              <div className="flex-1 overflow-y-auto pb-4 space-y-4">
-                                {loadingSteps ? (
-                                  <div className="flex flex-col items-center justify-center py-20 gap-3 text-gray-400">
-                                    <div className="w-8 h-8 rounded-full border-4 border-indigo-500/20 border-t-indigo-600 animate-spin" />
-                                    <span className="text-[11px] font-bold">Carregando adicionais...</span>
-                                  </div>
-                                ) : stepsError ? (
-                                  <div className="p-6 text-center text-xs text-rose-500 font-bold bg-white rounded-2xl mx-4 mt-4 shadow-sm border border-rose-100">
-                                    {stepsError}
-                                  </div>
-                                ) : productSteps && Array.isArray(productSteps.passos) && productSteps.passos.length > 0 ? (
-                                  productSteps.passos.map((passo: any) => {
-                                    const perguntaExibir = passo.Pergunta || passo.pergunta || passo.SubTitulo || passo.sub_titulo || 'Opções';
-                                    const subTituloExibir = passo.SubTitulo || passo.sub_titulo || '';
-                                    const isObrigatorio = (passo.QtdMin !== undefined ? passo.QtdMin : (passo.qtd_min !== undefined ? passo.qtd_min : 0)) > 0;
-                                    const isSingle = (passo.QtdMax !== undefined ? passo.QtdMax : (passo.qtd_max !== undefined ? passo.qtd_max : 1)) === 1;
-
-                                    return (
-                                      <div key={passo.IdProdutoPassos || passo.id} className="space-y-1">
-                                        {/* Cabeçalho do Passo */}
-                                        <div className="bg-slate-100 dark:bg-slate-200/50 px-4 py-2 text-left flex flex-col gap-0.5">
-                                          <div className="flex items-center justify-between">
-                                            <span className="text-xs font-black text-gray-700 tracking-tight">
-                                              {perguntaExibir}
-                                            </span>
-                                            {isObrigatorio && (
-                                              <span className="text-[8px] bg-red-500 text-white font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider scale-90">
-                                                Obrigatório
-                                              </span>
-                                            )}
-                                          </div>
-                                          {subTituloExibir && subTituloExibir !== perguntaExibir && (
-                                            <span className="text-[9px] text-gray-400 font-bold leading-none">
-                                              {subTituloExibir}
-                                            </span>
-                                          )}
-                                        </div>
-
-                                        {/* Opções do Passo */}
-                                        <div className="bg-white divide-y divide-gray-100">
-                                          {Array.isArray(passo.ListaProdutos) && passo.ListaProdutos.map((opt: any) => {
-                                            const precoList = opt.ListaPreco || opt.listaPreco || [];
-                                            const precoAdicional = precoList?.[0]?.Preco !== undefined 
-                                              ? precoList[0].Preco 
-                                              : (precoList?.[0]?.preco !== undefined 
-                                                ? precoList[0].preco 
-                                                : (opt.preco !== undefined ? opt.preco : 0));
-                                            const imageUrl = opt.Imagem ? opt.Imagem.split('|')[0] : (opt.imagem ? opt.imagem.split('|')[0] : '');
-
-                                            return (
-                                              <div 
-                                                key={opt.IdProduto || opt.id}
-                                                className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer"
-                                              >
-                                                <div className="flex items-center flex-1 min-w-0">
-                                                  {imageUrl && (
-                                                    <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-50 border border-gray-100 mr-3 flex-shrink-0">
-                                                      <img src={imageUrl} alt={opt.Descricao || opt.descricao} className="w-full h-full object-cover" />
-                                                    </div>
-                                                  )}
-                                                  <span className="text-xs font-semibold text-gray-800 truncate">
-                                                    {opt.Descricao || opt.descricao}
-                                                  </span>
-                                                </div>
-                                                <div className="flex items-center gap-3">
-                                                  {precoAdicional > 0 && (
-                                                    <span className="text-[11px] font-extrabold text-emerald-600">
-                                                      +{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(precoAdicional)}
-                                                    </span>
-                                                  )}
-                                                  {isSingle ? (
-                                                    <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0">
-                                                      <div className="w-2 h-2 rounded-full bg-red-600 opacity-0 hover:opacity-100 transition-opacity" />
-                                                    </div>
-                                                  ) : (
-                                                    <div className="w-4 h-4 rounded border-2 border-gray-300 flex items-center justify-center flex-shrink-0 text-red-600 font-black text-[10px]">
-                                                      +
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                    );
-                                  })
-                                ) : (
-                                  <div className="p-8 text-center text-xs text-gray-400 font-medium">
-                                    Nenhum opcional cadastrado para este produto.
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Rodapé de Ação Detalhada */}
-                              <div className="h-16 bg-white border-t border-gray-100 px-4 flex items-center justify-between gap-4 flex-shrink-0">
-                                <div className="flex items-center bg-gray-100 rounded-xl px-2 py-1 gap-3">
-                                  <button 
-                                    type="button" 
-                                    onClick={() => detailQty > 1 && setDetailQty(detailQty - 1)}
-                                    className="w-7 h-7 rounded-lg hover:bg-white text-gray-600 flex items-center justify-center transition-all"
-                                  >
-                                    <Minus size={14} />
-                                  </button>
-                                  <span className="text-xs font-black text-gray-800 w-4 text-center">{detailQty}</span>
-                                  <button 
-                                    type="button" 
-                                    onClick={() => setDetailQty(detailQty + 1)}
-                                    className="w-7 h-7 rounded-lg hover:bg-white text-gray-600 flex items-center justify-center transition-all"
-                                  >
-                                    <Plus size={14} />
-                                  </button>
-                                </div>
-
-                                <button 
-                                  type="button" 
-                                  onClick={() => setSelectedProduct(null)}
-                                  className="flex-1 h-11 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 uppercase tracking-wide"
-                                >
-                                  Adicionar
-                                  <span>•</span>
-                                  <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedProduct.price * detailQty)}</span>
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            /* Listagem Principal do Cardápio */
-                            <>
-                              {/* Cabeçalho do Cardápio Fiel ao Layout da Loja */}
-                              <div className="bg-white px-4 pt-2 pb-4 text-center border-b border-gray-100 flex-shrink-0 flex flex-col items-center">
-                                <div className="flex items-center gap-4 justify-center mb-1 text-emerald-600">
-                                  <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[10px] font-bold">W</div>
-                                  <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-yellow-500 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold">I</div>
-                                </div>
-                                <h3 className="text-base font-black text-gray-900 tracking-tight uppercase">
-                                  {nomeIa || 'BURGUER PLUS'}
-                                </h3>
-                                <span className="text-[10px] text-gray-500 flex items-center gap-1 mt-0.5 justify-center">
-                                  <MapPin size={10} />
-                                  {endereco ? (endereco.split('-')[0].trim()) : 'Taboão da Serra - SP'}
-                                </span>
-                                <span className="mt-2 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase tracking-wider">
-                                  LOJA ABERTA
-                                </span>
-                              </div>
-
-                              {/* Categorias (Navegação Horizontal) */}
-                              <div className="flex items-center gap-5 overflow-x-auto px-4 pb-2 pt-3 border-b border-gray-100 scrollbar-none flex-shrink-0 bg-white">
-                                {cardapioExibido.grupos.map((g: any) => {
-                                  const isActive = activeGroupId === g.id;
-                                  return (
-                                    <button
-                                      key={g.id}
-                                      type="button"
-                                      onClick={() => setActiveGroupId(g.id)}
-                                      className={cn(
-                                        "pb-1.5 text-xs font-black tracking-wider uppercase whitespace-nowrap transition-all border-b-2 relative",
-                                        isActive 
-                                          ? "border-red-600 text-red-600 font-extrabold"
-                                          : "border-transparent text-gray-400 hover:text-gray-600"
-                                      )}
-                                    >
-                                      {g.description}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-
-                              {/* Lista de Produtos do Grupo */}
-                              <div className="flex-1 overflow-y-auto px-4 divide-y divide-gray-100 bg-white">
-                                {(() => {
-                                  const filtered = (cardapioExibido.produtos || []).filter((p: any) => p.groupId === activeGroupId);
-                                  if (filtered.length === 0) {
-                                    return (
-                                      <div className="text-center py-12 text-xs text-gray-400">
-                                        Nenhum produto cadastrado neste grupo.
-                                      </div>
-                                    );
-                                  }
-                                  return filtered.map((p: any) => {
-                                    const imageUrl = p.image ? p.image.split('|')[0] : '';
-                                    const hasPromo = p.name.toLowerCase().includes('costela') || p.name.toLowerCase().includes('combo');
-                                    const originalPrice = p.price * 1.35;
-
-                                    return (
-                                      <div 
-                                        key={p.id} 
-                                        onClick={() => handleProductClick(p)}
-                                        className="flex items-start justify-between gap-4 py-4 cursor-pointer hover:bg-slate-50 transition-all rounded-lg px-1"
-                                      >
-                                        <div className="flex-1 space-y-1 text-left">
-                                          <h4 className="text-sm font-bold text-gray-900 uppercase tracking-tight">
-                                            {p.name}
-                                          </h4>
-                                          {p.description && (
-                                            <p className="text-xs text-gray-400 line-clamp-3 leading-relaxed">
-                                              {p.description}
-                                            </p>
-                                          )}
-                                          <div className="pt-1.5 flex flex-col gap-0.5">
-                                            {hasPromo ? (
-                                              <div className="text-xs text-gray-400 flex items-center gap-1">
-                                                <span>De</span>
-                                                <span className="line-through">
-                                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(originalPrice)}
-                                                </span>
-                                                <span>por</span>
-                                                <span className="text-sm font-extrabold text-emerald-600">
-                                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)}
-                                                </span>
-                                              </div>
-                                            ) : (
-                                              <span className="text-sm font-extrabold text-gray-900">
-                                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)}
-                                              </span>
-                                            )}
-                                            {p.active === false && (
-                                              <span className="w-fit bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider mt-1">
-                                                Pausado
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                        
-                                        {/* Imagem */}
-                                        {imageUrl ? (
-                                          <div className="w-20 h-20 rounded-2xl overflow-hidden bg-gray-50 border border-gray-100 flex-shrink-0 flex items-center justify-center shadow-sm">
-                                            <img 
-                                              src={imageUrl} 
-                                              alt={p.name} 
-                                              className="w-full h-full object-cover"
-                                              onError={(e) => {
-                                                (e.target as HTMLElement).style.display = 'none';
-                                              }}
-                                            />
-                                          </div>
-                                        ) : (
-                                          <div className="w-20 h-20 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-400 flex-shrink-0 border border-gray-200/50">
-                                            <Utensils size={18} />
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  });
-                                })()}
-                              </div>
-
-                              {/* Barra de Navegação Inferior Mockada */}
-                              <div className="h-14 bg-white border-t border-gray-100 flex items-center justify-around text-gray-400 px-2 flex-shrink-0">
-                                <button type="button" className="flex flex-col items-center justify-center gap-0.5 text-red-600">
-                                  <Home size={18} />
-                                  <span className="text-[9px] font-bold">Início</span>
-                                </button>
-                                <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
-                                  <Search size={18} />
-                                  <span className="text-[9px] font-bold">Buscar</span>
-                                </button>
-                                <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
-                                  <ClipboardList size={18} />
-                                  <span className="text-[9px] font-bold">Pedidos</span>
-                                </button>
-                                <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
-                                  <User size={18} />
-                                  <span className="text-[9px] font-bold">Perfil</span>
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="text-center py-8 text-xs text-amber-500 font-mono">
-                          A estrutura do JSON retornado não possui "grupos" e "produtos" válidos para visualização.
-                        </div>
+                  <div className="pt-4 flex flex-wrap items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={handleTestRequest}
+                      disabled={testLoading || isMapping || !cardapioJsonUrl}
+                      className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-purple-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {testLoading && !testResult?.fromSupabase ? 'Testando...' : 'Testar Requisição'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConsultSupabase}
+                      disabled={testLoading || isMapping}
+                      className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {testLoading && testResult?.fromSupabase ? 'Consultando...' : 'Consultar Supabase'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={isMapping ? () => { cancelMappingRef.current = true; } : handleMapCardapio}
+                      disabled={testLoading || !cardapioJsonUrl}
+                      className={cn(
+                        "px-6 py-2.5 font-semibold rounded-xl shadow-lg flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed",
+                        isMapping
+                          ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/20 animate-pulse"
+                          : "bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-emerald-500/20"
                       )}
+                    >
+                      {isMapping ? 'Cancelar Mapeamento' : 'Mapear Cardápio'}
+                    </button>
+                  </div>
+
+                  {/* Painel de Logs e Progresso do Mapeamento */}
+                  {(isMapping || mappingLogs.length > 0) && (
+                    <div className="bg-slate-900 text-slate-100 p-6 rounded-2xl space-y-4 border border-slate-800 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="text-xs font-bold font-mono tracking-wider text-emerald-400">STATUS DO MAPEAMENTO</span>
+                        </div>
+                        {estTimeRemaining !== null && estTimeRemaining > 0 && (
+                          <span className="text-[11px] font-semibold text-slate-400 font-mono">
+                            Tempo restante estimado: {Math.floor(estTimeRemaining / 60)}m {estTimeRemaining % 60}s
+                          </span>
+                        )}
                       </div>
-                    );
-                  })()}
 
-                  {/* Aba de JSON Bruto */}
-                  {activeResultTab === 'json' && (
-                    <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30 animate-in fade-in duration-250">
-                      {JSON.stringify(
-                        loadSource === 'supabase' && supabaseData ? supabaseData : testResult.data, 
-                        null, 
-                        2
-                      )}
+                      {/* Barra de Progresso */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs font-bold font-mono">
+                          <span>Progresso Geral</span>
+                          <span className="text-emerald-400">{mappingProgress}%</span>
+                        </div>
+                        <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
+                          <div 
+                            className="bg-gradient-to-r from-emerald-400 to-teal-500 h-full rounded-full transition-all duration-300"
+                            style={{ width: `${mappingProgress}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Terminal de Logs */}
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">Terminal Logs</span>
+                        <div className="bg-black/40 border border-slate-800/80 rounded-xl p-4 max-h-48 overflow-y-auto font-mono text-[11px] space-y-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+                          {mappingLogs.map((log, idx) => (
+                            <div key={idx} className={cn(
+                              "leading-relaxed whitespace-pre-wrap text-left",
+                              log.includes('❌') ? "text-rose-400" : log.includes('🎉') || log.includes('sucesso') || log.includes('concluído') ? "text-emerald-400" : "text-slate-300"
+                            )}>
+                              {log}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   )}
 
+                  {testError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro no teste:</strong> {testError}
+                    </div>
+                  )}
+
+                  {testResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
+                      
+                      {/* Cabeçalho de Status e Abas */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-gray-500 dark:text-gray-400">
+                            {testResult.fromSupabase ? 'Consulta Banco de Dados:' : 'Resultado do Teste:'}
+                          </span>
+                          <span className={cn(
+                            "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider",
+                            testResult.status === 200 ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
+                          )}>
+                            {testResult.fromSupabase ? 'Supabase (Gravado)' : `Status: ${testResult.status}`}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center bg-gray-200/50 dark:bg-black/20 p-1 rounded-xl w-fit font-sans">
+                          <button
+                            type="button"
+                            onClick={() => setActiveResultTab('preview')}
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                              activeResultTab === 'preview'
+                                ? "bg-white dark:bg-[#2a3942] text-gray-800 dark:text-gray-100 shadow-sm"
+                                : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                            )}
+                          >
+                            Visualização do Cardápio
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActiveResultTab('json')}
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                              activeResultTab === 'json'
+                                ? "bg-white dark:bg-[#2a3942] text-gray-800 dark:text-gray-100 shadow-sm"
+                                : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                            )}
+                          >
+                            JSON Bruto
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Aba de Visualização do Cardápio */}
+                      {activeResultTab === 'preview' && (() => {
+                        const cardapioExibido = loadSource === 'supabase' && supabaseData
+                          ? supabaseData
+                          : testResult?.data;
+                        const hasData = cardapioExibido && Array.isArray(cardapioExibido.grupos) && Array.isArray(cardapioExibido.produtos);
+
+                        return (
+                          <div className="flex flex-col items-center gap-4 py-4 bg-slate-100/50 dark:bg-black/30 rounded-2xl w-full">
+                            {/* Seletor de Origem (caso existam dados no Supabase) */}
+                            {supabaseData && (
+                              <div className="flex items-center bg-gray-200/50 dark:bg-black/20 p-1 rounded-xl w-fit font-sans shadow-sm">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setLoadSource('api');
+                                    if (testResult?.data?.grupos?.length > 0) {
+                                      setActiveGroupId(testResult.data.grupos[0].id);
+                                    }
+                                  }}
+                                  className={cn(
+                                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                    loadSource === 'api'
+                                      ? "bg-indigo-500 text-white shadow-sm"
+                                      : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                                  )}
+                                >
+                                  API Gastrofood (Bruto)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setLoadSource('supabase');
+                                    if (supabaseData?.grupos?.length > 0) {
+                                      setActiveGroupId(supabaseData.grupos[0].id);
+                                    }
+                                  }}
+                                  className={cn(
+                                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                    loadSource === 'supabase'
+                                      ? "bg-emerald-500 text-white shadow-sm"
+                                      : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                                  )}
+                                >
+                                  Supabase (Banco de Dados)
+                                </button>
+                              </div>
+                            )}
+
+                            {hasData ? (
+                              <div className="w-[390px] h-[740px] bg-white text-gray-800 rounded-[36px] border-[8px] border-slate-800 dark:border-slate-700 shadow-2xl overflow-hidden flex flex-col relative font-sans">
+                              {/* Barra de Status */}
+                              <div className="h-6 bg-white flex justify-between items-center px-6 pt-1 text-[10px] font-bold text-gray-500 z-10 select-none flex-shrink-0">
+                                <span>12:00</span>
+                                <div className="flex items-center gap-1">
+                                  <Signal size={10} />
+                                  <Wifi size={10} />
+                                  <Battery size={10} className="rotate-90" />
+                                </div>
+                              </div>
+
+                              {selectedProduct ? (
+                                /* Tela de Detalhes do Produto */
+                                <div className="flex-grow flex flex-col overflow-hidden bg-slate-50 relative">
+                                  {/* Botão de Voltar Flutuante */}
+                                  <div className="absolute top-8 left-4 z-20">
+                                    <button 
+                                      type="button"
+                                      onClick={() => setSelectedProduct(null)}
+                                      className="w-8 h-8 rounded-full bg-black/40 text-white flex items-center justify-center backdrop-blur-sm hover:bg-black/60 transition-colors shadow-md"
+                                    >
+                                      <ChevronLeft size={20} />
+                                    </button>
+                                  </div>
+
+                                  {/* Imagem do Produto no Topo */}
+                                  {selectedProduct.image ? (
+                                    <div className="h-44 w-full bg-gray-100 flex-shrink-0 relative">
+                                      <img 
+                                        src={selectedProduct.image.split('|')[0]} 
+                                        alt={selectedProduct.name} 
+                                        className="w-full h-full object-cover"
+                                      />
+                                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
+                                    </div>
+                                  ) : (
+                                    <div className="h-28 w-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center text-slate-400 border-b border-gray-200 flex-shrink-0">
+                                      <Utensils size={32} />
+                                    </div>
+                                  )}
+
+                                  {/* Informações Básicas do Produto */}
+                                  <div className="bg-white p-4 space-y-1.5 border-b border-gray-100 flex-shrink-0 text-left">
+                                    <h4 className="text-base font-extrabold text-gray-900 uppercase tracking-tight">
+                                      {selectedProduct.name}
+                                    </h4>
+                                    {selectedProduct.description && (
+                                      <p className="text-xs text-gray-500 leading-relaxed">
+                                        {selectedProduct.description}
+                                      </p>
+                                    )}
+                                    <span className="text-base font-black text-gray-950 block">
+                                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedProduct.price)}
+                                    </span>
+                                  </div>
+
+                                  {/* Listagem de Passos / Adicionais */}
+                                  <div className="flex-1 overflow-y-auto pb-4 space-y-4">
+                                    {loadingSteps ? (
+                                      <div className="flex flex-col items-center justify-center py-20 gap-3 text-gray-400">
+                                        <div className="w-8 h-8 rounded-full border-4 border-indigo-500/20 border-t-indigo-600 animate-spin" />
+                                        <span className="text-[11px] font-bold">Carregando adicionais...</span>
+                                      </div>
+                                    ) : stepsError ? (
+                                      <div className="p-6 text-center text-xs text-rose-500 font-bold bg-white rounded-2xl mx-4 mt-4 shadow-sm border border-rose-100">
+                                        {stepsError}
+                                      </div>
+                                    ) : productSteps && Array.isArray(productSteps.passos) && productSteps.passos.length > 0 ? (
+                                      productSteps.passos.map((passo: any) => {
+                                        const perguntaExibir = passo.Pergunta || passo.pergunta || passo.SubTitulo || passo.sub_titulo || 'Opções';
+                                        const subTituloExibir = passo.SubTitulo || passo.sub_titulo || '';
+                                        const isObrigatorio = (passo.QtdMin !== undefined ? passo.QtdMin : (passo.qtd_min !== undefined ? passo.qtd_min : 0)) > 0;
+                                        const isSingle = (passo.QtdMax !== undefined ? passo.QtdMax : (passo.qtd_max !== undefined ? passo.qtd_max : 1)) === 1;
+
+                                        return (
+                                          <div key={passo.IdProdutoPassos || passo.id} className="space-y-1">
+                                            {/* Cabeçalho do Passo */}
+                                            <div className="bg-slate-100 dark:bg-slate-200/50 px-4 py-2 text-left flex flex-col gap-0.5">
+                                              <div className="flex items-center justify-between">
+                                                <span className="text-xs font-black text-gray-700 tracking-tight">
+                                                  {perguntaExibir}
+                                                </span>
+                                                {isObrigatorio && (
+                                                  <span className="text-[8px] bg-red-500 text-white font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider scale-90">
+                                                    Obrigatório
+                                                  </span>
+                                                )}
+                                              </div>
+                                              {subTituloExibir && subTituloExibir !== perguntaExibir && (
+                                                <span className="text-[9px] text-gray-400 font-bold leading-none">
+                                                  {subTituloExibir}
+                                                </span>
+                                              )}
+                                            </div>
+
+                                            {/* Opções do Passo */}
+                                            <div className="bg-white divide-y divide-gray-100">
+                                              {Array.isArray(passo.ListaProdutos) && passo.ListaProdutos.map((opt: any) => {
+                                                const precoList = opt.ListaPreco || opt.listaPreco || [];
+                                                const precoAdicional = precoList?.[0]?.Preco !== undefined 
+                                                  ? precoList[0].Preco 
+                                                  : (precoList?.[0]?.preco !== undefined 
+                                                    ? precoList[0].preco 
+                                                    : (opt.preco !== undefined ? opt.preco : 0));
+                                                const imageUrl = opt.Imagem ? opt.Imagem.split('|')[0] : (opt.imagem ? opt.imagem.split('|')[0] : '');
+
+                                                return (
+                                                  <div 
+                                                    key={opt.IdProduto || opt.id}
+                                                    className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer"
+                                                  >
+                                                    <div className="flex items-center flex-1 min-w-0">
+                                                      {imageUrl && (
+                                                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-50 border border-gray-100 mr-3 flex-shrink-0">
+                                                          <img src={imageUrl} alt={opt.Descricao || opt.descricao} className="w-full h-full object-cover" />
+                                                        </div>
+                                                      )}
+                                                      <span className="text-xs font-semibold text-gray-800 truncate">
+                                                        {opt.Descricao || opt.descricao}
+                                                      </span>
+                                                    </div>
+                                                    <div className="flex items-center gap-3">
+                                                      {precoAdicional > 0 && (
+                                                        <span className="text-[11px] font-extrabold text-emerald-600">
+                                                          +{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(precoAdicional)}
+                                                        </span>
+                                                      )}
+                                                      {isSingle ? (
+                                                        <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0">
+                                                          <div className="w-2 h-2 rounded-full bg-red-600 opacity-0 hover:opacity-100 transition-opacity" />
+                                                        </div>
+                                                      ) : (
+                                                        <div className="w-4 h-4 rounded border-2 border-gray-300 flex items-center justify-center flex-shrink-0 text-red-600 font-black text-[10px]">
+                                                          +
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        );
+                                      })
+                                    ) : (
+                                      <div className="p-8 text-center text-xs text-gray-400 font-medium">
+                                        Nenhum opcional cadastrado para este produto.
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Rodapé de Ação Detalhada */}
+                                  <div className="h-16 bg-white border-t border-gray-100 px-4 flex items-center justify-between gap-4 flex-shrink-0">
+                                    <div className="flex items-center bg-gray-100 rounded-xl px-2 py-1 gap-3">
+                                      <button 
+                                        type="button" 
+                                        onClick={() => detailQty > 1 && setDetailQty(detailQty - 1)}
+                                        className="w-7 h-7 rounded-lg hover:bg-white text-gray-600 flex items-center justify-center transition-all"
+                                      >
+                                        <Minus size={14} />
+                                      </button>
+                                      <span className="text-xs font-black text-gray-800 w-4 text-center">{detailQty}</span>
+                                      <button 
+                                        type="button" 
+                                        onClick={() => setDetailQty(detailQty + 1)}
+                                        className="w-7 h-7 rounded-lg hover:bg-white text-gray-600 flex items-center justify-center transition-all"
+                                      >
+                                        <Plus size={14} />
+                                      </button>
+                                    </div>
+
+                                    <button 
+                                      type="button" 
+                                      onClick={() => setSelectedProduct(null)}
+                                      className="flex-1 h-11 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 uppercase tracking-wide"
+                                    >
+                                      Adicionar
+                                      <span>•</span>
+                                      <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedProduct.price * detailQty)}</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                /* Listagem Principal do Cardápio */
+                                <>
+                                  {/* Cabeçalho do Cardápio Fiel ao Layout da Loja */}
+                                  <div className="bg-white px-4 pt-2 pb-4 text-center border-b border-gray-100 flex-shrink-0 flex flex-col items-center">
+                                    <div className="flex items-center gap-4 justify-center mb-1 text-emerald-600">
+                                      <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[10px] font-bold">W</div>
+                                      <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-yellow-500 to-purple-500 flex items-center justify-center text-white text-[10px] font-bold">I</div>
+                                    </div>
+                                    <h3 className="text-base font-black text-gray-900 tracking-tight uppercase">
+                                      {nomeIa || 'BURGUER PLUS'}
+                                    </h3>
+                                    <span className="text-[10px] text-gray-500 flex items-center gap-1 mt-0.5 justify-center">
+                                      <MapPin size={10} />
+                                      {endereco ? (endereco.split('-')[0].trim()) : 'Taboão da Serra - SP'}
+                                    </span>
+                                    <span className="mt-2 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-[9px] font-black uppercase tracking-wider">
+                                      LOJA ABERTA
+                                    </span>
+                                  </div>
+
+                                  {/* Categorias (Navegação Horizontal) */}
+                                  <div className="flex items-center gap-5 overflow-x-auto px-4 pb-2 pt-3 border-b border-gray-100 scrollbar-none flex-shrink-0 bg-white">
+                                    {cardapioExibido.grupos.map((g: any) => {
+                                      const isActive = activeGroupId === g.id;
+                                      return (
+                                        <button
+                                          key={g.id}
+                                          type="button"
+                                          onClick={() => setActiveGroupId(g.id)}
+                                          className={cn(
+                                            "pb-1.5 text-xs font-black tracking-wider uppercase whitespace-nowrap transition-all border-b-2 relative",
+                                            isActive 
+                                              ? "border-red-600 text-red-600 font-extrabold"
+                                              : "border-transparent text-gray-400 hover:text-gray-600"
+                                          )}
+                                        >
+                                          {g.description}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+
+                                  {/* Lista de Produtos do Grupo */}
+                                  <div className="flex-1 overflow-y-auto px-4 divide-y divide-gray-100 bg-white">
+                                    {(() => {
+                                      const filtered = (cardapioExibido.produtos || []).filter((p: any) => p.groupId === activeGroupId);
+                                      if (filtered.length === 0) {
+                                        return (
+                                          <div className="text-center py-12 text-xs text-gray-400">
+                                            Nenhum produto cadastrado neste grupo.
+                                          </div>
+                                        );
+                                      }
+                                      return filtered.map((p: any) => {
+                                        const imageUrl = p.image ? p.image.split('|')[0] : '';
+                                        const hasPromo = p.name.toLowerCase().includes('costela') || p.name.toLowerCase().includes('combo');
+                                        const originalPrice = p.price * 1.35;
+
+                                        return (
+                                          <div 
+                                            key={p.id} 
+                                            onClick={() => handleProductClick(p)}
+                                            className="flex items-start justify-between gap-4 py-4 cursor-pointer hover:bg-slate-50 transition-all rounded-lg px-1"
+                                          >
+                                            <div className="flex-1 space-y-1 text-left">
+                                              <h4 className="text-sm font-bold text-gray-900 uppercase tracking-tight">
+                                                {p.name}
+                                              </h4>
+                                              {p.description && (
+                                                <p className="text-xs text-gray-400 line-clamp-3 leading-relaxed">
+                                                  {p.description}
+                                                </p>
+                                              )}
+                                              <div className="pt-1.5 flex flex-col gap-0.5">
+                                                {hasPromo ? (
+                                                  <div className="text-xs text-gray-400 flex items-center gap-1">
+                                                    <span>De</span>
+                                                    <span className="line-through">
+                                                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(originalPrice)}
+                                                    </span>
+                                                    <span>por</span>
+                                                    <span className="text-sm font-extrabold text-emerald-600">
+                                                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)}
+                                                    </span>
+                                                  </div>
+                                                ) : (
+                                                  <span className="text-sm font-extrabold text-gray-900">
+                                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)}
+                                                  </span>
+                                                )}
+                                                {p.active === false && (
+                                                  <span className="w-fit bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider mt-1">
+                                                    Pausado
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+                                            
+                                            {/* Imagem */}
+                                            {imageUrl ? (
+                                              <div className="w-20 h-20 rounded-2xl overflow-hidden bg-gray-50 border border-gray-100 flex-shrink-0 flex items-center justify-center shadow-sm">
+                                                <img 
+                                                  src={imageUrl} 
+                                                  alt={p.name} 
+                                                  className="w-full h-full object-cover"
+                                                  onError={(e) => {
+                                                    (e.target as HTMLElement).style.display = 'none';
+                                                  }}
+                                                />
+                                              </div>
+                                            ) : (
+                                              <div className="w-20 h-20 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-400 flex-shrink-0 border border-gray-200/50">
+                                                <Utensils size={18} />
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      });
+                                    })()}
+                                  </div>
+
+                                  {/* Barra de Navegação Inferior Mockada */}
+                                  <div className="h-14 bg-white border-t border-gray-100 flex items-center justify-around text-gray-400 px-2 flex-shrink-0">
+                                    <button type="button" className="flex flex-col items-center justify-center gap-0.5 text-red-600">
+                                      <Home size={18} />
+                                      <span className="text-[9px] font-bold">Início</span>
+                                    </button>
+                                    <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
+                                      <Search size={18} />
+                                      <span className="text-[9px] font-bold">Buscar</span>
+                                    </button>
+                                    <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
+                                      <ClipboardList size={18} />
+                                      <span className="text-[9px] font-bold">Pedidos</span>
+                                    </button>
+                                    <button type="button" className="flex flex-col items-center justify-center gap-0.5 hover:text-gray-600">
+                                      <User size={18} />
+                                      <span className="text-[9px] font-bold">Perfil</span>
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-center py-8 text-xs text-amber-500 font-mono">
+                              A estrutura do JSON retornado não possui "grupos" e "produtos" válidos para visualização.
+                            </div>
+                          )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Aba de JSON Bruto */}
+                      {activeResultTab === 'json' && (
+                        <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30 animate-in fade-in duration-250">
+                          {JSON.stringify(
+                            loadSource === 'supabase' && supabaseData ? supabaseData : testResult.data, 
+                            null, 
+                            2
+                          )}
+                        </div>
+                      )}
+
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
  
         </div>
