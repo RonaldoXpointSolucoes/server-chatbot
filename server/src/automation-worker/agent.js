@@ -22,6 +22,18 @@ class LocalEmbeddingsPipeline {
 const cardapioInMemoryCache = new Map();
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
 
+const GASTROFOOD_BASE_URL = 'https://service.xpointsolucoes.com.br:8443';
+const CARDAPIO_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/server/nuvem/ProdutoPdvService/GetCardapioCompleto`;
+const CEP_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/ConsultaCepService/Execute`;
+const CLIENTE_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/LoginService/ValidaTelefone`;
+const PEDIDO_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/server/nuvem/PedidoCardapioService/FinalizeOrder`;
+
+const GASTROFOOD_DEFAULT_TOKEN = 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw';
+
+const DEFAULT_CARDAPIO_PAYLOAD = { AGuidEstab: '6D0187D9-E905-4479-AB15-B908F0222607' };
+const DEFAULT_CEP_PAYLOAD = { ACep: '06764365' };
+const DEFAULT_CLIENTE_PAYLOAD = { ATelefone: '973933247' };
+
 async function getOrUpdateCardapioCache(tenantId, companySettings) {
     const now = Date.now();
     let cache = cardapioInMemoryCache.get(tenantId);
@@ -65,9 +77,9 @@ async function getOrUpdateCardapioCache(tenantId, companySettings) {
     }
     
     // Se não há dados no Supabase, tenta carregar da API externa do GastroFood (Fallback / Auto-Healing)
-    const cardapioUrl = companySettings.cardapio_json_url;
-    const cardapioToken = companySettings.cardapio_json_token;
-    const cardapioPayload = companySettings.cardapio_json_payload;
+    const cardapioUrl = companySettings.cardapio_json_url || CARDAPIO_DEFAULT_URL;
+    const cardapioToken = companySettings.cardapio_json_token || GASTROFOOD_DEFAULT_TOKEN;
+    const cardapioPayload = companySettings.cardapio_json_payload || DEFAULT_CARDAPIO_PAYLOAD;
     
     if (cardapioUrl) {
         try {
@@ -983,6 +995,34 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                 },
                                 required: ["nome_produto"]
                             }
+                        },
+                        {
+                            name: "Validar_cliente_cadastrado",
+                            description: "Verifica se o cliente já possui cadastro prévio no sistema Gastrofood utilizando o número do seu telefone celular.",
+                            parameters: {
+                                type: "OBJECT",
+                                properties: {
+                                    telefone: {
+                                        type: "STRING",
+                                        description: "Número do telefone celular do cliente com DDD (ex: 11973933247 ou 973933247)."
+                                    }
+                                },
+                                required: ["telefone"]
+                            }
+                        },
+                        {
+                            name: "Enviar_pedido_gastrofood",
+                            description: "Envia o pedido finalizado e confirmado do cliente para integração no sistema Gastrofood. Retorna o status da criação do pedido.",
+                            parameters: {
+                                type: "OBJECT",
+                                properties: {
+                                    payload_pedido: {
+                                        type: "OBJECT",
+                                        description: "O payload JSON completo do pedido contendo a estrutura jsOrder esperada pela API Gastrofood."
+                                    }
+                                },
+                                required: ["payload_pedido"]
+                            }
                         }
                     ]
                 }]
@@ -1059,28 +1099,163 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                             if (rawCep.length !== 8) {
                                 functionResult = { erro: "O CEP fornecido é inválido. Deve conter exatamente 8 algarismos." };
                             } else {
+                                let cepSuccess = false;
                                 try {
-                                    console.log(`[AutomationWorker - CEP] Consultando CEP ${rawCep} na ViaCEP...`);
-                                    const response = await fetch(`https://viacep.com.br/ws/${rawCep}/json/`);
-                                    if (response.ok) {
-                                        const data = await response.json();
-                                        if (data.erro) {
-                                            functionResult = { erro: "O CEP pesquisado não foi localizado na base dos Correios." };
-                                        } else {
-                                            functionResult = {
-                                                logradouro: data.logradouro || '',
-                                                bairro: data.bairro || '',
-                                                cidade: data.localidade || '',
-                                                estado: data.uf || '',
-                                                cep: data.cep || ''
-                                            };
-                                        }
-                                    } else {
-                                        functionResult = { erro: "Serviço de busca de CEP temporariamente indisponível." };
+                                    const cepUrl = companySettings.cep_json_url || CEP_DEFAULT_URL;
+                                    const cepToken = companySettings.cep_json_token || GASTROFOOD_DEFAULT_TOKEN;
+                                    const cepPayloadTemplate = companySettings.cep_json_payload || DEFAULT_CEP_PAYLOAD;
+
+                                    let bodyObj = { ACep: rawCep };
+                                    if (cepPayloadTemplate) {
+                                        try {
+                                            const parsed = typeof cepPayloadTemplate === 'string' ? JSON.parse(cepPayloadTemplate) : cepPayloadTemplate;
+                                            bodyObj = { ...parsed };
+                                            const cepKey = Object.keys(bodyObj).find(k => k.toLowerCase().includes('cep')) || 'ACep';
+                                            bodyObj[cepKey] = rawCep;
+                                        } catch (e) {}
                                     }
-                                } catch (cepErr) {
-                                    console.error("[AutomationWorker - CEP] Erro na requisição ViaCEP:", cepErr);
-                                    functionResult = { erro: "Erro ao conectar-se ao servidor de CEP." };
+
+                                    const headers = { 'Content-Type': 'application/json' };
+                                    if (cepToken) {
+                                        headers['Authorization'] = cepToken.startsWith('Bearer ') ? cepToken : `Bearer ${cepToken}`;
+                                    }
+
+                                    console.log(`[AutomationWorker - CEP] Consultando CEP ${rawCep} via Gastrofood API...`);
+                                    const response = await fetch(cepUrl, {
+                                        method: 'POST',
+                                        headers,
+                                        body: JSON.stringify(bodyObj)
+                                    });
+
+                                    if (response.ok) {
+                                        const resData = await response.json();
+                                        const data = resData.data || resData;
+                                        if (data && !data.erro && !data.error && (data.logradouro || data.Logradouro || data.rua || data.Rua)) {
+                                            functionResult = {
+                                                logradouro: data.logradouro || data.Logradouro || data.rua || data.Rua || '',
+                                                bairro: data.bairro || data.Bairro || '',
+                                                cidade: data.cidade || data.Cidade || data.localidade || data.Localidade || '',
+                                                estado: data.estado || data.Estado || data.uf || data.Uf || '',
+                                                cep: data.cep || data.Cep || rawCep
+                                            };
+                                            cepSuccess = true;
+                                        }
+                                    }
+                                } catch (errGastroCep) {
+                                    console.error("[AutomationWorker - CEP] Erro na consulta do CEP via Gastrofood API:", errGastroCep);
+                                }
+
+                                // Fallback para ViaCEP se falhar ou não retornar dados válidos
+                                if (!cepSuccess) {
+                                    try {
+                                        console.log(`[AutomationWorker - CEP] Consultando CEP ${rawCep} na ViaCEP (Fallback)...`);
+                                        const response = await fetch(`https://viacep.com.br/ws/${rawCep}/json/`);
+                                        if (response.ok) {
+                                            const data = await response.json();
+                                            if (data.erro) {
+                                                functionResult = { erro: "O CEP pesquisado não foi localizado na base dos Correios." };
+                                            } else {
+                                                functionResult = {
+                                                    logradouro: data.logradouro || '',
+                                                    bairro: data.bairro || '',
+                                                    cidade: data.localidade || '',
+                                                    estado: data.uf || '',
+                                                    cep: data.cep || ''
+                                                };
+                                            }
+                                        } else {
+                                            functionResult = { erro: "Serviço de busca de CEP temporariamente indisponível." };
+                                        }
+                                    } catch (cepErr) {
+                                        console.error("[AutomationWorker - CEP] Erro na requisição ViaCEP:", cepErr);
+                                        functionResult = { erro: "Erro ao conectar-se ao servidor de CEP." };
+                                    }
+                                }
+                            }
+                        }
+                        else if (call.name === "Validar_cliente_cadastrado") {
+                            const rawPhone = String(call.args.telefone || '').replace(/\D/g, '');
+                            if (!rawPhone) {
+                                functionResult = { erro: "O número de telefone é obrigatório para verificar o cadastro." };
+                            } else {
+                                try {
+                                    const clienteUrl = companySettings.cliente_json_url || CLIENTE_DEFAULT_URL;
+                                    const clienteToken = companySettings.cliente_json_token || GASTROFOOD_DEFAULT_TOKEN;
+                                    const clientePayloadTemplate = companySettings.cliente_json_payload || DEFAULT_CLIENTE_PAYLOAD;
+
+                                    let bodyObj = { ATelefone: rawPhone };
+                                    if (clientePayloadTemplate) {
+                                        try {
+                                            const parsed = typeof clientePayloadTemplate === 'string' ? JSON.parse(clientePayloadTemplate) : clientePayloadTemplate;
+                                            bodyObj = { ...parsed };
+                                            const phoneKey = Object.keys(bodyObj).find(k => k.toLowerCase().includes('tel') || k.toLowerCase().includes('fone')) || 'ATelefone';
+                                            bodyObj[phoneKey] = rawPhone;
+                                        } catch (e) {}
+                                    }
+
+                                    const headers = { 'Content-Type': 'application/json' };
+                                    if (clienteToken) {
+                                        headers['Authorization'] = clienteToken.startsWith('Bearer ') ? clienteToken : `Bearer ${clienteToken}`;
+                                    }
+
+                                    console.log(`[AutomationWorker - Cliente] Validando telefone ${rawPhone} via Gastrofood API...`);
+                                    const response = await fetch(clienteUrl, {
+                                        method: 'POST',
+                                        headers,
+                                        body: JSON.stringify(bodyObj)
+                                    });
+
+                                    if (response.ok) {
+                                        const resData = await response.json();
+                                        const data = resData.data || resData;
+                                        functionResult = {
+                                            cadastrado: data.cadastrado !== false && !data.erro && (!!data.id || !!data.IdUsuario || !!data.NomeRazao || !!data.nome || !!data.customer || data.status === 200),
+                                            dados_cadastro: data
+                                        };
+                                    } else {
+                                        functionResult = { erro: `Serviço de validação de cliente indisponível (Status: ${response.status})` };
+                                    }
+                                } catch (errCli) {
+                                    console.error("[AutomationWorker - Cliente] Erro ao validar telefone:", errCli);
+                                    functionResult = { erro: `Erro ao conectar-se ao serviço de validação: ${errCli.message}` };
+                                }
+                            }
+                        }
+                        else if (call.name === "Enviar_pedido_gastrofood") {
+                            const payloadPedido = call.args.payload_pedido;
+                            if (!payloadPedido) {
+                                functionResult = { erro: "O payload do pedido é obrigatório." };
+                            } else {
+                                try {
+                                    const pedidoUrl = companySettings.pedido_json_url || PEDIDO_DEFAULT_URL;
+                                    const pedidoToken = companySettings.pedido_json_token || GASTROFOOD_DEFAULT_TOKEN;
+
+                                    const headers = { 'Content-Type': 'application/json' };
+                                    if (pedidoToken) {
+                                        headers['Authorization'] = pedidoToken.startsWith('Bearer ') ? pedidoToken : `Bearer ${pedidoToken}`;
+                                    }
+
+                                    console.log(`[AutomationWorker - Pedido] Enviando pedido para Gastrofood...`);
+                                    const response = await fetch(pedidoUrl, {
+                                        method: 'POST',
+                                        headers,
+                                        body: JSON.stringify(payloadPedido)
+                                    });
+
+                                    if (response.ok) {
+                                        const resData = await response.json();
+                                        functionResult = {
+                                            sucesso: response.status === 200 || response.status === 201,
+                                            status: response.status,
+                                            dados_resposta: resData
+                                        };
+                                    } else {
+                                        const errText = await response.text();
+                                        functionResult = { erro: `Erro ao enviar pedido para o Gastrofood (Status: ${response.status}). Detalhes: ${errText}` };
+                                    }
+                                } catch (errPed) {
+                                    console.error("[AutomationWorker - Pedido] Erro ao enviar pedido:", errPed);
+                                    functionResult = { erro: `Erro ao conectar-se ao serviço de pedidos: ${errPed.message}` };
                                 }
                             }
                         }
