@@ -46,6 +46,12 @@ const CEP_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/ConsultaCepServic
 const CLIENTE_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/LoginService/ValidaTelefone`;
 const PEDIDO_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/server/nuvem/PedidoCardapioService/FinalizeOrder`;
 
+const GASTROFOOD_DEFAULT_TOKEN = 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw';
+
+const DEFAULT_CARDAPIO_PAYLOAD = `{
+  "AGuidEstab": "6D0187D9-E905-4479-AB15-B908F0222607"
+}`;
+
 const DEFAULT_CEP_PAYLOAD = `{
   "ACep": "06764365"
 }`;
@@ -142,8 +148,8 @@ export default function AccountSettings() {
   const [success, setSuccess] = useState(false);
 
   const [cardapioJsonUrl, setCardapioJsonUrl] = useState(CARDAPIO_DEFAULT_URL);
-  const [cardapioJsonToken, setCardapioJsonToken] = useState('');
-  const [cardapioJsonPayload, setCardapioJsonPayload] = useState('');
+  const [cardapioJsonToken, setCardapioJsonToken] = useState(GASTROFOOD_DEFAULT_TOKEN);
+  const [cardapioJsonPayload, setCardapioJsonPayload] = useState(DEFAULT_CARDAPIO_PAYLOAD);
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
   const [testError, setTestError] = useState('');
@@ -174,7 +180,7 @@ export default function AccountSettings() {
 
   // Estados para Consulta de CEP
   const [cepJsonUrl, setCepJsonUrl] = useState(CEP_DEFAULT_URL);
-  const [cepJsonToken, setCepJsonToken] = useState('');
+  const [cepJsonToken, setCepJsonToken] = useState(GASTROFOOD_DEFAULT_TOKEN);
   const [cepJsonPayload, setCepJsonPayload] = useState(DEFAULT_CEP_PAYLOAD);
   const [cepLoading, setCepLoading] = useState(false);
   const [cepResult, setCepResult] = useState<any>(null);
@@ -182,7 +188,7 @@ export default function AccountSettings() {
 
   // Estados para Consulta de Cliente
   const [clienteJsonUrl, setClienteJsonUrl] = useState(CLIENTE_DEFAULT_URL);
-  const [clienteJsonToken, setClienteJsonToken] = useState('');
+  const [clienteJsonToken, setClienteJsonToken] = useState(GASTROFOOD_DEFAULT_TOKEN);
   const [clienteJsonPayload, setClienteJsonPayload] = useState(DEFAULT_CLIENTE_PAYLOAD);
   const [clienteLoading, setClienteLoading] = useState(false);
   const [clienteResult, setClienteResult] = useState<any>(null);
@@ -190,7 +196,7 @@ export default function AccountSettings() {
 
   // Estados para Envio de Pedido
   const [pedidoJsonUrl, setPedidoJsonUrl] = useState(PEDIDO_DEFAULT_URL);
-  const [pedidoJsonToken, setPedidoJsonToken] = useState('');
+  const [pedidoJsonToken, setPedidoJsonToken] = useState(GASTROFOOD_DEFAULT_TOKEN);
   const [pedidoJsonPayload, setPedidoJsonPayload] = useState(DEFAULT_PEDIDO_PAYLOAD);
   const [pedidoLoading, setPedidoLoading] = useState(false);
   const [pedidoResult, setPedidoResult] = useState<any>(null);
@@ -596,19 +602,19 @@ export default function AccountSettings() {
       setYoutube(tenantInfo.settings.youtube || '');
       setTiktok(tenantInfo.settings.tiktok || '');
       setCardapioJsonUrl(tenantInfo.settings.cardapio_json_url || CARDAPIO_DEFAULT_URL);
-      setCardapioJsonToken(tenantInfo.settings.cardapio_json_token || '');
-      setCardapioJsonPayload(tenantInfo.settings.cardapio_json_payload || '');
+      setCardapioJsonToken(tenantInfo.settings.cardapio_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setCardapioJsonPayload(tenantInfo.settings.cardapio_json_payload || DEFAULT_CARDAPIO_PAYLOAD);
 
       setCepJsonUrl(tenantInfo.settings.cep_json_url || CEP_DEFAULT_URL);
-      setCepJsonToken(tenantInfo.settings.cep_json_token || '');
+      setCepJsonToken(tenantInfo.settings.cep_json_token || GASTROFOOD_DEFAULT_TOKEN);
       setCepJsonPayload(tenantInfo.settings.cep_json_payload || DEFAULT_CEP_PAYLOAD);
 
       setClienteJsonUrl(tenantInfo.settings.cliente_json_url || CLIENTE_DEFAULT_URL);
-      setClienteJsonToken(tenantInfo.settings.cliente_json_token || '');
+      setClienteJsonToken(tenantInfo.settings.cliente_json_token || GASTROFOOD_DEFAULT_TOKEN);
       setClienteJsonPayload(tenantInfo.settings.cliente_json_payload || DEFAULT_CLIENTE_PAYLOAD);
 
       setPedidoJsonUrl(tenantInfo.settings.pedido_json_url || PEDIDO_DEFAULT_URL);
-      setPedidoJsonToken(tenantInfo.settings.pedido_json_token || '');
+      setPedidoJsonToken(tenantInfo.settings.pedido_json_token || GASTROFOOD_DEFAULT_TOKEN);
       setPedidoJsonPayload(tenantInfo.settings.pedido_json_payload || DEFAULT_PEDIDO_PAYLOAD);
       
       if (tenantInfo.settings.horarios_estrutura) {
@@ -1279,32 +1285,17 @@ export default function AccountSettings() {
             {isCardapioExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Token de Autorização (Bearer)
-                      </label>
-                      <input 
-                        type="text"
-                        value={cardapioJsonToken}
-                        onChange={(e) => setCardapioJsonToken(e.target.value)}
-                        placeholder="Bearer eyJ0eXAi..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Corpo da Requisição (JSON Payload)
-                      </label>
-                      <textarea 
-                        value={cardapioJsonPayload}
-                        onChange={(e) => setCardapioJsonPayload(e.target.value)}
-                        placeholder='{"AGuidEstab": "6D0187D9-E905-4479-AB15-B908F0222607"}'
-                        rows={3}
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                      />
-                    </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                      Corpo da Requisição (JSON Payload)
+                    </label>
+                    <textarea 
+                      value={cardapioJsonPayload}
+                      onChange={(e) => setCardapioJsonPayload(e.target.value)}
+                      placeholder='{"AGuidEstab": "6D0187D9-E905-4479-AB15-B908F0222607"}'
+                      rows={3}
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                    />
                   </div>
 
                   <div className="pt-4 flex flex-wrap items-center gap-4">
@@ -1863,32 +1854,17 @@ export default function AccountSettings() {
             {isCepExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Token de Autorização (Bearer)
-                      </label>
-                      <input 
-                        type="text"
-                        value={cepJsonToken}
-                        onChange={(e) => setCepJsonToken(e.target.value)}
-                        placeholder="Bearer eyJ0eXAi..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Corpo da Requisição (JSON Payload)
-                      </label>
-                      <textarea 
-                        value={cepJsonPayload}
-                        onChange={(e) => setCepJsonPayload(e.target.value)}
-                        placeholder='{"ACep": "06764365"}'
-                        rows={3}
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                      />
-                    </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                      Corpo da Requisição (JSON Payload)
+                    </label>
+                    <textarea 
+                      value={cepJsonPayload}
+                      onChange={(e) => setCepJsonPayload(e.target.value)}
+                      placeholder='{"ACep": "06764365"}'
+                      rows={3}
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                    />
                   </div>
 
                   <div className="pt-4 flex flex-wrap items-center gap-4">
@@ -1950,32 +1926,17 @@ export default function AccountSettings() {
             {isClienteExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Token de Autorização (Bearer)
-                      </label>
-                      <input 
-                        type="text"
-                        value={clienteJsonToken}
-                        onChange={(e) => setClienteJsonToken(e.target.value)}
-                        placeholder="Bearer eyJ0eXAi..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Corpo da Requisição (JSON Payload)
-                      </label>
-                      <textarea 
-                        value={clienteJsonPayload}
-                        onChange={(e) => setClienteJsonPayload(e.target.value)}
-                        placeholder='{"ATelefone": "973933247"}'
-                        rows={3}
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                      />
-                    </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                      Corpo da Requisição (JSON Payload)
+                    </label>
+                    <textarea 
+                      value={clienteJsonPayload}
+                      onChange={(e) => setClienteJsonPayload(e.target.value)}
+                      placeholder='{"ATelefone": "973933247"}'
+                      rows={3}
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                    />
                   </div>
 
                   <div className="pt-4 flex flex-wrap items-center gap-4">
@@ -2037,32 +1998,17 @@ export default function AccountSettings() {
             {isPedidoExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Token de Autorização (Bearer)
-                      </label>
-                      <input 
-                        type="text"
-                        value={pedidoJsonToken}
-                        onChange={(e) => setPedidoJsonToken(e.target.value)}
-                        placeholder="Bearer eyJ0eXAi..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Corpo da Requisição (JSON Payload)
-                      </label>
-                      <textarea 
-                        value={pedidoJsonPayload}
-                        onChange={(e) => setPedidoJsonPayload(e.target.value)}
-                        placeholder="Corpo da Requisição (JSON)"
-                        rows={10}
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                      />
-                    </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                      Corpo da Requisição (JSON Payload)
+                    </label>
+                    <textarea 
+                      value={pedidoJsonPayload}
+                      onChange={(e) => setPedidoJsonPayload(e.target.value)}
+                      placeholder="Corpo da Requisição (JSON)"
+                      rows={10}
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                    />
                   </div>
 
                   <div className="pt-4 flex flex-wrap items-center gap-4">
