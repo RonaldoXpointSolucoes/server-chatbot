@@ -130,6 +130,14 @@ export default function ContactsManager() {
       query = query.order('name', { ascending: true });
     } else if (currentSort === 'alpha_desc') {
       query = query.order('name', { ascending: false });
+    } else if (currentSort === 'document_asc') {
+      query = query.order('document_number', { ascending: true, nullsFirst: false });
+    } else if (currentSort === 'document_desc') {
+      query = query.order('document_number', { ascending: false, nullsFirst: false });
+    } else if (currentSort === 'phone_asc') {
+      query = query.order('phone', { ascending: true, nullsFirst: false });
+    } else if (currentSort === 'phone_desc') {
+      query = query.order('phone', { ascending: false, nullsFirst: false });
     }
 
     const start = (currentPage - 1) * pageSize;
@@ -358,6 +366,10 @@ export default function ContactsManager() {
                <option value="oldest">Mais Antigos</option>
                <option value="alpha_asc">Ordem Alfabética (A-Z)</option>
                <option value="alpha_desc">Ordem Alfabética (Z-A)</option>
+               <option value="document_asc">CNPJ / CPF (Crescente)</option>
+               <option value="document_desc">CNPJ / CPF (Decrescente)</option>
+               <option value="phone_asc">Celular (Crescente)</option>
+               <option value="phone_desc">Celular (Decrescente)</option>
             </select>
             <select 
                value={filterType}
@@ -399,8 +411,8 @@ export default function ContactsManager() {
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto styled-scrollbar px-6 pb-12">
         <div className="bg-[#182229] border border-[#2a3942] rounded-2xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
-           
-           <table className="w-full text-left border-collapse">
+           <div className="overflow-x-auto w-full">
+           <table className="w-full text-left border-collapse min-w-[900px]">
               <thead>
                 <tr className="border-b border-[#2a3942] bg-[#202c33]/50">
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Identificação</th>
@@ -586,7 +598,7 @@ export default function ContactsManager() {
                          </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
-                         <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                         <div className="flex items-center justify-end gap-2 opacity-50 hover:opacity-100 transition-opacity">
                             <button 
                               onClick={() => {
                                 useChatStore.getState().setActiveChat(contact.id);
@@ -619,6 +631,7 @@ export default function ContactsManager() {
                 )}
               </tbody>
            </table>
+           </div>
            
            {/* Pagination Controls */}
            {totalPages > 1 && (
