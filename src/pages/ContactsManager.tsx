@@ -19,10 +19,12 @@ export default function ContactsManager() {
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterType, setFilterType] = useState('all');
   const [sortOrder, setSortOrder] = useState('recent');
   const [filterGroup, setFilterGroup] = useState('all');
   const pageSize = 50;
@@ -46,7 +48,14 @@ export default function ContactsManager() {
 
   const totalPages = Math.ceil(totalCount / pageSize) || 1;
 
-  const fetchContacts = async (search = '', currentPage = 1, currentFilter = 'all', currentSort = 'recent', currentGroup = 'all') => {
+  const fetchContacts = async (
+    search = '', 
+    currentPage = 1, 
+    currentFilter = 'all', 
+    currentSort = 'recent', 
+    currentGroup = 'all',
+    currentType = 'all'
+  ) => {
     if (!tenantId) return;
     setLoading(true);
 
@@ -57,19 +66,47 @@ export default function ContactsManager() {
 
     if (search) {
       const searchLower = search.toLowerCase();
-      const matchingCompIds = allCompanies
+      
+      // Lightweight search to find explicit matches and their company links
+      const { data: matchedContacts } = await supabase
+        .from('contacts')
+        .select('id, company_ids')
+        .eq('tenant_id', tenantId)
+        .or(`name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%,document_number.ilike.%${search}%,phone.ilike.%${search}%`);
+      
+      const matchedContactIds = matchedContacts?.map(c => c.id) || [];
+      const linkedCompanyIds = matchedContacts?.flatMap(c => c.company_ids || []) || [];
+      
+      // Companies matching search term directly from allCompanies cache
+      const matchedCompanyIds = allCompanies
         .filter(c => c.name?.toLowerCase().includes(searchLower) || c.fantasy_name?.toLowerCase().includes(searchLower))
         .map(c => c.id);
-
-      if (matchingCompIds.length > 0) {
-        query = query.or(`name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%,document_number.ilike.%${search}%,phone.ilike.%${search}%,company_ids.ov.{${matchingCompIds.join(',')}}`);
+      
+      const explicitIds = Array.from(new Set([...matchedContactIds, ...linkedCompanyIds, ...matchedCompanyIds]));
+      
+      if (explicitIds.length > 0) {
+        if (matchedCompanyIds.length > 0) {
+          query = query.or(`id.in.(${explicitIds.join(',')}),company_ids.ov.{${matchedCompanyIds.join(',')}}`);
+        } else {
+          query = query.in('id', explicitIds);
+        }
       } else {
-        query = query.or(`name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%,document_number.ilike.%${search}%,phone.ilike.%${search}%`);
+        query = query.eq('id', '00000000-0000-0000-0000-000000000000');
       }
     }
 
     if (currentFilter !== 'all') {
-      query = query.eq('bot_status', currentFilter);
+      if (currentFilter === 'blocked') {
+        query = query.eq('is_blocked', true);
+      } else {
+        query = query.eq('bot_status', currentFilter);
+      }
+    }
+
+    if (currentType === 'companies') {
+      query = query.eq('document_type', 'cnpj');
+    } else if (currentType === 'contacts') {
+      query = query.or('document_type.neq.cnpj,document_type.is.null');
     }
 
     if (currentGroup !== 'all') {
@@ -108,18 +145,24 @@ export default function ContactsManager() {
     setLoading(false);
   };
 
-  // Reset page to 1 when search, filter or sort changes
+  // Reset page to 1 when search, filter, sort, type, or group changes
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, filterStatus, sortOrder]);
+  }, [searchTerm, filterStatus, sortOrder, filterType, filterGroup]);
 
+  // Debounce search term separately
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      fetchContacts(searchTerm, page, filterStatus, sortOrder);
+      setDebouncedSearchTerm(searchTerm);
     }, 400);
 
     return () => clearTimeout(delayDebounceFn);
-  }, [tenantId, searchTerm, filterStatus, sortOrder, page]);
+  }, [searchTerm]);
+
+  // Fetch contacts when any parameters change (no debounce delay for filters/sorting/pagination!)
+  useEffect(() => {
+    fetchContacts(debouncedSearchTerm, page, filterStatus, sortOrder, filterGroup, filterType);
+  }, [tenantId, debouncedSearchTerm, filterStatus, sortOrder, page, filterGroup, filterType]);
 
   const handleOpenModal = (contact?: ContactRow) => {
     if (contact) {
@@ -295,8 +338,8 @@ export default function ContactsManager() {
 
       {/* Toolbox & Seach */}
       <div className="px-6 py-5 flex items-center justify-between shrink-0 flex-wrap gap-4">
-         <div className="flex items-center gap-3 w-full max-w-3xl">
-            <div className="relative flex-1">
+         <div className="flex items-center gap-3 w-full max-w-5xl flex-wrap">
+            <div className="relative flex-1 min-w-[240px]">
                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8696a0]" />
                <input 
                  type="text" 
@@ -317,6 +360,15 @@ export default function ContactsManager() {
                <option value="alpha_desc">Ordem Alfabética (Z-A)</option>
             </select>
             <select 
+               value={filterType}
+               onChange={(e) => setFilterType(e.target.value)}
+               className="bg-[#202c33] border border-[#2a3942] rounded-xl px-4 py-2.5 text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all shadow-sm appearance-none cursor-pointer min-w-[150px]"
+            >
+               <option value="all">Todos os Tipos</option>
+               <option value="companies">Apenas Empresas</option>
+               <option value="contacts">Apenas Contatos</option>
+            </select>
+            <select 
                value={filterStatus}
                onChange={(e) => setFilterStatus(e.target.value)}
                className="bg-[#202c33] border border-[#2a3942] rounded-xl px-4 py-2.5 text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all shadow-sm appearance-none cursor-pointer min-w-[150px]"
@@ -324,6 +376,7 @@ export default function ContactsManager() {
                <option value="all">Todos os Status</option>
                <option value="active">Apenas Ativos</option>
                <option value="paused">Apenas Pausados</option>
+               <option value="blocked">Apenas Bloqueados</option>
             </select>
             {useChatStore.getState().tenantInfo?.settings?.contactGroups?.length > 0 && (
                <select 
@@ -523,11 +576,13 @@ export default function ContactsManager() {
                       <td className="px-6 py-4 whitespace-nowrap">
                          <span className={cn(
                            "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border",
-                           contact.bot_status === 'active' 
-                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
-                            : "bg-red-500/10 text-red-400 border-red-500/20"
-                         )}>
-                           {contact.bot_status === 'active' ? 'Ativo' : 'Pausado'}
+                           contact.is_blocked
+                             ? "bg-red-500/10 text-red-400 border-red-500/20"
+                             : contact.bot_status === 'active' 
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                              : "bg-[#2a3942]/40 text-[#8696a0] border-[#2a3942]/60"
+                          )}>
+                           {contact.is_blocked ? 'Bloqueado' : contact.bot_status === 'active' ? 'Ativo' : 'Pausado'}
                          </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
