@@ -3381,13 +3381,15 @@ export default function ChatDashboard() {
           }
         }}
         onClearAssociation={async () => {
-          if (!activeChat) return;
+          if (!activeChat || !companyDetailsOpen) return;
           try {
             const { supabase } = await import('../services/supabase');
             const cleanActiveChatId = activeChat.id.includes('_') ? activeChat.id.split('_')[0] : activeChat.id;
             
-            // Remove the company ID from the parent contact's company_ids
-            const newCompanyIds = (activeChat.company_ids || []).filter((id: string) => id !== companyDetailsOpen?.id);
+            // If the open details are of the active chat itself, clear all associated companies. Otherwise, filter out the specific company.
+            const newCompanyIds = companyDetailsOpen.id === activeChat.id
+              ? []
+              : (activeChat.company_ids || []).filter((id: string) => id !== companyDetailsOpen.id);
             
             const { error } = await supabase
               .from('contacts')

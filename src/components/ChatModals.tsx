@@ -1936,12 +1936,15 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
             <ExternalLink size={16} className="ml-auto opacity-70 group-hover:opacity-100 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 transition-all" />
           </button>
 
-          {parentContact && parentContact.company_ids?.includes(contact.id) && onClearAssociation && (
+          {onClearAssociation && (
+            (parentContact && parentContact.company_ids?.includes(contact.id)) ||
+            (contact.company_ids && contact.company_ids.length > 0)
+          ) && (
             <button 
               onClick={onClearAssociation}
               className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl font-semibold transition-all duration-200"
             >
-              <span>Desvincular desta Empresa</span>
+              <span>{contact.company_ids && contact.company_ids.length > 0 ? "Desvincular Empresa" : "Desvincular desta Empresa"}</span>
             </button>
           )}
         </div>
