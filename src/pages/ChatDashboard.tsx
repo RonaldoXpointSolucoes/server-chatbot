@@ -1784,22 +1784,48 @@ export default function ChatDashboard() {
     // 1. Salva a posição de scroll atual da lista lateral de chats
     const currentScrollTop = contactListRef.current ? contactListRef.current.scrollTop : 0;
     
-    // 2. Dispara a ação de resolução
-    await resolveConversation(contactId, reactivateAi);
-    
-    // 3. Estabilização absoluta em cascata de tempo para anular saltos enquanto o Framer-motion anima a saída
-    const restoreScroll = () => {
-      if (contactListRef.current) {
-        contactListRef.current.scrollTop = currentScrollTop;
-      }
-    };
-    
-    restoreScroll();
-    requestAnimationFrame(restoreScroll);
-    [10, 30, 50, 100, 180, 300, 500].forEach(ms => setTimeout(restoreScroll, ms));
+    try {
+      // 2. Dispara a ação de resolução
+      await resolveConversation(contactId, reactivateAi);
+      
+      // 3. Estabilização absoluta em cascata de tempo para anular saltos enquanto o Framer-motion anima a saída
+      const restoreScroll = () => {
+        if (contactListRef.current) {
+          contactListRef.current.scrollTop = currentScrollTop;
+        }
+      };
+      
+      restoreScroll();
+      requestAnimationFrame(restoreScroll);
+      [10, 30, 50, 100, 180, 300, 500].forEach(ms => setTimeout(restoreScroll, ms));
+    } catch (err: any) {
+      alert('Erro ao resolver conversa: ' + (err.message || String(err)));
+    }
   };
 
   const handleResolveConversation = async (contactId: string) => {
+    const contact = contacts.find(c => c.id === contactId);
+    if (contact) {
+      // 1. Caso o próprio contato seja uma empresa e não tenha CNPJ
+      if (contact.fantasy_name && !contact.document_number) {
+        alert(`O CNPJ da empresa "${contact.fantasy_name}" é obrigatório para resolver o ticket. Por favor, cadastre o CNPJ na ficha da empresa.`);
+        setCompanyDetailsOpen(contact);
+        return;
+      }
+      
+      // 2. Caso o contato tenha empresas vinculadas e alguma não tenha CNPJ cadastrado
+      const linkedCompanies = contact.company_ids
+        ?.map((id: string) => allCompanies.find((c: any) => c.id === id))
+        .filter(Boolean) || [];
+      const companyWithMissingCnpj = linkedCompanies.find((c: any) => !c.document_number);
+      
+      if (companyWithMissingCnpj) {
+        alert(`O CNPJ da empresa "${companyWithMissingCnpj.fantasy_name || companyWithMissingCnpj.name}" é obrigatório para resolver o ticket. Por favor, cadastre o CNPJ na ficha da empresa.`);
+        setCompanyDetailsOpen(companyWithMissingCnpj);
+        return;
+      }
+    }
+    
     await executeResolve(contactId, true);
   };
 
@@ -3301,6 +3327,12 @@ export default function ChatDashboard() {
         isOpen={!!companyDetailsOpen}
         onClose={() => setCompanyDetailsOpen(null)}
         contact={companyDetailsOpen}
+        onUpdateCompany={(updatedCompany) => {
+          setAllCompanies(prev => prev.map(c => c.id === updatedCompany.id ? { ...c, ...updatedCompany } : c));
+          if (activeChat && activeChat.id === updatedCompany.id) {
+            setActiveChat({ ...activeChat, ...updatedCompany });
+          }
+        }}
       />
 
       {/* Modal de Preview de Imagem Colada (Agora com Editor de Imagem) */}
@@ -4948,28 +4980,44 @@ export default function ChatDashboard() {
                              </div>
                            )}
                          </div>
-                          {contact.fantasy_name ? (
-                            <span className="text-[11px] text-gray-500 dark:text-[#8696a0] truncate flex items-center gap-1">
-                              <Building2 size={10} className="shrink-0" />
-                              {contact.fantasy_name}
-                            </span>
-                          ) : (
-                            (() => {
-                              const linkedCompanies = contact.company_ids
-                                ?.map((id: string) => allCompanies.find((c: any) => c.id === id))
-                                .filter(Boolean) || [];
-                              if (linkedCompanies.length > 0) {
-                                return (
-                                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium truncate flex items-center gap-1">
-                                    <Building2 size={10} className="shrink-0" />
-                                    {linkedCompanies[0].fantasy_name || linkedCompanies[0].name}
-                                    {linkedCompanies.length > 1 && ` (+${linkedCompanies.length - 1})`}
-                                  </span>
-                                );
-                              }
-                              return null;
-                            })()
-                          )}
+                           {contact.fantasy_name ? (
+                             (() => {
+                               const missingCnpj = !contact.document_number;
+                               return (
+                                 <div className="flex items-center gap-1.5 truncate">
+                                   <span className={cn("text-[11px] truncate flex items-center gap-1", missingCnpj ? "text-rose-500 dark:text-rose-400 font-medium" : "text-gray-500 dark:text-[#8696a0]")}>
+                                     {missingCnpj ? <AlertTriangle size={10} className="shrink-0 text-rose-500 animate-pulse" /> : <Building2 size={10} className="shrink-0" />}
+                                     {contact.fantasy_name}
+                                   </span>
+                                   {missingCnpj && (
+                                     <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-1.5 py-[1px] rounded border border-rose-500/20 shrink-0">FALTA CNPJ</span>
+                                   )}
+                                 </div>
+                               );
+                             })()
+                           ) : (
+                             (() => {
+                               const linkedCompanies = contact.company_ids
+                                 ?.map((id: string) => allCompanies.find((c: any) => c.id === id))
+                                 .filter(Boolean) || [];
+                               if (linkedCompanies.length > 0) {
+                                 const missingCnpj = linkedCompanies.some((c: any) => !c.document_number);
+                                 return (
+                                   <div className="flex items-center gap-1.5 truncate">
+                                     <span className={cn("text-[11px] font-medium truncate flex items-center gap-1", missingCnpj ? "text-rose-500 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>
+                                       {missingCnpj ? <AlertTriangle size={10} className="shrink-0 text-rose-500 animate-pulse" /> : <Building2 size={10} className="shrink-0" />}
+                                       {linkedCompanies[0].fantasy_name || linkedCompanies[0].name}
+                                       {linkedCompanies.length > 1 && ` (+${linkedCompanies.length - 1})`}
+                                     </span>
+                                     {missingCnpj && (
+                                       <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-1.5 py-[1px] rounded border border-rose-500/20 shrink-0">FALTA CNPJ</span>
+                                     )}
+                                   </div>
+                                 );
+                               }
+                               return null;
+                             })()
+                           )}
                            
                          
                         {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (
