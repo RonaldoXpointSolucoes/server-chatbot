@@ -4,7 +4,7 @@ import { pipeline } from '@xenova/transformers';
 import { supabase } from '../supabase.js';
 import { PDFParse } from 'pdf-parse';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-
+import autoRagTrainer from '../automation-worker/auto-rag-trainer.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } }); // 100MB
@@ -248,6 +248,25 @@ router.get('/:id/content', async (req, res) => {
     }
 });
 
+// Treinamento manual do RAG a partir das últimas 20 mensagens de uma conversa
+router.post('/manual-train', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.body?.tenant_id;
+        const { conversationId } = req.body;
+
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+        if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
+
+        // Dispara o treinamento em background para não travar a requisição
+        autoRagTrainer.trainFromResolvedConversation(tenant_id, conversationId).catch(err => {
+            console.error(`[AutoRagTrainer Manual] Erro ao treinar conversa ${conversationId}:`, err);
+        });
+
+        res.json({ success: true, message: 'Treinamento manual RAG iniciado.' });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 // Atualiza o documento enviando um novo conteúdo em formato de texto (Re-vetorização)
 router.put('/:id', async (req, res) => {
     try {

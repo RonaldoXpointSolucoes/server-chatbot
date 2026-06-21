@@ -55,12 +55,41 @@ interface WebhookTrigger {
 }
 
 export default function Integrations() {
-  const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
+  const tenantInfo = useChatStore(state => state.tenantInfo);
+  const updateTenantSettings = useChatStore(state => state.updateTenantSettings);
+  const tenantIdFromStore = tenantInfo?.id;
   const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
   
   const [globalApiKey, setGlobalApiKey] = useState<string>('');
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Gemini API Key states
+  const [geminiKeyInput, setGeminiKeyInput] = useState('');
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [isSavingGeminiKey, setIsSavingGeminiKey] = useState(false);
+
+  const geminiApiKeyFromSettings = tenantInfo?.settings?.gemini_api_key;
+
+  useEffect(() => {
+    if (geminiApiKeyFromSettings) {
+      setGeminiKeyInput(geminiApiKeyFromSettings);
+    } else {
+      setGeminiKeyInput('');
+    }
+  }, [geminiApiKeyFromSettings]);
+
+  const handleSaveGeminiKey = async () => {
+    setIsSavingGeminiKey(true);
+    try {
+      await updateTenantSettings({ gemini_api_key: geminiKeyInput.trim() });
+      alert('Chave do Gemini atualizada com sucesso!');
+    } catch (e) {
+      alert('Erro ao atualizar a chave do Gemini.');
+    } finally {
+      setIsSavingGeminiKey(false);
+    }
+  };
   
   // Tabs navigation
   const [activeTab, setActiveTab] = useState<'api' | 'triggers'>('api');
@@ -721,6 +750,67 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
                       </div>
                     </div>
                   ))
+                )}
+              </div>
+            </section>
+
+            {/* Card 3: Gemini API Key */}
+            <section className="relative overflow-hidden backdrop-blur-xl bg-[#1e1e24]/60 border border-[#2a2a2f]/80 rounded-[24px] p-6 shadow-2xl transition-all duration-300 hover:border-[#3a3a45]">
+              <div className="absolute top-0 right-0 w-48 h-48 bg-[#00a884]/5 rounded-full blur-3xl pointer-events-none" />
+              
+              <div className="flex items-center gap-2.5 mb-4">
+                <div className="p-2 bg-[#00a884]/10 border border-[#00a884]/20 rounded-xl text-[#00a884]">
+                  <Sparkles size={18} />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-white tracking-tight">Chave de API do Gemini (I.A.)</h3>
+                  <p className="text-xs text-slate-400">Configure sua chave individual para o recurso de Magia da IA</p>
+                </div>
+              </div>
+
+              <div className="space-y-4 mt-5">
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Para utilizar a Magia da IA no painel de atendimento (melhorar respostas, analisar conversações, etc.), você precisa de uma chave de API do Gemini. 
+                  Você pode obter uma chave gratuita ou de uso pago em <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="text-[#00a884] hover:underline font-semibold inline-flex items-center gap-0.5">Google AI Studio <ExternalLink size={10} className="inline" /></a>.
+                </p>
+
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type={showGeminiKey ? 'text' : 'password'}
+                      value={geminiKeyInput}
+                      onChange={(e) => setGeminiKeyInput(e.target.value)}
+                      placeholder="AIzaSy..."
+                      className="w-full bg-[#141416]/95 border border-[#2a2a2f] rounded-xl px-4 py-3 text-sm font-mono text-emerald-300 focus:outline-none focus:border-[#00a884]/50 transition-colors pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowGeminiKey(!showGeminiKey)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors"
+                    >
+                      {showGeminiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={handleSaveGeminiKey}
+                    disabled={isSavingGeminiKey}
+                    className="px-5 py-3 bg-[#00a884] hover:bg-[#00c298] text-[#111b21] rounded-xl font-semibold text-sm transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1.5 shadow-[0_4px_14px_0_rgba(0,168,132,0.2)]"
+                  >
+                    {isSavingGeminiKey ? 'Salvando...' : 'Salvar'}
+                  </button>
+                </div>
+
+                {geminiKeyInput.trim() ? (
+                  <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2.5 rounded-xl leading-relaxed">
+                    <Check size={14} className="shrink-0" />
+                    <span>Sua chave de API personalizada está ativa e sendo usada com prioridade sobre a chave padrão.</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-2.5 rounded-xl leading-relaxed">
+                    <AlertTriangle size={14} className="shrink-0" />
+                    <span>Nenhuma chave personalizada configurada. A aplicação está usando a chave padrão do sistema (definida no servidor).</span>
+                  </div>
                 )}
               </div>
             </section>

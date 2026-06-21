@@ -321,7 +321,7 @@ export default function ChatDashboard() {
   const [filterContextMenu, setFilterContextMenu] = useState<{ type: string, x: number, y: number } | null>(null);
   const [instanceNamesMap, setInstanceNamesMap] = useState<Record<string, string>>({});
   const [instanceColorsMap, setInstanceColorsMap] = useState<Record<string, string>>({});
-  const [availableInstancesList, setAvailableInstancesList] = useState<{id: string, display_name: string, color: string}[]>([]);
+  const [availableInstancesList, setAvailableInstancesList] = useState<{id: string, display_name: string, color: string, tenant_id?: string}[]>([]);
 
   const [copiedDoc, setCopiedDoc] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -393,6 +393,7 @@ export default function ChatDashboard() {
     appVersion,
     setActiveChat, 
     sendHumanMessage, 
+    sendPresenceUpdate,
     forwardMessage,
     setBotStatus,
     fetchInitialData,
@@ -451,6 +452,7 @@ export default function ChatDashboard() {
     appVersion: state.appVersion,
     setActiveChat: state.setActiveChat, 
     sendHumanMessage: state.sendHumanMessage, 
+    sendPresenceUpdate: state.sendPresenceUpdate,
     forwardMessage: state.forwardMessage,
     setBotStatus: state.setBotStatus,
     fetchInitialData: state.fetchInitialData,
@@ -506,7 +508,7 @@ export default function ChatDashboard() {
   useEffect(() => {
     if (activeChatId) {
       const activeContact = contacts.find(c => c.id === activeChatId);
-      if (activeContact && Number(activeContact.unread || 0) > 0) {
+      if (activeContact && Number(activeContact.unread || 0) > 0 && !activeContact.isManuallyUnread) {
         useChatStore.getState().markAsRead(activeChatId);
       }
     }
@@ -521,6 +523,64 @@ export default function ChatDashboard() {
   // Efect removido (duplicado com o useEffect consolidado mais abaixo)
   
   const [chatMode, setChatMode] = useState<'chat' | 'internal_note'>('chat');
+  
+  // Typing indicator refs and handlers
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastPresenceSentRef = useRef<number>(0);
+  const activeJidRef = useRef<string | null>(null);
+
+  const handleUserTyping = (currentVal: string) => {
+    if (!activeChatId || chatMode === 'internal_note') return;
+
+    const activeChat = contacts.find(c => c.id === activeChatId);
+    if (!activeChat) return;
+
+    const targetJid = activeChat.whatsapp_jid || (activeChat.phone + '@s.whatsapp.net');
+    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+    if (!properTargetInstance) return;
+
+    activeJidRef.current = targetJid;
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    if (!currentVal.trim()) {
+      sendPresenceUpdate(activeChatId, 'paused', properTargetInstance).catch(() => {});
+      lastPresenceSentRef.current = 0;
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastPresenceSentRef.current > 10000) {
+      lastPresenceSentRef.current = now;
+      sendPresenceUpdate(activeChatId, 'composing', properTargetInstance).catch(() => {});
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      if (activeChatId) {
+        sendPresenceUpdate(activeChatId, 'paused', properTargetInstance).catch(() => {});
+      }
+      lastPresenceSentRef.current = 0;
+    }, 4000);
+  };
+
+  useEffect(() => {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    if (activeJidRef.current && activeChatId) {
+      const prevContact = contacts.find(c => (c.whatsapp_jid || (c.phone + '@s.whatsapp.net')) === activeJidRef.current);
+      if (prevContact) {
+        const properTargetInstance = getStrictInstance(prevContact) || activeChannelFilter || connectedInstanceName;
+        if (properTargetInstance) {
+          sendPresenceUpdate(prevContact.id, 'paused', properTargetInstance).catch(() => {});
+        }
+      }
+    }
+    lastPresenceSentRef.current = 0;
+  }, [activeChatId]);
+
   const [isTaskMode, setIsTaskMode] = useState(false);
   const [taskAssignedTo, setTaskAssignedTo] = useState<string | null>(null);
   const [checklistDraft, setChecklistDraft] = useState<string[]>([]);
@@ -595,6 +655,21 @@ export default function ChatDashboard() {
   };
 
   // Estados para o Modal Premium de Atribuição de Implantação Completa CRM
+  const [showRecordingModal, setShowRecordingModal] = useState(false);
+  const [showPauseMenu, setShowPauseMenu] = useState(false);
+  
+  // Ref para cliques fora do menu de pausa
+  const pauseMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (pauseMenuRef.current && !pauseMenuRef.current.contains(event.target as Node)) {
+        setShowPauseMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const [showImplantacaoModal, setShowImplantacaoModal] = useState(false);
   const [implantacaoSelectedAgent, setImplantacaoSelectedAgent] = useState<string | null>(null);
 
@@ -1086,18 +1161,59 @@ export default function ChatDashboard() {
     }
   };
 
+  const whatsappStatusMemo = React.useMemo(() => {
+    const currentTenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    const tenantInstances = availableInstancesList.filter(inst => !currentTenantId || inst.tenant_id === currentTenantId);
+    const total = tenantInstances.length;
+    
+    if (total === 0) {
+      return {
+        connected: evolutionConnected,
+        label: evolutionConnected ? "Conectado" : "Offline",
+        health: evolutionConnected ? 'green' as const : 'red' as const,
+        percentage: evolutionConnected ? 100 : 0,
+        connectedCount: evolutionConnected ? 1 : 0,
+        total: 0
+      };
+    }
+
+    const connectedCount = tenantInstances.filter(inst => instancesStatus[inst.id] === 'connected').length;
+    const percentage = Math.round((connectedCount / total) * 100);
+
+    let health: 'green' | 'yellow' | 'red' = 'red';
+    let label = '';
+
+    if (connectedCount === total) {
+      health = 'green';
+      label = "Conectado";
+    } else if (connectedCount > 0) {
+      health = 'yellow';
+      label = `Parcial (${percentage}%)`;
+    } else {
+      health = 'red';
+      label = "Offline";
+    }
+
+    return {
+      connected: connectedCount > 0,
+      label,
+      health,
+      percentage,
+      connectedCount,
+      total
+    };
+  }, [availableInstancesList, instancesStatus, evolutionConnected]);
+
   const systemHealth = React.useMemo<'green' | 'yellow' | 'red'>(() => {
     const internetOk = isOnline;
-    const realtimeOk = realtimeStatus === 'connected';
-    const evoOk = evolutionConnected;
-
-    if (!internetOk || !evoOk || realtimeStatus === 'disconnected') {
+    
+    if (!internetOk || realtimeStatus === 'disconnected' || whatsappStatusMemo.health === 'red') {
       return 'red';
-    } else if (realtimeStatus === 'connecting') {
+    } else if (realtimeStatus === 'connecting' || whatsappStatusMemo.health === 'yellow') {
       return 'yellow';
     }
     return 'green';
-  }, [isOnline, realtimeStatus, evolutionConnected]);
+  }, [isOnline, realtimeStatus, whatsappStatusMemo]);
 
   // Estados para Fechamento em Lote de Tickets (Modo Ticket Ativo)
   const [isConfirmBatchResolveOpen, setIsConfirmBatchResolveOpen] = useState(false);
@@ -2101,11 +2217,19 @@ export default function ChatDashboard() {
              return true;
           });
 
+          const newStatuses: Record<string, string> = {};
           data.forEach(d => { 
              nameMap[d.id] = d.display_name; 
              if(d.color) colorMap[d.id] = d.color;
-             setInstanceStatus(d.id, d.status);
+             newStatuses[d.id] = d.status;
           });
+          
+          useChatStore.setState(state => ({
+             instancesStatus: {
+                ...state.instancesStatus,
+                ...newStatuses
+             }
+          }));
           
           setInstanceNamesMap(nameMap);
           setInstanceColorsMap(colorMap);
@@ -2463,6 +2587,14 @@ export default function ChatDashboard() {
        alert('Instância offline. Conecte-a para enviar mensagens.');
        return;
     }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    if (activeChatId && chatMode !== 'internal_note') {
+      sendPresenceUpdate(activeChatId, 'paused', properTargetInstance).catch(() => {});
+    }
+    lastPresenceSentRef.current = 0;
     
     isSendingRef.current = true;
     setIsSendingMessage(true);
@@ -4309,7 +4441,11 @@ export default function ChatDashboard() {
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
-                onClick={() => setShowMainSidebar(!showMainSidebar)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setShowMainSidebar(!showMainSidebar);
+                }}
                 className="flex p-2 -ml-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors"
                 title={showMainSidebar ? "Ocultar Menu Principal" : "Mostrar Menu Principal"}
               >
@@ -4440,7 +4576,11 @@ export default function ChatDashboard() {
               </span>
               <span className="text-[11px] font-bold text-gray-600 dark:text-[#d1d7db] truncate">
                 {systemHealth === 'green' ? "Operando" :
-                 systemHealth === 'yellow' ? "Atenção" : "Offline"}
+                 systemHealth === 'yellow' ? (
+                   whatsappStatusMemo.total > 0 && whatsappStatusMemo.connectedCount < whatsappStatusMemo.total
+                     ? `Atenção (${whatsappStatusMemo.percentage}%)`
+                     : "Atenção"
+                 ) : "Offline"}
               </span>
             </div>
             <ChevronDown 
@@ -4594,16 +4734,23 @@ export default function ChatDashboard() {
               {/* Status 3: Evolution Engine */}
               <div className="bg-gray-50/50 dark:bg-[#202c33]/40 border border-gray-100 dark:border-white/5 rounded-xl p-2 flex flex-col items-center justify-center gap-1.5 text-center transition-all hover:scale-[1.02] duration-300">
                 <div className="relative">
-                  <ShieldCheck size={16} className={evolutionConnected ? "text-emerald-500" : "text-rose-500"} />
+                  <ShieldCheck 
+                    size={16} 
+                    className={
+                      whatsappStatusMemo.health === 'green' ? "text-emerald-500" :
+                      whatsappStatusMemo.health === 'yellow' ? "text-amber-500" : "text-rose-500"
+                    } 
+                  />
                   <span className={cn(
                     "absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border border-white dark:border-[#111b21]",
-                    evolutionConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"
+                    whatsappStatusMemo.health === 'green' ? "bg-emerald-500 animate-pulse" :
+                    whatsappStatusMemo.health === 'yellow' ? "bg-amber-500 animate-pulse" : "bg-rose-500"
                   )}></span>
                 </div>
                 <div className="flex flex-col">
                   <span className="text-[10px] font-medium text-gray-400 dark:text-[#8696a0]">WhatsApp</span>
-                  <span className="text-[11px] font-bold text-gray-700 dark:text-[#d1d7db]">
-                    {evolutionConnected ? "Conectado" : "Offline"}
+                  <span className="text-[11px] font-bold text-gray-700 dark:text-[#d1d7db] truncate max-w-full px-0.5" title={whatsappStatusMemo.label}>
+                    {whatsappStatusMemo.label}
                   </span>
                 </div>
               </div>
@@ -5467,42 +5614,110 @@ export default function ChatDashboard() {
               
               <div className="hidden lg:flex items-center gap-2">
                 {/* Botão Premium de Controle da I.A (Desktop) */}
-                <button 
-                  onClick={() => {
-                    useChatStore.getState().updateConversationField(activeChat.id, { 
-                      ai_paused: !activeChat.ai_paused,
-                      ai_paused_manually: !activeChat.ai_paused
-                    });
-                  }}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-semibold border shadow-sm hover:scale-105 active:scale-95",
-                    !activeChat.ai_paused 
-                      ? "bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.1)]"
-                      : "bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-400"
-                  )}
-                  title={!activeChat.ai_paused ? "Pausar Inteligência Artificial" : "Retomar Inteligência Artificial"}
-                >
-                  <div className="relative flex items-center justify-center">
-                    <BrainCircuit size={16} className={cn(!activeChat.ai_paused && "animate-pulse")} />
-                    {!activeChat.ai_paused && (
-                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-                      </span>
+                {globalAiEnabled && (
+                  <div className="relative" ref={pauseMenuRef}>
+                    <button 
+                    onClick={() => setShowPauseMenu(!showPauseMenu)}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-xs font-semibold border shadow-sm hover:scale-105 active:scale-95 whitespace-nowrap",
+                      !activeChat.ai_paused 
+                        ? "bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.1)]"
+                        : "bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-400"
                     )}
+                    title="Opções da Inteligência Artificial"
+                  >
+                    <div className="relative flex items-center justify-center">
+                      <BrainCircuit size={14} className={cn(!activeChat.ai_paused && "animate-pulse")} />
+                      {!activeChat.ai_paused && (
+                        <span className="absolute -top-1 -right-1 flex h-1.5 w-1.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-500"></span>
+                        </span>
+                      )}
+                    </div>
+                    <span>{!activeChat.ai_paused ? "I.A Ativa" : "I.A Pausada"}</span>
+                    <ChevronDown size={12} className={cn("transition-transform duration-200", showPauseMenu && "rotate-180")} />
+                  </button>
+
+                  <AnimatePresence>
+                    {showPauseMenu && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700/50 py-2 z-[60]"
+                      >
+                        {activeChat.ai_paused ? (
+                          <button
+                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-emerald-600 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+                            onClick={() => {
+                               useChatStore.getState().updateConversationField(activeChat.id, { 
+                                 ai_paused: false,
+                                 ai_paused_manually: false,
+                                 ai_paused_until: null
+                               });
+                               setShowPauseMenu(false);
+                            }}
+                          >
+                            <Play size={16} />
+                            <span>Retomar I.A Imediatamente</span>
+                          </button>
+                        ) : (
+                          <>
+                            <div className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                              Pausar Temporariamente
+                            </div>
+                            {[10, 60, 720].map((mins) => (
+                              <button
+                                key={mins}
+                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+                                onClick={() => {
+                                   const pauseUntil = new Date(Date.now() + mins * 60000).toISOString();
+                                   useChatStore.getState().updateConversationField(activeChat.id, { 
+                                     ai_paused: true,
+                                     ai_paused_manually: true,
+                                     ai_paused_until: pauseUntil
+                                   });
+                                   setShowPauseMenu(false);
+                                }}
+                              >
+                                <Clock size={16} className="text-indigo-500" />
+                                <span>Por {mins === 60 ? '1 hora' : mins === 720 ? '12 horas' : `${mins} minutos`}</span>
+                              </button>
+                            ))}
+                            <div className="my-1 border-t border-slate-200 dark:border-slate-700/50"></div>
+                            <button
+                                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-amber-600 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+                                onClick={() => {
+                                   useChatStore.getState().updateConversationField(activeChat.id, { 
+                                     ai_paused: true,
+                                     ai_paused_manually: true,
+                                     ai_paused_until: null
+                                   });
+                                   setShowPauseMenu(false);
+                                }}
+                            >
+                                <StopCircle size={16} />
+                                <span>Pausar Definitivamente</span>
+                            </button>
+                          </>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   </div>
-                  <span>{!activeChat.ai_paused ? "I.A Ativa" : "I.A Pausada"}</span>
-                </button>
+                )}
 
                 {activeChat.conv_status === 'resolved' ? (
                   <button 
                     onClick={() => {
                       reopenConversation(activeChat.id);
                     }}
-                    className="flex items-center gap-2 px-4 py-1.5 bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-full transition-all duration-300 text-sm font-semibold border border-blue-200 dark:border-blue-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-full transition-all duration-300 text-xs font-semibold border border-blue-200 dark:border-blue-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95 whitespace-nowrap"
                     title="Reabrir Conversa"
                   >
-                    <RotateCcw size={16} className="animate-spin-once" />
+                    <RotateCcw size={14} className="animate-spin-once" />
                     <span>Reabrir Conversa</span>
                   </button>
                 ) : (
@@ -5510,10 +5725,10 @@ export default function ChatDashboard() {
                     onClick={() => {
                       handleResolveConversation(activeChat.id);
                     }}
-                    className="flex items-center gap-2 px-4 py-1.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-all duration-300 text-sm font-semibold border border-emerald-200 dark:border-emerald-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-all duration-300 text-xs font-semibold border border-emerald-200 dark:border-emerald-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95 whitespace-nowrap"
                     title="Resolver Conversa"
                   >
-                    <CheckCircle2 size={16} />
+                    <CheckCircle2 size={14} />
                     <span>Resolver</span>
                   </button>
                 )}
@@ -5587,25 +5802,64 @@ export default function ChatDashboard() {
                         </button>
                       )}
                       
-                      {/* Botão de Controle da I.A (Mobile) */}
-                      <button 
-                        onClick={() => {
-                          useChatStore.getState().updateConversationField(activeChat.id, { 
-                            ai_paused: !activeChat.ai_paused,
-                            ai_paused_manually: !activeChat.ai_paused
-                          });
-                          setMobileHeaderMenuOpen(false);
-                        }}
-                        className={cn(
-                          "flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl transition-all text-sm font-semibold border w-full shadow-sm hover:scale-[1.02]",
-                          !activeChat.ai_paused 
-                            ? "bg-indigo-500/10 border-indigo-500/20 text-indigo-600 dark:text-indigo-400"
-                            : "bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400"
-                        )}
-                      >
-                        <BrainCircuit size={16} className={cn(!activeChat.ai_paused && "animate-pulse")} />
-                        <span>{!activeChat.ai_paused ? "Pausar Inteligência" : "Ativar Inteligência"}</span>
-                      </button>
+                      {/* Botões de Controle da I.A (Mobile) */}
+                      {activeChat.ai_paused ? (
+                        <button 
+                          onClick={() => {
+                            useChatStore.getState().updateConversationField(activeChat.id, { 
+                              ai_paused: false,
+                              ai_paused_manually: false,
+                              ai_paused_until: null
+                            });
+                            setMobileHeaderMenuOpen(false);
+                          }}
+                          className="flex items-center justify-center gap-2 px-3 py-2.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-[#00a884] rounded-xl transition-all text-sm font-semibold border border-emerald-200 dark:border-emerald-500/20 w-full shadow-sm hover:scale-[1.02]"
+                        >
+                          <Play size={16} />
+                          <span>Retomar IA</span>
+                        </button>
+                      ) : (
+                        <div className="flex flex-col gap-2 p-2 bg-amber-50/50 dark:bg-amber-500/5 rounded-xl border border-amber-100 dark:border-amber-500/10">
+                          <div className="text-[11px] text-amber-600/80 dark:text-amber-500/80 text-center font-bold uppercase tracking-wider mb-0.5 flex items-center justify-center gap-1.5">
+                            <BrainCircuit size={12} className="animate-pulse" />
+                            <span>Pausar IA</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {[10, 60, 720].map((mins) => (
+                              <button
+                                key={mins}
+                                onClick={() => {
+                                  const pauseUntil = new Date(Date.now() + mins * 60000).toISOString();
+                                  useChatStore.getState().updateConversationField(activeChat.id, { 
+                                    ai_paused: true,
+                                    ai_paused_manually: true,
+                                    ai_paused_until: pauseUntil
+                                  });
+                                  setMobileHeaderMenuOpen(false);
+                                }}
+                                className="flex items-center justify-center gap-1.5 px-2 py-2 bg-white dark:bg-[#111b21] text-amber-600 dark:text-amber-400 rounded-lg transition-all text-[11px] font-semibold border border-amber-200 dark:border-amber-500/20 shadow-sm active:scale-95 hover:bg-amber-50 dark:hover:bg-amber-500/10"
+                              >
+                                <Clock size={12} />
+                                <span>{mins === 60 ? '1 hora' : mins === 720 ? '12 horas' : `${mins} min`}</span>
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => {
+                                useChatStore.getState().updateConversationField(activeChat.id, { 
+                                  ai_paused: true,
+                                  ai_paused_manually: true,
+                                  ai_paused_until: null
+                                });
+                                setMobileHeaderMenuOpen(false);
+                              }}
+                              className="flex items-center justify-center gap-1.5 px-2 py-2 bg-white dark:bg-[#111b21] text-red-600 dark:text-red-400 rounded-lg transition-all text-[11px] font-semibold border border-red-200 dark:border-red-500/20 shadow-sm active:scale-95 hover:bg-red-50 dark:hover:bg-red-500/10"
+                            >
+                              <StopCircle size={12} />
+                              <span>Definitivo</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="flex flex-col gap-2 bg-gray-50 dark:bg-[#111b21] p-2 rounded-lg border border-black/5 dark:border-white/5">
                         <span className="text-[11px] text-gray-500 text-center font-bold uppercase tracking-wider">Status & Atribuição</span>
@@ -5639,7 +5893,8 @@ export default function ChatDashboard() {
                           onClick={() => { 
                             useChatStore.getState().updateConversationField(activeChat.id, { 
                               ai_paused: false,
-                              ai_paused_manually: false
+                              ai_paused_manually: false,
+                              ai_paused_until: null
                             }); 
                             setActiveChatDropdown(false); 
                           }}
@@ -5653,7 +5908,8 @@ export default function ChatDashboard() {
                           onClick={() => { 
                             useChatStore.getState().updateConversationField(activeChat.id, { 
                               ai_paused: true,
-                              ai_paused_manually: true
+                              ai_paused_manually: true,
+                              ai_paused_until: null
                             }); 
                             setActiveChatDropdown(false); 
                           }}
@@ -5695,6 +5951,14 @@ export default function ChatDashboard() {
              className="flex-1 overflow-y-auto p-4 z-10 flex flex-col gap-2"
              ref={messagesContainerRef}
              onScroll={handleScroll}
+             onClick={() => {
+               if (activeChatId) {
+                 const activeContact = contacts.find(c => c.id === activeChatId);
+                 if (activeContact && (Number(activeContact.unread || 0) > 0 || activeContact.isManuallyUnread)) {
+                   useChatStore.getState().markAsRead(activeChatId);
+                 }
+               }
+             }}
           >
             {isSyncingHistory[activeChat.id] && (
                <div className="flex justify-center my-4 animate-in fade-in duration-300">
@@ -6620,6 +6884,14 @@ export default function ChatDashboard() {
                           value={inputText}
                           spellCheck={true}
                           lang="pt-BR"
+                          onFocus={() => {
+                            if (activeChatId) {
+                              const activeContact = contacts.find(c => c.id === activeChatId);
+                              if (activeContact && (Number(activeContact.unread || 0) > 0 || activeContact.isManuallyUnread)) {
+                                useChatStore.getState().markAsRead(activeChatId);
+                              }
+                            }
+                          }}
                           onChange={e => {
                             const val = e.target.value;
                             setInputText(val);
@@ -6629,6 +6901,7 @@ export default function ChatDashboard() {
                             } else {
                               setShowQuickReplies(false);
                             }
+                            handleUserTyping(val);
                           }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' && !e.shiftKey) {

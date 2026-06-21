@@ -19,8 +19,11 @@ import {
   RefreshCw,
   FolderOpen,
   ClipboardList,
-  Star
+  Star,
+  Search,
+  GripVertical
 } from 'lucide-react';
+import { Reorder } from 'framer-motion';
 
 interface OperatorProfile {
   id: string;
@@ -60,6 +63,8 @@ interface ExecutionResponse {
   observation?: string;
   evidenceUrl?: string;
   evidenceUploading?: boolean;
+  answeredAt?: string;
+  answeredBy?: string;
 }
 
 export default function ChecklistTablet() {
@@ -88,6 +93,11 @@ export default function ChecklistTablet() {
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const [itemsToAnswer, setItemsToAnswer] = useState<any[]>([]);
   const [responses, setResponses] = useState<Record<string, ExecutionResponse>>({});
+  const [checkedSubtasks, setCheckedSubtasks] = useState<Record<string, boolean>>({});
+
+  // Filtros locais e ordenação
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
 
   // Toast e Modais de Sucesso
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error', msg: string } | null>(null);
@@ -424,6 +434,7 @@ export default function ChecklistTablet() {
     setActiveChecklist(chk);
     setStartedAt(new Date().toISOString());
     setResponses({});
+    setCheckedSubtasks({});
     setDistanceFromUnit(null);
     setCurrentCoords(null);
     setGeoError('');
@@ -500,7 +511,9 @@ export default function ChecklistTablet() {
           value: val,
           isConforming,
           isMetaOk,
-          isDone
+          isDone,
+          answeredAt: isDone ? new Date().toISOString() : undefined,
+          answeredBy: isDone && loggedInUser ? loggedInUser.name : undefined
         }
       };
     });
@@ -1000,32 +1013,170 @@ export default function ChecklistTablet() {
 
                   {/* Formulário de Perguntas/Itens */}
                   <div className="flex-1 overflow-y-auto styled-scrollbar p-6 space-y-4">
-                    {itemsToAnswer.map((item, idx) => {
+                    
+                    {/* Filtros da Lista */}
+                    {itemsToAnswer.length > 0 && (
+                      <div className="flex flex-col sm:flex-row gap-3 mb-6 bg-[#202c33]/50 p-3 rounded-2xl border border-[#2a3942]/60">
+                        <div className="flex-1 relative">
+                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Search size={16} className="text-[#8696a0]" />
+                          </div>
+                          <input
+                            type="text"
+                            placeholder="Buscar item..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl pl-10 pr-4 py-2.5 text-sm text-[#d1d7db] placeholder-[#8696a0] focus:outline-none focus:border-indigo-500 transition-all"
+                          />
+                        </div>
+                        
+                        <div className="sm:w-64">
+                          <select
+                            value={categoryFilter}
+                            onChange={(e) => setCategoryFilter(e.target.value)}
+                            className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-4 py-2.5 text-sm text-[#d1d7db] focus:outline-none focus:border-indigo-500 transition-all cursor-pointer"
+                          >
+                            <option value="">Todas as Categorias</option>
+                            {Array.from(new Set(itemsToAnswer.map(item => {
+                              const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                              return match ? match[1] : null;
+                            }).filter(Boolean))).map(cat => (
+                              <option key={cat as string} value={cat as string}>{cat}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    <Reorder.Group 
+                      axis="y" 
+                      values={itemsToAnswer.filter(item => {
+                        const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                        const groupName = match ? match[1] : null;
+                        const cleanTitle = match ? match[2] : item.title;
+                        
+                        if (categoryFilter && groupName !== categoryFilter) return false;
+                        if (searchQuery && !cleanTitle.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+                        return true;
+                      })} 
+                      onReorder={(newFilteredItems) => {
+                        const currentFiltered = itemsToAnswer.filter(item => {
+                          const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                          const groupName = match ? match[1] : null;
+                          const cleanTitle = match ? match[2] : item.title;
+                          if (categoryFilter && groupName !== categoryFilter) return false;
+                          if (searchQuery && !cleanTitle.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+                          return true;
+                        });
+                        
+                        const newItemsToAnswer = [...itemsToAnswer];
+                        const indices = currentFiltered.map(item => itemsToAnswer.findIndex(i => i.id === item.id));
+                        indices.forEach((index, i) => {
+                          newItemsToAnswer[index] = newFilteredItems[i];
+                        });
+                        setItemsToAnswer(newItemsToAnswer);
+                      }}
+                      className="space-y-4"
+                    >
+                    {itemsToAnswer.filter(item => {
+                      const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                      const groupName = match ? match[1] : null;
+                      const cleanTitle = match ? match[2] : item.title;
+                      
+                      if (categoryFilter && groupName !== categoryFilter) return false;
+                      if (searchQuery && !cleanTitle.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+                      return true;
+                    }).map((item, idx) => {
                       const resp = responses[item.id] || { itemId: item.id, value: '', isConforming: true, isMetaOk: true, isDone: false };
 
                       return (
-                        <div 
+                        <Reorder.Item 
                           key={item.id}
-                          className={`p-5 rounded-[28px] border bg-[#202c33]/50 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all ${
-                            item.is_required && !resp.isDone ? 'border-[#2a3942]/60' : 'border-emerald-500/30 shadow-sm shadow-emerald-500/5 bg-[#202c33]/80'
+                          value={item}
+                          className={`p-5 rounded-[28px] border flex flex-col gap-4 transition-all ${
+                            item.is_required && !resp.isDone ? 'border-[#2a3942]/60 bg-[#202c33]/50' : 'border-emerald-500/30 shadow-sm shadow-emerald-500/5 bg-[#202c33]/80'
                           }`}
                         >
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                           {/* Enunciado e Instrução */}
                           <div className="min-w-0 flex-1 space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
-                                {idx + 1}
-                              </span>
-                              <h4 className="font-semibold text-white text-sm leading-snug">{item.title}</h4>
-                              {item.is_required && (
-                                <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest shrink-0">* Obrigatório</span>
-                              )}
-                              {item.is_critical && (
-                                <span className="text-[9px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full shrink-0">Crítico</span>
-                              )}
-                            </div>
-                            {item.description && (
-                              <p className="text-xs text-[#8696a0] pl-7 leading-relaxed">{item.description}</p>
+                            {(() => {
+                              const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                              const groupName = match ? match[1] : null;
+                              const cleanTitle = match ? match[2] : item.title;
+                              const cleanDescription = item.description ? item.description.replace(/Fornecedor:\s*/g, '').replace(/Custo:\s*/g, '').split(' | ').join(' • ') : null;
+
+                              return (
+                                <>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="cursor-grab hover:text-indigo-400 text-[#8696a0] transition-colors shrink-0 mr-1 active:cursor-grabbing">
+                                      <GripVertical size={16} />
+                                    </div>
+                                    <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
+                                      {idx + 1}
+                                    </span>
+                                    {groupName && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#2a3942] text-[#8696a0] font-bold tracking-wider uppercase shrink-0">
+                                        {groupName}
+                                      </span>
+                                    )}
+                                    <h4 className="font-semibold text-white text-sm leading-snug">{cleanTitle}</h4>
+                                    {item.is_required && (
+                                      <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest shrink-0">* Obrigatório</span>
+                                    )}
+                                    {item.is_critical && (
+                                      <span className="text-[9px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full shrink-0">Crítico</span>
+                                    )}
+                                  </div>
+                                  
+                                  {cleanDescription && (
+                                    <p className="text-xs text-[#8696a0] pl-7 leading-relaxed">{cleanDescription}</p>
+                                  )}
+
+                                  {/* Metas Numéricas / Temperatura */}
+                                  {(item.response_type === 'numeric' || item.response_type === 'temperature') && (item.min_meta !== null || item.max_meta !== null) && (
+                                    <p className="text-[11px] text-teal-400 pl-7 font-mono font-bold mt-0.5">
+                                      {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Máx: ${item.max_meta}` : ''} {item.measurement_unit}
+                                    </p>
+                                  )}
+                                </>
+                              );
+                            })()}
+
+                            {/* Lista de Verificação (Sub-tarefas) */}
+                            {item.options && item.options.length > 0 && (
+                              <div className="mt-2 pl-7 space-y-1.5">
+                                <span className="text-[9px] font-black text-indigo-400/80 block uppercase tracking-widest">Itens a verificar:</span>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {item.options.map((sub: string, sIdx: number) => {
+                                    const subtaskKey = `${item.id}_${sIdx}`;
+                                    const isChecked = checkedSubtasks[subtaskKey] || false;
+                                    return (
+                                      <label 
+                                        key={sIdx} 
+                                        className={`flex items-center gap-2 p-2 rounded-xl border transition-all cursor-pointer select-none text-[11px] ${
+                                          isChecked 
+                                            ? 'bg-indigo-500/10 border-indigo-500/30 text-white' 
+                                            : 'bg-black/25 border-[#2a3942]/40 text-[#d1d7db] hover:bg-black/40'
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={isChecked}
+                                          onChange={(e) => {
+                                            setCheckedSubtasks(prev => ({
+                                              ...prev,
+                                              [subtaskKey]: e.target.checked
+                                            }));
+                                          }}
+                                          className="rounded border-[#2a3942] text-indigo-600 bg-transparent focus:ring-indigo-600/30 focus:ring-offset-0 w-3.5 h-3.5"
+                                        />
+                                        <span className="truncate">{sub}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
                             )}
 
                             {/* Campo de Upload de Foto de Evidência se exigido */}
@@ -1116,18 +1267,42 @@ export default function ChecklistTablet() {
 
                             {/* NUMERIC / TEMPERATURE / COUNTER */}
                             {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'counter') && (
-                              <div className="flex items-center gap-2 bg-black/20 p-1 rounded-xl pr-3">
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={resp.value || ''}
-                                  onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
-                                  placeholder="Digite..."
-                                  className="bg-transparent border-none focus:outline-none focus:ring-0 text-xs w-20 text-center text-white"
-                                />
-                                {item.measurement_unit && (
-                                  <span className="text-[10px] font-mono text-[#8696a0] shrink-0">{item.measurement_unit}</span>
-                                )}
+                              <div className="flex items-center gap-1 bg-[#111b21] p-1.5 rounded-[20px] border border-[#2a3942]/80 shadow-inner">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const current = parseFloat(resp.value || '0');
+                                    handleAnswerChange(item.id, item.response_type, (current - 1).toString(), item.min_meta, item.max_meta);
+                                  }}
+                                  className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-[#202c33] hover:bg-[#2a3942] rounded-2xl text-[#8696a0] hover:text-white text-3xl font-light transition-all active:scale-95"
+                                >
+                                  -
+                                </button>
+                                
+                                <div className="flex items-baseline px-2">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={resp.value || ''}
+                                    onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
+                                    placeholder="0"
+                                    className="bg-transparent border-none focus:outline-none focus:ring-0 text-3xl md:text-4xl font-black w-20 md:w-24 text-center text-white p-0 m-0"
+                                  />
+                                  {item.measurement_unit && (
+                                    <span className="text-xs font-bold text-[#8696a0] shrink-0 ml-1">{item.measurement_unit}</span>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const current = parseFloat(resp.value || '0');
+                                    handleAnswerChange(item.id, item.response_type, (current + 1).toString(), item.min_meta, item.max_meta);
+                                  }}
+                                  className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-2xl text-3xl font-light transition-all active:scale-95 border border-emerald-500/30"
+                                >
+                                  +
+                                </button>
                               </div>
                             )}
 
@@ -1160,10 +1335,24 @@ export default function ChecklistTablet() {
                               </div>
                             )}
 
+                           </div>
                           </div>
-                        </div>
+
+                          {/* Data e Hora e Operador */}
+                          {resp.isDone && resp.answeredAt && resp.answeredBy && (
+                            <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-[#2a3942]/30 text-[10px] text-[#8696a0] animate-in fade-in slide-in-from-top-1">
+                              <CheckCircle2 size={12} className="text-emerald-500" />
+                              <span>
+                                Registrado por <strong className="text-[#d1d7db]">{resp.answeredBy}</strong> em{' '}
+                                {new Date(resp.answeredAt).toLocaleDateString('pt-BR')} às{' '}
+                                {new Date(resp.answeredAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                          )}
+                        </Reorder.Item>
                       );
                     })}
+                    </Reorder.Group>
                   </div>
 
                   {/* Barra Inferior de Envio */}

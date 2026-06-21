@@ -170,6 +170,17 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     };
 
     const fetchAgentPermissionsAndData = async () => {
+       const { data: { session } } = await supabase.auth.getSession();
+       if (!session) {
+         console.warn("[MainSidebar] No session found on mount. Redirecting to login...");
+         localStorage.removeItem('current_tenant_id');
+         sessionStorage.removeItem('current_tenant_id');
+         useChatStore.getState().clearStore();
+         await supabase.auth.signOut();
+         window.location.href = '/';
+         return;
+       }
+
        const storage = getActiveStorage();
        const userRole = storage ? storage.getItem('current_user_role') : null;
        const userEmail = storage ? storage.getItem('current_user_email') : null;
@@ -226,19 +237,16 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
              setInstances(finalData);
 
              // Inicializa o status de cada instância no store para reatividade
-             const store = useChatStore.getState();
+             const newStatuses: Record<string, string> = {};
              data.forEach(inst => {
-                if (inst.status !== 'connected') {
-                   store.setInstanceStatus(inst.id, inst.status);
-                } else {
-                   useChatStore.setState(state => ({
-                      instancesStatus: {
-                         ...state.instancesStatus,
-                         [inst.id]: 'connected'
-                      }
-                   }));
-                }
+                newStatuses[inst.id] = inst.status;
              });
+             useChatStore.setState(state => ({
+                instancesStatus: {
+                   ...state.instancesStatus,
+                   ...newStatuses
+                }
+             }));
 
              // Auto-seleciona a única caixa disponível
              const { activeChannelFilter, setActiveChannelFilter, fetchInitialData } = useChatStore.getState();
@@ -567,7 +575,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                <div className="pl-1 border-l-2 border-[#2a3942]/50 ml-5 my-1 py-0.5 space-y-0.5">
                  {instances.map(inst => {
                     const unreadCount = contacts.filter(c => c.instance_id === inst.id && c.unread > 0 && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length;
-                    const status = instancesStatus[inst.id] ?? 'connected';
+                    const status = instancesStatus[inst.id] ?? inst.status ?? 'connected';
                     return (
                       <div 
                         key={inst.id} 
@@ -861,22 +869,22 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       )}
 
       {/* User Footer Profile */}
-      <div className="absolute bottom-0 w-full h-[60px] bg-[#202c33] border-t border-[#2a3942] flex items-center px-4 cursor-pointer hover:bg-[#2a3942] transition-colors group">
+      <div className="absolute bottom-0 w-full h-[60px] bg-[#e9edef] dark:bg-[#202c33] border-t border-gray-250/80 dark:border-[#2a3942] flex items-center px-4 cursor-pointer hover:bg-gray-200 dark:hover:bg-[#2a3942] transition-colors group">
         <div className="relative">
           <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-500 p-[1px] shadow-sm">
-            <div className="w-full h-full bg-[#111b21] rounded-full flex items-center justify-center overflow-hidden">
-              <span className="text-[#e9edef] font-semibold text-xs tracking-tight">{agentInitial}</span>
+            <div className="w-full h-full bg-white dark:bg-[#111b21] rounded-full flex items-center justify-center overflow-hidden">
+              <span className="text-gray-700 dark:text-[#e9edef] font-semibold text-xs tracking-tight">{agentInitial}</span>
             </div>
           </div>
-          <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#202c33] rounded-full group-hover:border-[#2a3942] transition-colors" />
+          <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#e9edef] dark:border-[#202c33] rounded-full group-hover:border-gray-200 dark:group-hover:border-[#2a3942] transition-colors" />
         </div>
         <div className={cn("ml-3 flex-1 min-w-0 transition-opacity duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100")}>
-          <p className="text-[14px] font-medium text-[#e9edef] truncate">{agentName}</p>
-          <p className="text-[11px] text-[#8696a0] truncate opacity-80">{currentUserEmail || ''}</p>
+          <p className="text-[14px] font-medium text-[#111b21] dark:text-[#e9edef] truncate">{agentName}</p>
+          <p className="text-[11px] text-[#54656f] dark:text-[#8696a0] truncate opacity-80">{currentUserEmail || ''}</p>
         </div>
         <button 
           onClick={handleLogout}
-          className={cn("ml-2 p-2 rounded-md text-[#8696a0] hover:text-[#f15c6d] hover:bg-[#2a3942] transition-all opacity-0 group-hover/sidebar:opacity-100 focus:opacity-100", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:pointer-events-none group-hover/sidebar:!opacity-100 group-hover/sidebar:!pointer-events-auto")}
+          className={cn("ml-2 p-2 rounded-md text-[#54656f] dark:text-[#8696a0] hover:text-[#f15c6d] hover:bg-gray-200 dark:hover:bg-[#2a3942] transition-all opacity-0 group-hover/sidebar:opacity-100 focus:opacity-100", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:pointer-events-none group-hover/sidebar:!opacity-100 group-hover/sidebar:!pointer-events-auto")}
           title="Sair da conta"
         >
           <LogOut size={16} />

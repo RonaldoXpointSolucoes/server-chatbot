@@ -53,6 +53,7 @@ export type ContactType = ContactRow & {
   conv_id?: string;
   ai_paused?: boolean;
   ai_paused_manually?: boolean;
+  isManuallyUnread?: boolean;
 };
 
 export interface AppointmentType {
@@ -249,6 +250,7 @@ interface ChatState {
   // Local state updaters
   addMessageLocally: (contactId: string, msg: MessageType) => void;
   upsertContactLocally: (contact: ContactRow) => void;
+  sendPresenceUpdate: (contactId: string, presence: 'composing' | 'recording' | 'paused' | 'available' | 'unavailable', instanceName?: string) => Promise<void>;
   sendHumanMessage: (contactId: string, text: string, instanceName: string) => Promise<void>;
   editHumanMessage: (contactId: string, messageId: string, newText: string, instanceName: string) => Promise<void>;
   deleteHumanMessage: (contactId: string, messageId: string, instanceName: string) => Promise<void>;
@@ -1326,6 +1328,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const pseudoId = 'optimistic-' + Math.random().toString();
     state.addMessageLocally(contactId, { id: pseudoId, text: finalMessageText, sender: 'human', timestamp: new Date() });
 
+    // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
+    if (state.globalAiEnabled && contact.bot_status !== 'paused') {
+        const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
+        state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
+    }
+
     try {
       const { sendTextMessage } = await import('../services/whatsappEngine');
       // 1. Manda pra Baileys Engine Local
@@ -1357,6 +1365,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } else {
          alert(`Não foi possível enviar a mensagem: ${err.message}`);
       }
+    }
+  },
+
+  sendPresenceUpdate: async (contactId, presence, instanceName) => {
+    const state = get();
+    const contact = state.contacts.find(c => c.id === contactId);
+    if (!contact || !state.tenantInfo) return;
+
+    const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
+    const expectedInstance = compositeInstance || contact.instance_id;
+    const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
+
+    try {
+      const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
+      if (!resolvedInstanceId) return;
+
+      const apiKey = await getOrFetchApiKey(resolvedInstanceId);
+      const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
+
+      const { sendEnginePresenceUpdate } = await import('../services/whatsappEngine');
+      await sendEnginePresenceUpdate(state.tenantInfo.id, resolvedInstanceId, jid, presence, apiKey);
+    } catch (err: any) {
+      console.warn('[sendPresenceUpdate] Erro ao enviar status de presença:', err);
     }
   },
 
@@ -1587,6 +1618,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp: new Date() 
     });
 
+    // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
+    if (contact.bot_status !== 'paused') {
+        const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
+        state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
+    }
+
     try {
       const formData = new FormData();
       formData.append('media', file);
@@ -1754,6 +1791,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       mediaUrl: mediaUrl, // Always keep the mediaUrl so it renders the video properly
       timestamp: new Date() 
     });
+
+    // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
+    if (state.globalAiEnabled && contact.bot_status !== 'paused') {
+        const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
+        state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
+    }
 
     try {
       const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
@@ -2040,7 +2083,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const finalId = c.id.includes('_') ? c.id : (baseId.includes('temp-') ? baseId : `${baseId}_${effectiveInstanceId}`);
             
             const finalCustomName = c.custom_name || contact.custom_name;
-            const fallbackName = c.name !== c.phone && c.name ? c.name : contact.name;
+            const fallbackName = (c.name !== c.phone && c.name ? c.name : contact.name) || contact.push_name;
             
             const tname = get().tenantInfo?.name || '';
             let finalName = finalCustomName || fallbackName;
@@ -2068,7 +2111,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
          const effectiveInstanceId = contact.instance_id || 'default';
          const compositeId = contact.id.includes('_') ? contact.id : `${contact.id}_${effectiveInstanceId}`;
          const tname = get().tenantInfo?.name || '';
-         let finalName = contact.custom_name || contact.name;
+         let finalName = contact.custom_name || contact.name || contact.push_name;
          finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
          
          const updatedTags = Array.isArray(contact.tags) ? contact.tags : [];
@@ -2142,6 +2185,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const { error } = await supabase.from('contacts').update(dbPayload).eq('id', realContactId);
       if (error) throw error;
+
+      if (payload.tags) {
+        await get().syncConversationLabelsWithTags(realContactId, payload.tags);
+      }
 
       // Log Operation
       if (rawBeforeState) {
@@ -2449,7 +2496,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     
     // UI Otimista
     set((state) => ({
-      contacts: state.contacts.map(c => c.id === contactId ? { ...c, unread: newUnread } : c)
+      contacts: state.contacts.map(c => c.id === contactId ? { ...c, unread: newUnread, isManuallyUnread: newUnread > 0 } : c)
     }));
 
     try {
@@ -2464,7 +2511,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.error('Erro ao alternar unread:', e);
       // Reverter atualização otimista
       set((state) => ({
-        contacts: state.contacts.map(c => c.id === contactId ? { ...c, unread: currentUnread } : c)
+        contacts: state.contacts.map(c => c.id === contactId ? { ...c, unread: currentUnread, isManuallyUnread: currentUnread > 0 } : c)
       }));
     }
   },
@@ -2472,7 +2519,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   markAsRead: async (contactId: string) => {
     const state = get();
     const contact = state.contacts.find(c => c.id === contactId);
-    if (!contact || contact.unread === 0) return;
+    if (!contact || (contact.unread === 0 && !contact.isManuallyUnread)) return;
 
     const unreadCount = contact.unread;
 
@@ -2498,6 +2545,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       contacts: s.contacts.map(c => c.id === contactId ? { 
         ...c, 
         unread: 0,
+        isManuallyUnread: false,
         messages: c.messages.map(m => unreadIds.includes(m.id) ? {
           ...m,
           payload: { ...(m.payload || {}), read_receipt: readReceipt }
@@ -2978,7 +3026,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      }
                   } else {
                      const finalCustomName = dbC.custom_name;
-                     const finalName = finalCustomName || dbC.name;
+                     const finalName = finalCustomName || dbC.name || dbC.push_name;
                      const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || dbC.phone)}&background=random&color=fff`;
 
                      newContacts.push({
@@ -3322,6 +3370,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                    updated[idx] = {
                        ...updated[idx],
                        unread: 0,
+                       isManuallyUnread: false,
                        messages: uniqueMsgs
                    };
                }
@@ -3647,7 +3696,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!tenant) return;
     
     // UI Otimista (Separa flags internas que não pertencem ao schema de conversations)
-    const { snoozed_by_system, ...dbPayload } = payload as any;
+    const { snoozed_by_system, ai_paused, ai_paused_manually, ai_paused_until, ...dbPayload } = payload as any;
     if ('ai_paused' in payload) {
       dbPayload.status = payload.ai_paused ? 'open' : 'bot';
     }
@@ -3665,7 +3714,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if ('ai_paused' in payload) {
                stateUpdates.ai_paused = payload.ai_paused;
                stateUpdates.ai_paused_manually = payload.ai_paused_manually;
-               stateUpdates.bot_status = payload.ai_paused ? 'paused' : 'active';
+               
+               if (payload.ai_paused_until) {
+                  // Pausa temporária: status do contato continua active (o backend lida com bot_paused_until)
+                  // Mas marcamos ai_paused no app para refletir a UI
+                  stateUpdates.bot_paused_until = payload.ai_paused_until;
+                  stateUpdates.bot_status = 'active'; 
+               } else if (payload.ai_paused === false) {
+                  // Retomada: limpa data e volta pra active
+                  stateUpdates.bot_paused_until = null;
+                  stateUpdates.bot_status = 'active';
+               } else {
+                  // Pausa definitiva
+                  stateUpdates.bot_paused_until = null;
+                  stateUpdates.bot_status = 'paused';
+               }
                stateUpdates.conv_status = payload.ai_paused ? 'open' : 'bot';
             }
             return { ...c, ...stateUpdates };
@@ -3695,14 +3758,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (error) throw error;
 
       if ('ai_paused' in payload) {
-        await supabase.from('contacts').update({ bot_status: payload.ai_paused ? 'paused' : 'active' }).eq('id', realContactId);
+        const botStatusPayload: any = { 
+            bot_status: payload.ai_paused && !payload.ai_paused_until ? 'paused' : 'active',
+            bot_paused_until: payload.ai_paused_until || null
+        };
+        await supabase.from('contacts').update(botStatusPayload).eq('id', realContactId);
 
         const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
         const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
         const me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
         const operatorName = currentUserName || me?.full_name || me?.email || 'Atendente';
 
-        const statusText = payload.ai_paused ? '⏸️ IA Luna Pausada' : '▶️ IA Luna Retomada';
+        let statusText = '▶️ IA Luna Retomada';
+        if (payload.ai_paused) {
+           if (payload.ai_paused_until) {
+              const minutes = Math.round((new Date(payload.ai_paused_until).getTime() - Date.now()) / 60000);
+              statusText = `⏸️ IA Luna Pausada (${minutes}m)`;
+           } else {
+              statusText = '⏸️ IA Luna Pausada Definitivamente';
+           }
+        }
         const msgText = `${statusText} por ${operatorName}`;
 
         const dbMsg = {
@@ -4071,6 +4146,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   if (isClient && !isHistorical && !updatedContact.is_blocked) {
                      if (s.activeChatId !== cid) {
                          updatedContact.unread = (updatedContact.unread || 0) + 1;
+                     } else {
+                         updatedContact.isManuallyUnread = false;
                      }
                      
                      if (!isIgnoredSilent) {
@@ -4217,11 +4294,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                const contactInstance = getInstanceIdFromContact(c.id) || c.instance_id || 'default';
                const convInstance = conv.instance_id || 'default';
                if (realId === conv.contact_id && contactInstance === convInstance) {
+                  const stillManuallyUnread = c.isManuallyUnread && conv.unread_count === 1;
                   return {
                      ...c,
                      conv_status: conv.status,
                      assigned_to: conv.assigned_to,
                      unread: conv.unread_count,
+                     isManuallyUnread: stillManuallyUnread,
                      is_pinned: conv.is_pinned,
                      is_favorite: conv.is_favorite,
                      snoozed_until: conv.snoozed_until,

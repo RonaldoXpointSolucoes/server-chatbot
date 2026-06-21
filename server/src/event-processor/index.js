@@ -429,7 +429,8 @@ class EventProcessor {
                  if (existingDbContacts) {
                      for (const e of existingDbContacts) {
                          existingMap.set(e.phone, e);
-                         contactBotStatusMap.set(e.id, e.bot_status);
+                         const isTempPaused = e.bot_paused_until && new Date(e.bot_paused_until) > new Date();
+                         contactBotStatusMap.set(e.id, (e.bot_status === 'paused' || isTempPaused) ? 'paused' : 'active');
                      }
                  }
              }
@@ -785,7 +786,7 @@ class EventProcessor {
                              if (singleErr.code !== '23505') {
                                  console.error(`[BatchProcessor] Erro na inserção individual falha para ID ${m.whatsapp_message_id}:`, singleErr);
                                  // Re-enfileira a mensagem para tentar novamente se for erro transiente e não tiver excedido o limite de 5 tentativas
-                                 const originalItem = activeBatch.find(x => x.rawMsg?.key?.id === m.whatsapp_message_id);
+                                 const originalItem = activeBatch.find(x => x.rawMsg?.key?.id === m.whatsapp_message_id && x.instanceId === m.instance_id);
                                  if (originalItem) {
                                      originalItem.retryCount = (originalItem.retryCount || 0) + 1;
                                      if (originalItem.retryCount < 5) {
@@ -815,7 +816,7 @@ class EventProcessor {
              const aiTriggerMap = new Map();
 
              for(const msg of realInserted) {
-                 const b = activeBatch.find(x => x.rawMsg.key.id === msg.whatsapp_message_id);
+                 const b = activeBatch.find(x => x.rawMsg.key.id === msg.whatsapp_message_id && x.instanceId === msg.instance_id);
                  if (!b) continue;
 
                  if (!b.isHistory) {
@@ -930,7 +931,7 @@ class EventProcessor {
                       // 1. Verifica se o robô está ativo para esta caixa de entrada (padrão true se undefined)
                       const botActive = instanceConfig.bot_active !== false;
                       if (!botActive) {
-                          console.log(`[EventProcessor] Robô desativado nas configurações da caixa de entrada (${b.instanceId}). Silenciando robô.`);
+                          console.warn(`[EventProcessor] Robô desativado nas configurações da caixa de entrada (${b.instanceId}). Silenciando robô.`);
                           return;
                       }
 
@@ -956,14 +957,14 @@ class EventProcessor {
                       // Se a conversa for 'open' (operador humano), o robô só responde se o cliente estiver explicitamente na whitelist de testes
                       if (b.convStatus === 'open') {
                           if (!isTestAllowed) {
-                              // Silencia o robô para clientes de produção normais em conversas abertas
+                              console.warn(`[EventProcessor] Conversa está aberta (operador humano) para o contato ${b.phone}. Cliente não está na whitelist de testes da instância. Silenciando robô.`);
                               return;
                           }
                           console.log(`[EventProcessor] Sandbox Ativo: Forçando resposta da IA em chat 'open' para o celular homologado (${b.phone}).`);
                       } else {
                           // Para status 'bot' ou 'teste_robo', se houver whitelist de testes configurada, o cliente precisa estar nela
                           if (testNumbers.length > 0 && !isTestAllowed) {
-                              console.log(`[EventProcessor] Sandbox da Instância Ativo: Mensagem do celular (${b.phone}) não está na whitelist de testes da instância. Silenciando robô.`);
+                              console.warn(`[EventProcessor] Sandbox da Instância Ativo: Mensagem do celular (${b.phone}) não está na whitelist de testes da instância. Silenciando robô.`);
                               return;
                           }
                       }
@@ -972,7 +973,7 @@ class EventProcessor {
                           const { data: companyData } = await supabase.from('companies').select('global_ai_enabled').eq('id', b.tenantId).single();
                           // Se o IA estiver desativado globalmente e NÃO for um teste, aborta o processamento.
                           if (companyData && companyData.global_ai_enabled === false && b.convStatus !== 'teste_robo' && !isTestAllowed) {
-                              console.log(`[BatchProcessor] IA e Automações Globais estão DESATIVADAS para o tenant ${b.tenantId}`);
+                              console.warn(`[BatchProcessor] IA e Automações Globais estão DESATIVADAS para o tenant ${b.tenantId}`);
                               return;
                           }
 
@@ -1025,6 +1026,10 @@ class EventProcessor {
                                }
                            }
 
+                           if (!botData) {
+                               console.warn(`[EventProcessor] Nenhum bot ativo ou elegível encontrado para a caixa de entrada ${b.instanceId}. Silenciando robô.`);
+                           }
+
                           if (botData) {
                               // --- MODO SANDBOX / FILTRO DE TELEFONE DE TESTE ---
                               // Se o bot estiver em modo de teste (test_mode), ele responde estritamente
@@ -1034,7 +1039,7 @@ class EventProcessor {
                                   const clientPhoneClean = String(b.phone || '').replace(/\D/g, '');
                                   
                                   if (clientPhoneClean !== testPhoneClean) {
-                                      console.log(`[EventProcessor] Sandbox Ativo: O bot ${botData.name} está em Modo de Teste e o celular recebido (${clientPhoneClean}) é diferente do celular sandbox (${testPhoneClean}). Silenciando robô.`);
+                                      console.warn(`[EventProcessor] Sandbox Ativo: O bot ${botData.name} está em Modo de Teste e o celular recebido (${clientPhoneClean}) é diferente do celular sandbox (${testPhoneClean}). Silenciando robô.`);
                                       return;
                                   }
                                   console.log(`[EventProcessor] Sandbox Ativo: Mensagem do celular homologado (${clientPhoneClean}) autorizada para o bot ${botData.name}.`);

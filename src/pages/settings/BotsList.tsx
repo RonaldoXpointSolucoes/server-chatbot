@@ -41,6 +41,7 @@ import { Link } from 'react-router-dom';
 import { BotModal } from '../../components/modals/BotModal';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
+import { geminiService } from '../../services/geminiService';
 import { BOT_INDUSTRIES, BOT_TEMPLATES, BotTemplate, BOT_CATEGORIES } from '../../lib/botTemplates';
 import { cn } from '../../lib/utils';
 
@@ -812,19 +813,7 @@ INSTRUÇÕES DO ORQUESTRADOR:
    - Se o nome do cliente atual estiver disponível/preenchido e NÃO for um nome genérico (como "Cliente Simulador", "Cliente", ou vazio), você DEVE OBRIGATORIAMENTE chamar o cliente pelo nome dele nas mensagens e saudações.
    - Por exemplo, em saudações diga: Olá, tudo bem Vanessa? Seja bem-vinda!, ou Como posso te ajudar hoje, Vanessa?, ou Que bom falar com você, Vanessa!
    - Mantenha esse tratamento personalizado chamando o cliente pelo nome durante a conversa de maneira natural.
-9. AVISO DE PRIMEIRA MENSAGEM:
-   - Esta ${isFirstMessage ? 'É' : 'NÃO É'} a primeira mensagem desta conversa.
-   - ${isFirstMessage ? "Se houver um bloco de texto com a tag '[PRIMEIRA MENSSAGEM A SER ENVIADA]' ou '[PRIMEIRA MENSAGEM A SER ENVIADA]' no prompt de sistema do robô escolhido, você DEVE responder EXATAMENTE com o texto contido nesse bloco (substituindo apenas as variáveis/links se necessário), sem adicionar outras frases, explicações ou emojis fora desse bloco." : "Como esta NÃO é a primeira mensagem, você deve responder às perguntas do cliente de forma natural, ignorando qualquer tag '[PRIMEIRA MENSSAGEM A SER ENVIADA]'."}
-10. ENTENDIMENTO DE SALADAS (ESTRITA):
-    - Se o cliente solicitar uma "salada", diferencie claramente entre "salada de verdade" (como a SALADA CAESAR ou Salada de Frutas) e "lanches/combos com salada" (como Lanche Plus Salada ou Combo Plus Salada, que são hambúrgueres).
-    - Se o cliente disser que quer comer uma salada (prato leve), apresente a SALADA CAESAR como o item principal e ideal de salada do cardápio, antes de citar lanches que apenas contêm salada em sua composição.
-
-Contexto RAG recuperado para esta pergunta:
-${contextText || 'Nenhum contexto encontrado no RAG para esta pergunta.'}
 `;
-
-      const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!geminiApiKey) throw new Error("Chave do Gemini (VITE_GEMINI_API_KEY) não configurada no .env.");
 
       const geminiHistory = chatMessages.filter(m => m.type === 'user' || m.type === 'agent').slice(-5).map(m => ({
         role: m.type === 'user' ? 'user' : 'model',
@@ -832,40 +821,26 @@ ${contextText || 'Nenhum contexto encontrado no RAG para esta pergunta.'}
       }));
       geminiHistory.push({ role: 'user', parts: [{ text: userText }] });
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${geminiApiKey}`, {
+      const response = await fetch(`${ENGINE_URL}/api/v1/bots/simulate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': tenantId || ''
+        },
         body: JSON.stringify({
-          system_instruction: { parts: [{ text: contextBase }] },
-          contents: geminiHistory,
-          generationConfig: { responseMimeType: 'application/json' }
+          textMessage: userText,
+          history: geminiHistory,
+          contactId: simulatorContact?.id || null
         })
       });
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error?.message || "Erro de requisição ao Gemini.");
+        throw new Error(errData.error || "Erro de requisição ao simulador no servidor.");
       }
 
-      const data = await response.json();
-      let rawText = data.candidates[0].content.parts[0].text;
+      const result = await response.json();
       
-      // Limpeza robusta de blocos de código markdown do JSON
-      if (rawText.includes('```json')) {
-        rawText = rawText.split('```json')[1].split('```')[0].trim();
-      } else if (rawText.includes('```')) {
-        rawText = rawText.split('```')[1].split('```')[0].trim();
-      }
-
-      let result;
-      try {
-        result = JSON.parse(rawText.trim());
-      } catch (parseErr) {
-        console.warn("Direct JSON parsing failed, attempting sanitization fallback:", parseErr);
-        const sanitizedText = sanitizeJsonString(rawText.trim());
-        result = JSON.parse(sanitizedText);
-      }
-
       const targetBot = activeBots.find(b => b.id === result.agentId) || activeBots[0];
       const intent = result.intent || 'indefinida';
       const reasoning = result.reasoning || 'Robô selecionado.';
@@ -949,9 +924,9 @@ ${contextText || 'Nenhum contexto encontrado no RAG para esta pergunta.'}
     setIsGeneratingRules(true);
 
     try {
-      const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      const geminiApiKey = geminiService.getApiKey();
       if (!geminiApiKey) {
-        throw new Error("Chave do Gemini (VITE_GEMINI_API_KEY) não configurada no arquivo .env.");
+        throw new Error("Chave do Gemini não configurada nas Configurações.");
       }
 
       // 1. Buscar toda a base de conhecimento RAG para esta empresa

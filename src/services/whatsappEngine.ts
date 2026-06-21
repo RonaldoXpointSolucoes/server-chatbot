@@ -294,3 +294,26 @@ export const toggleEngineGroupEphemeral = async (tenantId: string, instanceId: s
   if (!res.ok) throw new Error('Falha ao configurar mensagens temporárias');
   return res.json();
 };
+
+export const sendEnginePresenceUpdate = async (tenantId: string, instanceId: string, jid: string, presence: 'composing' | 'recording' | 'paused' | 'available' | 'unavailable', apiKey: string) => {
+  if (!API_URL) throw new Error("URL do motor Antigravity não definida (.env)");
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, { 
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
+    body: JSON.stringify({ method: 'sendPresenceUpdate', args: [presence, jid] })
+  });
+  
+  let resJson;
+  try {
+    resJson = await res.json();
+  } catch (e) {
+    resJson = {};
+  }
+  
+  if (!res.ok || resJson.ok === false) {
+    const errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
+    throw new Error(`Falha ao enviar presença: ${errorDetail}`);
+  }
+  
+  return resJson;
+};

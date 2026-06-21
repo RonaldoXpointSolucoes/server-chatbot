@@ -11,7 +11,12 @@ export default function ClientLogin() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [keepLogged, setKeepLogged] = useState(false);
+  const [keepLogged, setKeepLogged] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('keep_logged') === 'true';
+    }
+    return false;
+  });
   const [showPassword, setShowPassword] = useState(false);
   
   // Antigravity Dev Logger State
@@ -243,6 +248,7 @@ export default function ClientLogin() {
            allowedCompanies = authResult.user.allowed_companies || [];
         }
 
+        localStorage.setItem('keep_logged', 'true');
         const { error: signInError } = await supabase.auth.signInWithPassword({
            email: matchedEmail.trim().toLowerCase(),
            password: decryptedPwd
@@ -374,6 +380,7 @@ export default function ClientLogin() {
       addDevLog('LINK_FACE_SAVE_SUCCESS', 'Biometria vinculada com absoluto sucesso!', 'success');
 
       // 3. Efetua a autenticação oficial no Supabase Auth
+      localStorage.setItem('keep_logged', 'true');
       const { error: signInError } = await supabase.auth.signInWithPassword({
          email: faceLinkEmail.trim().toLowerCase(),
          password: faceLinkPassword.trim()
@@ -554,6 +561,7 @@ export default function ClientLogin() {
       }
       
       addDevLog('SUPABASE_AUTH_START', 'Iniciando sessão real no Supabase Auth...', 'info');
+      localStorage.setItem('keep_logged', keepLogged ? 'true' : 'false');
       const { error: signInError } = await supabase.auth.signInWithPassword({
          email: email.trim().toLowerCase(),
          password: password.trim()

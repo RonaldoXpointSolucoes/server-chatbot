@@ -596,11 +596,38 @@ export const MessageBubble = memo(({
                 </div>
               )}
 
-              {/* Se for uma mídia apagada e tivermos o tipo mas sem legenda/texto */}
-              {!msg.text && msg.mediaType && (
+              {/* Se for uma mídia apagada e tivermos o tipo */}
+              {msg.mediaType && (
                 <div className="mt-1 pl-3 border-l border-black/15 dark:border-white/15 text-[11px] text-[#54656f]/40 dark:text-[#8696a0]/30 italic leading-relaxed select-text font-light">
                   <span className="block text-[8px] uppercase tracking-wider font-semibold text-black/25 dark:text-white/25 not-italic mb-0.5 select-none">Mídia original apagada:</span>
-                  <span className="select-none">[{msg.mediaType === 'image' ? 'Imagem' : msg.mediaType === 'video' ? 'Vídeo' : msg.mediaType === 'audio' ? 'Áudio' : 'Documento'}]</span>
+                  {msg.mediaUrl ? (
+                    <div className="mt-2 opacity-85 filter grayscale-[20%]">
+                      {msg.mediaType === 'image' && (
+                        <div 
+                          className="relative overflow-hidden rounded-xl border border-black/5 dark:border-white/5 mb-1 bg-black/5 dark:bg-black/20 cursor-pointer"
+                          onClick={(e) => { e.stopPropagation(); setFullscreenImage(msg.mediaUrl || null); }}
+                        >
+                          <img src={msg.mediaUrl} alt="Imagem Apagada" className="max-w-full h-auto max-h-[250px] object-cover pointer-events-none" />
+                        </div>
+                      )}
+                      
+                      {msg.mediaType === 'audio' && (
+                        <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] sm:max-w-[260px] h-10 custom-audio" />
+                      )}
+
+                      {(msg.mediaType === 'video' || msg.mediaUrl.endsWith('.mp4')) && (
+                        <VideoPlayerPremium src={msg.mediaUrl} />
+                      )}
+
+                      {msg.mediaType === 'document' && (
+                        <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 bg-black/5 dark:bg-white/5 rounded text-[#00a884] hover:underline font-medium w-fit">
+                          <FileText size={16} /> Baixar Documento
+                        </a>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="select-none">[{msg.mediaType === 'image' ? 'Imagem' : msg.mediaType === 'video' ? 'Vídeo' : msg.mediaType === 'audio' ? 'Áudio' : 'Documento'}]</span>
+                  )}
                 </div>
               )}
               

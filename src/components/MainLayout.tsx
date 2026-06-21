@@ -41,11 +41,11 @@ export function MainLayout() {
             : "-translate-x-full lg:translate-x-0 lg:w-0 opacity-0 overflow-hidden pointer-events-none lg:pointer-events-auto"
         }`}
       >
-        <MainSidebar onClose={() => {
+        <MainSidebar onClose={React.useCallback(() => {
           if (window.innerWidth < 1024) {
             setShowMainSidebar(false);
           }
-        }} />
+        }, [])} />
       </div>
 
       {/* Main Content Area (Outlet renderiza a rota ativa) */}

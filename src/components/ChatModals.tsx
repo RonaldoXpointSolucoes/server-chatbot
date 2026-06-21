@@ -31,7 +31,8 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
     address_street: '',
     phone: '',
     bot_status: 'active',
-    company_ids: [] as string[]
+    company_ids: [] as string[],
+    tags: [] as string[]
   });
 
   const [companies, setCompanies] = useState<any[]>([]);
@@ -43,6 +44,11 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
 
   const [isCompanySearchOpen, setIsCompanySearchOpen] = useState(false);
   const [companySearchQuery, setCompanySearchQuery] = useState('');
+
+  const [isGroupSearchOpen, setIsGroupSearchOpen] = useState(false);
+  const [groupSearchQuery, setGroupSearchQuery] = useState('');
+
+  const contactGroups = useChatStore(state => state.tenantInfo?.settings?.contactGroups) || [];
 
   React.useEffect(() => {
     if (contactData && isOpen) {
@@ -60,10 +66,13 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
         address_street: contactData.address_street || '',
         phone: contactData.phone || '',
         bot_status: contactData.bot_status || 'active',
-        company_ids: contactData.company_ids || []
+        company_ids: contactData.company_ids || [],
+        tags: contactData.tags || []
       });
       setIsCompanySearchOpen(false);
       setCompanySearchQuery('');
+      setIsGroupSearchOpen(false);
+      setGroupSearchQuery('');
     }
   }, [contactData, isOpen]);
 
@@ -245,190 +254,340 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                <h3 className="text-sm font-semibold text-[#00a884] uppercase tracking-wider mb-2">Dados Principais</h3>
                
                <div className="flex flex-col sm:flex-row gap-4">
-                  <div className="w-full sm:w-1/3">
-                    <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Tipo de Documento</label>
-                    <select 
-                      value={formData.document_type}
-                      onChange={e => {
-                        setFormData({...formData, document_type: e.target.value});
-                        setDocFeedback(null);
-                      }}
-                      className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                    >
-                       <option value="contato">Contato</option>
-                       <option value="cpf">CPF</option>
-                       <option value="cnpj">CNPJ</option>
-                    </select>
-                  </div>
-                  <div className="w-full sm:w-2/3 flex flex-col relative">
-                    {formData.document_type === 'contato' ? (
-                      <>
-                        <label className="flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-[#8696a0] mb-1">
-                          <span className="flex items-center gap-1.5">
-                            <Building2 size={14} className="text-[#00a884]" />
-                            Empresas Vinculadas
-                            {formData.company_ids && formData.company_ids.length > 0 && (
-                              <span className="px-1.5 py-0.5 rounded-full bg-[#00a884]/10 text-[#00a884] text-[10px] font-bold">
-                                {formData.company_ids.length}
-                              </span>
-                            )}
-                          </span>
-                          <button 
-                            type="button"
-                            onClick={() => setIsCompanySearchOpen(!isCompanySearchOpen)}
-                            className={cn(
-                              "px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all active:scale-95",
-                              isCompanySearchOpen 
-                                ? "bg-[#00a884]/10 border-[#00a884]/20 text-[#00a884] shadow-sm"
-                                : "bg-[#f0f2f5] dark:bg-[#111b21] border-transparent text-gray-500 hover:text-[#00a884]"
-                            )}
-                            title="Buscar e vincular empresas"
-                          >
-                            <Search size={12} />
-                            {isCompanySearchOpen ? 'Fechar' : 'Buscar'}
-                          </button>
-                        </label>
-
-                        {/* Badges de empresas ativas resumidas quando fechado */}
-                        {!isCompanySearchOpen && formData.company_ids && formData.company_ids.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 p-2 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[42px] items-center">
-                            {formData.company_ids.map(cId => {
-                              const comp = companies.find(c => c.id === cId);
-                              if (!comp) return null;
-                              return (
-                                <span 
-                                  key={`badge-${cId}`} 
-                                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 text-[11px] font-bold text-[#111b21] dark:text-[#e9edef] uppercase tracking-wider shadow-sm"
-                                >
-                                  {comp.name?.toUpperCase() || comp.fantasy_name?.toUpperCase()}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        {/* Lista colapsável de busca de empresas */}
-                        {isCompanySearchOpen && (
-                          <div className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-2xl p-3 flex flex-col gap-3 shadow-lg absolute top-[44px] left-0 right-0 z-30 animate-in fade-in slide-in-from-top-2 duration-200">
-                            
-                            {/* Input de filtro da busca */}
-                            <div className="relative">
-                              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                              <input 
-                                type="text"
-                                value={companySearchQuery}
-                                onChange={e => setCompanySearchQuery(e.target.value)}
-                                placeholder="Filtrar empresas..."
-                                className="w-full pl-9 pr-8 py-2 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-xs text-[#111b21] dark:text-[#e9edef] transition-all"
-                                autoFocus
-                              />
-                              {companySearchQuery && (
-                                <button 
-                                  type="button" 
-                                  onClick={() => setCompanySearchQuery('')}
-                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-0.5 rounded"
-                                >
-                                  <X size={12} />
-                                </button>
-                              )}
-                            </div>
-
-                            {/* Container de checkboxes das empresas */}
-                            <div className="w-full max-h-[140px] overflow-y-auto bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl p-1.5 styled-scrollbar flex flex-col gap-0.5">
-                              {(() => {
-                                // 1. Ordena as empresas em ordem alfabética
-                                const sortedCompanies = [...companies].sort((a, b) => {
-                                  const nameA = (a.fantasy_name || a.name || '').toUpperCase();
-                                  const nameB = (b.fantasy_name || b.name || '').toUpperCase();
-                                  return nameA.localeCompare(nameB);
-                                });
-
-                                // 2. Filtra as empresas baseado na query de busca
-                                const filteredCompanies = sortedCompanies.filter(c => {
-                                  const term = companySearchQuery.toLowerCase();
-                                  const fantasy = (c.fantasy_name || '').toLowerCase();
-                                  const name = (c.name || '').toLowerCase();
-                                  return fantasy.includes(term) || name.includes(term);
-                                });
-
-                                if (filteredCompanies.length === 0) {
-                                  return <div className="text-xs text-gray-500 text-center py-4">Nenhuma empresa encontrada</div>;
-                                }
-
-                                return filteredCompanies.map(c => {
-                                  const name = (c.name || '').toUpperCase();
-                                  const fantasy = c.fantasy_name && c.fantasy_name.toLowerCase() !== c.name?.toLowerCase() 
-                                    ? c.fantasy_name.toUpperCase() 
-                                    : '';
-                                  const isChecked = formData.company_ids?.includes(c.id) || false;
-                                  
-                                  return (
-                                    <label key={c.id} className="flex items-center gap-2.5 p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
-                                      <div className="relative flex items-center justify-center">
-                                        <input
-                                          type="checkbox"
-                                          checked={isChecked}
-                                          onChange={(e) => {
-                                            const currentIds = formData.company_ids || [];
-                                            if (e.target.checked) {
-                                              setFormData({...formData, company_ids: [...currentIds, c.id]});
-                                            } else {
-                                              setFormData({...formData, company_ids: currentIds.filter(id => id !== c.id)});
-                                            }
-                                          }}
-                                          className="peer w-4 h-4 cursor-pointer appearance-none border border-gray-400 dark:border-gray-600 rounded bg-transparent checked:bg-[#00a884] checked:border-[#00a884] transition-all"
-                                        />
-                                        <svg className="absolute w-3 h-3 text-white pointer-events-none opacity-0 peer-checked:opacity-100 scale-50 peer-checked:scale-100 transition-all" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                                      </div>
-                                      <span className="text-sm text-[#111b21] dark:text-[#e9edef] truncate group-hover:text-[#00a884] transition-colors font-bold tracking-wide flex items-center gap-2">
-                                        <span>{name}</span>
-                                        {fantasy && (
-                                          <span className="text-[10px] text-gray-500 dark:text-[#8696a0] font-normal normal-case px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
-                                            {fantasy}
-                                          </span>
-                                        )}
-                                      </span>
-                                    </label>
-                                  );
-                                });
-                              })()}
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <label className="flex justify-between text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">
-                           <span>Número do Documento</span>
-                           {formData.document_type === 'cnpj' && (
-                             <span className="text-[#00a884] cursor-pointer hover:underline flex items-center gap-1" onClick={handleCnpjSearch}>
-                               {isSearchingDoc ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />} Autocompletar
-                             </span>
-                           )}
-                        </label>
-                        <div className="relative">
-                           <FileText size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                           <input 
-                             type="text" 
-                             value={formData.document_number}
-                             onChange={e => {
-                               setFormData({...formData, document_number: formatDocumentNumber(e.target.value, formData.document_type)});
-                               setDocFeedback(null);
+                   <div className={cn(
+                     "w-full",
+                     formData.document_type === 'contato' ? "sm:w-1/4" : "sm:w-1/3"
+                   )}>
+                     <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Tipo de Documento</label>
+                     <select 
+                       value={formData.document_type}
+                       onChange={e => {
+                         setFormData({...formData, document_type: e.target.value});
+                         setDocFeedback(null);
+                       }}
+                       className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                     >
+                        <option value="contato">Contato</option>
+                        <option value="cpf">CPF</option>
+                        <option value="cnpj">CNPJ</option>
+                     </select>
+                   </div>
+                   
+                   {formData.document_type === 'contato' ? (
+                     <>
+                       {/* Empresas Vinculadas */}
+                       <div className="w-full sm:w-[38%] flex flex-col relative">
+                         <label className="flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-[#8696a0] mb-1">
+                           <span className="flex items-center gap-1.5">
+                             <Building2 size={14} className="text-[#00a884]" />
+                             Empresas Vinculadas
+                             {formData.company_ids && formData.company_ids.length > 0 && (
+                               <span className="px-1.5 py-0.5 rounded-full bg-[#00a884]/10 text-[#00a884] text-[10px] font-bold">
+                                 {formData.company_ids.length}
+                               </span>
+                             )}
+                           </span>
+                           <button 
+                             type="button"
+                             onClick={() => {
+                               setIsCompanySearchOpen(!isCompanySearchOpen);
+                               setIsGroupSearchOpen(false);
                              }}
-                             placeholder={formData.document_type === 'cpf' ? '000.000.000-00' : '00.000.000/0000-00'}
-                             className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                           />
-                        </div>
-                        {docFeedback && (
-                          <div className="text-red-500 text-xs mt-1.5 flex items-center gap-1.5 animate-in fade-in duration-200">
-                            <AlertCircle size={14} className="shrink-0" />
-                            <span>{docFeedback}</span>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-               </div>
+                             className={cn(
+                               "px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all active:scale-95",
+                               isCompanySearchOpen 
+                                 ? "bg-[#00a884]/10 border-[#00a884]/20 text-[#00a884] shadow-sm"
+                                 : "bg-[#f0f2f5] dark:bg-[#111b21] border-transparent text-gray-500 hover:text-[#00a884]"
+                             )}
+                             title="Buscar e vincular empresas"
+                           >
+                             <Search size={12} />
+                             {isCompanySearchOpen ? 'Fechar' : 'Buscar'}
+                           </button>
+                         </label>
+
+                         {/* Badges de empresas ativas resumidas quando fechado */}
+                         {!isCompanySearchOpen && formData.company_ids && formData.company_ids.length > 0 && (
+                           <div className="flex flex-wrap gap-1.5 p-2 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[42px] items-center">
+                             {formData.company_ids.map(cId => {
+                               const comp = companies.find(c => c.id === cId);
+                               if (!comp) return null;
+                               return (
+                                 <span 
+                                   key={`badge-${cId}`} 
+                                   className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 text-[11px] font-bold text-[#111b21] dark:text-[#e9edef] uppercase tracking-wider shadow-sm"
+                                 >
+                                   {comp.name?.toUpperCase() || comp.fantasy_name?.toUpperCase()}
+                                 </span>
+                               );
+                             })}
+                           </div>
+                         )}
+                         {!isCompanySearchOpen && (!formData.company_ids || formData.company_ids.length === 0) && (
+                           <div className="flex items-center px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[42px] text-xs text-gray-400">
+                             Nenhuma vinculada
+                           </div>
+                         )}
+
+                         {/* Lista colapsável de busca de empresas */}
+                         {isCompanySearchOpen && (
+                           <div className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-2xl p-3 flex flex-col gap-3 shadow-lg absolute top-[44px] left-0 right-0 z-30 animate-in fade-in slide-in-from-top-2 duration-200">
+                             
+                             {/* Input de filtro da busca */}
+                             <div className="relative">
+                               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                               <input 
+                                 type="text"
+                                 value={companySearchQuery}
+                                 onChange={e => setCompanySearchQuery(e.target.value)}
+                                 placeholder="Filtrar empresas..."
+                                 className="w-full pl-9 pr-8 py-2 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-xs text-[#111b21] dark:text-[#e9edef] transition-all"
+                                 autoFocus
+                               />
+                               {companySearchQuery && (
+                                 <button 
+                                   type="button" 
+                                   onClick={() => setCompanySearchQuery('')}
+                                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-0.5 rounded"
+                                 >
+                                   <X size={12} />
+                                 </button>
+                               )}
+                             </div>
+
+                             {/* Container de checkboxes das empresas */}
+                             <div className="w-full max-h-[140px] overflow-y-auto bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl p-1.5 styled-scrollbar flex flex-col gap-0.5">
+                               {(() => {
+                                 // 1. Ordena as empresas em ordem alfabética
+                                 const sortedCompanies = [...companies].sort((a, b) => {
+                                   const nameA = (a.fantasy_name || a.name || '').toUpperCase();
+                                   const nameB = (b.fantasy_name || b.name || '').toUpperCase();
+                                   return nameA.localeCompare(nameB);
+                                 });
+
+                                 // 2. Filtra as empresas baseado na query de busca
+                                 const filteredCompanies = sortedCompanies.filter(c => {
+                                   const term = companySearchQuery.toLowerCase();
+                                   const fantasy = (c.fantasy_name || '').toLowerCase();
+                                   const name = (c.name || '').toLowerCase();
+                                   return fantasy.includes(term) || name.includes(term);
+                                 });
+
+                                 if (filteredCompanies.length === 0) {
+                                   return <div className="text-xs text-gray-500 text-center py-4">Nenhuma empresa encontrada</div>;
+                                 }
+
+                                 return filteredCompanies.map(c => {
+                                   const name = (c.name || '').toUpperCase();
+                                   const fantasy = c.fantasy_name && c.fantasy_name.toLowerCase() !== c.name?.toLowerCase() 
+                                     ? c.fantasy_name.toUpperCase() 
+                                     : '';
+                                   const isChecked = formData.company_ids?.includes(c.id) || false;
+                                   
+                                   return (
+                                     <label key={c.id} className="flex items-center gap-2.5 p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
+                                       <div className="relative flex items-center justify-center">
+                                         <input
+                                           type="checkbox"
+                                           checked={isChecked}
+                                           onChange={(e) => {
+                                             const currentIds = formData.company_ids || [];
+                                             if (e.target.checked) {
+                                               setFormData({...formData, company_ids: [...currentIds, c.id]});
+                                             } else {
+                                               setFormData({...formData, company_ids: currentIds.filter(id => id !== c.id)});
+                                             }
+                                           }}
+                                           className="peer w-4 h-4 cursor-pointer appearance-none border border-gray-400 dark:border-gray-600 rounded bg-transparent checked:bg-[#00a884] checked:border-[#00a884] transition-all"
+                                         />
+                                         <svg className="absolute w-3 h-3 text-white pointer-events-none opacity-0 peer-checked:opacity-100 scale-50 peer-checked:scale-100 transition-all" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                       </div>
+                                       <span className="text-sm text-[#111b21] dark:text-[#e9edef] truncate group-hover:text-[#00a884] transition-colors font-bold tracking-wide flex items-center gap-2">
+                                         <span>{name}</span>
+                                         {fantasy && (
+                                           <span className="text-[10px] text-gray-500 dark:text-[#8696a0] font-normal normal-case px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
+                                             {fantasy}
+                                           </span>
+                                         )}
+                                       </span>
+                                     </label>
+                                   );
+                                 });
+                               })()}
+                             </div>
+                           </div>
+                         )}
+                       </div>
+
+                       {/* Grupo de Empresas */}
+                       <div className="w-full sm:w-[37%] flex flex-col relative">
+                         <label className="flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-[#8696a0] mb-1">
+                           <span className="flex items-center gap-1.5">
+                             <Building size={14} className="text-[#00a884]" />
+                             Grupo de Empresas
+                             {formData.tags && formData.tags.length > 0 && (
+                               <span className="px-1.5 py-0.5 rounded-full bg-[#00a884]/10 text-[#00a884] text-[10px] font-bold">
+                                 {formData.tags.length}
+                               </span>
+                             )}
+                           </span>
+                           <button 
+                             type="button"
+                             onClick={() => {
+                               setIsGroupSearchOpen(!isGroupSearchOpen);
+                               setIsCompanySearchOpen(false);
+                             }}
+                             className={cn(
+                               "px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all active:scale-95",
+                               isGroupSearchOpen 
+                                 ? "bg-[#00a884]/10 border-[#00a884]/20 text-[#00a884] shadow-sm"
+                                 : "bg-[#f0f2f5] dark:bg-[#111b21] border-transparent text-gray-500 hover:text-[#00a884]"
+                             )}
+                             title="Selecionar grupos empresariais"
+                           >
+                             <Search size={12} />
+                             {isGroupSearchOpen ? 'Fechar' : 'Buscar'}
+                           </button>
+                         </label>
+
+                         {/* Badges de grupos ativos resumidos quando fechado */}
+                         {!isGroupSearchOpen && formData.tags && formData.tags.length > 0 && (
+                           <div className="flex flex-wrap gap-1.5 p-2 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[42px] items-center">
+                             {formData.tags.map(tagId => {
+                               const grp = contactGroups.find(g => g.id === tagId);
+                               if (!grp) return null;
+                               return (
+                                 <span 
+                                   key={`badge-group-${tagId}`} 
+                                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border bg-opacity-10 dark:bg-opacity-10 backdrop-blur-sm shadow-sm"
+                                   style={{ 
+                                      backgroundColor: `${grp.color}15`, 
+                                      borderColor: `${grp.color}30`,
+                                      color: grp.color 
+                                   }}
+                                 >
+                                   <span 
+                                     className="w-1.5 h-1.5 rounded-full shrink-0" 
+                                     style={{ backgroundColor: grp.color || '#00a884' }}
+                                   />
+                                   {grp.name}
+                                 </span>
+                               );
+                             })}
+                           </div>
+                         )}
+                         {!isGroupSearchOpen && (!formData.tags || formData.tags.length === 0) && (
+                           <div className="flex items-center px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[42px] text-xs text-gray-400">
+                             Nenhum grupo
+                           </div>
+                         )}
+
+                         {/* Lista colapsável de busca do grupo */}
+                         {isGroupSearchOpen && (
+                           <div className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-2xl p-3 flex flex-col gap-3 shadow-lg absolute top-[44px] left-0 right-0 z-30 animate-in fade-in slide-in-from-top-2 duration-200">
+                             
+                             {/* Input de filtro da busca do grupo */}
+                             <div className="relative">
+                               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                               <input 
+                                 type="text"
+                                 value={groupSearchQuery}
+                                 onChange={e => setGroupSearchQuery(e.target.value)}
+                                 placeholder="Filtrar grupos..."
+                                 className="w-full pl-9 pr-8 py-2 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-xs text-[#111b21] dark:text-[#e9edef] transition-all"
+                                 autoFocus
+                               />
+                               {groupSearchQuery && (
+                                 <button 
+                                   type="button" 
+                                   onClick={() => setGroupSearchQuery('')}
+                                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-0.5 rounded"
+                                 >
+                                   <X size={12} />
+                                 </button>
+                               )}
+                             </div>
+
+                             {/* Container de checkboxes dos grupos */}
+                             <div className="w-full max-h-[140px] overflow-y-auto bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl p-1.5 styled-scrollbar flex flex-col gap-0.5">
+                               {(() => {
+                                 const filteredGroups = contactGroups.filter(g => 
+                                   g.name.toLowerCase().includes(groupSearchQuery.toLowerCase())
+                                 );
+
+                                 if (filteredGroups.length === 0) {
+                                   return <div className="text-xs text-gray-500 text-center py-4">Nenhum grupo encontrado</div>;
+                                 }
+
+                                 return filteredGroups.map(g => {
+                                   const isChecked = formData.tags?.includes(g.id) || false;
+                                   
+                                   return (
+                                     <label key={g.id} className="flex items-center gap-2.5 p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
+                                       <div className="relative flex items-center justify-center">
+                                         <input
+                                           type="checkbox"
+                                           checked={isChecked}
+                                           onChange={(e) => {
+                                             const currentTags = formData.tags || [];
+                                             if (e.target.checked) {
+                                               setFormData({...formData, tags: [...currentTags, g.id]});
+                                             } else {
+                                               setFormData({...formData, tags: currentTags.filter(id => id !== g.id)});
+                                             }
+                                           }}
+                                           className="peer w-4 h-4 cursor-pointer appearance-none border border-gray-400 dark:border-gray-600 rounded bg-transparent checked:bg-[#00a884] checked:border-[#00a884] transition-all"
+                                         />
+                                         <svg className="absolute w-3 h-3 text-white pointer-events-none opacity-0 peer-checked:opacity-100 scale-50 peer-checked:scale-100 transition-all" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                       </div>
+                                       <span className="text-sm text-[#111b21] dark:text-[#e9edef] truncate group-hover:text-[#00a884] transition-colors font-bold tracking-wide flex items-center gap-2">
+                                         <span 
+                                           className="w-2.5 h-2.5 rounded-full shrink-0" 
+                                           style={{ backgroundColor: g.color || '#00a884' }}
+                                         />
+                                         <span>{g.name}</span>
+                                       </span>
+                                     </label>
+                                   );
+                                 });
+                               })()}
+                             </div>
+                           </div>
+                         )}
+                       </div>
+                     </>
+                   ) : (
+                     <div className="w-full sm:w-2/3 flex flex-col relative">
+                       <label className="flex justify-between text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">
+                          <span>Número do Documento</span>
+                          {formData.document_type === 'cnpj' && (
+                            <span className="text-[#00a884] cursor-pointer hover:underline flex items-center gap-1" onClick={handleCnpjSearch}>
+                              {isSearchingDoc ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />} Autocompletar
+                            </span>
+                          )}
+                       </label>
+                       <div className="relative">
+                          <FileText size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input 
+                            type="text" 
+                            value={formData.document_number}
+                            onChange={e => {
+                              setFormData({...formData, document_number: formatDocumentNumber(e.target.value, formData.document_type)});
+                              setDocFeedback(null);
+                            }}
+                            placeholder={formData.document_type === 'cpf' ? '000.000.000-00' : '00.000.000/0000-00'}
+                            className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                          />
+                       </div>
+                       {docFeedback && (
+                         <div className="text-red-500 text-xs mt-1.5 flex items-center gap-1.5 animate-in fade-in duration-200">
+                           <AlertCircle size={14} className="shrink-0" />
+                           <span>{docFeedback}</span>
+                         </div>
+                       )}
+                     </div>
+                   )}
+                </div>
 
                <div className="flex flex-col sm:flex-row gap-4">
                   <div className="w-full sm:w-1/2">
@@ -1938,13 +2097,14 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
 
           {onClearAssociation && (
             (parentContact && parentContact.company_ids?.includes(contact.id)) ||
-            (contact.company_ids && contact.company_ids.length > 0)
+            (contact.company_ids && contact.company_ids.length > 0) ||
+            !!contact.fantasy_name
           ) && (
             <button 
               onClick={onClearAssociation}
               className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl font-semibold transition-all duration-200"
             >
-              <span>{contact.company_ids && contact.company_ids.length > 0 ? "Desvincular Empresa" : "Desvincular desta Empresa"}</span>
+              <span>{(contact.company_ids && contact.company_ids.length > 0) || contact.fantasy_name ? "Desvincular Empresa" : "Desvincular desta Empresa"}</span>
             </button>
           )}
         </div>

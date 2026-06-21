@@ -3,7 +3,7 @@ import express from 'express';
 const MAX_LOGS = 200;
 const MAX_ERRORS = 100;
 const logBuffer = [];
-const errorBuffer = [];
+export const errorBuffer = [];
 let clients = [];
 
 const router = express.Router();

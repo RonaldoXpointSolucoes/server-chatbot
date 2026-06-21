@@ -1,14 +1,14 @@
 {
   "name": "chatboot",
   "private": true,
-  "version": "3.4.2",
+  "version": "3.4.7",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "deploy": "vercel --prod --force --yes"
+    "deploy": "npx vercel --prod --force --yes"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -28,6 +28,7 @@
     "tailwind-merge": "^3.5.0",
     "tus-js-client": "^4.3.1",
     "uuid": "^13.0.0",
+    "xlsx": "^0.18.5",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

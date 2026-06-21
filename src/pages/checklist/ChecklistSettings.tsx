@@ -332,7 +332,7 @@ export default function ChecklistSettings() {
       };
 
       if (editingUser.id) {
-        // Salvar/Upsert perfil na tabela de extensão
+        // Atualizar ou inserir perfil na tabela de extensão
         const { error } = await supabase
           .from('users_profiles')
           .upsert({
@@ -344,27 +344,35 @@ export default function ChecklistSettings() {
             pin: editingUser.pin || '',
             role: editingUser.role,
             is_active: editingUser.is_active ?? true
-          });
+          }, { onConflict: 'id' });
         if (error) throw error;
 
         // Atualizar Permissões de Unidades (Exclui antigas, reinsere novas)
-        await supabase.from('user_unit_permissions').delete().eq('user_id', editingUser.id);
+        const { error: delUnitErr } = await supabase.from('user_unit_permissions').delete().eq('user_id', editingUser.id);
+        if (delUnitErr) console.warn('Erro ao deletar user_unit_permissions:', delUnitErr);
+
         if (editingUser.unit_permissions && editingUser.unit_permissions.length > 0) {
-          const insertPayloads = editingUser.unit_permissions.map(uId => ({
+          const uniqueUnits = Array.from(new Set(editingUser.unit_permissions));
+          const insertPayloads = uniqueUnits.map(uId => ({
             user_id: editingUser.id,
             unit_id: uId
           }));
-          await supabase.from('user_unit_permissions').insert(insertPayloads);
+          const { error: insUnitErr } = await supabase.from('user_unit_permissions').upsert(insertPayloads, { onConflict: 'user_id,unit_id' });
+          if (insUnitErr) throw insUnitErr;
         }
 
         // Atualizar Permissões de Setores
-        await supabase.from('user_sector_permissions').delete().eq('user_id', editingUser.id);
+        const { error: delSecErr } = await supabase.from('user_sector_permissions').delete().eq('user_id', editingUser.id);
+        if (delSecErr) console.warn('Erro ao deletar user_sector_permissions:', delSecErr);
+
         if (editingUser.sector_permissions && editingUser.sector_permissions.length > 0) {
-          const insertPayloads = editingUser.sector_permissions.map(sId => ({
+          const uniqueSectors = Array.from(new Set(editingUser.sector_permissions));
+          const insertPayloads = uniqueSectors.map(sId => ({
             user_id: editingUser.id,
             sector_id: sId
           }));
-          await supabase.from('user_sector_permissions').insert(insertPayloads);
+          const { error: insSecErr } = await supabase.from('user_sector_permissions').upsert(insertPayloads, { onConflict: 'user_id,sector_id' });
+          if (insSecErr) throw insSecErr;
         }
 
         showToast('success', 'Perfil e acessos do colaborador atualizados com sucesso!');

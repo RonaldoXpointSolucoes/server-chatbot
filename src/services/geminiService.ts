@@ -1,7 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { useChatStore } from "../store/chatStore";
 
 // Ensure there is a way to handle missing keys gracefully in UI
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
+const fallbackApiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
 
 const formatValueToString = (val: any): string => {
   if (val === null || val === undefined) return '';
@@ -17,21 +18,36 @@ const formatValueToString = (val: any): string => {
 };
 
 class GeminiService {
-  private genAI: GoogleGenerativeAI;
-  
-  constructor() {
-    this.genAI = new GoogleGenerativeAI(apiKey || 'unconfigured');
+  getApiKey(): string {
+    // 1. Check local override
+    const localKey = typeof window !== 'undefined' ? localStorage.getItem('user_gemini_api_key') : null;
+    if (localKey && localKey.length > 5) return localKey;
+    
+    // 2. Check store / database settings
+    try {
+      const storeKey = useChatStore.getState().tenantInfo?.settings?.gemini_api_key;
+      if (storeKey && storeKey.length > 5) return storeKey;
+    } catch (e) {}
+
+    // 3. Fallback to env variable
+    return fallbackApiKey;
+  }
+
+  private getGenAI(): GoogleGenerativeAI {
+    const key = this.getApiKey();
+    return new GoogleGenerativeAI(key || 'unconfigured');
   }
 
   isConfigured(): boolean {
-    return apiKey.length > 5;
+    const key = this.getApiKey();
+    return key.length > 5;
   }
 
   async enhanceMessage(draft: string, intent: 'grammar' | 'sales' | 'enchant' | 'support' | 'analyze', contextHistory: {role: string, text: string}[]): Promise<string> {
     if (!this.isConfigured()) {
-      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure a sua chave de API nas Configurações do sistema.');
     }
-    const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const historyText = contextHistory.slice(-15).map(m => `${m.role}: ${m.text}`).join('\n');
 
@@ -77,9 +93,9 @@ ATENÇÃO E REGRAS DE FORMATO:
 
   async chatWithArchitect(history: {role: 'user'|'model', text: string}[]): Promise<string> {
     if (!this.isConfigured()) {
-      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // Build standard multi-turn format for Gemini
     const contents = history.map(msg => ({
@@ -133,7 +149,7 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
 
   async transcribeAudio(mediaUrl: string): Promise<string> {
     if (!this.isConfigured()) {
-      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
 
     try {
@@ -179,7 +195,7 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
         ]
       };
 
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${this.getApiKey()}`;
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -201,9 +217,9 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
 
   async suggestReplyWithContext(targetMessageText: string, contextHistory: {role: string, text: string}[]): Promise<string[]> {
     if (!this.isConfigured()) {
-      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // Format the context
     const historyText = contextHistory.map(m => `${m.role === 'user' ? 'Cliente' : 'Atendente (VOCÊ)'}: ${m.text}`).join('\n');
@@ -251,9 +267,9 @@ ATENÇÃO E REGRAS DE FORMATO CRÍTICAS:
 
   async generateCannedResponse(promptUser: string, ragContext: string, tone: string = 'professional'): Promise<{ text: string, shortcut: string }> {
     if (!this.isConfigured()) {
-      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
 
     let toneInstruction = "Mantenha um tom profissional, polido, formal e extremamente educado.";
     switch (tone) {
@@ -323,11 +339,11 @@ REGRAS DE RETORNO CRÍTICAS:
 
   async compareFaces(photoBase64_1: string, photoBase64_2: string): Promise<{ verified: boolean, confidence: number }> {
     if (!this.isConfigured()) {
-      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
 
     try {
-      const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
 
       const prompt = `Você é um sistema biométrico de reconhecimento facial de alta segurança e precisão cirúrgica.
 Sua tarefa é comparar as duas imagens fornecidas e determinar se pertencem à mesma pessoa física.
@@ -381,9 +397,9 @@ Retorne APENAS o JSON cru, sem marcações markdown ou blocos de código.`;
 
   async analyzeConversationWithFeedback(history: {role: string, text: string, time: string}[]): Promise<{ summary: string, feedback: string }> {
     if (!this.isConfigured()) {
-      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.genAI.getGenerativeModel({
+    const model = this.getGenAI().getGenerativeModel({
       model: "gemini-2.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
@@ -454,9 +470,9 @@ Regras importantes de retorno:
 
   async extractBusinessRulesForRag(contextHistory: {role: string, text: string}[]): Promise<{ suggestedRules: string[] }> {
     if (!this.isConfigured()) {
-      throw new Error('VITE_GEMINI_API_KEY não configurada. Configure no arquivo .env para usar este recurso.');
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.genAI.getGenerativeModel({
+    const model = this.getGenAI().getGenerativeModel({
       model: "gemini-2.5-flash",
       generationConfig: {
         responseMimeType: "application/json",

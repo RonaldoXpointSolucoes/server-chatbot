@@ -7,20 +7,87 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Credenciais do Supabase ausentes no .env");
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const customFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  try {
+    return await fetch(input, init);
+  } catch (error: any) {
+    if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
+      console.warn('[Supabase Network] Falha de conexão detectada. Verifique sua internet.', error);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('supabase-network-error', {
+          detail: { 
+            message: "Sua conexão com a internet parece instável ou o servidor demorou a responder.",
+            originalError: error.message 
+          }
+        }));
+      }
+    }
+    throw error;
+  }
+};
+
+const customAuthStorage = {
+  getItem: (key: string) => {
+    if (typeof window === 'undefined') return null;
+    const keepLogged = localStorage.getItem('keep_logged') === 'true';
+    return keepLogged ? localStorage.getItem(key) : sessionStorage.getItem(key);
+  },
+  setItem: (key: string, value: string) => {
+    if (typeof window === 'undefined') return;
+    const keepLogged = localStorage.getItem('keep_logged') === 'true';
+    if (keepLogged) {
+      localStorage.setItem(key, value);
+      sessionStorage.removeItem(key);
+    } else {
+      sessionStorage.setItem(key, value);
+      localStorage.removeItem(key);
+    }
+  },
+  removeItem: (key: string) => {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+  }
+};
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    storage: customAuthStorage,
+    persistSession: true
+  },
+  global: {
+    fetch: customFetch
+  }
+});
 
 // Interceptador global de ciclo de vida de autenticação para evitar sessões zumbis
 supabase.auth.onAuthStateChange((event, session) => {
   if (event === 'SIGNED_OUT') {
+    // Se estiver offline, não limpa a sessão local ainda, pois pode ser apenas falha temporária de rede ao tentar atualizar o token
+    if (typeof window !== 'undefined' && !window.navigator.onLine) {
+      console.warn("[Supabase Auth] SIGNED_OUT detectado mas o usuário está offline. Mantendo sessão local.");
+      return;
+    }
+
     console.warn("[Supabase Auth] Session invalidated or signed out. Clearing local session state...");
     
     // Limpeza de credenciais do Tenant e Usuário
     localStorage.removeItem('current_tenant_id');
     localStorage.removeItem('current_tenant_name');
+    localStorage.removeItem('current_user_name');
+    localStorage.removeItem('current_user_role');
+    localStorage.removeItem('current_user_email');
+    localStorage.removeItem('allowed_instances');
+    localStorage.removeItem('allowed_companies');
+    localStorage.removeItem('keep_logged');
+    
     sessionStorage.removeItem('current_tenant_id');
     sessionStorage.removeItem('current_tenant_name');
-    sessionStorage.removeItem('current_user_email');
+    sessionStorage.removeItem('current_user_name');
     sessionStorage.removeItem('current_user_role');
+    sessionStorage.removeItem('current_user_email');
+    sessionStorage.removeItem('allowed_instances');
+    sessionStorage.removeItem('allowed_companies');
     sessionStorage.removeItem('admin_token');
     
     // Se estiver em uma rota restrita, força redirecionamento instantâneo para o login corporativo
@@ -63,10 +130,12 @@ export type ContactRow = {
   address_state?: string;
   notes?: string;
   tags?: any[];
+  company_ids?: string[];
   phone: string;
   evolution_remote_jid?: string; // Mantido como optional para retrocompatibilidade
   whatsapp_jid?: string;
   bot_status: 'active' | 'paused';
+  bot_paused_until?: string;
   open_date?: string;
   company_size?: string;
   legal_nature?: string;

@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
+import { useDevStore } from '../../store/devStore';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { geminiService } from '../../services/geminiService';
+import * as XLSX from 'xlsx';
 import { 
   Sparkles, 
   Plus, 
@@ -31,7 +34,11 @@ import {
   ChevronUp,
   ChevronDown,
   Users,
-  Search
+  Search,
+  Upload,
+  FileSpreadsheet,
+  Table2,
+  Download
 } from 'lucide-react';
 
 interface Checklist {
@@ -309,6 +316,36 @@ const TEMPLATES_LIST = [
       { title: 'Estado físico das barreiras sanitárias e telas', description: 'Prevenção contra vetores e pragas.', response_type: 'yes_no', is_required: true, weight: 1, sort_order: 1, is_critical: false, require_evidence: false, permit_observation: true, options: ['Verificar se a porta de entrada da cozinha possui mola de fechamento automática ativa', 'Checar se as telas de proteção contra insetos nas janelas estão íntegras e sem furos', 'Garantir que as lixeiras de pedal estejam tampadas'] },
       { title: 'Controle de potabilidade e limpeza da caixa d\'água', description: 'Pureza da água para alimentos e produção de gelo.', response_type: 'boolean', is_required: true, weight: 1, sort_order: 2, is_critical: false, require_evidence: false, permit_observation: true, options: ['Verificar validade do laudo bacteriológico de limpeza da caixa d\'água (máximo 6 meses)', 'Trocar elemento filtrante da máquina de gelo e pias', 'Checar se a tampa da caixa d\'água principal está perfeitamente vedada'] }
     ]
+  },
+  {
+    id: 'contagem_estoque',
+    title: 'Contagem de Estoque',
+    description: 'Checklist com riqueza de detalhes para inventário físico e contagem de itens de estoque (secos, frios, congelados, bebidas, embalagens e limpeza).',
+    category: 'Estoque',
+    tags: ['ESTOQUE', 'INVENTÁRIO'],
+    icon: 'layers',
+    items: [
+      { title: '[Secos] Arroz tipo 1 (saco 5kg)', description: 'Contar sacos fechados no estoque seco.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 0, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Secos] Feijão Carioca (saco 1kg)', description: 'Contar pacotes individuais de 1kg.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 1, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Secos] Farinha de Trigo Especial (saco 5kg)', description: 'Contar sacos de farinha no almoxarifado.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 2, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Secos] Óleo de Soja (garrafa 900ml)', description: 'Contar garrafas individuais.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 3, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Secos] Sal Refinado (pacote 1kg)', description: 'Contar pacotes de sal de 1kg.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 4, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Frios] Queijo Muçarela (peça/kg)', description: 'Pesar ou estimar peças fechadas e abertas.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 5, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'kg' },
+      { title: '[Frios] Presunto Cozido (peça/kg)', description: 'Pesar ou estimar peças fechadas e abertas.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 6, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'kg' },
+      { title: '[Frios] Creme de Leite UHT (caixa 1L)', description: 'Contar caixas individuais de 1 litro.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 7, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Frios] Manteiga com Sal (barra 500g)', description: 'Contar tabletes de 500g.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 8, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Congelados] Hambúrguer Blend (caixa c/ 50)', description: 'Contar caixas lacradas e estimar frações.', response_type: 'numeric', is_required: true, weight: 1.5, sort_order: 9, is_critical: true, require_evidence: false, permit_observation: true, measurement_unit: 'cx' },
+      { title: '[Congelados] Peito de Frango (kg)', description: 'Pesar ou contar pacotes fechados de peito de frango.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 10, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'kg' },
+      { title: '[Congelados] Batata Pré-Frita (caixa 10kg)', description: 'Contar caixas de batata palito.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 11, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'cx' },
+      { title: '[Bebidas] Coca-Cola Lata 350ml (unidade)', description: 'Contar latas individuais no estoque ou geladeira.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 12, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Bebidas] Guaraná Lata 350ml (unidade)', description: 'Contar latas individuais.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 13, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Bebidas] Água Mineral sem Gás 500ml (unidade)', description: 'Contar garrafas individuais.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 14, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Bebidas] Barril de Chope Pilsen 50L (unidade)', description: 'Contar barris cheios.', response_type: 'numeric', is_required: true, weight: 1.5, sort_order: 15, is_critical: true, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Embalagens] Caixa de Delivery para Hambúrguer', description: 'Contar pacotes fechados ou unidades avulsas.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 16, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Embalagens] Sacola Kraft para Delivery', description: 'Contar pacotes ou unidades.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 17, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Limpeza] Detergente Neutro Concentrado (galão 5L)', description: 'Contar galões cheios.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 18, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Limpeza] Cloro Sanitizante (galão 5L)', description: 'Contar galões cheios no abrigo de química.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 19, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' }
+    ]
   }
 ];
 
@@ -402,8 +439,8 @@ const getResponseTypeGuideline = (type: string) => {
 
 export default function ChecklistBuilder() {
   const { showMainSidebar, setShowMainSidebar } = (useOutletContext() as { showMainSidebar: boolean, setShowMainSidebar: (v: boolean) => void }) || { showMainSidebar: true, setShowMainSidebar: () => {} };
+  const geminiApiKey = geminiService.getApiKey();
   const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
-  const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
 
   // Listas de Carregamento
   const [checklists, setChecklists] = useState<Checklist[]>([]);
@@ -420,6 +457,9 @@ export default function ChecklistBuilder() {
   const [showAddSectorModal, setShowAddSectorModal] = useState(false);
   const [newSectorName, setNewSectorName] = useState('');
   const [newSectorUnitId, setNewSectorUnitId] = useState('');
+  const [showInlineUnitCreation, setShowInlineUnitCreation] = useState(false);
+  const [newUnitName, setNewUnitName] = useState('');
+  const [creatingUnit, setCreatingUnit] = useState(false);
 
   // Estados para Controle de UX de Abas e Drawer de Tarefas
   const [activeTab, setActiveTab] = useState<'info' | 'items' | 'schedules'>('info');
@@ -460,6 +500,14 @@ export default function ChecklistBuilder() {
   const [showAiModal, setShowAiModal] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [generatingAi, setGeneratingAi] = useState(false);
+
+  // Estados do Modal de Importação de Excel
+  const [showExcelImportModal, setShowExcelImportModal] = useState(false);
+  const [excelImportItems, setExcelImportItems] = useState<ChecklistItem[]>([]);
+  const [excelFileName, setExcelFileName] = useState('');
+  const [excelParsingError, setExcelParsingError] = useState('');
+  const [excelEditingIdx, setExcelEditingIdx] = useState<number | null>(null);
+  const excelFileInputRef = useRef<HTMLInputElement>(null);
 
   // Mensagens do Sistema
   const [successMsg, setSuccessMsg] = useState('');
@@ -530,6 +578,12 @@ export default function ChecklistBuilder() {
       setErrorMsg(msg);
       setTimeout(() => setErrorMsg(''), 4000);
     }
+    // Log no Antigravity DevLogger
+    useDevStore.getState().addLog({
+      type: type === 'success' ? 'success' : 'error',
+      message: msg,
+      source: 'ChecklistBuilder',
+    });
   };
 
   const loadChecklistItemsAndSchedules = async (chkId: string) => {
@@ -627,7 +681,7 @@ export default function ChecklistBuilder() {
       min_meta: item.min_meta ?? null,
       max_meta: item.max_meta ?? null,
       measurement_unit: item.measurement_unit || '',
-      options: null
+      options: item.options ? [...item.options] : null
     }));
 
     setChecklistItems(mappedItems);
@@ -779,7 +833,7 @@ export default function ChecklistBuilder() {
   const handleAddSchedule = () => {
     const newSch: Schedule = {
       checklist_id: editingChecklist?.id || '',
-      unit_id: units[0]?.id || '',
+      unit_id: 'ALL',
       responsible_user_id: null,
       start_time: '08:00',
       recurrency: 'daily',
@@ -800,8 +854,12 @@ export default function ChecklistBuilder() {
   // SALVAR NO BANCO DE DADOS (TRANSAÇÃO COMPLETA)
   // ==========================================
   const handleSaveAll = async () => {
-    if (!editingChecklist?.title || !editingChecklist.sector_id) {
-      showToast('error', 'O Checklist precisa de Título e Setor.');
+    if (!editingChecklist?.title?.trim()) {
+      showToast('error', 'O Checklist precisa de um Título.');
+      return;
+    }
+    if (!editingChecklist.sector_id) {
+      showToast('error', 'Selecione um Setor Responsável antes de salvar.');
       return;
     }
 
@@ -880,20 +938,45 @@ export default function ChecklistBuilder() {
       // 4. Salvar Agendamentos (Schedules)
       await supabase.from('checklist_schedules').delete().eq('checklist_id', finalChecklistId);
       if (schedules.length > 0) {
-        const schPayloads = schedules.map(sch => ({
-          tenant_id: tenantId,
-          checklist_id: finalChecklistId,
-          unit_id: sch.unit_id,
-          responsible_user_id: sch.responsible_user_id || null,
-          start_time: sch.start_time,
-          recurrency: sch.recurrency,
-          days_of_week: sch.days_of_week || null,
-          days_of_month: sch.days_of_month || null,
-          shift: sch.shift || 'Geral',
-          start_date: sch.start_date,
-          end_date: sch.end_date || null,
-          is_active: sch.is_active ?? true
-        }));
+        const schPayloads: any[] = [];
+        
+        schedules.forEach(sch => {
+          if (sch.unit_id === 'ALL') {
+             // Create one for each unit
+             units.forEach(u => {
+               schPayloads.push({
+                 tenant_id: tenantId,
+                 checklist_id: finalChecklistId,
+                 unit_id: u.id,
+                 responsible_user_id: sch.responsible_user_id,
+                 start_time: sch.start_time,
+                 recurrency: sch.recurrency,
+                 days_of_week: sch.days_of_week,
+                 days_of_month: sch.days_of_month,
+                 shift: sch.shift,
+                 start_date: sch.start_date,
+                 end_date: sch.end_date,
+                 is_active: sch.is_active
+               });
+             });
+          } else {
+             schPayloads.push({
+               tenant_id: tenantId,
+               checklist_id: finalChecklistId,
+               unit_id: sch.unit_id,
+               responsible_user_id: sch.responsible_user_id,
+               start_time: sch.start_time,
+               recurrency: sch.recurrency,
+               days_of_week: sch.days_of_week,
+               days_of_month: sch.days_of_month,
+               shift: sch.shift,
+               start_date: sch.start_date,
+               end_date: sch.end_date,
+               is_active: sch.is_active
+             });
+          }
+        });
+
         const { error: schErr } = await supabase.from('checklist_schedules').insert(schPayloads);
         if (schErr) throw schErr;
       }
@@ -904,6 +987,12 @@ export default function ChecklistBuilder() {
     } catch (err: any) {
       console.error(err);
       showToast('error', `Falha ao salvar: ${err.message}`);
+      useDevStore.getState().addLog({
+        type: 'error',
+        message: `[handleSaveAll] Erro ao salvar checklist: ${err.message}`,
+        source: 'ChecklistBuilder',
+        details: { stack: err.stack, code: err.code, hint: err.hint }
+      });
     } finally {
       setSaving(false);
     }
@@ -1000,13 +1089,67 @@ export default function ChecklistBuilder() {
     showToast('success', `Categoria "${cleanCat}" adicionada com sucesso!`);
   };
 
+  const handleCreateUnit = async () => {
+    if (!newUnitName.trim()) {
+      showToast('error', 'O nome da filial não pode estar vazio.');
+      return;
+    }
+
+    setCreatingUnit(true);
+    try {
+      const { data: newUnit, error } = await supabase
+        .from('units')
+        .insert({
+          tenant_id: tenantId,
+          name: newUnitName.trim(),
+          cep: '00000000',
+          street: 'Não informado',
+          number: 'S/N',
+          neighborhood: 'Não informado',
+          city: 'Não informado',
+          state: 'NA'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Recarregar lista de filiais
+      const { data: uniData } = await supabase.from('units').select('id, name').eq('tenant_id', tenantId);
+      setUnits(uniData || []);
+
+      // Auto-selecionar a filial recém-criada
+      setNewSectorUnitId(newUnit.id);
+      setNewUnitName('');
+      setShowInlineUnitCreation(false);
+      showToast('success', `Filial "${newUnit.name}" criada com sucesso!`);
+
+      useDevStore.getState().addLog({
+        type: 'success',
+        message: `[handleCreateUnit] Filial criada: ${newUnit.name} (${newUnit.id})`,
+        source: 'ChecklistBuilder',
+      });
+    } catch (err: any) {
+      console.error(err);
+      showToast('error', `Falha ao criar filial: ${err.message}`);
+      useDevStore.getState().addLog({
+        type: 'error',
+        message: `[handleCreateUnit] Erro: ${err.message}`,
+        source: 'ChecklistBuilder',
+        details: { stack: err.stack, code: err.code }
+      });
+    } finally {
+      setCreatingUnit(false);
+    }
+  };
+
   const handleCreateSector = async () => {
     if (!newSectorName.trim()) {
       showToast('error', 'O nome do setor não pode estar vazio.');
       return;
     }
     if (!newSectorUnitId) {
-      showToast('error', 'Selecione uma filial para o setor.');
+      showToast('error', 'Selecione ou crie uma filial para o setor.');
       return;
     }
     
@@ -1030,11 +1173,24 @@ export default function ChecklistBuilder() {
       setEditingChecklist(p => p ? { ...p, sector_id: newSec.id } : null);
 
       setNewSectorName('');
+      setNewSectorUnitId('');
       setShowAddSectorModal(false);
       showToast('success', `Setor "${newSec.name}" cadastrado com sucesso!`);
+
+      useDevStore.getState().addLog({
+        type: 'success',
+        message: `[handleCreateSector] Setor criado: ${newSec.name} (${newSec.id})`,
+        source: 'ChecklistBuilder',
+      });
     } catch (err: any) {
       console.error(err);
       showToast('error', `Falha ao cadastrar setor: ${err.message}`);
+      useDevStore.getState().addLog({
+        type: 'error',
+        message: `[handleCreateSector] Erro: ${err.message}`,
+        source: 'ChecklistBuilder',
+        details: { stack: err.stack, code: err.code }
+      });
     } finally {
       setSaving(false);
     }
@@ -1174,6 +1330,247 @@ export default function ChecklistBuilder() {
     });
   };
 
+  // ==========================================
+  // IMPORTAÇÃO DE PLANILHA EXCEL
+  // ==========================================
+  const VALID_RESPONSE_TYPES = ['boolean', 'conformity', 'yes_no', 'numeric', 'temperature', 'counter', 'text', 'photo', 'stars', 'single_select', 'multi_select', 'datetime'];
+
+  const normalizeHeader = (header: string): string => {
+    const h = header.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    // Title / Descrição (nome do produto)
+    if (['titulo', 'title', 'nome', 'item', 'produto', 'insumo', 'descricao do item', 'nome do item', 'nome do produto', 'descricao'].includes(h)) return 'title';
+    // Detailed description / instructions
+    if (['instrucao', 'instrucoes', 'detalhe', 'detalhes', 'obs', 'observacao', 'observacoes'].includes(h)) return 'description';
+    // Response type
+    if (['tipo', 'type', 'tipo_resposta', 'response_type', 'tipo de resposta'].includes(h)) return 'response_type';
+    // Unit
+    if (['unidade', 'unit', 'un', 'medida', 'unidade de medida', 'measurement_unit', 'un.', 'und', 'und.'].includes(h)) return 'measurement_unit';
+    // Quantity / expected count
+    if (['quantidade', 'qtd', 'qty', 'qtde', 'qtd.', 'quantidade esperada', 'estoque', 'saldo', 'contado'].includes(h)) return 'quantity_hint';
+    // Critical
+    if (['critico', 'critical', 'is_critical', 'e critico'].includes(h)) return 'is_critical';
+    // Category / sector / grupo
+    if (['categoria', 'category', 'setor', 'secao', 'grupo', 'area'].includes(h)) return 'category_group';
+    // Weight
+    if (['peso', 'weight', 'peso_item'].includes(h)) return 'weight';
+    // Fornecedor / Supplier
+    if (['fornecedor', 'supplier', 'fabricante', 'marca'].includes(h)) return 'supplier';
+    // Custo / Cost
+    if (['custo', 'cost', 'preco', 'valor', 'preco unitario', 'custo unitario', 'valor unitario'].includes(h)) return 'cost';
+    // Min / Max
+    if (h.includes('min') && h.includes('max')) return 'min_max';
+    if (h === 'min' || h === 'minimo') return 'min_only';
+    if (h === 'max' || h === 'maximo') return 'max_only';
+    return h;
+  };
+
+  // Auto-detect the header row in a spreadsheet (skip decorative title rows)
+  const findHeaderRow = (rawData: any[][]): number => {
+    const headerKeywords = ['descricao', 'titulo', 'nome', 'item', 'produto', 'fornecedor', 'grupo', 'categoria', 'custo', 'title', 'description'];
+    for (let i = 0; i < Math.min(20, rawData.length); i++) {
+      const row = rawData[i];
+      if (!row || row.length < 2) continue;
+      const normalized = row.map((c: any) => String(c || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim());
+      const matchCount = normalized.filter((cell: string) => headerKeywords.some(kw => cell.includes(kw))).length;
+      if (matchCount >= 2) return i; // Found at least 2 header keywords in this row
+    }
+    return 0; // Fallback to first row
+  };
+
+  const handleExcelFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setExcelFileName(file.name);
+    setExcelParsingError('');
+    setExcelEditingIdx(null);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const rawData: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+        if (rawData.length < 2) {
+          setExcelParsingError('A planilha precisa ter pelo menos um cabeçalho e uma linha de dados.');
+          return;
+        }
+
+        // Auto-detect the actual header row (skip title/summary rows)
+        const headerRowIdx = findHeaderRow(rawData);
+        const headerRow = rawData[headerRowIdx];
+
+        // Map headers
+        const headers = headerRow.map((h: any) => normalizeHeader(String(h || '')));
+        const titleIdx = headers.indexOf('title');
+        const descIdx = headers.indexOf('description');
+        const typeIdx = headers.indexOf('response_type');
+        const unitIdx = headers.indexOf('measurement_unit');
+        const qtyIdx = headers.indexOf('quantity_hint');
+        const critIdx = headers.indexOf('is_critical');
+        const catIdx = headers.indexOf('category_group');
+        const weightIdx = headers.indexOf('weight');
+        const supplierIdx = headers.indexOf('supplier');
+        const costIdx = headers.indexOf('cost');
+        const minMaxIdx = headers.indexOf('min_max');
+        const minOnlyIdx = headers.indexOf('min_only');
+        const maxOnlyIdx = headers.indexOf('max_only');
+
+        if (titleIdx === -1) {
+          // Fallback: use first non-empty column as title
+          let fallbackTitleIdx = 0;
+          // Find first column that has data in the first data row
+          const firstDataRow = rawData[headerRowIdx + 1];
+          if (firstDataRow) {
+            for (let c = 0; c < firstDataRow.length; c++) {
+              if (String(firstDataRow[c] || '').trim()) { fallbackTitleIdx = c; break; }
+            }
+          }
+
+          const items: ChecklistItem[] = [];
+          for (let i = headerRowIdx + 1; i < rawData.length; i++) {
+            const row = rawData[i];
+            const title = String(row[fallbackTitleIdx] || '').trim();
+            if (!title || title.toLowerCase() === 'total') continue;
+            items.push({
+              title,
+              description: '',
+              response_type: 'numeric',
+              is_required: true,
+              weight: 1,
+              sort_order: items.length,
+              is_critical: false,
+              require_evidence: false,
+              permit_observation: true,
+              min_meta: null,
+              max_meta: null,
+              measurement_unit: 'un',
+              options: null
+            });
+          }
+          setExcelImportItems(items);
+          if (items.length === 0) {
+            setExcelParsingError('Nenhum item válido encontrado na planilha.');
+          }
+          return;
+        }
+
+        // Standard parsing with detected columns
+        const items: ChecklistItem[] = [];
+        for (let i = headerRowIdx + 1; i < rawData.length; i++) {
+          const row = rawData[i];
+          const title = String(row[titleIdx] || '').trim();
+          if (!title || title.toLowerCase() === 'total') continue;
+
+          let responseType = typeIdx >= 0 ? String(row[typeIdx] || '').trim().toLowerCase() : 'numeric';
+          if (!VALID_RESPONSE_TYPES.includes(responseType)) responseType = 'numeric';
+
+          const isCritical = critIdx >= 0 ? ['sim', 'yes', 'true', '1', 'x', 'critico'].includes(String(row[critIdx] || '').trim().toLowerCase()) : false;
+          const unit = unitIdx >= 0 ? String(row[unitIdx] || '').trim() || 'un' : 'un';
+          const weight = weightIdx >= 0 ? parseFloat(String(row[weightIdx] || '1')) || 1 : 1;
+          const catGroup = catIdx >= 0 ? String(row[catIdx] || '').trim() : '';
+          const supplier = supplierIdx >= 0 ? String(row[supplierIdx] || '').trim() : '';
+          const costRaw = costIdx >= 0 ? row[costIdx] : '';
+          const costVal = typeof costRaw === 'number' ? costRaw : parseFloat(String(costRaw || '0').replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+          const costStr = costVal > 0 ? `R$ ${costVal.toFixed(2).replace('.', ',')}` : '';
+
+          // Parse Min / Max (format: "10/30" or separate columns)
+          let minMeta: number | null = null;
+          let maxMeta: number | null = null;
+          if (minMaxIdx >= 0) {
+            const minMaxStr = String(row[minMaxIdx] || '').trim();
+            const parts = minMaxStr.split('/').map(s => parseFloat(s.trim()));
+            if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+              minMeta = parts[0];
+              maxMeta = parts[1];
+            }
+          } else {
+            if (minOnlyIdx >= 0) minMeta = parseFloat(String(row[minOnlyIdx] || '')) || null;
+            if (maxOnlyIdx >= 0) maxMeta = parseFloat(String(row[maxOnlyIdx] || '')) || null;
+          }
+
+          // Build description with supplier and cost
+          const descParts: string[] = [];
+          if (descIdx >= 0) { const d = String(row[descIdx] || '').trim(); if (d) descParts.push(d); }
+          if (supplier) descParts.push(`Fornecedor: ${supplier}`);
+          if (costStr) descParts.push(`Custo: ${costStr}`);
+          const desc = descParts.join(' | ');
+
+          // Build the title prefix with category group
+          const prefixedTitle = catGroup ? `[${catGroup}] ${title}` : title;
+
+          items.push({
+            title: prefixedTitle,
+            description: desc,
+            response_type: responseType,
+            is_required: true,
+            weight,
+            sort_order: items.length,
+            is_critical: isCritical,
+            require_evidence: false,
+            permit_observation: true,
+            min_meta: minMeta,
+            max_meta: maxMeta,
+            measurement_unit: unit,
+            options: null
+          });
+        }
+
+        setExcelImportItems(items);
+        if (items.length === 0) {
+          setExcelParsingError('Nenhum item válido encontrado na planilha.');
+        }
+      } catch (err: any) {
+        console.error('Erro ao parsear Excel:', err);
+        setExcelParsingError(`Erro ao ler o arquivo: ${err.message || 'formato inválido'}`);
+        useDevStore.getState().addLog({
+          type: 'error',
+          message: `[Excel Import] Erro ao parsear planilha: ${err.message}`,
+          source: 'ChecklistBuilder',
+          details: { fileName: file.name, stack: err.stack }
+        });
+      }
+    };
+    reader.readAsBinaryString(file);
+
+    // Reset file input
+    if (excelFileInputRef.current) {
+      excelFileInputRef.current.value = '';
+    }
+  };
+
+  const handleConfirmExcelImport = () => {
+    if (excelImportItems.length === 0) return;
+    
+    setChecklistItems(prev => {
+      const startIdx = prev.length;
+      const newItems = excelImportItems.map((item, idx) => ({
+        ...item,
+        sort_order: startIdx + idx
+      }));
+      return [...prev, ...newItems];
+    });
+
+    showToast('success', `${excelImportItems.length} itens importados da planilha com sucesso!`);
+    setShowExcelImportModal(false);
+    setExcelImportItems([]);
+    setExcelFileName('');
+  };
+
+  const handleExcelItemEdit = (idx: number, field: keyof ChecklistItem, value: any) => {
+    setExcelImportItems(prev => {
+      const items = [...prev];
+      items[idx] = { ...items[idx], [field]: value };
+      return items;
+    });
+  };
+
+  const handleExcelItemRemove = (idx: number) => {
+    setExcelImportItems(prev => prev.filter((_, i) => i !== idx).map((item, i) => ({ ...item, sort_order: i })));
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full bg-[#182229] dark:bg-[#0b141a] text-[#d1d7db] overflow-y-auto p-6 styled-scrollbar">
       
@@ -1299,29 +1696,94 @@ export default function ChecklistBuilder() {
                   type="text"
                   value={newSectorName}
                   onChange={e => setNewSectorName(e.target.value)}
-                  placeholder="Ex: Salão Principal"
+                  placeholder="Ex: Cozinha, Salão, Bar"
                   className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2.5 text-xs text-[#d1d7db] focus:outline-none focus:border-indigo-500 placeholder-[#8696a0]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#8696a0] mb-1.5">Filial / Unidade de Vínculo</label>
-                <select
-                  value={newSectorUnitId}
-                  onChange={e => setNewSectorUnitId(e.target.value)}
-                  className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2.5 text-xs text-[#d1d7db] focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="" disabled>Selecione a filial</option>
-                  {units.map(u => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-[#8696a0]">Filial / Unidade de Vínculo</label>
+                  {units.length > 0 && (
+                    <button
+                      onClick={() => setShowInlineUnitCreation(!showInlineUnitCreation)}
+                      className="text-[10px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-0.5 transition-all"
+                    >
+                      <Plus size={11} /> Nova Filial
+                    </button>
+                  )}
+                </div>
+
+                {units.length === 0 && !showInlineUnitCreation ? (
+                  /* No units exist — show prominent creation UI */
+                  <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl p-3 space-y-3">
+                    <p className="text-[11px] text-amber-300 leading-relaxed">
+                      <AlertTriangle size={12} className="inline mr-1 -mt-0.5" />
+                      Nenhuma filial cadastrada. Crie sua primeira filial para vincular o setor.
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newUnitName}
+                        onChange={e => setNewUnitName(e.target.value)}
+                        placeholder="Nome da filial (ex: Matriz, Filial Centro)"
+                        className="flex-1 bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2 text-xs text-[#d1d7db] focus:outline-none focus:border-amber-500 placeholder-[#8696a0]"
+                        onKeyDown={e => e.key === 'Enter' && handleCreateUnit()}
+                      />
+                      <button
+                        onClick={handleCreateUnit}
+                        disabled={creatingUnit || !newUnitName.trim()}
+                        className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-black font-bold px-4 py-2 rounded-xl text-xs transition-all active:scale-95 whitespace-nowrap"
+                      >
+                        {creatingUnit ? '...' : 'Criar'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Units exist — show select + optional inline creation */
+                  <>
+                    <select
+                      value={newSectorUnitId}
+                      onChange={e => setNewSectorUnitId(e.target.value)}
+                      className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2.5 text-xs text-[#d1d7db] focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="" disabled>Selecione a filial</option>
+                      {units.map(u => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </select>
+
+                    {showInlineUnitCreation && (
+                      <div className="mt-2 bg-indigo-500/10 border border-indigo-500/25 rounded-xl p-3 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                        <p className="text-[10px] text-indigo-300 font-semibold">Criar Nova Filial</p>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={newUnitName}
+                            onChange={e => setNewUnitName(e.target.value)}
+                            placeholder="Nome da filial"
+                            className="flex-1 bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2 text-xs text-[#d1d7db] focus:outline-none focus:border-indigo-500 placeholder-[#8696a0]"
+                            onKeyDown={e => e.key === 'Enter' && handleCreateUnit()}
+                          />
+                          <button
+                            onClick={handleCreateUnit}
+                            disabled={creatingUnit || !newUnitName.trim()}
+                            className="bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all active:scale-95 whitespace-nowrap"
+                          >
+                            {creatingUnit ? '...' : 'Criar'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               <div className="flex gap-2">
                 <button
                   onClick={handleCreateSector}
-                  className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 text-xs"
+                  disabled={saving || !newSectorName.trim() || !newSectorUnitId}
+                  className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 text-xs"
                 >
                   Cadastrar Setor
                 </button>
@@ -1374,6 +1836,7 @@ export default function ChecklistBuilder() {
                   case 'calculator': return <Calculator size={24} className="text-rose-400" />;
                   case 'beer': return <Beer size={24} className="text-sky-400" />;
                   case 'crown': return <Crown size={24} className="text-purple-400" />;
+                  case 'layers': return <Layers size={24} className="text-teal-400" />;
                   default: return <ClipboardList size={24} />;
                 }
               };
@@ -2029,12 +2492,26 @@ export default function ChecklistBuilder() {
                     <ClipboardList size={18} className="text-indigo-400" />
                     <h3 className="font-extrabold text-white text-base">Tarefas Cadastradas ({checklistItems.length})</h3>
                   </div>
-                  <button
-                    onClick={handleOpenAddTask}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition-all active:scale-95 shadow-md shadow-indigo-600/10"
-                  >
-                    <Plus size={14} /> Adicionar Tarefa
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setExcelImportItems([]);
+                        setExcelFileName('');
+                        setExcelParsingError('');
+                        setExcelEditingIdx(null);
+                        setShowExcelImportModal(true);
+                      }}
+                      className="bg-teal-600/15 hover:bg-teal-600/30 text-teal-400 border border-teal-500/20 text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition-all active:scale-95"
+                    >
+                      <FileSpreadsheet size={14} /> Importar Excel
+                    </button>
+                    <button
+                      onClick={handleOpenAddTask}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition-all active:scale-95 shadow-md shadow-indigo-600/10"
+                    >
+                      <Plus size={14} /> Adicionar Tarefa
+                    </button>
+                  </div>
                 </div>
 
                 {checklistItems.length === 0 ? (
@@ -2055,40 +2532,59 @@ export default function ChecklistBuilder() {
                         {/* Linha 1: Conteúdo Principal e Ações */}
                         <div className="flex justify-between items-center gap-4">
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
-                                {idx + 1}
-                              </span>
-                              <h4 className="font-semibold text-white text-sm truncate">{item.title}</h4>
-                              <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-500/15 text-[#8696a0] font-bold shrink-0 uppercase tracking-wider">
-                                {item.response_type === 'boolean' ? 'Feito/Não Feito' : 
-                                 item.response_type === 'conformity' ? 'Conformidade' : 
-                                 item.response_type === 'yes_no' ? 'Sim/Não' : item.response_type}
-                              </span>
-                              {item.is_critical && (
-                                <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold shrink-0">
-                                  Crítico
-                                </span>
-                              )}
-                              {item.options && item.options.length > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => toggleExpandTask(idx)}
-                                  className="text-[9px] px-2 py-0.5 rounded-full bg-indigo-500/25 hover:bg-indigo-500/35 text-indigo-400 font-bold shrink-0 flex items-center gap-1.5 transition-all"
-                                  title={expandedTaskIndexes.includes(idx) ? 'Ocultar Passos' : 'Visualizar Passos'}
-                                >
-                                  <span>📋 {item.options.length} sub-tarefas</span>
-                                </button>
-                              )}
-                            </div>
-                            <p className="text-xs text-[#8696a0] mt-1 pl-7 line-clamp-1">{item.description || 'Sem descrição cadastrada.'}</p>
-                            
-                            {/* Metas */}
-                            {(item.response_type === 'numeric' || item.response_type === 'temperature') && (item.min_meta !== null || item.max_meta !== null) && (
-                              <p className="text-[10px] text-indigo-400 mt-1 pl-7 font-mono font-bold">
-                                Meta: {item.min_meta !== null ? `Meta Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Meta Máx: ${item.max_meta}` : ''} {item.measurement_unit}
-                              </p>
-                            )}
+                            {(() => {
+                              const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                              const groupName = match ? match[1] : null;
+                              const cleanTitle = match ? match[2] : item.title;
+                              const cleanDescription = item.description ? item.description.replace(/Fornecedor:\s*/g, '').replace(/Custo:\s*/g, '').split(' | ').join(' • ') : null;
+
+                              return (
+                                <>
+                                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                                    <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
+                                      {idx + 1}
+                                    </span>
+                                    {groupName && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#2a3942] text-[#8696a0] font-bold tracking-wider uppercase shrink-0">
+                                        {groupName}
+                                      </span>
+                                    )}
+                                    <h4 className="font-semibold text-white text-sm truncate">{cleanTitle}</h4>
+                                    <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-slate-500/15 text-[#8696a0] font-bold shrink-0 uppercase tracking-wider">
+                                      {item.response_type === 'boolean' ? 'Feito/Não Feito' : 
+                                       item.response_type === 'conformity' ? 'Conformidade' : 
+                                       item.response_type === 'yes_no' ? 'Sim/Não' : item.response_type}
+                                    </span>
+                                    {item.is_critical && (
+                                      <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold shrink-0">
+                                        Crítico
+                                      </span>
+                                    )}
+                                    {item.options && item.options.length > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleExpandTask(idx)}
+                                        className="text-[8px] px-1.5 py-0.5 rounded-full bg-indigo-500/25 hover:bg-indigo-500/35 text-indigo-400 font-bold shrink-0 flex items-center gap-1.5 transition-all"
+                                        title={expandedTaskIndexes.includes(idx) ? 'Ocultar Passos' : 'Visualizar Passos'}
+                                      >
+                                        <span>📋 {item.options.length} sub-tarefas</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                  
+                                  {cleanDescription && (
+                                    <p className="text-[10px] text-[#8696a0] mt-0.5 pl-7 line-clamp-1">{cleanDescription}</p>
+                                  )}
+                                  
+                                  {/* Metas */}
+                                  {(item.response_type === 'numeric' || item.response_type === 'temperature') && (item.min_meta !== null || item.max_meta !== null) && (
+                                    <p className="text-[10px] text-teal-400 mt-1 pl-7 font-mono font-bold">
+                                      {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Meta Máx: ${item.max_meta}` : ''} {item.measurement_unit}
+                                    </p>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
 
                           {/* Ações de Reordenação e Edição */}
@@ -2179,6 +2675,35 @@ export default function ChecklistBuilder() {
                   </button>
                 </div>
 
+                {/* Previsão Tolerância Global */}
+                <div className="bg-[#111b21] p-4 rounded-3xl border border-[#2a3942]/60 mb-6">
+                  <h4 className="text-xs font-semibold text-white mb-3">Tolerância de Execução (Previsão)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[#8696a0] mb-1">Hora Início (Minutos antes permitidos)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editingChecklist.min_time_lead_minutes || 0}
+                        onChange={e => setEditingChecklist(p => ({ ...p, min_time_lead_minutes: parseInt(e.target.value) || 0 }))}
+                        className="w-full bg-[#182229] border border-[#2a3942] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                        placeholder="Ex: 60"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[#8696a0] mb-1">Hora Fim / Previsão (Minutos após para concluir)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editingChecklist.max_time_lag_minutes || 0}
+                        onChange={e => setEditingChecklist(p => ({ ...p, max_time_lag_minutes: parseInt(e.target.value) || 0 }))}
+                        className="w-full bg-[#182229] border border-[#2a3942] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                        placeholder="Ex: 120"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 {schedules.length === 0 ? (
                   <div className="p-12 text-center text-[#8696a0] border border-dashed border-[#2a3942]/60 rounded-3xl bg-[#111b21]/30 flex flex-col items-center gap-2">
                     <CalendarDays size={32} className="text-[#2a3942]" />
@@ -2207,6 +2732,7 @@ export default function ChecklistBuilder() {
                               }}
                               className="w-full bg-[#182229] border border-[#2a3942] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
                             >
+                              <option value="ALL">⭐ Todas as Unidades (Global)</option>
                               {units.map(u => (
                                 <option key={u.id} value={u.id}>{u.name}</option>
                               ))}
@@ -2235,6 +2761,8 @@ export default function ChecklistBuilder() {
                               onChange={e => {
                                   const newSchs = [...schedules];
                                   newSchs[idx].recurrency = e.target.value as any;
+                                  if (e.target.value !== 'weekly') newSchs[idx].days_of_week = null;
+                                  if (e.target.value !== 'monthly') newSchs[idx].days_of_month = null;
                                   setSchedules(newSchs);
                               }}
                               className="w-full bg-[#182229] border border-[#2a3942] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
@@ -2262,6 +2790,68 @@ export default function ChecklistBuilder() {
                             </select>
                           </div>
                         </div>
+
+                        {sch.recurrency === 'weekly' && (
+                          <div className="mt-3">
+                            <label className="block text-[10px] font-semibold text-[#8696a0] mb-2">Dias da Semana</label>
+                            <div className="flex flex-wrap gap-2">
+                              {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day, dIdx) => (
+                                <button
+                                  key={day}
+                                  type="button"
+                                  onClick={() => {
+                                    const newSchs = [...schedules];
+                                    const currentDays = newSchs[idx].days_of_week || [];
+                                    if (currentDays.includes(dIdx)) {
+                                      newSchs[idx].days_of_week = currentDays.filter(d => d !== dIdx);
+                                    } else {
+                                      newSchs[idx].days_of_week = [...currentDays, dIdx].sort();
+                                    }
+                                    setSchedules(newSchs);
+                                  }}
+                                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                                    (sch.days_of_week || []).includes(dIdx)
+                                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                                      : 'bg-[#182229] text-[#8696a0] border border-[#2a3942] hover:bg-[#2a3942]'
+                                  }`}
+                                >
+                                  {day}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {sch.recurrency === 'monthly' && (
+                          <div className="mt-3">
+                            <label className="block text-[10px] font-semibold text-[#8696a0] mb-2">Dias do Mês</label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                                <button
+                                  key={day}
+                                  type="button"
+                                  onClick={() => {
+                                    const newSchs = [...schedules];
+                                    const currentDays = newSchs[idx].days_of_month || [];
+                                    if (currentDays.includes(day)) {
+                                      newSchs[idx].days_of_month = currentDays.filter(d => d !== day);
+                                    } else {
+                                      newSchs[idx].days_of_month = [...currentDays, day].sort((a, b) => a - b);
+                                    }
+                                    setSchedules(newSchs);
+                                  }}
+                                  className={`w-8 h-8 flex items-center justify-center text-[11px] font-bold rounded-lg transition-all ${
+                                    (sch.days_of_month || []).includes(day)
+                                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                                      : 'bg-[#182229] text-[#8696a0] border border-[#2a3942] hover:bg-[#2a3942]'
+                                  }`}
+                                >
+                                  {day}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -2563,6 +3153,362 @@ export default function ChecklistBuilder() {
         </div>
       )}
 
+      {/* =============================================
+          MODAL FULLSCREEN: IMPORTAÇÃO DE PLANILHA EXCEL
+         ============================================= */}
+      {showExcelImportModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex flex-col z-[70] animate-in fade-in duration-200">
+          {/* Header */}
+          <div className="h-16 bg-[#202c33] border-b border-[#2a3942]/60 px-6 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-2xl bg-teal-500/15 flex items-center justify-center text-teal-400 border border-teal-500/20">
+                <FileSpreadsheet size={18} />
+              </div>
+              <div>
+                <h2 className="font-bold text-white text-sm">Importar Planilha de Estoque</h2>
+                <p className="text-[10px] text-[#8696a0]">Faça upload, revise, edite e confirme os itens antes de importar.</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowExcelImportModal(false)}
+              className="p-2 hover:bg-white/10 rounded-xl text-[#8696a0] hover:text-white transition-all"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto styled-scrollbar p-6">
+            <div className="max-w-6xl mx-auto space-y-6">
+
+              {/* Upload Area */}
+              {excelImportItems.length === 0 && (
+                <div className="space-y-4">
+                  <div 
+                    className="border-2 border-dashed border-[#2a3942] hover:border-teal-500/40 rounded-3xl p-12 text-center transition-all cursor-pointer group bg-[#202c33]/40 hover:bg-teal-500/5"
+                    onClick={() => excelFileInputRef.current?.click()}
+                  >
+                    <Upload size={48} className="mx-auto text-[#2a3942] group-hover:text-teal-400 transition-colors mb-4" />
+                    <h3 className="font-bold text-white text-base mb-2">Arraste ou clique para selecionar a planilha</h3>
+                    <p className="text-xs text-[#8696a0] max-w-md mx-auto leading-relaxed">
+                      Formatos aceitos: <span className="text-teal-400 font-bold">.xlsx</span>, <span className="text-teal-400 font-bold">.xls</span> e <span className="text-teal-400 font-bold">.csv</span>. 
+                      A primeira linha será interpretada como cabeçalho. Colunas reconhecidas automaticamente: 
+                      <span className="text-white font-semibold"> Título, Descrição, Unidade, Quantidade, Categoria, Crítico, Peso</span>.
+                    </p>
+                    <input 
+                      ref={excelFileInputRef}
+                      type="file" 
+                      accept=".xlsx,.xls,.csv" 
+                      onChange={handleExcelFileChange} 
+                      className="hidden" 
+                    />
+                  </div>
+
+                  {/* Dica de formato */}
+                  <div className="bg-[#202c33]/60 border border-[#2a3942]/60 rounded-2xl p-5">
+                    <h4 className="text-xs font-bold text-white mb-3 flex items-center gap-2">
+                      <Table2 size={14} className="text-teal-400" />
+                      Exemplo de Formato Esperado (compatível com sua planilha de compras)
+                    </h4>
+                    <div className="overflow-x-auto rounded-xl border border-[#2a3942]/40">
+                      <table className="w-full text-[11px]">
+                        <thead>
+                          <tr className="bg-[#111b21]">
+                            <th className="px-3 py-2 text-left text-teal-400 font-bold">Descrição</th>
+                            <th className="px-3 py-2 text-left text-teal-400 font-bold">Fornecedor</th>
+                            <th className="px-3 py-2 text-left text-teal-400 font-bold">Custo</th>
+                            <th className="px-3 py-2 text-left text-teal-400 font-bold">Grupo</th>
+                            <th className="px-3 py-2 text-left text-teal-400 font-bold">Min / Max</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-[#d1d7db]">
+                          <tr className="border-t border-[#2a3942]/30">
+                            <td className="px-3 py-2">AGUA 500ML</td>
+                            <td className="px-3 py-2 text-sky-400/70">AMBEV SA CDD EMBU</td>
+                            <td className="px-3 py-2 text-emerald-400/70 font-mono">R$ 1,32</td>
+                            <td className="px-3 py-2">REFRIGERANTES</td>
+                            <td className="px-3 py-2 font-mono">48/60</td>
+                          </tr>
+                          <tr className="border-t border-[#2a3942]/30">
+                            <td className="px-3 py-2">BATATA CRINKLES PORCAO</td>
+                            <td className="px-3 py-2 text-sky-400/70">NOVA MEGA G ATACADISTA</td>
+                            <td className="px-3 py-2 text-emerald-400/70 font-mono">R$ 4,28</td>
+                            <td className="px-3 py-2">PORCOES</td>
+                            <td className="px-3 py-2 font-mono">50/80</td>
+                          </tr>
+                          <tr className="border-t border-[#2a3942]/30">
+                            <td className="px-3 py-2">BOMBOM OURO BRANCO</td>
+                            <td className="px-3 py-2 text-sky-400/70">DOCERIA MARINGA</td>
+                            <td className="px-3 py-2 text-emerald-400/70 font-mono">R$ 1,28</td>
+                            <td className="px-3 py-2">DOCES</td>
+                            <td className="px-3 py-2 font-mono">20/100</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[10px] text-[#8696a0] mt-3 leading-relaxed">
+                      💡 <span className="text-white font-semibold">Dica:</span> O sistema detecta automaticamente o cabeçalho mesmo que a planilha tenha linhas de título e resumo acima. Colunas como <span className="text-teal-400 font-semibold">Descrição</span>, <span className="text-teal-400 font-semibold">Fornecedor</span>, <span className="text-teal-400 font-semibold">Custo</span>, <span className="text-teal-400 font-semibold">Grupo</span> e <span className="text-teal-400 font-semibold">Min/Max</span> são reconhecidas automaticamente.
+                    </p>
+                  </div>
+
+                  {excelParsingError && (
+                    <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex items-center gap-3">
+                      <AlertTriangle size={18} className="text-rose-400 shrink-0" />
+                      <p className="text-xs text-rose-300">{excelParsingError}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Review Table */}
+              {excelImportItems.length > 0 && (
+                <div className="space-y-4">
+                  {/* Stats Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2 bg-teal-500/10 border border-teal-500/20 px-4 py-2 rounded-xl">
+                        <FileSpreadsheet size={14} className="text-teal-400" />
+                        <span className="text-xs font-bold text-teal-400">{excelFileName}</span>
+                      </div>
+                      <div className="flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 px-4 py-2 rounded-xl">
+                        <ClipboardList size={14} className="text-indigo-400" />
+                        <span className="text-xs font-bold text-indigo-400">{excelImportItems.length} itens detectados</span>
+                      </div>
+                      <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 px-4 py-2 rounded-xl">
+                        <AlertTriangle size={14} className="text-amber-400" />
+                        <span className="text-xs font-bold text-amber-400">{excelImportItems.filter(i => i.is_critical).length} críticos</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setExcelImportItems([]);
+                        setExcelFileName('');
+                        setExcelParsingError('');
+                      }}
+                      className="text-xs text-[#8696a0] hover:text-rose-400 font-semibold flex items-center gap-1 transition-all"
+                    >
+                      <Trash2 size={12} /> Descartar e Reenviar
+                    </button>
+                  </div>
+
+                  {/* Table */}
+                  <div className="bg-[#202c33]/80 border border-[#2a3942]/60 rounded-3xl overflow-hidden">
+                    <div className="overflow-x-auto styled-scrollbar">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-[#111b21]/80 border-b border-[#2a3942]/60">
+                            <th className="px-3 py-3 text-left text-[10px] font-black text-[#8696a0] uppercase tracking-widest w-10">#</th>
+                            <th className="px-3 py-3 text-left text-[10px] font-black text-[#8696a0] uppercase tracking-widest min-w-[220px]">Descrição</th>
+                            <th className="px-3 py-3 text-left text-[10px] font-black text-[#8696a0] uppercase tracking-widest min-w-[180px]">Fornecedor / Custo</th>
+                            <th className="px-3 py-3 text-left text-[10px] font-black text-[#8696a0] uppercase tracking-widest w-24">Grupo</th>
+                            <th className="px-3 py-3 text-center text-[10px] font-black text-[#8696a0] uppercase tracking-widest w-24">Min / Max</th>
+                            <th className="px-3 py-3 text-left text-[10px] font-black text-[#8696a0] uppercase tracking-widest w-28">Tipo Resposta</th>
+                            <th className="px-3 py-3 text-center text-[10px] font-black text-[#8696a0] uppercase tracking-widest w-16">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {excelImportItems.map((item, idx) => {
+                            const isEditing = excelEditingIdx === idx;
+                            // Extract group from title prefix [GROUP] 
+                            const groupMatch = item.title.match(/^\[([^\]]+)\]\s*/);
+                            const groupName = groupMatch ? groupMatch[1] : '';
+                            const cleanTitle = groupMatch ? item.title.replace(groupMatch[0], '') : item.title;
+                            return (
+                              <tr 
+                                key={idx} 
+                                className={`border-b border-[#2a3942]/30 transition-all ${
+                                  isEditing ? 'bg-indigo-500/10' : 
+                                  item.is_critical ? 'bg-amber-500/5' : 
+                                  idx % 2 === 0 ? 'bg-transparent' : 'bg-[#111b21]/20'
+                                } hover:bg-white/5`}
+                              >
+                                {/* # */}
+                                <td className="px-3 py-3">
+                                  <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full">
+                                    {idx + 1}
+                                  </span>
+                                </td>
+
+                                {/* Descrição (Title) */}
+                                <td className="px-3 py-3">
+                                  {isEditing ? (
+                                    <input
+                                      value={item.title}
+                                      onChange={e => handleExcelItemEdit(idx, 'title', e.target.value)}
+                                      className="w-full bg-[#111b21] border border-indigo-500/40 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                    />
+                                  ) : (
+                                    <div>
+                                      <span className="font-semibold text-white">{cleanTitle}</span>
+                                      {item.is_critical && (
+                                        <span className="ml-2 text-[8px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold align-middle">CRÍTICO</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* Fornecedor / Custo (from description) */}
+                                <td className="px-3 py-3">
+                                  {isEditing ? (
+                                    <input
+                                      value={item.description}
+                                      onChange={e => handleExcelItemEdit(idx, 'description', e.target.value)}
+                                      className="w-full bg-[#111b21] border border-indigo-500/40 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                    />
+                                  ) : (
+                                    <div className="space-y-0.5">
+                                      {item.description ? item.description.split(' | ').map((part, pIdx) => {
+                                        const isSupplier = part.startsWith('Fornecedor:');
+                                        const isCost = part.startsWith('Custo:');
+                                        return (
+                                          <div key={pIdx} className="text-[10px]">
+                                            {isSupplier ? (
+                                              <span className="text-sky-400">{part}</span>
+                                            ) : isCost ? (
+                                              <span className="text-emerald-400 font-mono font-semibold">{part}</span>
+                                            ) : (
+                                              <span className="text-[#8696a0]">{part}</span>
+                                            )}
+                                          </div>
+                                        );
+                                      }) : <span className="text-[#8696a0] text-[10px]">-</span>}
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* Grupo */}
+                                <td className="px-3 py-3">
+                                  {groupName ? (
+                                    <span className="text-[9px] px-2 py-1 rounded-full bg-indigo-500/15 text-indigo-300 font-bold">{groupName}</span>
+                                  ) : (
+                                    <span className="text-[#8696a0] text-[10px]">-</span>
+                                  )}
+                                </td>
+
+                                {/* Min / Max */}
+                                <td className="px-3 py-3 text-center">
+                                  {isEditing ? (
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="number"
+                                        placeholder="Min"
+                                        value={item.min_meta ?? ''}
+                                        onChange={e => handleExcelItemEdit(idx, 'min_meta', e.target.value ? parseFloat(e.target.value) : null)}
+                                        className="w-12 bg-[#111b21] border border-indigo-500/40 rounded-lg px-1 py-1.5 text-[10px] text-white text-center focus:outline-none focus:border-indigo-500"
+                                      />
+                                      <span className="text-[#8696a0]">/</span>
+                                      <input
+                                        type="number"
+                                        placeholder="Max"
+                                        value={item.max_meta ?? ''}
+                                        onChange={e => handleExcelItemEdit(idx, 'max_meta', e.target.value ? parseFloat(e.target.value) : null)}
+                                        className="w-12 bg-[#111b21] border border-indigo-500/40 rounded-lg px-1 py-1.5 text-[10px] text-white text-center focus:outline-none focus:border-indigo-500"
+                                      />
+                                    </div>
+                                  ) : (
+                                    (item.min_meta !== null || item.max_meta !== null) ? (
+                                      <span className="font-mono text-[10px] text-teal-400 font-bold">
+                                        {item.min_meta ?? 0}/{item.max_meta ?? 0}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[#8696a0] text-[10px]">-</span>
+                                    )
+                                  )}
+                                </td>
+
+                                {/* Tipo de Resposta */}
+                                <td className="px-3 py-3">
+                                  {isEditing ? (
+                                    <select
+                                      value={item.response_type}
+                                      onChange={e => handleExcelItemEdit(idx, 'response_type', e.target.value)}
+                                      className="bg-[#111b21] border border-indigo-500/40 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 w-full"
+                                    >
+                                      <option value="numeric">Numérico</option>
+                                      <option value="boolean">Feito/Não Feito</option>
+                                      <option value="conformity">Conformidade</option>
+                                      <option value="yes_no">Sim/Não</option>
+                                      <option value="temperature">Temperatura</option>
+                                      <option value="counter">Contador (+/-)</option>
+                                      <option value="text">Texto Livre</option>
+                                      <option value="photo">Foto</option>
+                                      <option value="stars">Estrelas</option>
+                                    </select>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full bg-slate-500/15 text-[#8696a0] font-bold text-[9px] uppercase">
+                                      {item.response_type === 'numeric' ? 'Numérico' :
+                                       item.response_type === 'boolean' ? 'Feito/Não' :
+                                       item.response_type === 'conformity' ? 'Conform.' :
+                                       item.response_type === 'yes_no' ? 'Sim/Não' :
+                                       item.response_type === 'temperature' ? 'Temp.' :
+                                       item.response_type === 'counter' ? 'Contador' :
+                                       item.response_type}
+                                    </span>
+                                  )}
+                                </td>
+
+                                {/* Ações */}
+                                <td className="px-3 py-3 text-center">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      onClick={() => setExcelEditingIdx(isEditing ? null : idx)}
+                                      className={`p-1.5 rounded-lg transition-all ${
+                                        isEditing ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25' : 'hover:bg-indigo-500/15 text-[#8696a0] hover:text-indigo-400'
+                                      }`}
+                                      title={isEditing ? 'Confirmar Edição' : 'Editar Item'}
+                                    >
+                                      {isEditing ? <Check size={13} /> : <Edit2 size={13} />}
+                                    </button>
+                                    <button
+                                      onClick={() => handleExcelItemRemove(idx)}
+                                      className="p-1.5 hover:bg-rose-500/15 text-[#8696a0] hover:text-rose-400 rounded-lg transition-all"
+                                      title="Remover Item"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Footer */}
+          {excelImportItems.length > 0 && (
+            <div className="h-20 bg-[#202c33] border-t border-[#2a3942]/60 px-6 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <p className="text-xs text-[#8696a0]">
+                  <span className="text-white font-bold">{excelImportItems.length}</span> itens prontos para importação
+                  {checklistItems.length > 0 && (
+                    <span> (serão adicionados aos <span className="text-white font-semibold">{checklistItems.length}</span> itens existentes)</span>
+                  )}
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowExcelImportModal(false)}
+                  className="text-xs text-[#8696a0] hover:text-[#d1d7db] font-semibold flex items-center gap-1 px-4 py-2.5 rounded-xl hover:bg-white/5 transition-all"
+                >
+                  <X size={14} /> Cancelar
+                </button>
+                <button
+                  onClick={handleConfirmExcelImport}
+                  className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs px-6 py-3 rounded-2xl flex items-center gap-2 transition-all shadow-md active:scale-95"
+                >
+                  <CheckCircle2 size={14} /> Confirmar Importação de {excelImportItems.length} Itens
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
 
     </div>

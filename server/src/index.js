@@ -13,7 +13,7 @@ import morgan from 'morgan';
 import apiGateway from './api-gateway/index.js';
 import publicRestRoutes from './api-gateway/public-rest.js';
 import { setupSwagger } from './api-gateway/swagger.js';
-import systemLogger from './system-logger.js';
+import systemLogger, { errorBuffer } from './system-logger.js';
 import { supabase } from './supabase.js';
 import sessionManager from './session-manager/index.js';
 import snoozeManager from './snooze-manager.js';
@@ -118,7 +118,17 @@ app.get('/debug/metrics', async (req, res) => {
 });
 
 app.get('/debug/recent-errors', async (req, res) => {
-    return res.json({ status: 'ok', errors: [] });
+    try {
+        const since = req.query.since;
+        let newErrors = errorBuffer;
+        if (since) {
+            const sinceTime = parseInt(since, 10);
+            newErrors = errorBuffer.filter(e => new Date(e.timestamp).getTime() > sinceTime);
+        }
+        return res.json({ success: true, errors: newErrors });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // Setup Swagger UI (/swagger/teste.html)
@@ -343,10 +353,7 @@ app.listen(PORT, '0.0.0.0', async () => {
               const newConv = payload.new;
               
               if (newConv && newConv.status === 'resolved' && (!oldConv || oldConv.status !== 'resolved')) {
-                  console.log(`[AutoRagTrainer] Conversa ${newConv.id} marcada como RESOLVIDA. Iniciando análise assíncrona.`);
-                  autoRagTrainer.trainFromResolvedConversation(newConv.tenant_id, newConv.id).catch(err => {
-                      console.error(`[AutoRagTrainer] Erro ao treinar conversa ${newConv.id}:`, err);
-                  });
+                  console.log(`[AutoRagTrainer] Conversa ${newConv.id} marcada como RESOLVIDA. (Treinamento automático desativado)`);
 
                   // Trigger webhook
                   (async () => {

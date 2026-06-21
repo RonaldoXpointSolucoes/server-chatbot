@@ -45,7 +45,10 @@ class AutoRagTrainer {
                 .select('text_content, sender_type, timestamp')
                 .eq('tenant_id', tenantId)
                 .eq('conversation_id', conversationId)
-                .order('timestamp', { ascending: true });
+                .order('timestamp', { ascending: false })
+                .limit(20);
+
+            if (messages) messages.reverse(); // Coloca em ordem cronológica novamente
 
             if (msgErr || !messages || messages.length === 0) {
                 console.log(`[AutoRagTrainer] Nenhuma mensagem encontrada para o chat ${conversationId}`);

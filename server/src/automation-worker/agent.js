@@ -589,6 +589,13 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 textMessage: combinedText
             });
 
+            if (!responseText) {
+                console.warn(`[AutomationWorker] Resposta da IA vazia ou nula para a conversa ${key}. Silenciando bot.`);
+                job.generating = false;
+                this.pendingJobs.delete(key);
+                return;
+            }
+
             // Se novas mensagens chegaram durante a geração, descarta e regera
             if (job.obsolete) {
                 console.log(`[AutomationWorker] Geração finalizada para ${key}, mas nova mensagem chegou durante a chamada de API. Descartando resposta obsoleta.`);
@@ -624,13 +631,13 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
         }
     }
 
-    async generateResponse({ tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock, botDelay, botInstructions }) {
+    async generateResponse({ tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock, botDelay, botInstructions, history: passedHistory }) {
         try {
             this.init();
-            if (!this.genAI) {
-                console.warn("[AutomationWorker] GEMINI_API_KEY não configurada.");
-                return null;
-            }
+             if (!this.genAI) {
+                 console.error("[AutomationWorker] GEMINI_API_KEY não configurada ou vazia. Não é possível gerar resposta da IA.");
+                 return null;
+             }
 
             console.log(`[AutomationWorker] Gerando resposta para o bot: ${botSettings.name} | Tenant: ${tenantId}`);
 
@@ -964,7 +971,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             const systemPrompt = replaceTokens(basePrompt + contextText + correctionsText);
             
             // 3. Obtem histórico da conversa
-            let history = await this.getConversationHistory(tenantId, conversationId, 12);
+            let history = passedHistory ? [...passedHistory] : await this.getConversationHistory(tenantId, conversationId, 12);
             // remove last message as it will be sent as new prompt
             if (history.length > 0 && history[history.length - 1].role === 'user') {
                 history.pop();
@@ -1254,7 +1261,12 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                                 cep: data.cep || data.Cep || rawCep
                                             };
                                             cepSuccess = true;
+                                        } else {
+                                            console.warn(`[AutomationWorker - CEP] Gastrofood retornou resposta vazia ou erro para CEP ${rawCep}:`, data);
                                         }
+                                    } else {
+                                        const errText = await response.text();
+                                        console.warn(`[AutomationWorker - CEP] Falha HTTP na consulta de CEP ${rawCep} via Gastrofood (Status: ${response.status}). Detalhes: ${errText}`);
                                     }
                                 } catch (errGastroCep) {
                                     console.error("[AutomationWorker - CEP] Erro na consulta do CEP via Gastrofood API:", errGastroCep);
@@ -1349,6 +1361,8 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                             dados_cadastro: data
                                         };
                                     } else {
+                                        const errText = await response.text();
+                                        console.error(`[AutomationWorker - Cliente] Falha HTTP ao validar cliente ${rawPhone} (Status: ${response.status}). Detalhes: ${errText}`);
                                         functionResult = { erro: `Serviço de validação de cliente indisponível (Status: ${response.status})` };
                                     }
                                 } catch (errCli) {
@@ -1385,8 +1399,12 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                             status: response.status,
                                             dados_resposta: resData
                                         };
+                                        if (!functionResult.sucesso) {
+                                            console.error(`[AutomationWorker - Pedido] Gastrofood recusou o pedido (Status: ${response.status}). Resposta:`, resData);
+                                        }
                                     } else {
                                         const errText = await response.text();
+                                        console.error(`[AutomationWorker - Pedido] Falha HTTP ao enviar pedido (Status: ${response.status}). Detalhes: ${errText}`);
                                         functionResult = { erro: `Erro ao enviar pedido para o Gastrofood (Status: ${response.status}). Detalhes: ${errText}` };
                                     }
                                 } catch (errPed) {
@@ -1543,7 +1561,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         keepLooping = false;
                     }
                 } catch (loopError) {
-                    console.error(`[AutomationWorker] Erro durante o loop de função (Iteração ${loopCount}):`, loopError);
+                    const errMsg = loopError?.message || String(loopError);
+                    const errStatus = loopError?.status || loopError?.response?.status || 'N/A';
+                    const errName = loopError?.name || loopError?.constructor?.name || 'UnknownError';
+                    console.error(`[AutomationWorker] Erro durante o loop de função (Iteração ${loopCount}):`, {
+                        name: errName,
+                        message: errMsg,
+                        status: errStatus,
+                        stack: loopError?.stack?.split('\n').slice(0, 5).join('\n')
+                    });
                     finalResponseText = "Desculpe, ocorreu um pequeno erro interno ao processar sua requisição. Pode tentar novamente?";
                     keepLooping = false;
                 }
@@ -1567,8 +1593,12 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
         
         try {
             if (finalResponseText && sock) {
-                // Simulação de digitação (Atraso Humano) baseada no botDelay
-                const delaySec = Number(botDelay) || 0;
+                // Simulação de digitação (Atraso Humano) baseada no botDelay (mínimo de 5 a 10 segundos para IA)
+                let delaySec = Number(botDelay) || 0;
+                if (delaySec < 5) {
+                    delaySec = Math.floor(Math.random() * 6) + 5; // Gera valor entre 5 e 10 segundos
+                }
+                
                 if (delaySec > 0) {
                     try {
                         await sock.sendPresenceUpdate('composing', jid);
