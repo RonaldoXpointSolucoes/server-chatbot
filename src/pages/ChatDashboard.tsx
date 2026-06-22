@@ -5227,7 +5227,10 @@ export default function ChatDashboard() {
                          </div>
                            {contact.fantasy_name ? (
                              (() => {
-                               const missingCnpj = !contact.document_number;
+                               const contactGroups = tenantInfo?.settings?.contactGroups || [];
+                               const groupIds = new Set(contactGroups.map((g: any) => g.id));
+                               const hasGroup = Array.isArray(contact.tags) && contact.tags.some((t: string) => groupIds.has(t));
+                               const missingCnpj = !contact.document_number && !hasGroup;
                                return (
                                  <div className="flex items-center gap-1.5 truncate">
                                    <span className={cn("text-[11px] truncate flex items-center gap-1", missingCnpj ? "text-rose-500 dark:text-rose-400 font-medium" : "text-gray-500 dark:text-[#8696a0]")}>
@@ -5246,7 +5249,13 @@ export default function ChatDashboard() {
                                  ?.map((id: string) => allCompanies.find((c: any) => c.id === id))
                                  .filter(Boolean) || [];
                                if (linkedCompanies.length > 0) {
-                                 const missingCnpj = linkedCompanies.some((c: any) => !c.document_number);
+                                 const contactGroups = tenantInfo?.settings?.contactGroups || [];
+                                 const groupIds = new Set(contactGroups.map((g: any) => g.id));
+                                 const hasGroup = (
+                                   (Array.isArray(contact.tags) && contact.tags.some((t: string) => groupIds.has(t))) ||
+                                   linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.some((t: string) => groupIds.has(t)))
+                                 );
+                                 const missingCnpj = linkedCompanies.some((c: any) => !c.document_number) && !hasGroup;
                                  return (
                                    <div className="flex items-center gap-1.5 truncate">
                                      <span className={cn("text-[11px] font-medium truncate flex items-center gap-1", missingCnpj ? "text-rose-500 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>

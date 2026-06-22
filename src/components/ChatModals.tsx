@@ -2234,6 +2234,22 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
   const tenantInfo = useChatStore(s => s.tenantInfo);
   const contactGroups = tenantInfo?.settings?.contactGroups;
 
+  const hasGroupSync = (() => {
+    if (!contact) return false;
+    const groupIds = new Set((contactGroups || []).map((g: any) => g.id));
+    if (Array.isArray(contact.tags) && contact.tags.some((t: string) => groupIds.has(t))) {
+      return true;
+    }
+    const linkedCompanyIds = Array.isArray(contact.company_ids) ? contact.company_ids : [];
+    if (linkedCompanyIds.length > 0) {
+      const companies = allContacts.filter((c: any) => linkedCompanyIds.includes(c.id));
+      if (companies.some((c: any) => Array.isArray(c.tags) && c.tags.some((t: string) => groupIds.has(t)))) {
+         return true;
+      }
+    }
+    return false;
+  })();
+
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [matchingGroups, setMatchingGroups] = useState<any[]>([]);
   const [groupCompanies, setGroupCompanies] = useState<any[]>([]);
@@ -2465,62 +2481,66 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
 
         <div className="flex flex-col gap-3 bg-[#f0f2f5]/80 dark:bg-black/20 p-4 rounded-2xl border border-black/5 dark:border-white/5">
           {/* CNPJ */}
-          <div className="flex items-center justify-between group">
-            <div className="flex items-center gap-3 w-full">
-              <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-400 shrink-0">
-                <FileText size={18} />
-              </div>
-              {editingCnpj ? (
-                <div className="flex items-center gap-2 w-full pr-2">
-                  <input
-                    type="text"
-                    placeholder="CNPJ ou CPF"
-                    value={cnpjInput}
-                    onChange={e => setCnpjInput(e.target.value)}
-                    className="w-full bg-white dark:bg-[#202c33] border border-emerald-500/40 rounded-lg px-2.5 py-1 text-xs text-[#111b21] dark:text-[#e9edef] font-mono focus:outline-none focus:border-emerald-500"
-                    autoFocus
-                  />
-                  <button 
-                    onClick={handleSaveCnpj} 
-                    disabled={savingCnpj} 
-                    className="p-1 rounded bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
-                  >
-                    {savingCnpj ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                  </button>
-                  <button 
-                    onClick={() => { setEditingCnpj(false); setCnpjInput(contact.document_number || ''); }} 
-                    className="p-1 rounded bg-gray-200 dark:bg-white/5 hover:bg-gray-300 dark:hover:bg-white/10 text-gray-500 transition-colors"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-col w-full min-w-0">
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">CNPJ / CPF</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[13px] font-mono font-semibold text-[#111b21] dark:text-[#e9edef] truncate">
-                      {contact.document_number ? formatDocument(contact.document_number) : 'Não informado'}
-                    </span>
-                    <button 
-                      onClick={() => { setEditingCnpj(true); setCnpjInput(contact.document_number || ''); }}
-                      className="p-1 text-gray-400 hover:text-emerald-500 transition-colors rounded hover:bg-black/5 dark:hover:bg-white/5"
-                      title="Editar Documento"
-                    >
-                      <Pencil size={12} />
-                    </button>
+          {!hasGroupSync && matchingGroups.length === 0 && (
+            <>
+              <div className="flex items-center justify-between group">
+                <div className="flex items-center gap-3 w-full">
+                  <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-400 shrink-0">
+                    <FileText size={18} />
                   </div>
+                  {editingCnpj ? (
+                    <div className="flex items-center gap-2 w-full pr-2">
+                      <input
+                        type="text"
+                        placeholder="CNPJ ou CPF"
+                        value={cnpjInput}
+                        onChange={e => setCnpjInput(e.target.value)}
+                        className="w-full bg-white dark:bg-[#202c33] border border-emerald-500/40 rounded-lg px-2.5 py-1 text-xs text-[#111b21] dark:text-[#e9edef] font-mono focus:outline-none focus:border-emerald-500"
+                        autoFocus
+                      />
+                      <button 
+                        onClick={handleSaveCnpj} 
+                        disabled={savingCnpj} 
+                        className="p-1 rounded bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
+                      >
+                        {savingCnpj ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                      </button>
+                      <button 
+                        onClick={() => { setEditingCnpj(false); setCnpjInput(contact.document_number || ''); }} 
+                        className="p-1 rounded bg-gray-200 dark:bg-white/5 hover:bg-gray-300 dark:hover:bg-white/10 text-gray-500 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col w-full min-w-0">
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">CNPJ / CPF</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[13px] font-mono font-semibold text-[#111b21] dark:text-[#e9edef] truncate">
+                          {contact.document_number ? formatDocument(contact.document_number) : 'Não informado'}
+                        </span>
+                        <button 
+                          onClick={() => { setEditingCnpj(true); setCnpjInput(contact.document_number || ''); }}
+                          className="p-1 text-gray-400 hover:text-emerald-500 transition-colors rounded hover:bg-black/5 dark:hover:bg-white/5"
+                          title="Editar Documento"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            {!editingCnpj && contact.document_number && (
-              <button onClick={handleCopyDoc} className="p-2 text-gray-400 hover:text-emerald-500 transition-colors bg-white dark:bg-[#202c33] rounded-lg shadow-sm border border-gray-100 dark:border-white/5 opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0">
-                {copiedDoc ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Copy size={16} />}
-              </button>
-            )}
-          </div>
+                {!editingCnpj && contact.document_number && (
+                  <button onClick={handleCopyDoc} className="p-2 text-gray-400 hover:text-emerald-500 transition-colors bg-white dark:bg-[#202c33] rounded-lg shadow-sm border border-gray-100 dark:border-white/5 opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0">
+                    {copiedDoc ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Copy size={16} />}
+                  </button>
+                )}
+              </div>
 
-          {/* Divider */}
-          <div className="h-px w-full bg-gradient-to-r from-transparent via-gray-200 dark:via-gray-700 to-transparent my-1"></div>
+              {/* Divider */}
+              <div className="h-px w-full bg-gradient-to-r from-transparent via-gray-200 dark:via-gray-700 to-transparent my-1"></div>
+            </>
+          )}
 
           {/* Telefone */}
           <div className="flex items-center justify-between group">
