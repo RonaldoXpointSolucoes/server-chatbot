@@ -3718,7 +3718,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!tenant) return;
     
     // UI Otimista (Separa flags internas que não pertencem ao schema de conversations)
-    const { snoozed_by_system, ai_paused, ai_paused_manually, ai_paused_until, ...dbPayload } = payload as any;
+    const { snoozed_by_system, ai_paused_until, ...dbPayload } = payload as any;
     if ('ai_paused' in payload) {
       dbPayload.status = payload.ai_paused ? 'open' : 'bot';
     }
