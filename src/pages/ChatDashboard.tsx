@@ -338,7 +338,7 @@ export default function ChatDashboard() {
         // 1. Fetch explicit companies with document_type = 'cnpj'
         const { data: explicitCompanies } = await supabase
           .from('contacts')
-          .select('id, name, fantasy_name, document_number')
+          .select('id, name, fantasy_name, document_number, tags')
           .eq('tenant_id', tenantId)
           .eq('document_type', 'cnpj');
 
@@ -369,7 +369,7 @@ export default function ChatDashboard() {
           if (idsToFetch.length > 0) {
             const { data: linkedCompanies } = await supabase
               .from('contacts')
-              .select('id, name, fantasy_name, document_number')
+              .select('id, name, fantasy_name, document_number, tags')
               .eq('tenant_id', tenantId)
               .in('id', idsToFetch);
               
@@ -5228,8 +5228,10 @@ export default function ChatDashboard() {
                            {contact.fantasy_name ? (
                              (() => {
                                const contactGroups = tenantInfo?.settings?.contactGroups || [];
-                               const groupIds = new Set(contactGroups.map((g: any) => g.id));
-                               const hasGroup = Array.isArray(contact.tags) && contact.tags.some((t: string) => groupIds.has(t));
+                               const matchingGroups = contactGroups.filter((g: any) => 
+                                 Array.isArray(contact.tags) && contact.tags.includes(g.id)
+                               );
+                               const hasGroup = matchingGroups.length > 0;
                                const missingCnpj = !contact.document_number && !hasGroup;
                                return (
                                  <div className="flex items-center gap-1.5 truncate">
@@ -5240,6 +5242,19 @@ export default function ChatDashboard() {
                                    {missingCnpj && (
                                      <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-1.5 py-[1px] rounded border border-rose-500/20 shrink-0">FALTA CNPJ</span>
                                    )}
+                                   {hasGroup && matchingGroups.map((g: any) => (
+                                     <span 
+                                       key={g.id} 
+                                       className="text-[9px] font-bold px-1.5 py-[1px] rounded border shrink-0"
+                                       style={{
+                                         backgroundColor: `${g.color}15`,
+                                         borderColor: `${g.color}30`,
+                                         color: g.color
+                                       }}
+                                     >
+                                       {g.name}
+                                     </span>
+                                   ))}
                                  </div>
                                );
                              })()
@@ -5250,11 +5265,11 @@ export default function ChatDashboard() {
                                  .filter(Boolean) || [];
                                if (linkedCompanies.length > 0) {
                                  const contactGroups = tenantInfo?.settings?.contactGroups || [];
-                                 const groupIds = new Set(contactGroups.map((g: any) => g.id));
-                                 const hasGroup = (
-                                   (Array.isArray(contact.tags) && contact.tags.some((t: string) => groupIds.has(t))) ||
-                                   linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.some((t: string) => groupIds.has(t)))
+                                 const matchingGroups = contactGroups.filter((g: any) => 
+                                   (Array.isArray(contact.tags) && contact.tags.includes(g.id)) ||
+                                   linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
                                  );
+                                 const hasGroup = matchingGroups.length > 0;
                                  const missingCnpj = linkedCompanies.some((c: any) => !c.document_number) && !hasGroup;
                                  return (
                                    <div className="flex items-center gap-1.5 truncate">
@@ -5266,6 +5281,19 @@ export default function ChatDashboard() {
                                      {missingCnpj && (
                                        <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-1.5 py-[1px] rounded border border-rose-500/20 shrink-0">FALTA CNPJ</span>
                                      )}
+                                     {hasGroup && matchingGroups.map((g: any) => (
+                                       <span 
+                                         key={g.id} 
+                                         className="text-[9px] font-bold px-1.5 py-[1px] rounded border shrink-0"
+                                         style={{
+                                           backgroundColor: `${g.color}15`,
+                                           borderColor: `${g.color}30`,
+                                           color: g.color
+                                         }}
+                                       >
+                                         {g.name}
+                                       </span>
+                                     ))}
                                    </div>
                                  );
                                }
