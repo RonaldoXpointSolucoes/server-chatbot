@@ -106,19 +106,25 @@ export default function AutomationSettings() {
 
     try {
       if (editingRule) {
+        const ruleBefore = rules.find(r => r.id === editingRule.id);
         const { error } = await supabase
           .from('tenant_automations')
           .update(formData)
           .eq('id', editingRule.id);
         if (error) throw error;
+        const ruleAfter = { ...ruleBefore, ...formData };
+        await useChatStore.getState().logOperation('UPDATE', 'tenant_automations', editingRule.id, ruleBefore || null, ruleAfter);
       } else {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('tenant_automations')
           .insert({
             tenant_id: tenantId,
             ...formData
-          });
+          })
+          .select()
+          .single();
         if (error) throw error;
+        await useChatStore.getState().logOperation('INSERT', 'tenant_automations', data?.id || 'new-automation', null, data || { tenant_id: tenantId, ...formData });
       }
       
       handleCloseModal();
@@ -132,11 +138,13 @@ export default function AutomationSettings() {
   const handleDelete = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir esta automação?')) return;
     try {
+      const ruleBefore = rules.find(r => r.id === id);
       const { error } = await supabase
         .from('tenant_automations')
         .delete()
         .eq('id', id);
       if (error) throw error;
+      await useChatStore.getState().logOperation('DELETE', 'tenant_automations', id, ruleBefore || null, null);
       fetchRules();
     } catch (error) {
       console.error('Erro ao excluir automação:', error);
@@ -145,11 +153,14 @@ export default function AutomationSettings() {
 
   const handleToggleActive = async (id: string, currentStatus: boolean) => {
     try {
+      const ruleBefore = rules.find(r => r.id === id);
       const { error } = await supabase
         .from('tenant_automations')
         .update({ is_active: !currentStatus })
         .eq('id', id);
       if (error) throw error;
+      const ruleAfter = { ...ruleBefore, is_active: !currentStatus };
+      await useChatStore.getState().logOperation('UPDATE', 'tenant_automations', id, ruleBefore || null, ruleAfter);
       fetchRules();
     } catch (error) {
       console.error('Erro ao alternar status:', error);

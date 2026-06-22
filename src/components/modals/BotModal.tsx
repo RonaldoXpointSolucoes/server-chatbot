@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Save, X, Settings2, BrainCircuit, Network, Sparkles, UploadCloud, Database, FileText, CheckCircle2, Trash2, Waypoints, MessageSquareWarning, Zap, User, Smartphone, AlertCircle, Loader2, Eye } from 'lucide-react';
+import { Bot, Save, X, Settings2, BrainCircuit, Network, Sparkles, UploadCloud, Database, FileText, CheckCircle2, Trash2, Waypoints, MessageSquareWarning, Zap, User, Smartphone, AlertCircle, Loader2, Eye, ChevronUp, ChevronDown, ClipboardList } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { BotTemplate, BOT_CATEGORIES, BOT_INDUSTRIES, BOT_TEMPLATES } from '../../lib/botTemplates';
 import { supabase } from '../../services/supabase';
@@ -59,6 +59,22 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
   const [handoffMessage, setHandoffMessage] = useState('Entendido. Estou transferindo o seu atendimento para um de nossos especialistas. Aguarde um momento.');
   const [handoffTargetType, setHandoffTargetType] = useState<'human' | 'bot'>('human');
   const [handoffBotId, setHandoffBotId] = useState<string>('');
+
+  // Integração do Cardápio Digital (GastroFood API)
+  const [cardapioOrigem, setCardapioOrigem] = useState<'supabase' | 'api'>('supabase');
+  const [cardapioJsonUrl, setCardapioJsonUrl] = useState('');
+  const [cardapioJsonToken, setCardapioJsonToken] = useState('');
+  const [cardapioJsonPayload, setCardapioJsonPayload] = useState('');
+
+  // Integração de Envio de Pedido (GastroFood API)
+  const [pedidoOrigem, setPedidoOrigem] = useState<'company' | 'api'>('company');
+  const [pedidoJsonUrl, setPedidoJsonUrl] = useState('');
+  const [pedidoJsonToken, setPedidoJsonToken] = useState('');
+  const [pedidoJsonPayload, setPedidoJsonPayload] = useState('');
+  const [isPedidoExpanded, setIsPedidoExpanded] = useState(false);
+  const [isTestingPedido, setIsTestingPedido] = useState(false);
+  const [testPedidoResult, setTestPedidoResult] = useState<any>(null);
+  const [testPedidoError, setTestPedidoError] = useState('');
 
   const fetchDocuments = async () => {
     try {
@@ -292,6 +308,28 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         setHandoffMessage(botToEdit.handoffMessage || 'Entendido. Estou transferindo o seu atendimento para um de nossos especialistas. Aguarde um momento.');
         setHandoffTargetType(botToEdit.handoff_target_type || 'human');
         setHandoffBotId(botToEdit.handoff_bot_id || '');
+
+        setCardapioOrigem(botToEdit.cardapio_origem || 'supabase');
+        setCardapioJsonUrl(botToEdit.cardapio_json_url || '');
+        setCardapioJsonToken(botToEdit.cardapio_json_token || '');
+        setCardapioJsonPayload(
+          botToEdit.cardapio_json_payload 
+            ? (typeof botToEdit.cardapio_json_payload === 'string' 
+                ? botToEdit.cardapio_json_payload 
+                : JSON.stringify(botToEdit.cardapio_json_payload, null, 2)) 
+            : ''
+        );
+
+        setPedidoOrigem(botToEdit.pedido_origem || 'company');
+        setPedidoJsonUrl(botToEdit.pedido_json_url || '');
+        setPedidoJsonToken(botToEdit.pedido_json_token || '');
+        setPedidoJsonPayload(
+          botToEdit.pedido_json_payload 
+            ? (typeof botToEdit.pedido_json_payload === 'string' 
+                ? botToEdit.pedido_json_payload 
+                : JSON.stringify(botToEdit.pedido_json_payload, null, 2)) 
+            : ''
+        );
       } else if (initialTemplate) {
         setName(initialTemplate.name || '');
         setDescription(initialTemplate.description || '');
@@ -307,6 +345,16 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         setHandoffMessage('Entendido. Estou transferindo o seu atendimento para um de nossos especialistas. Aguarde um momento.');
         setHandoffTargetType('human');
         setHandoffBotId('');
+
+        setCardapioOrigem('supabase');
+        setCardapioJsonUrl('');
+        setCardapioJsonToken('');
+        setCardapioJsonPayload('');
+
+        setPedidoOrigem('company');
+        setPedidoJsonUrl('');
+        setPedidoJsonToken('');
+        setPedidoJsonPayload('');
       } else {
         setName('');
         setDescription('');
@@ -322,6 +370,16 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         setHandoffMessage('Entendido. Estou transferindo o seu atendimento para um de nossos especialistas. Aguarde um momento.');
         setHandoffTargetType('human');
         setHandoffBotId('');
+
+        setCardapioOrigem('supabase');
+        setCardapioJsonUrl('');
+        setCardapioJsonToken('');
+        setCardapioJsonPayload('');
+
+        setPedidoOrigem('company');
+        setPedidoJsonUrl('');
+        setPedidoJsonToken('');
+        setPedidoJsonPayload('');
       }
       setActiveTab('identity');
     }
@@ -329,9 +387,74 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
 
   if (!isOpen) return null;
 
+  const handleTestPedido = async () => {
+    setIsTestingPedido(true);
+    setTestPedidoResult(null);
+    setTestPedidoError('');
+    try {
+      if (!pedidoJsonUrl) {
+        throw new Error('A URL do endpoint é obrigatória para realizar o teste.');
+      }
+
+      let parsedPayload = null;
+      if (pedidoJsonPayload) {
+        try {
+          parsedPayload = JSON.parse(pedidoJsonPayload);
+        } catch (e) {
+          throw new Error('O corpo da requisição (JSON Payload) não é um JSON válido. Verifique se aspas duplas, vírgulas e chaves estão corretas.');
+        }
+      }
+
+      const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
+      const res = await fetch(`${apiBase}/api/v1/utils/test-cardapio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: pedidoJsonUrl,
+          token: pedidoJsonToken,
+          payload: parsedPayload
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `Erro na requisição. Status: ${res.status}`);
+      }
+
+      const resData = await res.json();
+      setTestPedidoResult(resData);
+    } catch (err: any) {
+      setTestPedidoError(err.message || 'Ocorreu um erro desconhecido.');
+    } finally {
+      setIsTestingPedido(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (onSave) {
+      let parsedPayload = null;
+      if (cardapioJsonPayload && cardapioJsonPayload.trim()) {
+        try {
+          parsedPayload = JSON.parse(cardapioJsonPayload);
+        } catch (err) {
+          alert('Erro no Payload JSON do Cardápio: O texto inserido não é um JSON válido. Por favor, corrija-o antes de salvar.');
+          return;
+        }
+      }
+
+      let parsedPedidoPayload = null;
+      if (pedidoJsonPayload && pedidoJsonPayload.trim()) {
+        try {
+          parsedPedidoPayload = JSON.parse(pedidoJsonPayload);
+        } catch (err) {
+          alert('Erro no Payload JSON do Envio de Pedido: O texto inserido não é um JSON válido. Por favor, corrija-o antes de salvar.');
+          return;
+        }
+      }
+
       onSave({
         name,
         description,
@@ -348,6 +471,14 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         handoffMessage,
         handoff_target_type: handoffTargetType,
         handoff_bot_id: handoffBotId || null,
+        cardapio_origem: cardapioOrigem,
+        cardapio_json_url: cardapioJsonUrl.trim() || null,
+        cardapio_json_token: cardapioJsonToken.trim() || null,
+        cardapio_json_payload: parsedPayload,
+        pedido_origem: pedidoOrigem,
+        pedido_json_url: pedidoJsonUrl.trim() || null,
+        pedido_json_token: pedidoJsonToken.trim() || null,
+        pedido_json_payload: parsedPedidoPayload,
       });
     }
     onClose();
@@ -1016,6 +1147,230 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
                       />
                    </div>
                 </div>
+
+                {/* Integração do Cardápio Digital (GastroFood API) */}
+                 <div className="space-y-6 p-6 sm:p-8 bg-white/[0.02] border border-white/10 rounded-[2rem] shadow-inner relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-bl-full pointer-events-none" />
+
+                    <div className="flex items-center gap-3 text-indigo-400 border-b border-white/10 pb-4 relative z-10">
+                      <Database className="w-6 h-6" />
+                      <h4 className="text-sm font-black uppercase tracking-widest">Integração do Cardápio Digital (GastroFood API)</h4>
+                    </div>
+
+                    <div className="space-y-4 relative z-10">
+                       <div className="space-y-2">
+                          <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">Origem do Cardápio</label>
+                          <div className="flex items-center gap-2 p-1.5 bg-[#18181b]/80 border border-white/10 rounded-2xl shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]">
+                             <button
+                               type="button"
+                               onClick={() => setCardapioOrigem('supabase')}
+                               className={cn(
+                                 "flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-bold transition-all",
+                                 cardapioOrigem === 'supabase' 
+                                  ? "bg-indigo-500 text-white shadow-md" 
+                                  : "text-white/40 hover:text-white/80"
+                               )}
+                             >
+                                <Database className="w-4 h-4" /> Consultar Supabase (Recomendado)
+                             </button>
+                             <button
+                               type="button"
+                               onClick={() => setCardapioOrigem('api')}
+                               className={cn(
+                                 "flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-bold transition-all",
+                                 cardapioOrigem === 'api' 
+                                  ? "bg-rose-500 text-white shadow-md" 
+                                  : "text-white/40 hover:text-white/80"
+                               )}
+                             >
+                                <Network className="w-4 h-4" /> Consultar API GastroFood (Online)
+                             </button>
+                          </div>
+                          <p className="text-[11px] font-medium text-white/40 ml-1 leading-relaxed">
+                             {cardapioOrigem === 'supabase' 
+                               ? 'O robô utilizará os produtos importados e sincronizados no banco de dados local da plataforma.' 
+                               : 'O robô consultará o cardápio em tempo real diretamente na API externa do GastroFood configurada abaixo.'}
+                          </p>
+                       </div>
+
+                       {/* Campos Condicionais para API GastroFood */}
+                       {cardapioOrigem === 'api' && (
+                          <div className="space-y-5 p-5 bg-[#18181b]/50 border border-white/5 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-300">
+                             <div className="space-y-2">
+                                <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">URL da API do Cardápio</label>
+                                <input
+                                  type="text"
+                                  value={cardapioJsonUrl}
+                                  onChange={(e) => setCardapioJsonUrl(e.target.value)}
+                                  placeholder="https://service.xpointsolucoes.com.br:8443/v6/server/nuvem/..."
+                                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-white placeholder-white/20 focus:border-rose-500/50 focus:ring-1 focus:ring-rose-500/50 transition-all shadow-inner"
+                                />
+                             </div>
+
+                             <div className="space-y-2">
+                                <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">Token de Autorização (Bearer)</label>
+                                <input
+                                  type="text"
+                                  value={cardapioJsonToken}
+                                  onChange={(e) => setCardapioJsonToken(e.target.value)}
+                                  placeholder="Bearer eyJhbG..."
+                                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-white placeholder-white/20 focus:border-rose-500/50 focus:ring-1 focus:ring-rose-500/50 transition-all shadow-inner"
+                                />
+                             </div>
+
+                             <div className="space-y-2">
+                                <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">Corpo da Requisição (JSON Payload)</label>
+                                <textarea
+                                  rows={4}
+                                  value={cardapioJsonPayload}
+                                  onChange={(e) => setCardapioJsonPayload(e.target.value)}
+                                  placeholder={`{\n  // O ID da loja será injetado automaticamente\n}`}
+                                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-mono text-white placeholder-white/20 focus:border-rose-500/50 focus:ring-1 focus:ring-rose-500/50 transition-all resize-none styled-scrollbar shadow-inner"
+                                />
+                                <p className="text-[10px] font-medium text-white/40 ml-1 leading-relaxed">
+                                   Cole o payload JSON de inicialização para buscar o cardápio. Ex: Guid do Estabelecimento.
+                                </p>
+                             </div>
+                          </div>
+                       )}
+                    </div>
+                 </div>
+
+                 {/* Envio de Pedido (GastroFood API) */}
+                 <div className="space-y-6 p-6 sm:p-8 bg-white/[0.02] border border-white/10 rounded-[2rem] shadow-inner relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-bl-full pointer-events-none" />
+
+                    <div className="flex items-center justify-between border-b border-white/10 pb-4 relative z-10">
+                      <div className="flex items-center gap-3 text-rose-400">
+                        <ClipboardList className="w-6 h-6" />
+                        <h4 className="text-sm font-black uppercase tracking-widest">Envio de Pedido</h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsPedidoExpanded(!isPedidoExpanded)}
+                        className="p-1.5 hover:bg-white/5 rounded-xl text-white/40 hover:text-white transition-all"
+                      >
+                        {isPedidoExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                      </button>
+                    </div>
+
+                    <p className="text-[11px] font-medium text-white/40 ml-1 leading-relaxed -mt-3 relative z-10">
+                      Configure a finalização e integração de pedidos diretamente no Gastrofood.
+                    </p>
+
+                    {isPedidoExpanded && (
+                      <div className="space-y-4 relative z-10 animate-in fade-in slide-in-from-top-2 duration-300">
+                         <div className="space-y-2">
+                            <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">Configuração de Pedido</label>
+                            <div className="flex items-center gap-2 p-1.5 bg-[#18181b]/80 border border-white/10 rounded-2xl shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]">
+                               <button
+                                 type="button"
+                                 onClick={() => setPedidoOrigem('company')}
+                                 className={cn(
+                                   "flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-bold transition-all",
+                                   pedidoOrigem === 'company' 
+                                     ? "bg-indigo-500 text-white shadow-md" 
+                                     : "text-white/40 hover:text-white/80"
+                                 )}
+                               >
+                                  <Settings2 className="w-4 h-4" /> Usar Configuração da Empresa
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => setPedidoOrigem('api')}
+                                 className={cn(
+                                   "flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-bold transition-all",
+                                   pedidoOrigem === 'api' 
+                                     ? "bg-rose-500 text-white shadow-md" 
+                                     : "text-white/40 hover:text-white/80"
+                                 )}
+                               >
+                                  <Zap className="w-4 h-4" /> Configurar API do Robô (Customizado)
+                               </button>
+                            </div>
+                            <p className="text-[11px] font-medium text-white/40 ml-1 leading-relaxed">
+                               {pedidoOrigem === 'company' 
+                                 ? 'O robô utilizará as rotas e credenciais globais de pedidos configuradas nas Definições da Conta.' 
+                                 : 'O robô enviará os pedidos para a API externa personalizada configurada abaixo.'}
+                            </p>
+                         </div>
+
+                         {/* Campos Condicionais para API Customizada do Robô */}
+                         {pedidoOrigem === 'api' && (
+                            <div className="space-y-5 p-5 bg-[#18181b]/50 border border-white/5 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-300">
+                               <div className="space-y-2">
+                                  <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">URL de Envio do Pedido</label>
+                                  <input
+                                    type="text"
+                                    value={pedidoJsonUrl}
+                                    onChange={(e) => setPedidoJsonUrl(e.target.value)}
+                                    placeholder="https://service.xpointsolucoes.com.br:8443/v6/server/nuvem/pedido..."
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-white placeholder-white/20 focus:border-rose-500/50 focus:ring-1 focus:ring-rose-500/50 transition-all shadow-inner"
+                                  />
+                               </div>
+
+                               <div className="space-y-2">
+                                  <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">Token de Autorização (Bearer)</label>
+                                  <input
+                                    type="text"
+                                    value={pedidoJsonToken}
+                                    onChange={(e) => setPedidoJsonToken(e.target.value)}
+                                    placeholder="Bearer eyJhbG..."
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-white placeholder-white/20 focus:border-rose-500/50 focus:ring-1 focus:ring-rose-500/50 transition-all shadow-inner"
+                                  />
+                               </div>
+
+                               <div className="space-y-2">
+                                  <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">Corpo da Requisição (JSON Payload)</label>
+                                  <textarea
+                                    rows={6}
+                                    value={pedidoJsonPayload}
+                                    onChange={(e) => setPedidoJsonPayload(e.target.value)}
+                                    placeholder={`{\n  "jsOrder": {\n    "module": 1,\n    "fkCustomer": "9EA3F679-5565-4DA0-930F-0971A8B8A3CD",\n    "fkStore": "6A728D2A-8612-4DC1-8676-0B10E4D38AD5"\n  }\n}`}
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-mono text-white placeholder-white/20 focus:border-rose-500/50 focus:ring-1 focus:ring-rose-500/50 transition-all resize-none styled-scrollbar shadow-inner"
+                                  />
+                                  <p className="text-[10px] font-medium text-white/40 ml-1 leading-relaxed">
+                                     Cole o payload JSON de exemplo para envio do pedido.
+                                  </p>
+                               </div>
+
+                               <div className="pt-2 flex flex-col gap-3">
+                                  <div className="flex items-center gap-4">
+                                     <button
+                                       type="button"
+                                       onClick={handleTestPedido}
+                                       disabled={isTestingPedido || !pedidoJsonUrl}
+                                       className="flex items-center gap-2 px-6 py-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-[0_10px_20px_-10px_rgba(244,63,94,0.4)]"
+                                     >
+                                       {isTestingPedido ? 'Testando...' : 'Testar Requisição'}
+                                     </button>
+                                  </div>
+
+                                  {testPedidoError && (
+                                     <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-xs font-mono whitespace-pre-wrap animate-in fade-in duration-300">
+                                        <strong>Erro no teste:</strong> {testPedidoError}
+                                     </div>
+                                  )}
+
+                                  {testPedidoResult && (
+                                     <div className="bg-black/20 border border-white/5 p-4 rounded-xl space-y-3 animate-in fade-in duration-300">
+                                        <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                                           <span className="text-[10px] font-bold text-white/40">Resultado do Envio:</span>
+                                           <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-500/10 text-rose-400">
+                                              Status: {testPedidoResult.status}
+                                           </span>
+                                        </div>
+                                        <div className="max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed text-[10px] font-mono text-white/70 styled-scrollbar">
+                                           {JSON.stringify(testPedidoResult.data, null, 2)}
+                                        </div>
+                                     </div>
+                                  )}
+                               </div>
+                            </div>
+                         )}
+                      </div>
+                    )}
+                 </div>
 
             </div>
 

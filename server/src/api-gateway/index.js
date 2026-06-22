@@ -38,13 +38,13 @@ router.get('/v1/utils/link-preview', async (req, res) => {
 // Proxy para testar a requisição de Cardápio JSON Online sem bloqueios de CORS
 router.post('/v1/utils/test-cardapio', async (req, res) => {
     try {
-        const { url, token, payload } = req.body;
+        const { url, token, payload, method = 'POST' } = req.body;
         if (!url) {
             return res.status(400).json({ error: 'A URL do endpoint é obrigatória.' });
         }
 
-        let bodyObj = {};
-        if (payload) {
+        let bodyObj = null;
+        if (payload && method !== 'GET') {
             try {
                 bodyObj = typeof payload === 'string' ? JSON.parse(payload) : payload;
             } catch (e) {
@@ -59,12 +59,18 @@ router.post('/v1/utils/test-cardapio', async (req, res) => {
             headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
         }
 
-        console.log(`[test-cardapio] Fazendo requisição POST para ${url}`);
-        const response = await fetch(url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(bodyObj)
-        });
+        console.log(`[test-cardapio] Fazendo requisição ${method} para ${url}`);
+        
+        const fetchOptions = {
+            method,
+            headers
+        };
+
+        if (method !== 'GET' && bodyObj) {
+            fetchOptions.body = JSON.stringify(bodyObj);
+        }
+
+        const response = await fetch(url, fetchOptions);
 
         const status = response.status;
         let data;
@@ -158,11 +164,29 @@ router.post('/v1/admin/plans', async (req, res) => {
 });
 
 router.delete('/v1/admin/companies/:id', async (req, res) => {
+    const companyId = req.params.id;
     try {
-        const { error } = await supabase.from('companies').delete().eq('id', req.params.id);
+        // 1. Delete messages referencing this tenant to avoid foreign key violations
+        const { error: errMessages } = await supabase.from('messages').delete().eq('tenant_id', companyId);
+        if (errMessages) console.error('Erro ao deletar mensagens do tenant:', errMessages);
+
+        // 2. Delete conversations referencing this tenant to avoid foreign key violations
+        const { error: errConvs } = await supabase.from('conversations').delete().eq('tenant_id', companyId);
+        if (errConvs) console.error('Erro ao deletar conversas do tenant:', errConvs);
+
+        // 3. Delete contacts referencing this tenant to avoid foreign key violations
+        const { error: errContacts } = await supabase.from('contacts').delete().eq('tenant_id', companyId);
+        if (errContacts) console.error('Erro ao deletar contatos do tenant:', errContacts);
+
+        // 4. Finally delete the company itself
+        const { error } = await supabase.from('companies').delete().eq('id', companyId);
         if (error) throw error;
+
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) {
+        console.error('Erro ao deletar empresa:', e);
+        res.status(500).json({ error: e.message });
+    }
 });
 
 router.get('/v1/admin/economic-groups', async (req, res) => {

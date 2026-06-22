@@ -883,6 +883,7 @@ export default function ChecklistBuilder() {
 
       let finalChecklistId = editingChecklist.id;
 
+      const checklistBefore = editingChecklist.id ? checklists.find(c => c.id === editingChecklist.id) : null;
       if (editingChecklist.id) {
         // 1. Atualizar Checklist
         const { error: chkErr } = await supabase
@@ -890,6 +891,8 @@ export default function ChecklistBuilder() {
           .update(checklistPayload)
           .eq('id', editingChecklist.id);
         if (chkErr) throw chkErr;
+        const checklistAfter = { ...checklistBefore, ...checklistPayload };
+        await useChatStore.getState().logOperation('UPDATE', 'checklists', editingChecklist.id, checklistBefore || null, checklistAfter);
       } else {
         // 1. Inserir Checklist
         const { data: newChk, error: chkErr } = await supabase
@@ -899,6 +902,7 @@ export default function ChecklistBuilder() {
           .single();
         if (chkErr) throw chkErr;
         finalChecklistId = newChk.id;
+        await useChatStore.getState().logOperation('INSERT', 'checklists', finalChecklistId, null, newChk);
       }
 
       // 2. Salvar Itens (Exclui os antigos e insere todos para garantir sincronia e sort_order)
@@ -1062,8 +1066,10 @@ export default function ChecklistBuilder() {
   const handleDeleteChecklist = async (id: string) => {
     if (!window.confirm('Tem certeza absoluta que deseja remover este checklist e todos os seus históricos operacionais? Esta ação é irreversível.')) return;
     try {
+      const checklistBefore = checklists.find(c => c.id === id);
       const { error } = await supabase.from('checklists').delete().eq('id', id);
       if (error) throw error;
+      await useChatStore.getState().logOperation('DELETE', 'checklists', id, checklistBefore || null, null);
       showToast('success', 'Checklist excluído.');
       loadInitialData();
     } catch (err: any) {

@@ -32,6 +32,12 @@ function interceptConsole() {
         text = '[Non-serializable Object Object]';
     }
 
+    // Filtro de ruído: Ignora warnings de prekey bundle do Baileys para não inundar o logger
+    if (level === 'warn' && text.includes('Closing open session in favor of incoming prekey bundle')) {
+        originalFn.apply(console, args);
+        return;
+    }
+
     const logEntry = {
       type: 'log',
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),

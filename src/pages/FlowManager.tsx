@@ -1,3 +1,4 @@
+import { useChatStore } from '../store/chatStore';
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
 import { Plus, ArrowLeft, Bot, Play, Pause, Trash2, Edit, FolderPlus, MoreHorizontal, MessageSquare, GripVertical, Settings } from 'lucide-react';
@@ -42,6 +43,7 @@ export default function FlowManager() {
       .single();
 
     if (newFlow) {
+      await useChatStore.getState().logOperation('INSERT', 'flows', newFlow.id, null, newFlow);
       // Creates initial draft version
       const { data: version } = await supabase
         .from('flow_versions')
@@ -60,6 +62,7 @@ export default function FlowManager() {
         .single();
       
       if (version) {
+         await useChatStore.getState().logOperation('INSERT', 'flow_versions', version.id, null, version);
          navigate(`/flows/${newFlow.id}/edit`);
       }
     }
@@ -69,7 +72,9 @@ export default function FlowManager() {
 
   const handleDelete = async (id: string) => {
     if(!window.confirm("Certeza que deseja deletar este fluxo?")) return;
+    const flowBefore = flows.find(f => f.id === id);
     await supabase.from('flows').delete().eq('id', id);
+    await useChatStore.getState().logOperation('DELETE', 'flows', id, flowBefore || null, null);
     setFlows(flows.filter(f => f.id !== id));
   };
 

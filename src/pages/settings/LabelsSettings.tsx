@@ -167,12 +167,15 @@ export default function LabelsSettings() {
 
     if (editingLabel) {
       // Atualizar no banco
+      const labelBefore = labels.find(l => l.id === editingLabel.id);
       const { error } = await supabase
          .from('tenant_labels')
          .update({ name: formData.name, color: formData.color })
          .eq('id', editingLabel.id);
          
       if (!error) {
+        const labelAfter = { ...labelBefore, ...formData };
+        await useChatStore.getState().logOperation('UPDATE', 'tenant_labels', editingLabel.id, labelBefore || null, labelAfter);
         setLabels(labels.map(l => l.id === editingLabel.id ? { ...l, ...formData } : l));
         success = true;
       }
@@ -189,6 +192,7 @@ export default function LabelsSettings() {
          .single();
          
       if (data && !error) {
+        await useChatStore.getState().logOperation('INSERT', 'tenant_labels', data.id, null, data);
         setLabels([data, ...labels]);
         success = true;
       }
@@ -216,6 +220,7 @@ export default function LabelsSettings() {
     if (labelToDelete) {
        const { error } = await supabase.from('tenant_labels').delete().eq('id', id);
        if (!error) {
+          await useChatStore.getState().logOperation('DELETE', 'tenant_labels', id, labelToDelete, null);
           setLabels(labels.filter(l => l.id !== id));
           useChatStore.getState().fetchTenantLabels();
           // Remoção do banco é permanente, avisamos apenas

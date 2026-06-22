@@ -105,6 +105,19 @@ class SessionManager {
 
     async _createSessionInner(tenantId, instanceId) {
         try {
+            // Verifica se a instância ainda existe no banco de dados para evitar violação de chave estrangeira
+            const { data: instance, error: findError } = await supabase
+                .from('whatsapp_instances')
+                .select('id')
+                .eq('id', instanceId)
+                .single();
+
+            if (findError || !instance) {
+                const errorMsg = `Instância ${instanceId} não encontrada no banco de dados (provavelmente deletada).`;
+                console.warn(`[SessionManager] Abortando criação de sessão: ${errorMsg}`);
+                throw new Error(errorMsg);
+            }
+
             // Assume o lease e trava a posse do worker antes de iniciar
             await supabase.from('whatsapp_instances').update({
                 assigned_node_id: NODE_ID,

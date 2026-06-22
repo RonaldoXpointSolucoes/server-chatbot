@@ -394,8 +394,10 @@ export default function DevLogger() {
         
         if (url) {
           const isExpectedOfflineError = url.includes('/invoke') && response.status === 400;
+          const isLocalFrontend = url.includes(window.location.host) || (!url.startsWith('http://') && !url.startsWith('https://'));
+          const isStatus404 = url.includes('/status') && response.status === 404;
           
-          if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/realtime/') && !isExpectedOfflineError && !isAstsTest) {
+          if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/realtime/') && !isExpectedOfflineError && !isAstsTest && !isLocalFrontend && !isStatus404) {
              
              // Desduplicação de erros do Supabase
              if (url.includes('supabase.co')) {
@@ -412,6 +414,11 @@ export default function DevLogger() {
                detailsStr = await response.clone().text();
              } catch {
                detailsStr = 'no body';
+             }
+
+             // Ignorar erros PGRST116 (nenhuma linha retornada no .single() do Supabase)
+             if (response.status === 406 && detailsStr.includes('PGRST116')) {
+                return response;
              }
              
              let sourcePrefix = 'Fetch (External)';
@@ -433,7 +440,8 @@ export default function DevLogger() {
         const method = requestOptions?.method || 'GET';
         const urlStr = typeof urlObj === 'string' ? urlObj : 'unknown';
         
-        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/realtime/') || urlStr.includes('system_logs');
+        const isLocalFrontend = urlStr.includes(window.location.host) || (!urlStr.startsWith('http://') && !urlStr.startsWith('https://'));
+        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/realtime/') || urlStr.includes('system_logs') || isLocalFrontend;
         
         if (!isSpammyUrl && !isAstsTest) {
           const isAbort = err.name === 'AbortError';
@@ -1593,8 +1601,37 @@ export default function DevLogger() {
                    <Info size={24} className="opacity-50" />
                    <p>Nenhum log detectado</p>
                 </div>
-              ) : (
-                logs.map((log) => (
+              ) : (() => {
+                const groupedList: Array<{
+                  id: string;
+                  type: string;
+                  source: string;
+                  message: string;
+                  timestamp: any;
+                  details: any;
+                  count: number;
+                }> = [];
+
+                logs.forEach((log) => {
+                  const existing = groupedList.find(
+                    (item) =>
+                      item.type === log.type &&
+                      item.source === log.source &&
+                      item.message === log.message
+                  );
+                  if (existing) {
+                    existing.count++;
+                    existing.timestamp = log.timestamp;
+                    existing.details = log.details;
+                  } else {
+                    groupedList.push({
+                      ...log,
+                      count: 1
+                    });
+                  }
+                });
+
+                return groupedList.map((log) => (
                   <div 
                     key={log.id} 
                     className={`p-2 rounded-xl border flex flex-col gap-1 transition-all
@@ -1612,7 +1649,12 @@ export default function DevLogger() {
                          {log.type === 'success' && <CheckCircle2 size={12} className="text-emerald-400" />}
                          {log.type === 'info' && <Info size={12} className="text-blue-400" />}
                          {log.type === 'log' && <Terminal size={12} className="text-gray-400" />}
-                         <span className="truncate max-w-[300px]">{log.source}</span>
+                         <span className="truncate max-w-[260px] sm:max-w-[320px]">{log.source}</span>
+                         {log.count > 1 && (
+                           <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-white/15 text-white border border-white/5 whitespace-nowrap animate-pulse">
+                             x{log.count}
+                           </span>
+                         )}
                        </div>
                        <span className="text-[10px] opacity-50 flex-shrink-0">
                          {new Date(log.timestamp).toLocaleTimeString()}
@@ -1627,8 +1669,8 @@ export default function DevLogger() {
                       </div>
                     )}
                   </div>
-                ))
-              )}
+                ));
+              })()}
               <div ref={bottomRef} />
             </div>
           )

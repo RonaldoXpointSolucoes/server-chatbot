@@ -128,6 +128,12 @@ export type ContactRow = {
   address_neighborhood?: string;
   address_city?: string;
   address_state?: string;
+  latitude?: string;
+  longitude?: string;
+  addresses?: any[];
+  ap?: string;
+  block?: string;
+  reference?: string;
   notes?: string;
   tags?: any[];
   company_ids?: string[];
@@ -144,4 +150,5 @@ export type ContactRow = {
   created_at: string;
   is_pinned?: boolean;
   pinned_instances?: string[];
+  id_gastro_food?: string;
 }

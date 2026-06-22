@@ -208,18 +208,24 @@ export default function ChecklistSettings() {
 
       if (editingUnit.id) {
         // Atualizar
+        const unitBefore = units.find(u => u.id === editingUnit.id);
         const { error } = await supabase
           .from('units')
           .update(payload)
           .eq('id', editingUnit.id);
         if (error) throw error;
+        const unitAfter = { ...unitBefore, ...payload };
+        await useChatStore.getState().logOperation('UPDATE', 'units', editingUnit.id, unitBefore || null, unitAfter);
         showToast('success', 'Unidade atualizada com sucesso!');
       } else {
         // Inserir
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('units')
-          .insert(payload);
+          .insert(payload)
+          .select()
+          .single();
         if (error) throw error;
+        await useChatStore.getState().logOperation('INSERT', 'units', data?.id || 'new-unit', null, data || payload);
         showToast('success', 'Nova unidade cadastrada com sucesso!');
       }
 
@@ -237,8 +243,10 @@ export default function ChecklistSettings() {
     if (!window.confirm('Atenção: Excluir esta unidade apagará todos os seus setores, agendamentos e execuções vinculadas permanentemente. Deseja continuar?')) return;
     
     try {
+      const unitBefore = units.find(u => u.id === id);
       const { error } = await supabase.from('units').delete().eq('id', id);
       if (error) throw error;
+      await useChatStore.getState().logOperation('DELETE', 'units', id, unitBefore || null, null);
       showToast('success', 'Unidade removida com sucesso!');
       loadData();
     } catch (err: any) {
@@ -267,17 +275,23 @@ export default function ChecklistSettings() {
       };
 
       if (editingSector.id) {
+        const sectorBefore = sectors.find(s => s.id === editingSector.id);
         const { error } = await supabase
           .from('sectors')
           .update(payload)
           .eq('id', editingSector.id);
         if (error) throw error;
+        const sectorAfter = { ...sectorBefore, ...payload };
+        await useChatStore.getState().logOperation('UPDATE', 'sectors', editingSector.id, sectorBefore || null, sectorAfter);
         showToast('success', 'Setor operacional atualizado!');
       } else {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('sectors')
-          .insert(payload);
+          .insert(payload)
+          .select()
+          .single();
         if (error) throw error;
+        await useChatStore.getState().logOperation('INSERT', 'sectors', data?.id || 'new-sector', null, data || payload);
         showToast('success', 'Setor cadastrado com sucesso!');
       }
 
@@ -294,8 +308,10 @@ export default function ChecklistSettings() {
   const deleteSector = async (id: string) => {
     if (!window.confirm('Excluir este setor indisponibilizará checklists associados. Confirmar exclusão?')) return;
     try {
+      const sectorBefore = sectors.find(s => s.id === id);
       const { error } = await supabase.from('sectors').delete().eq('id', id);
       if (error) throw error;
+      await useChatStore.getState().logOperation('DELETE', 'sectors', id, sectorBefore || null, null);
       showToast('success', 'Setor removido.');
       loadData();
     } catch (err: any) {

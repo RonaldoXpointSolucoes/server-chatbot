@@ -59,7 +59,6 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     conversations: true,
     checklists: true,
-    teams: true,
     apps: false,
     channels: true,
     labels: false,
@@ -83,12 +82,13 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
-  const handleLogout = async (e: React.MouseEvent) => {
+  const handleLogout = (e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      if ('serviceWorker' in navigator && 'PushManager' in window) {
+
+    // 1. Limpeza do Service Worker executada em background (não bloqueante)
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+      navigator.serviceWorker.ready.then(async (registration) => {
         try {
-          const registration = await navigator.serviceWorker.ready;
           const subscription = await registration.pushManager.getSubscription();
           if (subscription) {
             const endpoint = subscription.endpoint;
@@ -98,15 +98,30 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         } catch (pushErr) {
           console.error('Erro ao remover push subscription:', pushErr);
         }
-      }
+      }).catch((err) => {
+        console.error('Erro ao obter service worker:', err);
+      });
+    }
 
+    // 2. Limpeza local da store (imediata)
+    try {
       useChatStore.getState().clearStore();
-      await supabase.auth.signOut();
+    } catch (storeErr) {
+      console.error('Erro ao limpar chatStore:', storeErr);
+    }
+
+    // 3. SignOut do Supabase em background (não bloqueia a navegação local)
+    supabase.auth.signOut().catch((authErr) => {
+      console.error('Erro ao fazer signOut no Supabase:', authErr);
+    });
+
+    // 4. Limpeza de storage e redirecionamento instantâneo
+    try {
       localStorage.clear();
       sessionStorage.clear();
       navigate('/');
-    } catch (error) {
-      console.error('Erro ao sair:', error);
+    } catch (navigateErr) {
+      console.error('Erro ao redirecionar após logout:', navigateErr);
     }
   };
   const [localAgentName, setLocalAgentName] = useState<string>(
@@ -133,6 +148,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   
   const currentAgent = agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
   const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to === currentAgent.id && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
+  const unreadCountGlobal = contacts.filter(c => c.unread > 0 && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length;
   
   const myTasksCount = React.useMemo(() => {
     if (!currentAgent) return 0;
@@ -646,7 +662,25 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                </div>
             )}
 
-            <NavItem title="Não atendidas" />
+            <NavItem 
+              title={
+                <div className="flex items-center gap-2">
+                  Não atendidas
+                  {unreadCountGlobal > 0 && (
+                    <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                      {unreadCountGlobal}
+                    </span>
+                  )}
+                </div>
+              } 
+              icon={<MessageCircle size={16} className={filterType === 'unread' ? "text-red-400" : ""} />} 
+              isActive={filterType === 'unread'} 
+              onClick={() => {
+                setActiveChannelFilter(null, null);
+                setFilterType('unread');
+                navigate('/chat');
+              }} 
+            />
             <NavItem icon={<Contact size={16} />} title="Contatos" onClick={() => navigate('/contacts')} />
             <NavItem 
               icon={<ClipboardList size={16} className="text-amber-500" />} 
@@ -661,7 +695,6 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               onClick={() => navigate('/apps/agenda')}
               isActive={window.location.pathname === '/apps/agenda'}
             />
-             <NavItem icon={<LayoutDashboard size={16} />} title="Kanban" />
           </CollapsibleSection>
 
           <CollapsibleSection 
@@ -744,10 +777,6 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
             
           </CollapsibleSection>
 
-          <CollapsibleSection title="Times" icon={<Users size={16} />} isOpen={expandedSections.teams} onToggle={() => toggleSection('teams')}>
-            <NavItem title="comercial" isSub />
-          </CollapsibleSection>
-
           <CollapsibleSection title="Etiquetas" icon={<Tag size={16} />} isOpen={expandedSections.labels} onToggle={() => toggleSection('labels')}>
             {tenantLabels && tenantLabels.length > 0 ? tenantLabels.map((label: any) => (
                 <NavItem 
@@ -804,7 +833,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           <NavItem icon={<MessageCircle size={16} />} title="Chat Interno" />
           <NavItem icon={<BarChart3 size={16} />} title="Relatórios" />
           <NavItem icon={<Megaphone size={16} />} title="Campanhas" />
-          <NavItem icon={<BookOpen size={16} />} title="Central de Ajuda" />
+          <NavItem 
+            icon={<BookOpen size={16} />} 
+            title="Central de Ajuda" 
+            onClick={() => navigate('/help')}
+            isActive={window.location.pathname === '/help'}
+          />
           
           {currentUserRole === 'admin' && (
             <div className="pt-2 mt-2 border-t border-gray-250/60 dark:border-[#2a3942]/60">
@@ -820,7 +854,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                 <NavItem icon={<Tag size={16} />} title="Etiquetas" isSub onClick={() => navigate('/settings/labels')} />
                 <NavItem icon={<History size={16} />} title="Log de Operações" isSub onClick={() => navigate('/settings/logs')} />
                 <NavItem icon={<Repeat size={16} />} title="Automação" isSub onClick={() => navigate('/settings/automation')} />
-                <NavItem icon={<Bot size={16} />} title="Robôs" isSub onClick={() => navigate('/settings/bots')} />
+                <NavItem icon={<Bot size={16} />} title="Robôs" isSub onClick={() => navigate('/settings/bots')} isActive={window.location.pathname === '/settings/bots'} />
+                <NavItem icon={<ScrollText size={16} />} title="Base de Conhecimento" isSub onClick={() => navigate('/knowledge')} isActive={window.location.pathname === '/knowledge'} />
                 <NavItem icon={<Puzzle size={16} />} title="Integrações" isSub onClick={() => navigate('/settings/integrations')} />
               </CollapsibleSection>
             </div>

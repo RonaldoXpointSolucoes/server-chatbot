@@ -28,131 +28,212 @@ const CEP_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/ConsultaCepServic
 const CLIENTE_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/LoginService/ValidaTelefone`;
 const PEDIDO_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/server/nuvem/PedidoCardapioService/FinalizeOrder`;
 
+const STATUS_PEDIDO_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/server/nuvem/BnPedido(50DA243C-4F4F-4293-95C8-34FFC00391D1)`;
+const PAGAMENTO_PIX_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v1/pagamentos/PixCardapioService/IniciarTransacao`;
+const CADASTRO_CLIENTE_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/UsuarioService/CreateUserWithAuthentication`;
+
 const GASTROFOOD_DEFAULT_TOKEN = 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw';
 
-const DEFAULT_CARDAPIO_PAYLOAD = { AGuidEstab: '6D0187D9-E905-4479-AB15-B908F0222607' };
+const DEFAULT_CARDAPIO_PAYLOAD = {};
 const DEFAULT_CEP_PAYLOAD = { ACep: '06764365' };
 const DEFAULT_CLIENTE_PAYLOAD = { ATelefone: '973933247' };
 
-async function getOrUpdateCardapioCache(tenantId, companySettings) {
+const DEFAULT_PAGAMENTO_PIX_PAYLOAD = {
+    APaymentData: {},
+    AIdPedido: "B7D7ADDD-AC17-4F63-994B-072BE6CE48D4"
+};
+
+const DEFAULT_CADASTRO_CLIENTE_PAYLOAD = {
+    JSONUser: {
+        name: "Valmir Teixeira",
+        phone: "11973933247",
+        verified: true
+    }
+};
+
+function injectStoreId(payloadObj, storeId) {
+    if (!storeId || !payloadObj || typeof payloadObj !== 'object') return payloadObj;
+    const clone = Array.isArray(payloadObj) ? [...payloadObj] : { ...payloadObj };
+    
+    if (!Array.isArray(clone)) {
+        // Sempre injeta ou sobrescreve o ID global
+        clone.AGuidEstab = storeId;
+        clone.AIdEstab = storeId;
+        
+        if (clone.jsOrder && typeof clone.jsOrder === 'object') {
+            clone.jsOrder = { 
+                ...clone.jsOrder,
+                fkStore: storeId 
+            };
+        }
+    }
+    return clone;
+}
+
+async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) {
     const now = Date.now();
-    let cache = cardapioInMemoryCache.get(tenantId);
+    const cacheKey = tenantId + '_' + (botSettings?.id || 'default');
+    let cache = cardapioInMemoryCache.get(cacheKey);
     
     if (cache && (now - cache.timestamp < CACHE_TTL)) {
-        console.log(`[CardapioCache] Cache HIT para o tenant ${tenantId}`);
+        console.log(`[CardapioCache] Cache HIT para a chave ${cacheKey}`);
         return cache;
     }
     
-    console.log(`[CardapioCache] Cache MISS ou expirado para o tenant ${tenantId}. Buscando do Supabase...`);
-    
-    // Tenta carregar do Supabase primeiro
-    try {
-        const { data: dbProdutos, error: errProd } = await supabase
-            .from('cardapio_produtos')
-            .select('*')
-            .eq('tenant_id', tenantId)
-            .eq('ativo', true);
-            
-        if (errProd) throw errProd;
-        
-        if (dbProdutos && dbProdutos.length > 0) {
-            const { data: dbGrupos } = await supabase
-                .from('cardapio_grupos')
+    const cardapioOrigem = (botSettings && botSettings.cardapio_origem) || 'supabase';
+    const cardapioUrl = (botSettings && botSettings.cardapio_json_url) || companySettings.cardapio_json_url || CARDAPIO_DEFAULT_URL;
+    const cardapioToken = (botSettings && botSettings.cardapio_json_token) || companySettings.cardapio_json_token || GASTROFOOD_DEFAULT_TOKEN;
+    const cardapioPayload = (botSettings && botSettings.cardapio_json_payload) || companySettings.cardapio_json_payload || DEFAULT_CARDAPIO_PAYLOAD;
+
+    console.log(`[CardapioCache] Cache MISS para a chave ${cacheKey}. Origem configurada: ${cardapioOrigem}`);
+
+    let apiAttempted = false;
+
+    // Se origem for 'supabase', tenta primeiro carregar do Supabase
+    if (cardapioOrigem === 'supabase') {
+        try {
+            console.log(`[CardapioCache] Buscando do Supabase para o tenant ${tenantId}...`);
+            const { data: dbProdutos, error: errProd } = await supabase
+                .from('cardapio_produtos')
                 .select('*')
                 .eq('tenant_id', tenantId)
                 .eq('ativo', true);
                 
-            cache = {
-                produtos: dbProdutos,
-                grupos: dbGrupos || [],
-                adicionais: new Map(), // produtoId -> passos
-                timestamp: now,
-                origem: 'supabase'
-            };
-            cardapioInMemoryCache.set(tenantId, cache);
-            return cache;
+            if (errProd) throw errProd;
+            
+            if (dbProdutos && dbProdutos.length > 0) {
+                const { data: dbGrupos } = await supabase
+                    .from('cardapio_grupos')
+                    .select('*')
+                    .eq('tenant_id', tenantId)
+                    .eq('ativo', true);
+                    
+                cache = {
+                    produtos: dbProdutos,
+                    grupos: dbGrupos || [],
+                    adicionais: new Map(), // produtoId -> passos
+                    timestamp: now,
+                    origem: 'supabase'
+                };
+                cardapioInMemoryCache.set(cacheKey, cache);
+                return cache;
+            }
+        } catch (dbErr) {
+            console.error(`[CardapioCache] Erro ao carregar cardápio do Supabase para o tenant ${tenantId}:`, dbErr);
         }
-    } catch (dbErr) {
-        console.error(`[CardapioCache] Erro ao carregar cardápio do Supabase para o tenant ${tenantId}:`, dbErr);
     }
-    
-    // Se não há dados no Supabase, tenta carregar da API externa do GastroFood (Fallback / Auto-Healing)
-    const cardapioUrl = companySettings.cardapio_json_url || CARDAPIO_DEFAULT_URL;
-    const cardapioToken = companySettings.cardapio_json_token || GASTROFOOD_DEFAULT_TOKEN;
-    const cardapioPayload = companySettings.cardapio_json_payload || DEFAULT_CARDAPIO_PAYLOAD;
-    
-    if (cardapioUrl) {
+
+    // Se a origem for 'api' OU se a busca do Supabase retornou vazia, tenta API externa
+    if (cardapioOrigem === 'api' || !cache) {
+        apiAttempted = true;
+        if (cardapioUrl) {
+            try {
+                console.log(`[CardapioCache - API] Buscando cardápio da API externa. URL: ${cardapioUrl}`);
+                let bodyObj = {};
+                if (cardapioPayload) {
+                    try {
+                        bodyObj = typeof cardapioPayload === 'string' ? JSON.parse(cardapioPayload) : cardapioPayload;
+                    } catch (e) {
+                        bodyObj = { AGuidEstab: cardapioPayload };
+                    }
+                }
+                if (companySettings && companySettings.gfood_store_id) {
+                    bodyObj = injectStoreId(bodyObj, companySettings.gfood_store_id);
+                }
+                
+                const headers = { 'Content-Type': 'application/json' };
+                if (cardapioToken) {
+                    headers['Authorization'] = cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`;
+                }
+                
+                const res = await fetch(cardapioUrl, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(bodyObj)
+                });
+                
+                if (res.ok) {
+                    const apiResponse = await res.json();
+                    const apiProdutos = apiResponse.produtos || apiResponse.data?.produtos || [];
+                    const apiGrupos = apiResponse.grupos || apiResponse.data?.grupos || [];
+                    
+                    if (apiProdutos.length > 0) {
+                        const mappedProdutos = apiProdutos.map(p => ({
+                            id: p.id || p.code || '',
+                            tenant_id: tenantId,
+                            grupo_id: p.groupId || p.grupo_id || null,
+                            name: p.name,
+                            description: p.description || null,
+                            price: Number(p.price || p.preco || 0),
+                            image: p.image || null,
+                            ativo: p.active !== false && p.ativo !== false
+                        }));
+                        
+                        const mappedGrupos = apiGrupos.map((g, idx) => ({
+                            id: g.id || g.code || '',
+                            tenant_id: tenantId,
+                            descricao: g.description || g.descricao || '',
+                            ordem: idx,
+                            ativo: g.active !== false && g.ativo !== false
+                        }));
+                        
+                        cache = {
+                            produtos: mappedProdutos,
+                            grupos: mappedGrupos,
+                            adicionais: new Map(),
+                            timestamp: now,
+                            origem: cardapioOrigem === 'api' ? 'api_direta' : 'api_fallback'
+                        };
+                        cardapioInMemoryCache.set(cacheKey, cache);
+                        
+                        // Dispara Auto-Healing em background se a origem geral do tenant permitir ou for o fluxo fallback
+                        if (cardapioOrigem !== 'api') {
+                            autoHealAndIndexCardapio(tenantId, companySettings, {
+                                grupos: mappedGrupos,
+                                produtos: mappedProdutos
+                            }).catch(err => {
+                                console.error(`[CardapioCache - AutoHealing] Falha no background sync para o tenant ${tenantId}:`, err);
+                            });
+                        }
+                        
+                        return cache;
+                    }
+                }
+            } catch (apiErr) {
+                console.error(`[CardapioCache - API] Erro ao consultar API externa para a chave ${cacheKey}:`, apiErr);
+            }
+        }
+    }
+
+    // Fallback de Resiliência: se o bot estava configurado como 'api', tentou a API, mas ela falhou, tenta carregar do Supabase para não deixar o cliente sem atendimento.
+    if (cardapioOrigem === 'api' && apiAttempted && !cache) {
         try {
-            console.log(`[CardapioCache - Fallback API] Buscando cardápio da API externa para o tenant ${tenantId}...`);
-            let bodyObj = {};
-            if (cardapioPayload) {
-                try {
-                    bodyObj = typeof cardapioPayload === 'string' ? JSON.parse(cardapioPayload) : cardapioPayload;
-                } catch (e) {
-                    bodyObj = { AGuidEstab: cardapioPayload };
-                }
-            }
-            
-            const headers = { 'Content-Type': 'application/json' };
-            if (cardapioToken) {
-                headers['Authorization'] = cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`;
-            }
-            
-            const res = await fetch(cardapioUrl, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(bodyObj)
-            });
-            
-            if (res.ok) {
-                const apiResponse = await res.json();
+            console.log(`[CardapioCache - Fallback Resiliência] API falhou. Tentando resgatar cardápio do Supabase local...`);
+            const { data: dbProdutos } = await supabase
+                .from('cardapio_produtos')
+                .select('*')
+                .eq('tenant_id', tenantId)
+                .eq('ativo', true);
                 
-                // O formato da API GastroFood retorna { grupos, produtos } encapsulado ou direto no root
-                const apiProdutos = apiResponse.produtos || apiResponse.data?.produtos || [];
-                const apiGrupos = apiResponse.grupos || apiResponse.data?.grupos || [];
-                
-                if (apiProdutos.length > 0) {
-                    const mappedProdutos = apiProdutos.map(p => ({
-                        id: p.id || p.code || '',
-                        tenant_id: tenantId,
-                        grupo_id: p.groupId || p.grupo_id || null,
-                        name: p.name,
-                        description: p.description || null,
-                        price: Number(p.price || p.preco || 0),
-                        image: p.image || null,
-                        ativo: p.active !== false && p.ativo !== false
-                    }));
+            if (dbProdutos && dbProdutos.length > 0) {
+                const { data: dbGrupos } = await supabase
+                    .from('cardapio_grupos')
+                    .select('*')
+                    .eq('tenant_id', tenantId)
+                    .eq('ativo', true);
                     
-                    const mappedGrupos = apiGrupos.map((g, idx) => ({
-                        id: g.id || g.code || '',
-                        tenant_id: tenantId,
-                        descricao: g.description || g.descricao || '',
-                        ordem: idx,
-                        ativo: g.active !== false && g.ativo !== false
-                    }));
-                    
-                    cache = {
-                        produtos: mappedProdutos,
-                        grupos: mappedGrupos,
-                        adicionais: new Map(),
-                        timestamp: now,
-                        origem: 'api_fallback'
-                    };
-                    cardapioInMemoryCache.set(tenantId, cache);
-                    
-                    // Dispara Auto-Healing e Sincronização RAG em background (não bloqueante)
-                    autoHealAndIndexCardapio(tenantId, companySettings, {
-                        grupos: mappedGrupos,
-                        produtos: mappedProdutos
-                    }).catch(err => {
-                        console.error(`[CardapioCache - AutoHealing] Falha no background sync para o tenant ${tenantId}:`, err);
-                    });
-                    
-                    return cache;
-                }
+                cache = {
+                    produtos: dbProdutos,
+                    grupos: dbGrupos || [],
+                    adicionais: new Map(),
+                    timestamp: now,
+                    origem: 'supabase_fallback'
+                };
+                cardapioInMemoryCache.set(cacheKey, cache);
+                return cache;
             }
-        } catch (apiErr) {
-            console.error(`[CardapioCache - Fallback API] Erro ao consultar API externa para o tenant ${tenantId}:`, apiErr);
+        } catch (dbErr) {
+            console.error(`[CardapioCache - Fallback Resiliência] Erro ao carregar cardápio do Supabase fallback:`, dbErr);
         }
     }
     
@@ -161,8 +242,8 @@ async function getOrUpdateCardapioCache(tenantId, companySettings) {
         produtos: [],
         grupos: [],
         adicionais: new Map(),
-        timestamp: now - CACHE_TTL + 30000, // expira em 30 segundos
-        origem: 'empty'
+        timestamp: now,
+        origem: 'vazio'
     };
 }
 
@@ -423,6 +504,70 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
     } catch (ragErr) {
         console.error(`[AutoHealing - RAG] Erro ao vetorizar cardápio para RAG:`, ragErr);
     }
+}
+
+async function getCoordsFromAddress(cep, street, number, city, state) {
+    let latitude = '';
+    let longitude = '';
+    const cleanCep = String(cep || '').replace(/\D/g, '');
+    
+    if (cleanCep.length === 8) {
+        // 1. Tentar AwesomeAPI
+        try {
+            const res = await fetch(`https://cep.awesomeapi.com.br/json/${cleanCep}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data && !data.erro) {
+                    latitude = String(data.lat || '');
+                    longitude = String(data.lng || '');
+                    console.log(`[Coords Lookup] Coordenadas obtidas da AwesomeAPI para o CEP ${cleanCep}: ${latitude}, ${longitude}`);
+                }
+            }
+        } catch (e) {
+            console.warn('[Coords Lookup] Erro ao buscar na AwesomeAPI:', e);
+        }
+        
+        // 2. Se AwesomeAPI falhar, tentar Nominatim pelo CEP
+        if (!latitude && !longitude) {
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?postalcode=${cleanCep}&country=Brazil&format=json`, {
+                    headers: { 'User-Agent': 'ChatBoot/1.0' }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.length > 0) {
+                        latitude = String(data[0].lat || '');
+                        longitude = String(data[0].lon || '');
+                        console.log(`[Coords Lookup] Coordenadas obtidas do Nominatim via CEP ${cleanCep}: ${latitude}, ${longitude}`);
+                    }
+                }
+            } catch (e) {
+                console.warn('[Coords Lookup] Erro ao buscar CEP no Nominatim:', e);
+            }
+        }
+    }
+    
+    // 3. Se ainda não tiver latitude/longitude e tivermos rua e cidade, tentar busca por endereço no Nominatim
+    if (!latitude && !longitude && street && city) {
+        try {
+            const queryStr = `${street}, ${number || ''}, ${city}, ${state || ''}, Brazil`;
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(queryStr)}`, {
+                headers: { 'User-Agent': 'ChatBoot/1.0' }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.length > 0) {
+                    latitude = String(data[0].lat || '');
+                    longitude = String(data[0].lon || '');
+                    console.log(`[Coords Lookup] Coordenadas obtidas do Nominatim via Endereço: ${latitude}, ${longitude}`);
+                }
+            }
+        } catch (e) {
+            console.warn('[Coords Lookup] Erro ao buscar endereço no Nominatim:', e);
+        }
+    }
+    
+    return { latitude, longitude };
 }
 
 class AutomationWorker {
@@ -907,7 +1052,11 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `   - Identifique quais passos de adicionais são OBRIGATÓRIOS (onde qtd_minima > 0). Você DEVE perguntar ao cliente a preferência dele para cada passo obrigatório antes de prosseguir (ex: ponto da carne, tamanho, etc.).\n` +
                           `   - Apresente também as opções extras/adicionais opcionais (ex: bacon, queijo extra, ovo, etc.) e pergunte de forma simpática se ele deseja adicionar alguma dessas opções no item.\n` +
                           `   - Quando o cliente fechar o que deseja, faça um resumo claro de todos os itens e seus respectivos adicionais selecionados, mostrando o preço de cada um e o total acumulado do pedido.\n` +
-                          `   - Coleta de Dados do Cliente: Para concluir a montagem do pedido, peça de forma educada e humanizada o Nome do Cliente (se ainda não souber, use a ferramenta "Atualizar_nome_contato" para registrar), o CEP (use a ferramenta "Consultar_cep" para preencher o endereço) e o número da residência/complemento.\n` +
+                          `   - Coleta de Dados do Cliente: Para concluir a montagem do pedido, você DEVE verificar se o cliente possui cadastro completo:
+                                  1. Se o cliente possui cadastro com nome e endereço (CEP, rua, número) válidos, CONFIRME os dados de endereço e utilize-o diretamente!
+                                  2. Se o cliente tem cadastro sem endereço ou não tem cadastro, solicite apenas o CEP e o número da residência. NUNCA peça dados desnecessários como rua, bairro e cidade se o cliente puder fornecer o CEP, pois com o CEP (chame a ferramenta "Consultar_cep") e o número da residência você consegue buscar/preencher todo o restante automaticamente.
+                                  3. IMPORTANTE: Após preencher ou confirmar o CEP e número, pergunte obrigatoriamente se é condomínio (se sim, solicite o número do apartamento e bloco/torre) e pergunte também se há um ponto de referência para a entrega.
+                                  4. Atualize o cadastro do contato utilizando a ferramenta "Atualizar_endereco_contato" assim que obtiver as informações novas/atualizadas de CEP, rua, número, bairro, cidade, estado, apartamento (ap), bloco (bloco), ponto de referência (referencia) e coordenadas, para garantir que a ficha de cadastro do contato esteja sempre em sincronia. E use estes dados atualizados para emitir o pedido na API do GastroFood ("Enviar_pedido_gastrofood").\n` +
                           `   - Ao final, após confirmar os detalhes do endereço e o resumo do pedido com os adicionais, informe o total e pergunte a forma de pagamento (Dinheiro, Cartão, Pix).\n` +
                           `   - Nunca invente preços ou opções. Sempre baseie-se estritamente no retorno das ferramentas "Consultar_produtos_cardapio" e "Consultar_adicionais_produto".\n` +
                           `3. Quando o cliente pedir o link do cardápio, envie apenas e exatamente o link [LINK_CARDAPIO].\n`;
@@ -965,7 +1114,35 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                               `- Bairro: ${contactInfo.address_neighborhood || 'Não informado'}\n` +
                               `- Cidade: ${contactInfo.address_city || 'Não informado'}\n` +
                               `- Estado (UF): ${contactInfo.address_state || 'Não informado'}\n` +
+                              `- Apartamento: ${contactInfo.ap || 'Não informado'}\n` +
+                              `- Bloco/Torre: ${contactInfo.block || 'Não informado'}\n` +
+                              `- Ponto de Referência: ${contactInfo.reference || 'Não informado'}\n` +
+                              `- Latitude: ${contactInfo.latitude || 'Não informado'}\n` +
+                              `- Longitude: ${contactInfo.longitude || 'Não informado'}\n` +
                               `- Anotações Internas sobre o Cliente: ${contactInfo.notes || 'Nenhuma anotação'}\n`;
+
+                if (Array.isArray(contactInfo.addresses) && contactInfo.addresses.length > 0) {
+                    basePrompt += `- Múltiplos Endereços Cadastrados:\n`;
+                    contactInfo.addresses.forEach((addr, idx) => {
+                        const streetName = addr.street || addr.address_street || 'Não informado';
+                        const num = addr.number || addr.address_number || 'S/N';
+                        const neighborhood = addr.neighborhood || addr.address_neighborhood || 'Não informado';
+                        const city = addr.city || addr.address_city || 'Não informado';
+                        const state = addr.state || addr.address_state || 'Não informado';
+                        const apt = addr.apartment || addr.ap || 'Não informado';
+                        const block = addr.block || 'Não informado';
+                        const ref = addr.reference || 'Não informado';
+                        
+                        basePrompt += `  * Endereço ${idx + 1}:${idx === 0 ? ' (Principal)' : ''}\n` +
+                                      `    - CEP: ${addr.cep || 'Não informado'}\n` +
+                                      `    - Rua: ${streetName}, Nº: ${num}\n` +
+                                      `    - Bairro: ${neighborhood}\n` +
+                                      `    - Cidade/UF: ${city}/${state}\n` +
+                                      `    - Apto: ${apt} | Bloco: ${block}\n` +
+                                      `    - Referência: ${ref}\n` +
+                                      `    - Lat/Lng: ${addr.latitude || 'Não informado'}/${addr.longitude || 'Não informado'}\n`;
+                    });
+                }
             }
 
             const systemPrompt = replaceTokens(basePrompt + contextText + correctionsText);
@@ -1046,7 +1223,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         },
                         {
                             name: "Atualizar_endereco_contato",
-                            description: "Salva ou atualiza os dados de endereço do cliente (CEP, rua, número, bairro, cidade, estado e anotações/referência) na ficha de contatos do sistema quando ele os informa na conversa.",
+                            description: "Salva ou atualiza os dados de endereço do cliente (CEP, rua, número, bairro, cidade, estado, apartamento, bloco, ponto de referência e coordenadas) na ficha de contatos do sistema.",
                             parameters: {
                                 type: "OBJECT",
                                 properties: {
@@ -1056,7 +1233,12 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     bairro: { type: "STRING", description: "O bairro (opcional)." },
                                     cidade: { type: "STRING", description: "A cidade (opcional)." },
                                     estado: { type: "STRING", description: "A sigla do estado/UF, ex: SP, RJ (opcional)." },
-                                    notes: { type: "STRING", description: "Pontos de referência, anotações ou observações úteis sobre este endereço (opcional)." }
+                                    ap: { type: "STRING", description: "O número do apartamento se residir em condomínio (opcional)." },
+                                    bloco: { type: "STRING", description: "O bloco ou torre do apartamento se residir em condomínio (opcional)." },
+                                    referencia: { type: "STRING", description: "Ponto de referência para a entrega (opcional)." },
+                                    latitude: { type: "STRING", description: "A latitude do endereço (opcional)." },
+                                    longitude: { type: "STRING", description: "A longitude do endereço (opcional)." },
+                                    notes: { type: "STRING", description: "Anotações adicionais/observações internas sobre o cliente (opcional)." }
                                 }
                             }
                         },
@@ -1127,6 +1309,56 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     }
                                 },
                                 required: ["payload_pedido"]
+                            }
+                        },
+                        {
+                            name: "Buscar_status_pedido",
+                            description: "Busca o status atual de um pedido no Gastrofood utilizando o ID do pedido.",
+                            parameters: {
+                                type: "OBJECT",
+                                properties: {
+                                    id_pedido: {
+                                        type: "STRING",
+                                        description: "O ID do pedido no formato UUID (ex: 50DA243C-4F4F-4293-95C8-34FFC00391D1)."
+                                    }
+                                },
+                                required: ["id_pedido"]
+                            }
+                        },
+                        {
+                            name: "Iniciar_transacao_pix",
+                            description: "Gera e busca o QR Code e o copia e cola do PIX para o pagamento de um pedido no Gastrofood.",
+                            parameters: {
+                                type: "OBJECT",
+                                properties: {
+                                    id_pedido: {
+                                        type: "STRING",
+                                        description: "O ID do pedido no formato UUID (ex: B7D7ADDD-AC17-4F63-994B-072BE6CE48D4)."
+                                    },
+                                    id_estab: {
+                                        type: "STRING",
+                                        description: "O ID do estabelecimento/loja no formato UUID (opcional, usa o padrão se omitido)."
+                                    }
+                                },
+                                required: ["id_pedido"]
+                            }
+                        },
+                        {
+                            name: "Cadastrar_cliente_gastrofood",
+                            description: "Cadastra um novo cliente no sistema Gastrofood com nome e telefone celular para viabilizar pedidos futuros.",
+                            parameters: {
+                                type: "OBJECT",
+                                properties: {
+                                    nome: {
+                                        type: "STRING",
+                                        description: "Nome completo do cliente a ser cadastrado."
+                                    },
+                                    telefone: {
+                                        type: "STRING",
+                                        description: "Número do telefone celular do cliente com DDD (apenas dígitos, ex: 11973933247)."
+                                    }
+                                },
+                                required: ["nome", "telefone"]
                             }
                         }
                     ]
@@ -1201,20 +1433,108 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         }
                         else if (call.name === "Atualizar_endereco_contato") {
                             if (contactId) {
-                                const updatePayload = {};
-                                if (call.args.cep !== undefined) updatePayload.cep = String(call.args.cep).replace(/\D/g, '');
-                                if (call.args.rua !== undefined) updatePayload.address_street = call.args.rua;
-                                if (call.args.numero !== undefined) updatePayload.address_number = call.args.numero;
-                                if (call.args.bairro !== undefined) updatePayload.address_neighborhood = call.args.bairro;
-                                if (call.args.cidade !== undefined) updatePayload.address_city = call.args.cidade;
-                                if (call.args.estado !== undefined) updatePayload.address_state = call.args.estado;
-                                if (call.args.notes !== undefined) updatePayload.notes = call.args.notes;
-
-                                if (Object.keys(updatePayload).length > 0) {
-                                    await supabase.from('contacts').update(updatePayload).eq('id', contactId);
+                                try {
+                                    // 1. Busca os dados atuais do contato
+                                    const { data: contact } = await supabase
+                                        .from('contacts')
+                                        .select('*')
+                                        .eq('id', contactId)
+                                        .single();
+                                    
+                                    if (contact) {
+                                        let currentAddresses = Array.isArray(contact.addresses) ? [...contact.addresses] : [];
+                                        let mainAddr = currentAddresses[0] || {};
+                                        
+                                        // 2. Extrai e mescla os dados fornecidos com os existentes
+                                        const finalCep = call.args.cep !== undefined ? String(call.args.cep).replace(/\D/g, '') : (mainAddr.cep || contact.cep || '');
+                                        const finalStreet = call.args.rua !== undefined ? call.args.rua : (mainAddr.street || mainAddr.address_street || contact.address_street || '');
+                                        const finalNumber = call.args.numero !== undefined ? call.args.numero : (mainAddr.number || mainAddr.address_number || contact.address_number || '');
+                                        const finalNeighborhood = call.args.bairro !== undefined ? call.args.bairro : (mainAddr.neighborhood || mainAddr.address_neighborhood || contact.address_neighborhood || '');
+                                        const finalCity = call.args.cidade !== undefined ? call.args.cidade : (mainAddr.city || mainAddr.address_city || contact.address_city || '');
+                                        const finalState = call.args.estado !== undefined ? call.args.estado : (mainAddr.state || mainAddr.address_state || contact.address_state || '');
+                                        const finalApartment = call.args.ap !== undefined ? call.args.ap : (mainAddr.apartment || mainAddr.ap || contact.ap || '');
+                                        const finalBlock = call.args.bloco !== undefined ? call.args.bloco : (mainAddr.block || contact.block || '');
+                                        const finalReference = call.args.referencia !== undefined ? call.args.referencia : (mainAddr.reference || contact.reference || '');
+                                        
+                                        // 3. Determina as coordenadas
+                                        let finalLatitude = mainAddr.latitude || contact.latitude || '';
+                                        let finalLongitude = mainAddr.longitude || contact.longitude || '';
+                                        
+                                        if (call.args.latitude !== undefined && call.args.longitude !== undefined) {
+                                            finalLatitude = call.args.latitude;
+                                            finalLongitude = call.args.longitude;
+                                        } else {
+                                            // Se o CEP ou a rua mudaram, recalcula a geolocalização
+                                            const cepChanged = call.args.cep !== undefined && String(call.args.cep).replace(/\D/g, '') !== String(contact.cep || '').replace(/\D/g, '');
+                                            const streetChanged = call.args.rua !== undefined && call.args.rua !== contact.address_street;
+                                            const numChanged = call.args.numero !== undefined && call.args.numero !== contact.address_number;
+                                            
+                                            if (cepChanged || streetChanged || numChanged || !finalLatitude || !finalLongitude) {
+                                                const coords = await getCoordsFromAddress(finalCep, finalStreet, finalNumber, finalCity, finalState);
+                                                if (coords.latitude && coords.longitude) {
+                                                    finalLatitude = coords.latitude;
+                                                    finalLongitude = coords.longitude;
+                                                }
+                                            }
+                                        }
+                                        
+                                        // 4. Monta o novo endereço principal
+                                        const updatedMainAddr = {
+                                            cep: finalCep,
+                                            street: finalStreet,
+                                            number: finalNumber,
+                                            neighborhood: finalNeighborhood,
+                                            city: finalCity,
+                                            state: finalState,
+                                            apartment: finalApartment,
+                                            block: finalBlock,
+                                            reference: finalReference,
+                                            latitude: finalLatitude,
+                                            longitude: finalLongitude
+                                        };
+                                        
+                                        if (currentAddresses.length === 0) {
+                                            currentAddresses.push(updatedMainAddr);
+                                        } else {
+                                            currentAddresses[0] = {
+                                                ...currentAddresses[0],
+                                                ...updatedMainAddr
+                                            };
+                                        }
+                                        
+                                        // 5. Monta payload de atualização para o Supabase
+                                        const updatePayload = {
+                                            cep: finalCep,
+                                            address_street: finalStreet,
+                                            address_number: finalNumber,
+                                            address_neighborhood: finalNeighborhood,
+                                            address_city: finalCity,
+                                            address_state: finalState,
+                                            ap: finalApartment,
+                                            block: finalBlock,
+                                            reference: finalReference,
+                                            latitude: finalLatitude,
+                                            longitude: finalLongitude,
+                                            addresses: currentAddresses
+                                        };
+                                        
+                                        if (call.args.notes !== undefined) {
+                                            updatePayload.notes = call.args.notes;
+                                        }
+                                        
+                                        await supabase.from('contacts').update(updatePayload).eq('id', contactId);
+                                        console.log(`[AutomationWorker - Endereço] Contato ${contactId} atualizado com sucesso. Payload:`, updatePayload);
+                                        functionResult = { status: "Dados de endereço do contato atualizados com sucesso no sistema (colunas raiz e múltiplos endereços sincronizados)." };
+                                    } else {
+                                        functionResult = { erro: "Contato não localizado na base de dados." };
+                                    }
+                                } catch (errUpdate) {
+                                    console.error("[AutomationWorker - Endereço] Erro ao atualizar endereço do contato:", errUpdate);
+                                    functionResult = { erro: "Erro ao processar a atualização do endereço no banco de dados." };
                                 }
+                            } else {
+                                functionResult = { erro: "Identificação do contato não fornecida no contexto." };
                             }
-                            functionResult = { status: "Dados de endereço do contato atualizados com sucesso no sistema." };
                         }
                         else if (call.name === "Consultar_cep") {
                             const rawCep = String(call.args.cep || '').replace(/\D/g, '');
@@ -1235,6 +1555,9 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                             const cepKey = Object.keys(bodyObj).find(k => k.toLowerCase().includes('cep')) || 'ACep';
                                             bodyObj[cepKey] = rawCep;
                                         } catch (e) {}
+                                    }
+                                    if (companySettings && companySettings.gfood_store_id) {
+                                        bodyObj = injectStoreId(bodyObj, companySettings.gfood_store_id);
                                     }
 
                                     const headers = { 'Content-Type': 'application/json' };
@@ -1260,6 +1583,9 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                                 estado: data.estado || data.Estado || data.uf || data.Uf || '',
                                                 cep: data.cep || data.Cep || rawCep
                                             };
+                                            const coords = await getCoordsFromAddress(rawCep, functionResult.logradouro, '', functionResult.cidade, functionResult.estado);
+                                            functionResult.latitude = coords.latitude;
+                                            functionResult.longitude = coords.longitude;
                                             cepSuccess = true;
                                         } else {
                                             console.warn(`[AutomationWorker - CEP] Gastrofood retornou resposta vazia ou erro para CEP ${rawCep}:`, data);
@@ -1289,6 +1615,9 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                                     estado: data.uf || '',
                                                     cep: data.cep || ''
                                                 };
+                                                const coords = await getCoordsFromAddress(rawCep, functionResult.logradouro, '', functionResult.cidade, functionResult.estado);
+                                                functionResult.latitude = coords.latitude;
+                                                functionResult.longitude = coords.longitude;
                                                 cepSuccess = true;
                                             }
                                         } else {
@@ -1303,17 +1632,44 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                 // Auto-save address if contact does not have one
                                 if (contactId && cepSuccess && functionResult && !functionResult.erro) {
                                     try {
-                                        const { data: contact } = await supabase.from('contacts').select('cep, address_street').eq('id', contactId).single();
+                                        const { data: contact } = await supabase.from('contacts').select('*').eq('id', contactId).single();
                                         if (contact && (!contact.address_street || !contact.cep)) {
+                                            let currentAddresses = Array.isArray(contact.addresses) ? [...contact.addresses] : [];
+                                            const updatedMainAddr = {
+                                                cep: rawCep,
+                                                street: functionResult.logradouro || '',
+                                                number: '',
+                                                neighborhood: functionResult.bairro || '',
+                                                city: functionResult.cidade || '',
+                                                state: functionResult.estado || '',
+                                                apartment: '',
+                                                block: '',
+                                                reference: '',
+                                                latitude: functionResult.latitude || '',
+                                                longitude: functionResult.longitude || ''
+                                            };
+                                            
+                                            if (currentAddresses.length === 0) {
+                                                currentAddresses.push(updatedMainAddr);
+                                            } else {
+                                                currentAddresses[0] = {
+                                                    ...currentAddresses[0],
+                                                    ...updatedMainAddr
+                                                };
+                                            }
+                                            
                                             const updatePayload = {
                                                 cep: rawCep,
                                                 address_street: functionResult.logradouro || '',
                                                 address_neighborhood: functionResult.bairro || '',
                                                 address_city: functionResult.cidade || '',
-                                                address_state: functionResult.estado || ''
+                                                address_state: functionResult.estado || '',
+                                                latitude: functionResult.latitude || '',
+                                                longitude: functionResult.longitude || '',
+                                                addresses: currentAddresses
                                             };
                                             await supabase.from('contacts').update(updatePayload).eq('id', contactId);
-                                            console.log(`[AutomationWorker - CEP] Endereço do contato ${contactId} atualizado automaticamente via CEP:`, updatePayload);
+                                            console.log(`[AutomationWorker - CEP] Endereço do contato ${contactId} atualizado automaticamente via CEP (colunas e addresses JSONB):`, updatePayload);
                                         }
                                     } catch (dbErr) {
                                         console.error('[AutomationWorker - CEP] Erro ao atualizar endereço do contato:', dbErr);
@@ -1339,6 +1695,9 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                             const phoneKey = Object.keys(bodyObj).find(k => k.toLowerCase().includes('tel') || k.toLowerCase().includes('fone')) || 'ATelefone';
                                             bodyObj[phoneKey] = rawPhone;
                                         } catch (e) {}
+                                    }
+                                    if (companySettings && companySettings.gfood_store_id) {
+                                        bodyObj = injectStoreId(bodyObj, companySettings.gfood_store_id);
                                     }
 
                                     const headers = { 'Content-Type': 'application/json' };
@@ -1377,19 +1736,35 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                 functionResult = { erro: "O payload do pedido é obrigatório." };
                             } else {
                                 try {
-                                    const pedidoUrl = companySettings.pedido_json_url || PEDIDO_DEFAULT_URL;
-                                    const pedidoToken = companySettings.pedido_json_token || GASTROFOOD_DEFAULT_TOKEN;
+                                    const pedidoOrigem = botSettings?.pedido_origem || 'company';
+                                    const pedidoUrl = (pedidoOrigem === 'api' && botSettings?.pedido_json_url)
+                                        ? botSettings.pedido_json_url
+                                        : (companySettings.pedido_json_url || PEDIDO_DEFAULT_URL);
+                                    const pedidoToken = (pedidoOrigem === 'api' && botSettings?.pedido_json_token)
+                                        ? botSettings.pedido_json_token
+                                        : (companySettings.pedido_json_token || GASTROFOOD_DEFAULT_TOKEN);
 
                                     const headers = { 'Content-Type': 'application/json' };
                                     if (pedidoToken) {
                                         headers['Authorization'] = pedidoToken.startsWith('Bearer ') ? pedidoToken : `Bearer ${pedidoToken}`;
                                     }
 
+                                    let finalPayload = payloadPedido;
+                                    if (typeof finalPayload === 'string') {
+                                        try {
+                                            finalPayload = JSON.parse(finalPayload);
+                                        } catch (e) {}
+                                    }
+                                    if (companySettings && companySettings.gfood_store_id) {
+                                        finalPayload = injectStoreId(finalPayload, companySettings.gfood_store_id);
+                                    }
+
+
                                     console.log(`[AutomationWorker - Pedido] Enviando pedido para Gastrofood...`);
                                     const response = await fetch(pedidoUrl, {
                                         method: 'POST',
                                         headers,
-                                        body: JSON.stringify(payloadPedido)
+                                        body: JSON.stringify(finalPayload)
                                     });
 
                                     if (response.ok) {
@@ -1413,11 +1788,184 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                 }
                             }
                         }
+                        else if (call.name === "Buscar_status_pedido") {
+                            const idPedido = call.args.id_pedido;
+                            if (!idPedido) {
+                                functionResult = { erro: "O ID do pedido é obrigatório para consultar o status." };
+                            } else {
+                                try {
+                                    const statusUrl = companySettings.status_pedido_json_url || STATUS_PEDIDO_DEFAULT_URL;
+                                    const statusToken = companySettings.status_pedido_json_token || GASTROFOOD_DEFAULT_TOKEN;
+
+                                    let requestUrl = statusUrl;
+                                    if (requestUrl.includes('BnPedido(')) {
+                                        requestUrl = requestUrl.replace(/BnPedido\([^)]+\)/, `BnPedido(${idPedido})`);
+                                    } else {
+                                        const uuidRegex = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
+                                        if (uuidRegex.test(requestUrl)) {
+                                            requestUrl = requestUrl.replace(uuidRegex, idPedido);
+                                        } else {
+                                            requestUrl = requestUrl.endsWith('/') ? `${requestUrl}${idPedido}` : `${requestUrl}/${idPedido}`;
+                                        }
+                                    }
+
+                                    const headers = {};
+                                    if (statusToken) {
+                                        headers['Authorization'] = statusToken.startsWith('Bearer ') ? statusToken : `Bearer ${statusToken}`;
+                                    }
+
+                                    console.log(`[AutomationWorker - Status Pedido] Buscando status do pedido ${idPedido} via Gastrofood API...`);
+                                    const response = await fetch(requestUrl, {
+                                        method: 'GET',
+                                        headers
+                                    });
+
+                                    if (response.ok) {
+                                        const resData = await response.json();
+                                        functionResult = {
+                                            sucesso: true,
+                                            status_http: response.status,
+                                            dados: resData.data || resData
+                                        };
+                                    } else {
+                                        const errText = await response.text();
+                                        console.error(`[AutomationWorker - Status Pedido] Falha HTTP ao buscar status (Status: ${response.status}). Detalhes: ${errText}`);
+                                        functionResult = { erro: `Erro ao buscar status do pedido (Status: ${response.status})` };
+                                    }
+                                } catch (errStat) {
+                                    console.error("[AutomationWorker - Status Pedido] Erro ao buscar status:", errStat);
+                                    functionResult = { erro: `Erro ao conectar-se ao serviço de status de pedido: ${errStat.message}` };
+                                }
+                            }
+                        }
+                        else if (call.name === "Iniciar_transacao_pix") {
+                            const idPedido = call.args.id_pedido;
+                            const idEstab = call.args.id_estab;
+                            if (!idPedido) {
+                                functionResult = { erro: "O ID do pedido é obrigatório para iniciar a transação PIX." };
+                            } else {
+                                try {
+                                    const pixUrl = companySettings.pagamento_pix_json_url || PAGAMENTO_PIX_DEFAULT_URL;
+                                    const pixToken = companySettings.pagamento_pix_json_token || GASTROFOOD_DEFAULT_TOKEN;
+                                    const pixPayloadTemplate = companySettings.pagamento_pix_json_payload || DEFAULT_PAGAMENTO_PIX_PAYLOAD;
+
+                                    let bodyObj = {
+                                        APaymentData: {},
+                                        AIdEstab: companySettings.gfood_store_id || idEstab || "6D0187D9-E905-4479-AB15-B908F0222607",
+                                        AIdPedido: idPedido
+                                    };
+
+                                    if (pixPayloadTemplate) {
+                                        try {
+                                            const parsed = typeof pixPayloadTemplate === 'string' ? JSON.parse(pixPayloadTemplate) : pixPayloadTemplate;
+                                            bodyObj = { ...parsed };
+                                            bodyObj.AIdPedido = idPedido;
+                                        } catch (e) {}
+                                    }
+                                    if (companySettings && companySettings.gfood_store_id) {
+                                        bodyObj = injectStoreId(bodyObj, companySettings.gfood_store_id);
+                                    } else if (idEstab) {
+                                        bodyObj = injectStoreId(bodyObj, idEstab);
+                                    }
+
+                                    const headers = { 'Content-Type': 'application/json' };
+                                    if (pixToken) {
+                                        headers['Authorization'] = pixToken.startsWith('Bearer ') ? pixToken : `Bearer ${pixToken}`;
+                                    }
+
+                                    console.log(`[AutomationWorker - Pagamento PIX] Iniciando transação PIX para pedido ${idPedido}...`);
+                                    const response = await fetch(pixUrl, {
+                                        method: 'POST',
+                                        headers,
+                                        body: JSON.stringify(bodyObj)
+                                    });
+
+                                    if (response.ok) {
+                                        const resData = await response.json();
+                                        functionResult = {
+                                            sucesso: true,
+                                            status_http: response.status,
+                                            dados: resData.data || resData
+                                        };
+                                    } else {
+                                        const errText = await response.text();
+                                        console.error(`[AutomationWorker - Pagamento PIX] Falha HTTP ao iniciar PIX (Status: ${response.status}). Detalhes: ${errText}`);
+                                        functionResult = { erro: `Erro ao iniciar transação PIX (Status: ${response.status})` };
+                                    }
+                                } catch (errPix) {
+                                    console.error("[AutomationWorker - Pagamento PIX] Erro ao iniciar PIX:", errPix);
+                                    functionResult = { erro: `Erro ao conectar-se ao serviço de pagamento PIX: ${errPix.message}` };
+                                }
+                            }
+                        }
+                        else if (call.name === "Cadastrar_cliente_gastrofood") {
+                            const nome = call.args.nome;
+                            const telefone = String(call.args.telefone || '').replace(/\D/g, '');
+                            if (!nome || !telefone) {
+                                functionResult = { erro: "Nome e telefone celular são obrigatórios para cadastrar o cliente." };
+                            } else {
+                                try {
+                                    const cadastrarUrl = companySettings.cadastro_cliente_json_url || CADASTRO_CLIENTE_DEFAULT_URL;
+                                    const cadastrarToken = companySettings.cadastro_cliente_json_token || GASTROFOOD_DEFAULT_TOKEN;
+                                    const cadastrarPayloadTemplate = companySettings.cadastro_cliente_json_payload || DEFAULT_CADASTRO_CLIENTE_PAYLOAD;
+
+                                    let bodyObj = {
+                                        JSONUser: {
+                                            name: nome,
+                                            phone: telefone,
+                                            verified: true
+                                        }
+                                    };
+
+                                    if (cadastrarPayloadTemplate) {
+                                        try {
+                                            const parsed = typeof cadastrarPayloadTemplate === 'string' ? JSON.parse(cadastrarPayloadTemplate) : cadastrarPayloadTemplate;
+                                            bodyObj = { ...parsed };
+                                            if (!bodyObj.JSONUser) bodyObj.JSONUser = {};
+                                            bodyObj.JSONUser.name = nome;
+                                            bodyObj.JSONUser.phone = telefone;
+                                            bodyObj.JSONUser.verified = true;
+                                        } catch (e) {}
+                                    }
+                                    if (companySettings && companySettings.gfood_store_id) {
+                                        bodyObj = injectStoreId(bodyObj, companySettings.gfood_store_id);
+                                    }
+
+                                    const headers = { 'Content-Type': 'application/json' };
+                                    if (cadastrarToken) {
+                                        headers['Authorization'] = cadastrarToken.startsWith('Bearer ') ? cadastrarToken : `Bearer ${cadastrarToken}`;
+                                    }
+
+                                    console.log(`[AutomationWorker - Cadastro Cliente] Cadastrando cliente ${nome} (${telefone}) via Gastrofood API...`);
+                                    const response = await fetch(cadastrarUrl, {
+                                        method: 'POST',
+                                        headers,
+                                        body: JSON.stringify(bodyObj)
+                                    });
+
+                                    if (response.ok) {
+                                        const resData = await response.json();
+                                        functionResult = {
+                                            sucesso: response.status === 200 || response.status === 201,
+                                            status_http: response.status,
+                                            dados: resData.data || resData
+                                        };
+                                    } else {
+                                        const errText = await response.text();
+                                        console.error(`[AutomationWorker - Cadastro Cliente] Falha HTTP ao cadastrar cliente (Status: ${response.status}). Detalhes: ${errText}`);
+                                        functionResult = { erro: `Erro ao cadastrar cliente no sistema (Status: ${response.status})` };
+                                    }
+                                } catch (errCad) {
+                                    console.error("[AutomationWorker - Cadastro Cliente] Erro ao cadastrar cliente:", errCad);
+                                    functionResult = { erro: `Erro ao conectar-se ao serviço de cadastro de cliente: ${errCad.message}` };
+                                }
+                            }
+                        }
                         else if (call.name === "Consultar_produtos_cardapio") {
                             try {
                                 console.log(`[AutomationWorker - Cardápio] Consultando produtos do tenant ${tenantId}...`);
                                 
-                                const cache = await getOrUpdateCardapioCache(tenantId, companySettings);
+                                const cache = await getOrUpdateCardapioCache(tenantId, companySettings, botSettings);
                                 const productsList = cache.produtos || [];
                                 const groupsList = cache.grupos || [];
                                 
@@ -1463,7 +2011,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                 try {
                                     console.log(`[AutomationWorker - Adicionais] Buscando adicionais de "${nomeProduto}"...`);
                                     
-                                    const cache = await getOrUpdateCardapioCache(tenantId, companySettings);
+                                    const cache = await getOrUpdateCardapioCache(tenantId, companySettings, botSettings);
                                     const productsList = cache.produtos || [];
                                     
                                     const searchLower = nomeProduto.toLowerCase();

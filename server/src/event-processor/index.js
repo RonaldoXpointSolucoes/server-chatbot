@@ -381,6 +381,12 @@ class EventProcessor {
                     isHistory: m.type === 'append'
                 });
 
+                // Otimização: Se a mensagem for enviada por um humano (atendente),
+                // força o flush imediato da fila para reduzir a latência percebida na tela do CRM.
+                if (senderType === 'human') {
+                    setTimeout(() => this.flushQueue(), 0);
+                }
+
             } catch (e) {
                 console.error(`[EventProcessor] Erro ao engatilhar mensagem na Queue:`, e);
             }
@@ -392,8 +398,37 @@ class EventProcessor {
         this.isFlushing = true;
         
         // Puxa até 1000 mensagens do buffer (Batch limit)
-        const batch = this.messageQueue.splice(0, 1000);
+        let batch = this.messageQueue.splice(0, 1000);
         console.log(`[BatchProcessor] Drenando lote de ${batch.length} novas interações...`);
+
+        // Filtra elementos pertencentes a instâncias deletadas para evitar violações de FK no banco
+        const uniqueInstanceIds = Array.from(new Set(batch.map(b => b.instanceId).filter(Boolean)));
+        if (uniqueInstanceIds.length > 0) {
+            try {
+                const { data: existingInstances, error: instError } = await supabase
+                    .from('whatsapp_instances')
+                    .select('id')
+                    .in('id', uniqueInstanceIds);
+                
+                if (instError) {
+                    console.error('[BatchProcessor] Erro ao buscar instâncias válidas:', instError);
+                } else {
+                    const validInstanceSet = new Set((existingInstances || []).map(i => i.id));
+                    const filteredBatch = batch.filter(b => !b.instanceId || validInstanceSet.has(b.instanceId));
+                    if (filteredBatch.length < batch.length) {
+                        console.log(`[BatchProcessor] Ignoradas ${batch.length - filteredBatch.length} interações de instâncias deletadas/inválidas.`);
+                        batch = filteredBatch;
+                    }
+                }
+            } catch (err) {
+                console.error('[BatchProcessor] Exceção crítica ao validar instâncias no banco:', err);
+            }
+        }
+
+        if (batch.length === 0) {
+            this.isFlushing = false;
+            return;
+        }
         
         try {
              // 1. Processa e Dedulplica Contatos
@@ -957,14 +992,14 @@ class EventProcessor {
                       // Se a conversa for 'open' (operador humano), o robô só responde se o cliente estiver explicitamente na whitelist de testes
                       if (b.convStatus === 'open') {
                           if (!isTestAllowed) {
-                              console.warn(`[EventProcessor] Conversa está aberta (operador humano) para o contato ${b.phone}. Cliente não está na whitelist de testes da instância. Silenciando robô.`);
+                              console.log(`[EventProcessor] Conversa está aberta (operador humano) para o contato ${b.phone}. Cliente não está na whitelist de testes da instância. Silenciando robô.`);
                               return;
                           }
                           console.log(`[EventProcessor] Sandbox Ativo: Forçando resposta da IA em chat 'open' para o celular homologado (${b.phone}).`);
                       } else {
                           // Para status 'bot' ou 'teste_robo', se houver whitelist de testes configurada, o cliente precisa estar nela
                           if (testNumbers.length > 0 && !isTestAllowed) {
-                              console.warn(`[EventProcessor] Sandbox da Instância Ativo: Mensagem do celular (${b.phone}) não está na whitelist de testes da instância. Silenciando robô.`);
+                              console.log(`[EventProcessor] Sandbox da Instância Ativo: Mensagem do celular (${b.phone}) não está na whitelist de testes da instância. Silenciando robô.`);
                               return;
                           }
                       }
@@ -973,7 +1008,7 @@ class EventProcessor {
                           const { data: companyData } = await supabase.from('companies').select('global_ai_enabled').eq('id', b.tenantId).single();
                           // Se o IA estiver desativado globalmente e NÃO for um teste, aborta o processamento.
                           if (companyData && companyData.global_ai_enabled === false && b.convStatus !== 'teste_robo' && !isTestAllowed) {
-                              console.warn(`[BatchProcessor] IA e Automações Globais estão DESATIVADAS para o tenant ${b.tenantId}`);
+                              console.log(`[BatchProcessor] IA e Automações Globais estão DESATIVADAS para o tenant ${b.tenantId}`);
                               return;
                           }
 
@@ -1109,6 +1144,20 @@ class EventProcessor {
     }
 
     async handleMessagingHistorySet(tenantId, instanceId, sock, payload) {
+        if (!instanceId) return;
+
+        // Verifica se a instância de fato existe para evitar violação de chave estrangeira
+        try {
+            const { data: instCheck } = await supabase.from('whatsapp_instances').select('id').eq('id', instanceId).limit(1);
+            if (!instCheck || instCheck.length === 0) {
+                console.warn(`[EventProcessor] Instância ${instanceId} não existe mais no banco de dados. Ignorando sincronização de histórico.`);
+                return;
+            }
+        } catch (e) {
+            console.error(`[EventProcessor] Erro ao verificar existência da instância ${instanceId} para histórico:`, e);
+            return;
+        }
+
         const chats = payload.chats || [];
         const contacts = payload.contacts || [];
         const messages = payload.messages || [];

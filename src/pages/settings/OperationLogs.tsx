@@ -110,17 +110,63 @@ export default function OperationLogs() {
         if (action === 'UPDATE') return `Atualizou o robô "${name}"`;
         if (action === 'DELETE') return `Excluiu o robô "${name}"`;
       }
-      if (table === 'automations') {
-        const keyword = after.keyword || before.keyword || 'Desconhecida';
-        if (action === 'INSERT') return `Criou automação para "${keyword}"`;
-        if (action === 'UPDATE') return `Atualizou automação "${keyword}"`;
-        if (action === 'DELETE') return `Excluiu automação "${keyword}"`;
+      if (table === 'automations' || table === 'tenant_automations') {
+        const name = after.name || before.name || after.condition_text || before.condition_text || after.keyword || before.keyword || 'Desconhecida';
+        if (action === 'INSERT') return `Criou regra de automação "${name}"`;
+        if (action === 'UPDATE') return `Atualizou regra de automação "${name}"`;
+        if (action === 'DELETE') return `Excluiu regra de automação "${name}"`;
       }
-      if (table === 'tenant_users') {
+      if (table === 'tenant_users' || table === 'users_profiles') {
+        const name = after.full_name || before.full_name || after.name || before.name || 'Desconhecido';
+        if (action === 'INSERT') return `Adicionou colaborador "${name}"`;
+        if (action === 'UPDATE') return `Atualizou colaborador "${name}"`;
+        if (action === 'DELETE') return `Removeu colaborador "${name}"`;
+      }
+      if (table === 'checklists') {
+        const title = after.title || before.title || 'Desconhecido';
+        if (action === 'INSERT') return `Criou o checklist "${title}"`;
+        if (action === 'UPDATE') return `Atualizou o checklist "${title}"`;
+        if (action === 'DELETE') return `Excluiu o checklist "${title}"`;
+      }
+      if (table === 'units') {
         const name = after.name || before.name || 'Desconhecido';
-        if (action === 'INSERT') return `Adicionou o agente "${name}"`;
-        if (action === 'UPDATE') return `Atualizou o agente "${name}"`;
-        if (action === 'DELETE') return `Removeu o agente "${name}"`;
+        if (action === 'INSERT') return `Criou a unidade "${name}"`;
+        if (action === 'UPDATE') return `Atualizou a unidade "${name}"`;
+        if (action === 'DELETE') return `Excluiu a unidade "${name}"`;
+      }
+      if (table === 'sectors') {
+        const name = after.name || before.name || 'Desconhecido';
+        if (action === 'INSERT') return `Criou o setor "${name}"`;
+        if (action === 'UPDATE') return `Atualizou o setor "${name}"`;
+        if (action === 'DELETE') return `Excluiu o setor "${name}"`;
+      }
+      if (table === 'flows') {
+        const name = after.name || before.name || 'Desconhecido';
+        if (action === 'INSERT') return `Criou o fluxo de conversa "${name}"`;
+        if (action === 'UPDATE') return `Atualizou o fluxo de conversa "${name}"`;
+        if (action === 'DELETE') return `Excluiu o fluxo de conversa "${name}"`;
+      }
+      if (table === 'flow_versions') {
+        if (action === 'INSERT') return 'Criou versão inicial do fluxo';
+        if (action === 'UPDATE') return 'Publicou nova versão do fluxo';
+        if (action === 'DELETE') return 'Excluiu versão do fluxo';
+      }
+      if (table === 'knowledge_documents') {
+        const title = after.title || before.title || 'Desconhecido';
+        if (action === 'INSERT') return `Adicionou documento "${title}" à base de conhecimento`;
+        if (action === 'UPDATE') return `Re-vetorizou documento "${title}"`;
+        if (action === 'DELETE') return `Removeu documento "${title}" da base de conhecimento`;
+      }
+      if (table === 'knowledge_corrections') {
+        const query = after.user_query || before.user_query || 'Desconhecida';
+        if (action === 'INSERT') return `Adicionou regra de correção para "${query}"`;
+        if (action === 'DELETE') return `Removeu regra de correção para "${query}"`;
+      }
+      if (table === 'whatsapp_instances') {
+        const name = after.display_name || before.display_name || 'Desconectada';
+        if (action === 'INSERT') return `Criou a conexão de WhatsApp "${name}"`;
+        if (action === 'UPDATE') return `Atualizou as configurações da conexão "${name}"`;
+        if (action === 'DELETE') return `Excluiu a conexão de WhatsApp "${name}"`;
       }
       if (table === 'macros') {
         const title = after.title || before.title || 'Desconhecida';
@@ -152,6 +198,12 @@ export default function OperationLogs() {
         }
         if (action === 'UPDATE') return `Atualizou configurações da empresa`;
       }
+      if (table === 'appointments') {
+        const title = after.title || before.title || 'Desconhecido';
+        if (action === 'INSERT') return `Criou o compromisso "${title}"`;
+        if (action === 'UPDATE') return `Atualizou o compromisso "${title}"`;
+        if (action === 'DELETE') return `Excluiu o compromisso "${title}"`;
+      }
 
       // Default fallback
       if (action === 'INSERT') return `Adicionou registro em ${table}`;
@@ -168,43 +220,43 @@ export default function OperationLogs() {
     <div className="flex-1 flex flex-col h-full bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden">
       
       {/* Header Premium */}
-      <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex items-center justify-between px-8 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
-            <ShieldAlert size={24} />
+      <div className="bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col md:flex-row md:items-center justify-between px-6 py-4 md:py-0 md:h-20 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 flex-shrink-0">
+            <ShieldAlert size={20} />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+            <h1 className="text-lg font-bold text-gray-800 dark:text-gray-100 leading-none">
               Log de Operações
             </h1>
-            <p className="text-sm text-gray-500 dark:text-[#aebac1]">
+            <p className="text-xs text-gray-500 dark:text-[#aebac1] mt-1">
               Auditoria em tempo real de alterações no sistema.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="relative group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-[#54656f] group-focus-within:text-indigo-500 transition-colors" size={18} />
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          <div className="relative flex-1 md:flex-initial">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-[#54656f] focus:text-indigo-500 transition-colors" size={16} />
             <input 
               type="text" 
-              placeholder="Buscar ação, tabela ou usuário..."
+              placeholder="Buscar ação, tabela..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="w-72 bg-white dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent dark:text-[#d1d7db] placeholder:text-gray-400 dark:placeholder:text-[#54656f] transition-all"
+              className="w-full md:w-64 bg-white dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl pl-9 pr-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent dark:text-[#d1d7db] placeholder:text-gray-400 dark:placeholder:text-[#54656f] transition-all"
             />
           </div>
           <button 
             onClick={fetchLogs}
-            className="p-2.5 bg-white dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl hover:bg-gray-50 dark:hover:bg-[#304046] transition-colors text-gray-600 dark:text-[#aebac1]"
+            className="p-2 bg-white dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl hover:bg-gray-50 dark:hover:bg-[#304046] transition-colors text-gray-600 dark:text-[#aebac1] flex-shrink-0"
           >
-            <RefreshCw size={20} className={cn(loading && "animate-spin")} />
+            <RefreshCw size={18} className={cn(loading && "animate-spin")} />
           </button>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto p-8 relative">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-8 relative">
         <div className="max-w-6xl mx-auto space-y-4">
           
           {loading ? (
@@ -217,110 +269,215 @@ export default function OperationLogs() {
               <p className="text-gray-500 dark:text-[#aebac1] font-medium">Nenhum log encontrado.</p>
             </div>
           ) : (
-            <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-gray-50/50 dark:bg-[#111b21]/50 border-b border-gray-100 dark:border-[#222d34]">
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider w-10"></th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider">Ação</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider">Descrição</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider">Tabela</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider">Usuário</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider text-right">Data / Hora</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50 dark:divide-[#222d34]/50">
-                  {filteredLogs.map(log => (
-                    <React.Fragment key={log.id}>
-                      <tr 
-                        className={cn(
-                          "group hover:bg-gray-50/80 dark:hover:bg-[#2a3942]/50 transition-colors cursor-pointer",
-                          expandedRow === log.id && "bg-gray-50 dark:bg-[#2a3942]"
+            <>
+              {/* Layout Desktop (Tabela) */}
+              <div className="hidden md:block bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50/50 dark:bg-[#111b21]/50 border-b border-gray-100 dark:border-[#222d34]">
+                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider w-10"></th>
+                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider">Ação</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider">Descrição</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider">Tabela</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider">Usuário</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider text-right">Data / Hora</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50 dark:divide-[#222d34]/50">
+                    {filteredLogs.map(log => (
+                      <React.Fragment key={log.id}>
+                        <tr 
+                          className={cn(
+                            "group hover:bg-gray-50/80 dark:hover:bg-[#2a3942]/50 transition-colors cursor-pointer",
+                            expandedRow === log.id && "bg-gray-50 dark:bg-[#2a3942]"
+                          )}
+                          onClick={() => setExpandedRow(expandedRow === log.id ? null : log.id)}
+                        >
+                          <td className="px-6 py-4">
+                            <button className="text-gray-400 hover:text-indigo-500 transition-colors">
+                              {expandedRow === log.id ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                            </button>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={cn(
+                              "px-3 py-1 rounded-lg text-xs font-bold tracking-wide border inline-flex items-center gap-1.5",
+                              getActionColor(log.action)
+                            )}>
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm font-medium text-gray-700 dark:text-[#d1d7db] max-w-xs truncate" title={generateDescription(log)}>
+                            {generateDescription(log)}
+                          </td>
+                          <td className="px-6 py-4 text-sm font-medium text-gray-500 dark:text-[#8696a0] flex items-center gap-2">
+                            <Database size={14} className="opacity-50" />
+                            {log.table_name}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-600 dark:text-[#aebac1]">
+                            {log.user_name || 'Sistema'}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-500 dark:text-[#8696a0] text-right font-mono">
+                            {format(new Date(log.created_at), 'dd/MM/yyyy HH:mm:ss')}
+                          </td>
+                        </tr>
+                        {/* Expanded View */}
+                        {expandedRow === log.id && (
+                          <tr className="bg-gray-50 dark:bg-[#111b21]/80 border-b border-gray-100 dark:border-[#222d34]">
+                            <td colSpan={6} className="px-8 py-6">
+                              <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                                
+                                <div className="grid grid-cols-2 gap-6">
+                                  {/* Antes */}
+                                  <div className="space-y-2">
+                                    <h4 className="text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase flex items-center gap-2">
+                                      <History size={14} /> Estado Anterior (Antes)
+                                    </h4>
+                                    <div className="bg-[#282c34] rounded-xl p-4 overflow-x-auto border border-gray-800">
+                                      <pre className="text-xs text-green-400 font-mono">
+                                        {log.before_state ? JSON.stringify(log.before_state, null, 2) : 'null'}
+                                      </pre>
+                                    </div>
+                                  </div>
+                                  {/* Depois */}
+                                  <div className="space-y-2">
+                                    <h4 className="text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase flex items-center gap-2">
+                                      <Database size={14} /> Estado Atual (Depois)
+                                    </h4>
+                                    <div className="bg-[#282c34] rounded-xl p-4 overflow-x-auto border border-gray-800">
+                                      <pre className="text-xs text-blue-400 font-mono">
+                                        {log.after_state ? JSON.stringify(log.after_state, null, 2) : 'null'}
+                                      </pre>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Undo Action Container */}
+                                <div className="flex justify-end pt-4 border-t border-gray-200 dark:border-[#304046]">
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setUndoLog(log);
+                                    }}
+                                    disabled={log.action === 'INSERT' && !log.record_id} // Regra basica
+                                    className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white text-sm font-semibold rounded-xl shadow-lg shadow-orange-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    <Undo2 size={16} />
+                                    Desfazer Operação
+                                  </button>
+                                </div>
+
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                        onClick={() => setExpandedRow(expandedRow === log.id ? null : log.id)}
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Layout Mobile (Duas Linhas por Registro) */}
+              <div className="block md:hidden space-y-4 animate-in fade-in duration-300">
+                {filteredLogs.map(log => {
+                  const isExpanded = expandedRow === log.id;
+                  return (
+                    <div 
+                      key={log.id} 
+                      className={cn(
+                        "bg-white dark:bg-[#202c33] rounded-2xl border border-gray-100 dark:border-[#222d34] overflow-hidden transition-all shadow-sm",
+                        isExpanded && "ring-1 ring-indigo-500/50"
+                      )}
+                    >
+                      {/* Item Header / Clickable Area */}
+                      <div 
+                        onClick={() => setExpandedRow(isExpanded ? null : log.id)}
+                        className="p-4 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-[#2a3942]/30 active:bg-gray-100 dark:active:bg-[#2a3942]/60 transition-colors space-y-2.5"
                       >
-                        <td className="px-6 py-4">
-                          <button className="text-gray-400 hover:text-indigo-500 transition-colors">
-                            {expandedRow === log.id ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                          </button>
-                        </td>
-                        <td className="px-6 py-4">
+                        {/* Linha 1: Ação (Badge) + Descrição */}
+                        <div className="flex items-start gap-2.5">
                           <span className={cn(
-                            "px-3 py-1 rounded-lg text-xs font-bold tracking-wide border inline-flex items-center gap-1.5",
+                            "px-2 py-0.5 rounded-md text-[10px] font-extrabold tracking-wider border shrink-0",
                             getActionColor(log.action)
                           )}>
                             {log.action}
                           </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm font-medium text-gray-700 dark:text-[#d1d7db] max-w-xs truncate" title={generateDescription(log)}>
-                          {generateDescription(log)}
-                        </td>
-                        <td className="px-6 py-4 text-sm font-medium text-gray-500 dark:text-[#8696a0] flex items-center gap-2">
-                          <Database size={14} className="opacity-50" />
-                          {log.table_name}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-600 dark:text-[#aebac1]">
-                          {log.user_name || 'Sistema'}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-500 dark:text-[#8696a0] text-right font-mono">
-                          {format(new Date(log.created_at), 'dd/MM/yyyy HH:mm:ss')}
-                        </td>
-                      </tr>
-                      {/* Expanded View */}
-                      {expandedRow === log.id && (
-                        <tr className="bg-gray-50 dark:bg-[#111b21]/80 border-b border-gray-100 dark:border-[#222d34]">
-                          <td colSpan={6} className="px-8 py-6">
-                            <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                              
-                              <div className="grid grid-cols-2 gap-6">
-                                {/* Antes */}
-                                <div className="space-y-2">
-                                  <h4 className="text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase flex items-center gap-2">
-                                    <History size={14} /> Estado Anterior (Antes)
-                                  </h4>
-                                  <div className="bg-[#282c34] rounded-xl p-4 overflow-x-auto border border-gray-800">
-                                    <pre className="text-xs text-green-400 font-mono">
-                                      {log.before_state ? JSON.stringify(log.before_state, null, 2) : 'null'}
-                                    </pre>
-                                  </div>
-                                </div>
-                                {/* Depois */}
-                                <div className="space-y-2">
-                                  <h4 className="text-xs font-semibold text-gray-500 dark:text-[#8696a0] uppercase flex items-center gap-2">
-                                    <Database size={14} /> Estado Atual (Depois)
-                                  </h4>
-                                  <div className="bg-[#282c34] rounded-xl p-4 overflow-x-auto border border-gray-800">
-                                    <pre className="text-xs text-blue-400 font-mono">
-                                      {log.after_state ? JSON.stringify(log.after_state, null, 2) : 'null'}
-                                    </pre>
-                                  </div>
-                                </div>
-                              </div>
+                          <div className="text-sm font-bold text-gray-800 dark:text-gray-200 leading-tight">
+                            {generateDescription(log)}
+                          </div>
+                        </div>
 
-                              {/* Undo Action Container */}
-                              <div className="flex justify-end pt-4 border-t border-gray-200 dark:border-[#304046]">
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setUndoLog(log);
-                                  }}
-                                  disabled={log.action === 'INSERT' && !log.record_id} // Regra basica
-                                  className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white text-sm font-semibold rounded-xl shadow-lg shadow-orange-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  <Undo2 size={16} />
-                                  Desfazer Operação
-                                </button>
-                              </div>
+                        {/* Linha 2: Usuário, Tabela, Data e Chevron */}
+                        <div className="flex items-center justify-between text-xs text-gray-500 dark:text-[#8696a0] pt-1">
+                          <div className="flex flex-wrap items-center gap-1.5 leading-none">
+                            <span className="font-medium text-gray-700 dark:text-[#aebac1] truncate max-w-[120px]">
+                              {log.user_name || 'Sistema'}
+                            </span>
+                            <span>•</span>
+                            <span className="flex items-center gap-1">
+                              <Database size={10} className="opacity-70" />
+                              {log.table_name}
+                            </span>
+                            <span>•</span>
+                            <span className="font-mono">
+                              {format(new Date(log.created_at), 'dd/MM HH:mm')}
+                            </span>
+                          </div>
+                          <div className="text-gray-400 dark:text-[#54656f] ml-2 shrink-0">
+                            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                          </div>
+                        </div>
+                      </div>
 
+                      {/* Conteúdo Expandido Collapsible */}
+                      {isExpanded && (
+                        <div className="px-4 pb-4 pt-2 border-t border-gray-100 dark:border-[#222d34] bg-gray-50/50 dark:bg-[#111b21]/30 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                          <div className="grid grid-cols-1 gap-4">
+                            {/* Antes */}
+                            <div className="space-y-1">
+                              <span className="text-[10px] font-bold text-gray-400 dark:text-[#8696a0] uppercase tracking-wider flex items-center gap-1">
+                                <History size={12} /> Antes
+                              </span>
+                              <div className="bg-[#282c34] rounded-xl p-3 overflow-x-auto border border-gray-800/80">
+                                <pre className="text-[11px] text-green-400 font-mono">
+                                  {log.before_state ? JSON.stringify(log.before_state, null, 2) : 'null'}
+                                </pre>
+                              </div>
                             </div>
-                          </td>
-                        </tr>
+                            
+                            {/* Depois */}
+                            <div className="space-y-1">
+                              <span className="text-[10px] font-bold text-gray-400 dark:text-[#8696a0] uppercase tracking-wider flex items-center gap-1">
+                                <Database size={12} /> Depois
+                              </span>
+                              <div className="bg-[#282c34] rounded-xl p-3 overflow-x-auto border border-gray-800/80">
+                                <pre className="text-[11px] text-blue-400 font-mono">
+                                  {log.after_state ? JSON.stringify(log.after_state, null, 2) : 'null'}
+                                </pre>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Ação de Desfazer */}
+                          <div className="flex justify-end pt-2">
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setUndoLog(log);
+                              }}
+                              disabled={log.action === 'INSERT' && !log.record_id}
+                              className="w-full py-2.5 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white text-xs font-bold rounded-xl shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-50"
+                            >
+                              <Undo2 size={14} />
+                              Desfazer Operação
+                            </button>
+                          </div>
+                        </div>
                       )}
-                    </React.Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
 
         </div>

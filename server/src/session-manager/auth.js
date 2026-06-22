@@ -22,6 +22,18 @@ function scheduleDbSync(instanceId, tenantId) {
         pendingWrites.delete(instanceId);
         
         try {
+            // Anti-violação de chave estrangeira: verifica se a instância ainda existe antes de rodar a sincronização
+            const { data: instanceExists } = await supabase
+                .from('whatsapp_instances')
+                .select('id')
+                .eq('id', instanceId)
+                .single();
+
+            if (!instanceExists) {
+                console.log(`[SessionManager] Instância ${instanceId} deletada do banco. Cancelando DB Sync pendente.`);
+                return;
+            }
+
             const dels = Array.from(queue.keysToDelete);
             if (dels.length > 0) {
                 const { error } = await supabase.from('wa_auth_keys')
@@ -68,6 +80,19 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
     } else {
         const init = initAuthCreds.default ? initAuthCreds.default : initAuthCreds;
         creds = init();
+
+        // Anti-violação de chave estrangeira: verifica se a instância ainda existe antes do upsert
+        const { data: instanceExists } = await supabase
+            .from('whatsapp_instances')
+            .select('id')
+            .eq('id', instanceId)
+            .single();
+
+        if (!instanceExists) {
+            console.warn(`[SessionManager] Tentativa de upsert de credenciais abortada: Instância ${instanceId} não existe.`);
+            throw new Error(`Instância ${instanceId} não existe no banco de dados.`);
+        }
+
         await supabase.from('wa_auth_credentials').upsert({
             instance_id: instanceId,
             tenant_id: tenantId,

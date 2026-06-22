@@ -153,14 +153,18 @@ export default function InstancesDashboard() {
       const newEngineId = uuidv4(); 
       const finalApiKey = 'sk_' + uuidv4().replace(/-/g, '');
 
-      const { error } = await supabase.from('whatsapp_instances').insert([{
+      const newInstObj = {
         id: newEngineId,
         display_name: nameStr,
         status: 'offline',
         settings: defaultSettings,
         tenant_id: tenantId,
         api_key: finalApiKey
-      }]);
+      };
+      const { error } = await supabase.from('whatsapp_instances').insert([newInstObj]);
+      if (!error) {
+        await useChatStore.getState().logOperation('INSERT', 'whatsapp_instances', newEngineId, null, newInstObj);
+      }
       
       if (error) throw error;
       
@@ -196,6 +200,7 @@ export default function InstancesDashboard() {
       
       // Remove do banco de dados local por precaução e reatividade
       await supabase.from('whatsapp_instances').delete().eq('id', deletingInstance.id);
+      await useChatStore.getState().logOperation('DELETE', 'whatsapp_instances', deletingInstance.id, deletingInstance, null);
       
       fetchInstances();
     } catch (e) {
@@ -210,7 +215,10 @@ export default function InstancesDashboard() {
   const handleSetAsActive = async (id: string) => {
     try {
       const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      const companyBefore = useChatStore.getState().tenantInfo;
       await supabase.from('companies').update({ evolution_api_instance: id }).eq('id', tenantId);
+      const companyAfter = companyBefore ? { ...companyBefore, evolution_api_instance: id } : { evolution_api_instance: id };
+      await useChatStore.getState().logOperation('UPDATE', 'companies', tenantId, companyBefore || null, companyAfter);
       setActiveInstanceId(id);
       alert('Instância definida como principal com sucesso!');
     } catch(err) {
@@ -338,7 +346,12 @@ export default function InstancesDashboard() {
     // Optimistic Update
     setInstances(prev => prev.map(inst => inst.id === id ? { ...inst, settings: newSettings } : inst));
     
+    const instBefore = instances.find(inst => inst.id === id);
     const { error } = await supabase.from('whatsapp_instances').update({ settings: newSettings }).eq('id', id);
+    if (!error) {
+       const instAfter = instBefore ? { ...instBefore, settings: newSettings } : { settings: newSettings };
+       await useChatStore.getState().logOperation('UPDATE', 'whatsapp_instances', id, instBefore || null, instAfter);
+    }
     if (error) {
        // Rollback se falhar
        setInstances(prev => prev.map(inst => inst.id === id ? { ...inst, settings: currentSettings } : inst));

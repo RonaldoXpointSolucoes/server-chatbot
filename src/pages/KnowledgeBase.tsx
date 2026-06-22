@@ -1,3 +1,4 @@
+import { useChatStore } from '../store/chatStore';
 import React, { useState, useEffect, useRef } from 'react';
 import { BrainCircuit, UploadCloud, FileText, File, Trash2, CheckCircle2, AlertCircle, Loader2, Search, Zap, Info, Server, ArrowLeft, Eye, Save, Database, X, Plus, Edit3, PlusCircle, List, Grid, ChevronLeft, ChevronRight, Square, CheckSquare, ChevronDown } from 'lucide-react';
 import { supabase } from '../services/supabase';
@@ -456,6 +457,10 @@ export default function KnowledgeBase() {
         })
       });
       if (response.ok) {
+        await useChatStore.getState().logOperation('INSERT', 'knowledge_corrections', 'corr-' + Date.now(), null, {
+          user_query: corr.user_query,
+          corrected_response: corr.corrected_response
+        });
         const res = await fetch(`${ENGINE_URL}/api/v1/knowledge/corrections`, {
           headers: {
             'x-tenant-id': tenantId
@@ -489,6 +494,7 @@ export default function KnowledgeBase() {
     if (!confirm('Tem certeza de que deseja excluir esta regra de raciocínio? A inteligência artificial deixará de seguir esta instrução imediatamente.')) return;
     setIsSavingContent(true);
     try {
+      const corrBefore = corrections.find(c => c.id === id);
       const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/corrections/${id}`, {
         method: 'DELETE',
         headers: {
@@ -496,6 +502,7 @@ export default function KnowledgeBase() {
         }
       });
       if (response.ok) {
+        await useChatStore.getState().logOperation('DELETE', 'knowledge_corrections', id, corrBefore || null, null);
         setCorrections(prev => prev.filter(c => c.id !== id));
         fetchDocuments();
       } else {
@@ -521,6 +528,9 @@ export default function KnowledgeBase() {
         body: JSON.stringify({ content: viewContent })
       });
       if (response.ok) {
+        const docBefore = viewingFile;
+        const docAfter = { ...viewingFile, content: viewContent };
+        await useChatStore.getState().logOperation('UPDATE', 'knowledge_documents', viewingFile.id, docBefore, docAfter);
         setViewingFile(null);
         setViewContent('');
         setIsEditMode(false);
@@ -555,6 +565,17 @@ export default function KnowledgeBase() {
          throw new Error(err.error || 'Falha no upload');
       }
       
+      try {
+         const resData = await response.json().catch(() => null);
+         if (resData && resData.document) {
+            await useChatStore.getState().logOperation('INSERT', 'knowledge_documents', resData.document.id, null, resData.document);
+         } else {
+            await useChatStore.getState().logOperation('INSERT', 'knowledge_documents', 'uploaded-doc-' + Date.now(), null, { title: file.name });
+         }
+      } catch(e) {
+         await useChatStore.getState().logOperation('INSERT', 'knowledge_documents', 'uploaded-doc-' + Date.now(), null, { title: file.name });
+      }
+      
       await fetchDocuments();
     } catch (err: any) {
       alert(`Erro no envio: ${err.message}`);
@@ -567,9 +588,11 @@ export default function KnowledgeBase() {
   const deleteDocument = async (id: string) => {
     if(!confirm('Tem certeza? Isso excluirá toda a inteligência e vetores atrelados a este arquivo.')) return;
     try {
+      const docBefore = documents.find(d => d.id === id);
       // Como a API e RLS já restringem, chamamos direto o supabase para manter rapido
       const { error } = await supabase.from('knowledge_documents').delete().eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
+      await useChatStore.getState().logOperation('DELETE', 'knowledge_documents', id, docBefore || null, null);
       setDocuments(prev => prev.filter(d => d.id !== id));
     } catch (err: any) {
       alert(`Erro ao excluir: ${err.message}`);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil } from 'lucide-react';
+import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -29,10 +29,15 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
     notes: '',
     email: '',
     address_street: '',
+    address_number: '',
+    latitude: '',
+    longitude: '',
     phone: '',
     bot_status: 'active',
     company_ids: [] as string[],
-    tags: [] as string[]
+    tags: [] as string[],
+    addresses: [] as any[],
+    id_gastro_food: ''
   });
 
   const [companies, setCompanies] = useState<any[]>([]);
@@ -47,32 +52,85 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
 
   const [isGroupSearchOpen, setIsGroupSearchOpen] = useState(false);
   const [groupSearchQuery, setGroupSearchQuery] = useState('');
+  const [isLinksSectionOpen, setIsLinksSectionOpen] = useState(false);
+  const [activeAddressIndex, setActiveAddressIndex] = useState(0);
 
   const contactGroups = useChatStore(state => state.tenantInfo?.settings?.contactGroups) || [];
 
   React.useEffect(() => {
     if (contactData && isOpen) {
+      let initialAddresses = [] as any[];
+      if (Array.isArray(contactData.addresses) && contactData.addresses.length > 0) {
+        initialAddresses = contactData.addresses.map((addr: any) => ({
+          cep: addr.cep || '',
+          street: addr.street || addr.address_street || '',
+          number: addr.number || addr.address_number || '',
+          neighborhood: addr.neighborhood || addr.address_neighborhood || '',
+          city: addr.city || addr.address_city || '',
+          state: addr.state || addr.address_state || '',
+          latitude: addr.latitude || '',
+          longitude: addr.longitude || '',
+          apartment: addr.apartment || addr.ap || '',
+          block: addr.block || '',
+          reference: addr.reference || '',
+          Distancia: addr.Distancia || addr.distancia || '',
+          Tempo: addr.Tempo || addr.tempo || ''
+        }));
+      } else {
+        initialAddresses = [{
+          cep: contactData.cep || '',
+          street: contactData.address_street || '',
+          number: contactData.address_number || '',
+          neighborhood: contactData.address_neighborhood || '',
+          city: contactData.address_city || '',
+          state: contactData.address_state || '',
+          latitude: contactData.latitude || '',
+          longitude: contactData.longitude || '',
+          apartment: contactData.ap || contactData.apartment || '',
+          block: contactData.block || '',
+          reference: contactData.reference || '',
+          Distancia: contactData.Distancia || contactData.distancia || '',
+          Tempo: contactData.Tempo || contactData.tempo || ''
+        }];
+      }
+
       setFormData({
         name: contactData.custom_name || contactData.name || '',
         fantasy_name: contactData.fantasy_name || '',
         document_type: contactData.document_type || 'contato',
         document_number: contactData.document_number ? formatDocumentNumber(contactData.document_number, contactData.document_type || 'cpf') : '',
         email: contactData.email || '',
-        cep: contactData.cep || '',
-        address_neighborhood: contactData.address_neighborhood || '',
-        address_city: contactData.address_city || '',
-        address_state: contactData.address_state || '',
+        cep: initialAddresses[0]?.cep || '',
+        address_neighborhood: initialAddresses[0]?.neighborhood || '',
+        address_city: initialAddresses[0]?.city || '',
+        address_state: initialAddresses[0]?.state || '',
         notes: contactData.notes || '',
-        address_street: contactData.address_street || '',
-        phone: contactData.phone || '',
+        address_street: initialAddresses[0]?.street || '',
+        address_number: initialAddresses[0]?.number || '',
+        latitude: initialAddresses[0]?.latitude || '',
+        longitude: initialAddresses[0]?.longitude || '',
+        phone: (() => {
+          let p = contactData.phone || '';
+          if (p.startsWith('55') && p.length > 10) {
+            return p.substring(2);
+          }
+          return p;
+        })(),
         bot_status: contactData.bot_status || 'active',
         company_ids: contactData.company_ids || [],
-        tags: contactData.tags || []
+        tags: contactData.tags || [],
+        addresses: initialAddresses,
+        id_gastro_food: contactData.id_gastro_food || contactData.idGastroFood || ''
       });
       setIsCompanySearchOpen(false);
       setCompanySearchQuery('');
       setIsGroupSearchOpen(false);
       setGroupSearchQuery('');
+      setIsLinksSectionOpen(
+        (contactData.company_ids && contactData.company_ids.length > 0) ||
+        (contactData.tags && contactData.tags.length > 0)
+      );
+      setActiveAddressIndex(0);
     }
   }, [contactData, isOpen]);
 
@@ -164,26 +222,150 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
   };
 
   const handleCepSearch = async () => {
-    const cleanCep = formData.cep.replace(/\D/g, '');
+    const activeAddr = formData.addresses[activeAddressIndex];
+    const cleanCep = activeAddr?.cep?.replace(/\D/g, '') || '';
     if (cleanCep.length !== 8) return;
     
     setIsSearchingCep(true);
     try {
-      const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
-      const data = await res.json();
-      if (!data.erro) {
+      let street = '';
+      let neighborhood = '';
+      let city = '';
+      let state = '';
+      let latitude = '';
+      let longitude = '';
+
+      // 1. Tentar AwesomeAPI (que retorna lat/lng direto)
+      try {
+        const awesomeRes = await fetch(`https://cep.awesomeapi.com.br/json/${cleanCep}`);
+        if (awesomeRes.ok) {
+          const awesomeData = await awesomeRes.json();
+          if (awesomeData && !awesomeData.erro) {
+            street = awesomeData.address || '';
+            neighborhood = awesomeData.district || '';
+            city = awesomeData.city || '';
+            state = awesomeData.state || '';
+            latitude = awesomeData.lat || '';
+            longitude = awesomeData.lng || '';
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar na AwesomeAPI, tentando ViaCEP como fallback...', err);
+      }
+
+      // 2. Se AwesomeAPI não obteve a rua ou falhou, tenta ViaCEP + Nominatim
+      if (!street) {
+        try {
+          const viacepRes = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+          if (viacepRes.ok) {
+            const viacepData = await viacepRes.json();
+            if (viacepData && !viacepData.erro) {
+              street = viacepData.logradouro || '';
+              neighborhood = viacepData.bairro || '';
+              city = viacepData.localidade || '';
+              state = viacepData.uf || '';
+              
+              // Tenta Nominatim do OpenStreetMap para pegar a latitude/longitude do CEP
+              try {
+                const nominatimRes = await fetch(`https://nominatim.openstreetmap.org/search?postalcode=${cleanCep}&country=Brazil&format=json`, {
+                  headers: { 'User-Agent': 'ChatBoot/1.0' }
+                });
+                if (nominatimRes.ok) {
+                  const nominatimData = await nominatimRes.json();
+                  if (nominatimData && nominatimData.length > 0) {
+                    latitude = nominatimData[0].lat || '';
+                    longitude = nominatimData[0].lon || '';
+                  } else {
+                    // Busca fallback usando Logradouro, Cidade, Estado
+                    const queryStr = `${street}, ${city}, ${state}, Brazil`;
+                    const nominatimRes2 = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(queryStr)}`, {
+                      headers: { 'User-Agent': 'ChatBoot/1.0' }
+                    });
+                    if (nominatimRes2.ok) {
+                      const nominatimData2 = await nominatimRes2.json();
+                      if (nominatimData2 && nominatimData2.length > 0) {
+                        latitude = nominatimData2[0].lat || '';
+                        longitude = nominatimData2[0].lon || '';
+                      }
+                    }
+                  }
+                }
+              } catch (nomErr) {
+                console.warn('Erro ao buscar coordenadas no Nominatim:', nomErr);
+              }
+            }
+          }
+        } catch (viacepErr) {
+          console.warn('Erro ao buscar no ViaCEP:', viacepErr);
+        }
+      }
+
+      if (street || city) {
+        const updatedAddresses = [...formData.addresses];
+        updatedAddresses[activeAddressIndex] = {
+          ...updatedAddresses[activeAddressIndex],
+          cep: cleanCep,
+          street: street || updatedAddresses[activeAddressIndex].street || '',
+          neighborhood: neighborhood || updatedAddresses[activeAddressIndex].neighborhood || '',
+          city: city || updatedAddresses[activeAddressIndex].city || '',
+          state: state || updatedAddresses[activeAddressIndex].state || '',
+          latitude: latitude || updatedAddresses[activeAddressIndex].latitude || '',
+          longitude: longitude || updatedAddresses[activeAddressIndex].longitude || '',
+          apartment: updatedAddresses[activeAddressIndex].apartment || '',
+          block: updatedAddresses[activeAddressIndex].block || '',
+          reference: updatedAddresses[activeAddressIndex].reference || ''
+        };
+
+        const syncFields = activeAddressIndex === 0 ? {
+          cep: cleanCep,
+          address_street: street || formData.address_street,
+          address_neighborhood: neighborhood || formData.address_neighborhood,
+          address_city: city || formData.address_city,
+          address_state: state || formData.address_state,
+          latitude: latitude || formData.latitude,
+          longitude: longitude || formData.longitude
+        } : {};
+
         setFormData(prev => ({
            ...prev,
-           address_street: data.logradouro || prev.address_street,
-           address_neighborhood: data.bairro || prev.address_neighborhood,
-           address_city: data.localidade || prev.address_city,
-           address_state: data.uf || prev.address_state,
+           ...syncFields,
+           addresses: updatedAddresses
         }));
+
+        // Posiciona o foco no campo número após o auto-preenchimento
+        setTimeout(() => {
+          const numberInput = document.getElementById(`address-number-input-${activeAddressIndex}`);
+          if (numberInput) {
+            (numberInput as HTMLInputElement).focus();
+          }
+        }, 100);
       }
     } catch (e) {
-      console.log('Erro ao buscar CEP');
+      console.error('Erro na busca de CEP:', e);
     } finally {
       setIsSearchingCep(false);
+    }
+  };
+
+  const handleFormKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    if (e.key === 'Enter') {
+      if (document.activeElement?.tagName === 'TEXTAREA') {
+        return;
+      }
+      if (document.activeElement?.tagName === 'BUTTON' || (document.activeElement as HTMLElement)?.getAttribute('role') === 'button') {
+        return;
+      }
+      
+      e.preventDefault();
+      const form = e.currentTarget;
+      const focusableElements = Array.from(
+        form.querySelectorAll('input:not([disabled]), select:not([disabled]), textarea:not([disabled])')
+      ) as HTMLElement[];
+      
+      const index = focusableElements.indexOf(document.activeElement as HTMLElement);
+      if (index > -1 && index < focusableElements.length - 1) {
+        focusableElements[index + 1].focus();
+      }
     }
   };
 
@@ -216,7 +398,28 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
 
     setIsSaving(true);
     try {
-      await onSave(formData);
+      const principalAddress = formData.addresses[0] || {};
+      let finalPhone = formData.phone?.replace(/\D/g, '') || '';
+      if (finalPhone && !finalPhone.startsWith('55')) {
+        finalPhone = '55' + finalPhone;
+      }
+
+      const finalPayload = {
+        ...formData,
+        phone: finalPhone,
+        cep: principalAddress.cep || '',
+        address_street: principalAddress.street || '',
+        address_number: principalAddress.number || '',
+        address_neighborhood: principalAddress.neighborhood || '',
+        address_city: principalAddress.city || '',
+        address_state: principalAddress.state || '',
+        latitude: principalAddress.latitude || '',
+        longitude: principalAddress.longitude || '',
+        ap: principalAddress.apartment || '',
+        block: principalAddress.block || '',
+        reference: principalAddress.reference || ''
+      };
+      await onSave(finalPayload);
       onClose();
     } catch (err) {
       alert("Erro ao salvar contato.");
@@ -247,360 +450,82 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
         </div>
         
         <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
-          <form id="crm-contact-form" onSubmit={handleSubmit} className="flex flex-col gap-6">
+          <form id="crm-contact-form" onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} className="flex flex-col gap-6">
             
             {/* Seção Principal */}
             <div className="bg-white dark:bg-[#202c33] p-5 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm space-y-4">
                <h3 className="text-sm font-semibold text-[#00a884] uppercase tracking-wider mb-2">Dados Principais</h3>
-               
-               <div className="flex flex-col sm:flex-row gap-4">
-                   <div className={cn(
-                     "w-full",
-                     formData.document_type === 'contato' ? "sm:w-1/4" : "sm:w-1/3"
-                   )}>
-                     <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Tipo de Documento</label>
-                     <select 
-                       value={formData.document_type}
-                       onChange={e => {
-                         setFormData({...formData, document_type: e.target.value});
-                         setDocFeedback(null);
-                       }}
-                       className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                     >
-                        <option value="contato">Contato</option>
-                        <option value="cpf">CPF</option>
-                        <option value="cnpj">CNPJ</option>
-                     </select>
-                   </div>
-                   
-                   {formData.document_type === 'contato' ? (
-                     <>
-                       {/* Empresas Vinculadas */}
-                       <div className="w-full sm:w-[38%] flex flex-col relative">
-                         <label className="flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-[#8696a0] mb-1">
-                           <span className="flex items-center gap-1.5">
-                             <Building2 size={14} className="text-[#00a884]" />
-                             Empresas Vinculadas
-                             {formData.company_ids && formData.company_ids.length > 0 && (
-                               <span className="px-1.5 py-0.5 rounded-full bg-[#00a884]/10 text-[#00a884] text-[10px] font-bold">
-                                 {formData.company_ids.length}
-                               </span>
-                             )}
-                           </span>
-                           <button 
-                             type="button"
-                             onClick={() => {
-                               setIsCompanySearchOpen(!isCompanySearchOpen);
-                               setIsGroupSearchOpen(false);
+                      <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="w-full sm:w-1/3">
+                      <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Tipo de Documento</label>
+                      <select 
+                        value={formData.document_type}
+                        onChange={e => {
+                          setFormData({...formData, document_type: e.target.value});
+                          setDocFeedback(null);
+                        }}
+                        className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                      >
+                         <option value="contato">Contato</option>
+                         <option value="cpf">CPF</option>
+                         <option value="cnpj">CNPJ</option>
+                      </select>
+                    </div>
+                    
+                    {formData.document_type !== 'contato' && (
+                      <div className="w-full sm:w-2/3 flex flex-col relative">
+                        <label className="flex justify-between text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">
+                           <span>Número do Documento</span>
+                           {formData.document_type === 'cnpj' && (
+                             <span className="text-[#00a884] cursor-pointer hover:underline flex items-center gap-1" onClick={handleCnpjSearch}>
+                               {isSearchingDoc ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />} Autocompletar
+                             </span>
+                           )}
+                        </label>
+                        <div className="relative">
+                           <FileText size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                           <input 
+                             type="text" 
+                             value={formData.document_number}
+                             onChange={e => {
+                               setFormData({...formData, document_number: formatDocumentNumber(e.target.value, formData.document_type)});
+                               setDocFeedback(null);
                              }}
-                             className={cn(
-                               "px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all active:scale-95",
-                               isCompanySearchOpen 
-                                 ? "bg-[#00a884]/10 border-[#00a884]/20 text-[#00a884] shadow-sm"
-                                 : "bg-[#f0f2f5] dark:bg-[#111b21] border-transparent text-gray-500 hover:text-[#00a884]"
-                             )}
-                             title="Buscar e vincular empresas"
-                           >
-                             <Search size={12} />
-                             {isCompanySearchOpen ? 'Fechar' : 'Buscar'}
-                           </button>
-                         </label>
-
-                         {/* Badges de empresas ativas resumidas quando fechado */}
-                         {!isCompanySearchOpen && formData.company_ids && formData.company_ids.length > 0 && (
-                           <div className="flex flex-wrap gap-1.5 p-2 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[42px] items-center">
-                             {formData.company_ids.map(cId => {
-                               const comp = companies.find(c => c.id === cId);
-                               if (!comp) return null;
-                               return (
-                                 <span 
-                                   key={`badge-${cId}`} 
-                                   className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 text-[11px] font-bold text-[#111b21] dark:text-[#e9edef] uppercase tracking-wider shadow-sm"
-                                 >
-                                   {comp.name?.toUpperCase() || comp.fantasy_name?.toUpperCase()}
-                                 </span>
-                               );
-                             })}
-                           </div>
-                         )}
-                         {!isCompanySearchOpen && (!formData.company_ids || formData.company_ids.length === 0) && (
-                           <div className="flex items-center px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[42px] text-xs text-gray-400">
-                             Nenhuma vinculada
-                           </div>
-                         )}
-
-                         {/* Lista colapsável de busca de empresas */}
-                         {isCompanySearchOpen && (
-                           <div className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-2xl p-3 flex flex-col gap-3 shadow-lg absolute top-[44px] left-0 right-0 z-30 animate-in fade-in slide-in-from-top-2 duration-200">
-                             
-                             {/* Input de filtro da busca */}
-                             <div className="relative">
-                               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                               <input 
-                                 type="text"
-                                 value={companySearchQuery}
-                                 onChange={e => setCompanySearchQuery(e.target.value)}
-                                 placeholder="Filtrar empresas..."
-                                 className="w-full pl-9 pr-8 py-2 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-xs text-[#111b21] dark:text-[#e9edef] transition-all"
-                                 autoFocus
-                               />
-                               {companySearchQuery && (
-                                 <button 
-                                   type="button" 
-                                   onClick={() => setCompanySearchQuery('')}
-                                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-0.5 rounded"
-                                 >
-                                   <X size={12} />
-                                 </button>
-                               )}
-                             </div>
-
-                             {/* Container de checkboxes das empresas */}
-                             <div className="w-full max-h-[140px] overflow-y-auto bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl p-1.5 styled-scrollbar flex flex-col gap-0.5">
-                               {(() => {
-                                 // 1. Ordena as empresas em ordem alfabética
-                                 const sortedCompanies = [...companies].sort((a, b) => {
-                                   const nameA = (a.fantasy_name || a.name || '').toUpperCase();
-                                   const nameB = (b.fantasy_name || b.name || '').toUpperCase();
-                                   return nameA.localeCompare(nameB);
-                                 });
-
-                                 // 2. Filtra as empresas baseado na query de busca
-                                 const filteredCompanies = sortedCompanies.filter(c => {
-                                   const term = companySearchQuery.toLowerCase();
-                                   const fantasy = (c.fantasy_name || '').toLowerCase();
-                                   const name = (c.name || '').toLowerCase();
-                                   return fantasy.includes(term) || name.includes(term);
-                                 });
-
-                                 if (filteredCompanies.length === 0) {
-                                   return <div className="text-xs text-gray-500 text-center py-4">Nenhuma empresa encontrada</div>;
-                                 }
-
-                                 return filteredCompanies.map(c => {
-                                   const name = (c.name || '').toUpperCase();
-                                   const fantasy = c.fantasy_name && c.fantasy_name.toLowerCase() !== c.name?.toLowerCase() 
-                                     ? c.fantasy_name.toUpperCase() 
-                                     : '';
-                                   const isChecked = formData.company_ids?.includes(c.id) || false;
-                                   
-                                   return (
-                                     <label key={c.id} className="flex items-center gap-2.5 p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
-                                       <div className="relative flex items-center justify-center">
-                                         <input
-                                           type="checkbox"
-                                           checked={isChecked}
-                                           onChange={(e) => {
-                                             const currentIds = formData.company_ids || [];
-                                             if (e.target.checked) {
-                                               setFormData({...formData, company_ids: [...currentIds, c.id]});
-                                             } else {
-                                               setFormData({...formData, company_ids: currentIds.filter(id => id !== c.id)});
-                                             }
-                                           }}
-                                           className="peer w-4 h-4 cursor-pointer appearance-none border border-gray-400 dark:border-gray-600 rounded bg-transparent checked:bg-[#00a884] checked:border-[#00a884] transition-all"
-                                         />
-                                         <svg className="absolute w-3 h-3 text-white pointer-events-none opacity-0 peer-checked:opacity-100 scale-50 peer-checked:scale-100 transition-all" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                                       </div>
-                                       <span className="text-sm text-[#111b21] dark:text-[#e9edef] truncate group-hover:text-[#00a884] transition-colors font-bold tracking-wide flex items-center gap-2">
-                                         <span>{name}</span>
-                                         {fantasy && (
-                                           <span className="text-[10px] text-gray-500 dark:text-[#8696a0] font-normal normal-case px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
-                                             {fantasy}
-                                           </span>
-                                         )}
-                                       </span>
-                                     </label>
-                                   );
-                                 });
-                               })()}
-                             </div>
-                           </div>
-                         )}
-                       </div>
-
-                       {/* Grupo de Empresas */}
-                       <div className="w-full sm:w-[37%] flex flex-col relative">
-                         <label className="flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-[#8696a0] mb-1">
-                           <span className="flex items-center gap-1.5">
-                             <Building size={14} className="text-[#00a884]" />
-                             Grupo de Empresas
-                             {formData.tags && formData.tags.length > 0 && (
-                               <span className="px-1.5 py-0.5 rounded-full bg-[#00a884]/10 text-[#00a884] text-[10px] font-bold">
-                                 {formData.tags.length}
-                               </span>
-                             )}
-                           </span>
-                           <button 
-                             type="button"
-                             onClick={() => {
-                               setIsGroupSearchOpen(!isGroupSearchOpen);
-                               setIsCompanySearchOpen(false);
-                             }}
-                             className={cn(
-                               "px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all active:scale-95",
-                               isGroupSearchOpen 
-                                 ? "bg-[#00a884]/10 border-[#00a884]/20 text-[#00a884] shadow-sm"
-                                 : "bg-[#f0f2f5] dark:bg-[#111b21] border-transparent text-gray-500 hover:text-[#00a884]"
-                             )}
-                             title="Selecionar grupos empresariais"
-                           >
-                             <Search size={12} />
-                             {isGroupSearchOpen ? 'Fechar' : 'Buscar'}
-                           </button>
-                         </label>
-
-                         {/* Badges de grupos ativos resumidos quando fechado */}
-                         {!isGroupSearchOpen && formData.tags && formData.tags.length > 0 && (
-                           <div className="flex flex-wrap gap-1.5 p-2 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[42px] items-center">
-                             {formData.tags.map(tagId => {
-                               const grp = contactGroups.find(g => g.id === tagId);
-                               if (!grp) return null;
-                               return (
-                                 <span 
-                                   key={`badge-group-${tagId}`} 
-                                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border bg-opacity-10 dark:bg-opacity-10 backdrop-blur-sm shadow-sm"
-                                   style={{ 
-                                      backgroundColor: `${grp.color}15`, 
-                                      borderColor: `${grp.color}30`,
-                                      color: grp.color 
-                                   }}
-                                 >
-                                   <span 
-                                     className="w-1.5 h-1.5 rounded-full shrink-0" 
-                                     style={{ backgroundColor: grp.color || '#00a884' }}
-                                   />
-                                   {grp.name}
-                                 </span>
-                               );
-                             })}
-                           </div>
-                         )}
-                         {!isGroupSearchOpen && (!formData.tags || formData.tags.length === 0) && (
-                           <div className="flex items-center px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[42px] text-xs text-gray-400">
-                             Nenhum grupo
-                           </div>
-                         )}
-
-                         {/* Lista colapsável de busca do grupo */}
-                         {isGroupSearchOpen && (
-                           <div className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-2xl p-3 flex flex-col gap-3 shadow-lg absolute top-[44px] left-0 right-0 z-30 animate-in fade-in slide-in-from-top-2 duration-200">
-                             
-                             {/* Input de filtro da busca do grupo */}
-                             <div className="relative">
-                               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                               <input 
-                                 type="text"
-                                 value={groupSearchQuery}
-                                 onChange={e => setGroupSearchQuery(e.target.value)}
-                                 placeholder="Filtrar grupos..."
-                                 className="w-full pl-9 pr-8 py-2 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-xs text-[#111b21] dark:text-[#e9edef] transition-all"
-                                 autoFocus
-                               />
-                               {groupSearchQuery && (
-                                 <button 
-                                   type="button" 
-                                   onClick={() => setGroupSearchQuery('')}
-                                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-0.5 rounded"
-                                 >
-                                   <X size={12} />
-                                 </button>
-                               )}
-                             </div>
-
-                             {/* Container de checkboxes dos grupos */}
-                             <div className="w-full max-h-[140px] overflow-y-auto bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl p-1.5 styled-scrollbar flex flex-col gap-0.5">
-                               {(() => {
-                                 const filteredGroups = contactGroups.filter(g => 
-                                   g.name.toLowerCase().includes(groupSearchQuery.toLowerCase())
-                                 );
-
-                                 if (filteredGroups.length === 0) {
-                                   return <div className="text-xs text-gray-500 text-center py-4">Nenhum grupo encontrado</div>;
-                                 }
-
-                                 return filteredGroups.map(g => {
-                                   const isChecked = formData.tags?.includes(g.id) || false;
-                                   
-                                   return (
-                                     <label key={g.id} className="flex items-center gap-2.5 p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
-                                       <div className="relative flex items-center justify-center">
-                                         <input
-                                           type="checkbox"
-                                           checked={isChecked}
-                                           onChange={(e) => {
-                                             const currentTags = formData.tags || [];
-                                             if (e.target.checked) {
-                                               setFormData({...formData, tags: [...currentTags, g.id]});
-                                             } else {
-                                               setFormData({...formData, tags: currentTags.filter(id => id !== g.id)});
-                                             }
-                                           }}
-                                           className="peer w-4 h-4 cursor-pointer appearance-none border border-gray-400 dark:border-gray-600 rounded bg-transparent checked:bg-[#00a884] checked:border-[#00a884] transition-all"
-                                         />
-                                         <svg className="absolute w-3 h-3 text-white pointer-events-none opacity-0 peer-checked:opacity-100 scale-50 peer-checked:scale-100 transition-all" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                                       </div>
-                                       <span className="text-sm text-[#111b21] dark:text-[#e9edef] truncate group-hover:text-[#00a884] transition-colors font-bold tracking-wide flex items-center gap-2">
-                                         <span 
-                                           className="w-2.5 h-2.5 rounded-full shrink-0" 
-                                           style={{ backgroundColor: g.color || '#00a884' }}
-                                         />
-                                         <span>{g.name}</span>
-                                       </span>
-                                     </label>
-                                   );
-                                 });
-                               })()}
-                             </div>
-                           </div>
-                         )}
-                       </div>
-                     </>
-                   ) : (
-                     <div className="w-full sm:w-2/3 flex flex-col relative">
-                       <label className="flex justify-between text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">
-                          <span>Número do Documento</span>
-                          {formData.document_type === 'cnpj' && (
-                            <span className="text-[#00a884] cursor-pointer hover:underline flex items-center gap-1" onClick={handleCnpjSearch}>
-                              {isSearchingDoc ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />} Autocompletar
-                            </span>
-                          )}
-                       </label>
-                       <div className="relative">
-                          <FileText size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                          <input 
-                            type="text" 
-                            value={formData.document_number}
-                            onChange={e => {
-                              setFormData({...formData, document_number: formatDocumentNumber(e.target.value, formData.document_type)});
-                              setDocFeedback(null);
-                            }}
-                            placeholder={formData.document_type === 'cpf' ? '000.000.000-00' : '00.000.000/0000-00'}
-                            className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                          />
-                       </div>
-                       {docFeedback && (
-                         <div className="text-red-500 text-xs mt-1.5 flex items-center gap-1.5 animate-in fade-in duration-200">
-                           <AlertCircle size={14} className="shrink-0" />
-                           <span>{docFeedback}</span>
-                         </div>
-                       )}
-                     </div>
-                   )}
-                </div>
+                             placeholder={formData.document_type === 'cpf' ? '000.000.000-00' : '00.000.000/0000-00'}
+                             className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                           />
+                        </div>
+                        {docFeedback && (
+                          <div className="text-red-500 text-xs mt-1.5 flex items-center gap-1.5 animate-in fade-in duration-200">
+                            <AlertCircle size={14} className="shrink-0" />
+                            <span>{docFeedback}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+               </div>
 
                <div className="flex flex-col sm:flex-row gap-4">
                   <div className="w-full sm:w-1/2">
                      <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Celular (ID)</label>
                      <div className="relative">
-                       <Phone size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                       <input 
-                         type="text" 
-                         value={formData.phone}
-                         onChange={e => setFormData({...formData, phone: e.target.value})}
-                         className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
-                         placeholder="5511999999999"
-                       />
+                        <Phone size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <span className="absolute left-9 top-1/2 -translate-y-1/2 text-gray-400 dark:text-[#8696a0] font-mono text-sm border-r border-gray-200 dark:border-white/10 pr-2">
+                          +55
+                        </span>
+                        <input 
+                          type="text" 
+                          value={formData.phone}
+                          onChange={e => {
+                            let val = e.target.value.replace(/\D/g, '');
+                            if (val.startsWith('55') && val.length > 10) {
+                              val = val.substring(2);
+                            }
+                            setFormData({...formData, phone: val});
+                          }}
+                          className="w-full pl-20 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
+                          placeholder="11999999999"
+                        />
                      </div>
                   </div>
                   <div className="w-full sm:w-1/2">
@@ -630,97 +555,623 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                  </div>
                </div>
 
-               <div>
-                 <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Nome Fantasia</label>
-                 <div className="relative">
-                   <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                   <input 
-                     type="text" 
-                     value={formData.fantasy_name}
-                     onChange={e => setFormData({...formData, fantasy_name: e.target.value})}
-                     className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                   />
-                 </div>
-               </div>
+                {formData.document_type === 'cnpj' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Nome Fantasia</label>
+                    <div className="relative">
+                      <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input 
+                        type="text" 
+                        value={formData.fantasy_name}
+                        onChange={e => setFormData({...formData, fantasy_name: e.target.value})}
+                        className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                      />
+                    </div>
+                  </div>
+                )}
 
                <div>
-                 <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">E-mail</label>
-                 <div className="relative">
-                   <Mail size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                   <input 
-                     type="email" 
-                     value={formData.email}
-                     onChange={e => setFormData({...formData, email: e.target.value})}
-                     className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                     placeholder="email@empresa.com.br"
-                   />
-                 </div>
-               </div>
-            </div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">E-mail</label>
+                  <div className="relative">
+                    <Mail size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input 
+                      type="email" 
+                      value={formData.email}
+                      onChange={e => setFormData({...formData, email: e.target.value})}
+                      className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                      placeholder="email@empresa.com.br"
+                    />
+                  </div>
+                </div>
+
+               <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">ID GastroFood</label>
+                  <div className="relative">
+                    <Building2 size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input 
+                      type="text" 
+                      value={formData.id_gastro_food || ''}
+                      onChange={e => setFormData({...formData, id_gastro_food: e.target.value})}
+                      className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
+                      placeholder="9EA3F679-5565-4DA0-930F-0971A8B8A3CD"
+                    />
+                  </div>
+                </div>
+
+                {formData.document_type === 'contato' && (
+                  <div className="border-t border-gray-100 dark:border-white/5 pt-4 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsLinksSectionOpen(!isLinksSectionOpen);
+                        setIsCompanySearchOpen(false);
+                        setIsGroupSearchOpen(false);
+                      }}
+                      className="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-[#8696a0] hover:text-[#00a884] transition-colors focus:outline-none"
+                    >
+                      <ChevronDown size={16} className={cn("transition-transform duration-200", isLinksSectionOpen && "rotate-180")} />
+                      <span>Empresas & Grupos (Opcional)</span>
+                      {((formData.company_ids?.length || 0) + (formData.tags?.length || 0)) > 0 && (
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-[#00a884]/10 text-[#00a884] text-[10px] font-bold">
+                          {(formData.company_ids?.length || 0) + (formData.tags?.length || 0)}
+                        </span>
+                      )}
+                    </button>
+                    
+                    {isLinksSectionOpen && (
+                      <div className="flex flex-col sm:flex-row gap-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                        {/* Empresas Vinculadas */}
+                        <div className="w-full sm:w-1/2 flex flex-col relative">
+                          <label className="flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-[#8696a0] mb-1">
+                            <span className="flex items-center gap-1.5">
+                              <Building2 size={14} className="text-[#00a884]" />
+                              Empresas
+                              {formData.company_ids && formData.company_ids.length > 0 && (
+                                <span className="px-1.5 py-0.5 rounded-full bg-[#00a884]/10 text-[#00a884] text-[10px] font-bold">
+                                  {formData.company_ids.length}
+                                </span>
+                              )}
+                            </span>
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setIsCompanySearchOpen(!isCompanySearchOpen);
+                                setIsGroupSearchOpen(false);
+                              }}
+                              className={cn(
+                                "px-2 py-0.5 rounded-md border text-[10px] font-bold flex items-center gap-1 transition-all active:scale-95",
+                                isCompanySearchOpen 
+                                  ? "bg-[#00a884]/10 border-[#00a884]/20 text-[#00a884] shadow-sm"
+                                  : "bg-[#f0f2f5] dark:bg-[#111b21] border-transparent text-gray-500 hover:text-[#00a884]"
+                              )}
+                              title="Buscar e vincular empresas"
+                            >
+                              <Search size={10} />
+                              {isCompanySearchOpen ? 'Fechar' : 'Buscar'}
+                            </button>
+                          </label>
+
+                          {/* Badges de empresas ativas resumidas quando fechado */}
+                          {!isCompanySearchOpen && formData.company_ids && formData.company_ids.length > 0 && (
+                            <div className="flex flex-wrap gap-1 p-1.5 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[38px] items-center">
+                              {formData.company_ids.map(cId => {
+                                const comp = companies.find(c => c.id === cId);
+                                if (!comp) return null;
+                                return (
+                                  <span 
+                                    key={`badge-${cId}`} 
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 text-[10px] font-bold text-[#111b21] dark:text-[#e9edef] uppercase tracking-wider shadow-sm"
+                                  >
+                                    {comp.name?.toUpperCase() || comp.fantasy_name?.toUpperCase()}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {!isCompanySearchOpen && (!formData.company_ids || formData.company_ids.length === 0) && (
+                            <div className="flex items-center px-3 py-2 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[38px] text-[11px] text-gray-400">
+                              Nenhuma vinculada
+                            </div>
+                          )}
+
+                          {/* Lista colapsável de busca de empresas */}
+                          {isCompanySearchOpen && (
+                            <div className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-2xl p-2.5 flex flex-col gap-2.5 shadow-lg absolute top-[44px] left-0 right-0 z-30 animate-in fade-in slide-in-from-top-2 duration-200">
+                              <div className="relative">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input 
+                                  type="text"
+                                  value={companySearchQuery}
+                                  onChange={e => setCompanySearchQuery(e.target.value)}
+                                  placeholder="Filtrar empresas..."
+                                  className="w-full pl-9 pr-8 py-2 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-xs text-[#111b21] dark:text-[#e9edef] transition-all"
+                                  autoFocus
+                                />
+                                {companySearchQuery && (
+                                  <button 
+                                    type="button" 
+                                    onClick={() => setCompanySearchQuery('')}
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-0.5 rounded"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="w-full max-h-[140px] overflow-y-auto bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl p-1.5 styled-scrollbar flex flex-col gap-0.5">
+                                {(() => {
+                                  const sortedCompanies = [...companies].sort((a, b) => {
+                                    const nameA = (a.fantasy_name || a.name || '').toUpperCase();
+                                    const nameB = (b.fantasy_name || b.name || '').toUpperCase();
+                                    return nameA.localeCompare(nameB);
+                                  });
+
+                                  const filteredCompanies = sortedCompanies.filter(c => {
+                                    const term = companySearchQuery.toLowerCase();
+                                    const fantasy = (c.fantasy_name || '').toLowerCase();
+                                    const name = (c.name || '').toLowerCase();
+                                    return fantasy.includes(term) || name.includes(term);
+                                  });
+
+                                  if (filteredCompanies.length === 0) {
+                                    return <div className="text-xs text-gray-500 text-center py-4">Nenhuma empresa encontrada</div>;
+                                  }
+
+                                  return filteredCompanies.map(c => {
+                                    const name = (c.name || '').toUpperCase();
+                                    const fantasy = c.fantasy_name && c.fantasy_name.toLowerCase() !== c.name?.toLowerCase() 
+                                      ? c.fantasy_name.toUpperCase() 
+                                      : '';
+                                    const isChecked = formData.company_ids?.includes(c.id) || false;
+                                    
+                                    return (
+                                      <label key={c.id} className="flex items-center gap-2.5 p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
+                                        <div className="relative flex items-center justify-center">
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={(e) => {
+                                              const currentIds = formData.company_ids || [];
+                                              if (e.target.checked) {
+                                                setFormData({...formData, company_ids: [...currentIds, c.id]});
+                                              } else {
+                                                setFormData({...formData, company_ids: currentIds.filter(id => id !== c.id)});
+                                              }
+                                            }}
+                                            className="peer w-4 h-4 cursor-pointer appearance-none border border-gray-400 dark:border-gray-600 rounded bg-transparent checked:bg-[#00a884] checked:border-[#00a884] transition-all"
+                                          />
+                                          <svg className="absolute w-3 h-3 text-white pointer-events-none opacity-0 peer-checked:opacity-100 scale-50 peer-checked:scale-100 transition-all" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                        </div>
+                                        <span className="text-xs text-[#111b21] dark:text-[#e9edef] truncate group-hover:text-[#00a884] transition-colors font-bold tracking-wide flex items-center gap-2">
+                                          <span>{name}</span>
+                                          {fantasy && (
+                                            <span className="text-[10px] text-gray-500 dark:text-[#8696a0] font-normal normal-case px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
+                                              {fantasy}
+                                            </span>
+                                          )}
+                                        </span>
+                                      </label>
+                                    );
+                                  });
+                                })()}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Grupo de Empresas */}
+                        <div className="w-full sm:w-1/2 flex flex-col relative">
+                          <label className="flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-[#8696a0] mb-1">
+                            <span className="flex items-center gap-1.5">
+                              <Building size={14} className="text-[#00a884]" />
+                              Grupos
+                              {formData.tags && formData.tags.length > 0 && (
+                                <span className="px-1.5 py-0.5 rounded-full bg-[#00a884]/10 text-[#00a884] text-[10px] font-bold">
+                                  {formData.tags.length}
+                                </span>
+                              )}
+                            </span>
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setIsGroupSearchOpen(!isGroupSearchOpen);
+                                setIsCompanySearchOpen(false);
+                              }}
+                              className={cn(
+                                "px-2 py-0.5 rounded-md border text-[10px] font-bold flex items-center gap-1 transition-all active:scale-95",
+                                isGroupSearchOpen 
+                                  ? "bg-[#00a884]/10 border-[#00a884]/20 text-[#00a884] shadow-sm"
+                                  : "bg-[#f0f2f5] dark:bg-[#111b21] border-transparent text-gray-500 hover:text-[#00a884]"
+                              )}
+                              title="Selecionar grupos empresariais"
+                            >
+                              <Search size={10} />
+                              {isGroupSearchOpen ? 'Fechar' : 'Buscar'}
+                            </button>
+                          </label>
+
+                          {/* Badges de grupos ativos resumidos quando fechado */}
+                          {!isGroupSearchOpen && formData.tags && formData.tags.length > 0 && (
+                            <div className="flex flex-wrap gap-1 p-1 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[38px] items-center">
+                              {formData.tags.map(tagId => {
+                                const grp = contactGroups.find(g => g.id === tagId);
+                                if (!grp) return null;
+                                return (
+                                  <span 
+                                    key={`badge-group-${tagId}`} 
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold border bg-opacity-10 dark:bg-opacity-10 backdrop-blur-sm shadow-sm"
+                                    style={{ 
+                                       backgroundColor: `${grp.color}15`, 
+                                       borderColor: `${grp.color}30`,
+                                       color: grp.color 
+                                    }}
+                                  >
+                                    <span 
+                                      className="w-1.5 h-1.5 rounded-full shrink-0" 
+                                      style={{ backgroundColor: grp.color || '#00a884' }}
+                                    />
+                                    {grp.name}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {!isGroupSearchOpen && (!formData.tags || formData.tags.length === 0) && (
+                            <div className="flex items-center px-3 py-2 bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl border border-transparent min-h-[38px] text-[11px] text-gray-400">
+                              Nenhum grupo
+                            </div>
+                          )}
+
+                          {/* Lista colapsável de busca do grupo */}
+                          {isGroupSearchOpen && (
+                            <div className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-2xl p-2.5 flex flex-col gap-2.5 shadow-lg absolute top-[44px] left-0 right-0 z-30 animate-in fade-in slide-in-from-top-2 duration-200">
+                              <div className="relative">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input 
+                                  type="text"
+                                  value={groupSearchQuery}
+                                  onChange={e => setGroupSearchQuery(e.target.value)}
+                                  placeholder="Filtrar grupos..."
+                                  className="w-full pl-9 pr-8 py-2 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 rounded-xl outline-none text-xs text-[#111b21] dark:text-[#e9edef] transition-all"
+                                  autoFocus
+                                />
+                                {groupSearchQuery && (
+                                  <button 
+                                    type="button" 
+                                    onClick={() => setGroupSearchQuery('')}
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 p-0.5 rounded"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="w-full max-h-[140px] overflow-y-auto bg-[#f0f2f5] dark:bg-[#111b21] rounded-xl p-1.5 styled-scrollbar flex flex-col gap-0.5">
+                                {(() => {
+                                  const filteredGroups = contactGroups.filter(g => 
+                                    g.name.toLowerCase().includes(groupSearchQuery.toLowerCase())
+                                  );
+
+                                  if (filteredGroups.length === 0) {
+                                    return <div className="text-xs text-gray-500 text-center py-4">Nenhum grupo encontrado</div>;
+                                  }
+
+                                  return filteredGroups.map(g => {
+                                    const isChecked = formData.tags?.includes(g.id) || false;
+                                    
+                                    return (
+                                      <label key={g.id} className="flex items-center gap-2.5 p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
+                                        <div className="relative flex items-center justify-center">
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={(e) => {
+                                              const currentTags = formData.tags || [];
+                                              if (e.target.checked) {
+                                                setFormData({...formData, tags: [...currentTags, g.id]});
+                                              } else {
+                                                setFormData({...formData, tags: currentTags.filter(id => id !== g.id)});
+                                              }
+                                            }}
+                                            className="peer w-4 h-4 cursor-pointer appearance-none border border-gray-400 dark:border-gray-600 rounded bg-transparent checked:bg-[#00a884] checked:border-[#00a884] transition-all"
+                                          />
+                                          <svg className="absolute w-3 h-3 text-white pointer-events-none opacity-0 peer-checked:opacity-100 scale-50 peer-checked:scale-100 transition-all" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                        </div>
+                                        <span className="text-xs text-[#111b21] dark:text-[#e9edef] truncate group-hover:text-[#00a884] transition-colors font-bold tracking-wide flex items-center gap-2">
+                                          <span 
+                                            className="w-2.5 h-2.5 rounded-full shrink-0" 
+                                            style={{ backgroundColor: g.color || '#00a884' }}
+                                          />
+                                          <span>{g.name}</span>
+                                        </span>
+                                      </label>
+                                    );
+                                  });
+                                })()}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+             </div>
 
             {/* Seção Endereço */}
-            <div className="bg-white dark:bg-[#202c33] p-5 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm space-y-4">
-               <h3 className="text-sm font-semibold text-[#00a884] uppercase tracking-wider mb-2 flex items-center justify-between">
-                 Endereço
-                 <span className="text-xs text-gray-400 font-normal normal-case flex items-center gap-1 cursor-pointer hover:text-[#00a884]" onClick={handleCepSearch}>
-                    {isSearchingCep && <Loader2 size={12} className="animate-spin" />} Buscar CEP
-                 </span>
-               </h3>
-               
-               <div className="flex flex-col sm:flex-row gap-4">
-                  <div className="w-full sm:w-1/3">
-                    <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">CEP</label>
-                    <input 
-                      type="text" 
-                      value={formData.cep}
-                      onBlur={handleCepSearch}
-                      onChange={e => setFormData({...formData, cep: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                      placeholder="00000-000"
-                    />
-                  </div>
-                  <div className="w-full sm:w-2/3">
-                    <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Rua / Logradouro</label>
-                    <input 
-                      type="text" 
-                      value={formData.address_street}
-                      onChange={e => setFormData({...formData, address_street: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                    />
-                  </div>
-               </div>
+             <div className="bg-white dark:bg-[#202c33] p-5 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/5 pb-2">
+                   <h3 className="text-sm font-semibold text-[#00a884] uppercase tracking-wider flex items-center gap-1.5">
+                     <MapPin size={16} /> Endereço
+                   </h3>
+                   <span className="text-xs text-gray-400 font-normal normal-case flex items-center gap-1 cursor-pointer hover:text-[#00a884]" onClick={handleCepSearch}>
+                      {isSearchingCep && <Loader2 size={12} className="animate-spin" />} Buscar CEP
+                   </span>
+                </div>
 
-               <div className="flex flex-col sm:flex-row gap-4">
-                  <div className="w-full sm:w-1/2">
-                     <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Bairro</label>
-                     <input 
-                       type="text" 
-                       value={formData.address_neighborhood}
-                       onChange={e => setFormData({...formData, address_neighborhood: e.target.value})}
-                       className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                     />
-                  </div>
-                  <div className="w-full sm:w-1/2">
-                     <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Cidade / UF</label>
-                     <div className="flex gap-2">
-                       <input 
-                         type="text" 
-                         value={formData.address_city}
-                         onChange={e => setFormData({...formData, address_city: e.target.value})}
-                         className="w-2/3 px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                       />
-                       <input 
-                         type="text" 
-                         value={formData.address_state}
-                         onChange={e => setFormData({...formData, address_state: e.target.value})}
-                         placeholder="UF"
-                         className="w-1/3 px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all text-center uppercase"
-                         maxLength={2}
-                       />
-                     </div>
-                  </div>
-               </div>
-            </div>
+                {/* Tabs de Múltiplos Endereços */}
+                <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 dark:border-white/5 pb-2">
+                  {formData.addresses.map((addr, idx) => (
+                    <div
+                      key={`addr-tab-${idx}`}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all border",
+                        activeAddressIndex === idx
+                          ? "bg-[#00a884]/10 border-[#00a884]/20 text-[#00a884] shadow-sm"
+                          : "bg-[#f0f2f5] dark:bg-[#111b21] border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                      )}
+                      onClick={() => setActiveAddressIndex(idx)}
+                    >
+                      <span>{idx === 0 ? "Principal" : `Endereço ${idx + 1}`}</span>
+                      {idx > 0 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const updated = formData.addresses.filter((_, i) => i !== idx);
+                            setFormData({ ...formData, addresses: updated });
+                            if (activeAddressIndex >= updated.length) {
+                              setActiveAddressIndex(updated.length - 1);
+                            }
+                          }}
+                          className="hover:text-red-500 p-0.5 rounded transition-colors"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  
+                  {formData.addresses.length < 5 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newAddress = {
+                          cep: '',
+                          street: '',
+                          number: '',
+                          neighborhood: '',
+                          city: '',
+                          state: '',
+                          latitude: '',
+                          longitude: '',
+                          apartment: '',
+                          block: '',
+                          reference: '',
+                          Distancia: '',
+                          Tempo: ''
+                        };
+                        setFormData({
+                          ...formData,
+                          addresses: [...formData.addresses, newAddress]
+                        });
+                        setActiveAddressIndex(formData.addresses.length);
+                      }}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-dashed border-gray-300 dark:border-gray-700 text-gray-500 hover:border-[#00a884] hover:text-[#00a884] transition-all active:scale-95"
+                    >
+                      <Plus size={12} /> Add Endereço
+                    </button>
+                  )}
+                </div>
+
+                {/* Form fields for the active address tab */}
+                {(() => {
+                  const currentAddress = formData.addresses[activeAddressIndex] || {
+                    cep: '',
+                    street: '',
+                    number: '',
+                    neighborhood: '',
+                    city: '',
+                    state: '',
+                    latitude: '',
+                    longitude: '',
+                    apartment: '',
+                    block: '',
+                    reference: ''
+                  };
+
+                  const updateActiveAddressField = (field: string, value: string) => {
+                    const updated = [...formData.addresses];
+                    updated[activeAddressIndex] = {
+                      ...updated[activeAddressIndex],
+                      [field]: value
+                    };
+                    
+                    const syncFields = activeAddressIndex === 0 ? {
+                      cep: field === 'cep' ? value : formData.cep,
+                      address_street: field === 'street' ? value : formData.address_street,
+                      address_number: field === 'number' ? value : formData.address_number,
+                      address_neighborhood: field === 'neighborhood' ? value : formData.address_neighborhood,
+                      address_city: field === 'city' ? value : formData.address_city,
+                      address_state: field === 'state' ? value : formData.address_state,
+                      latitude: field === 'latitude' ? value : formData.latitude,
+                      longitude: field === 'longitude' ? value : formData.longitude,
+                      ap: field === 'apartment' ? value : (formData as any).ap || '',
+                      block: field === 'block' ? value : (formData as any).block || '',
+                      reference: field === 'reference' ? value : (formData as any).reference || ''
+                    } : {};
+
+                    setFormData({
+                      ...formData,
+                      ...syncFields,
+                      addresses: updated
+                    });
+                  };
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        <div className="w-full sm:w-1/3">
+                          <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">CEP</label>
+                          <input 
+                            type="text" 
+                            value={currentAddress.cep || ''}
+                            onBlur={handleCepSearch}
+                            onChange={e => updateActiveAddressField('cep', e.target.value)}
+                            className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                            placeholder="00000-000"
+                          />
+                        </div>
+                        <div className="w-full sm:w-2/3 flex gap-4">
+                          <div className="w-2/3">
+                            <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Rua / Logradouro</label>
+                            <input 
+                              type="text" 
+                              value={currentAddress.street || ''}
+                              onChange={e => updateActiveAddressField('street', e.target.value)}
+                              className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                            />
+                          </div>
+                          <div className="w-1/3">
+                            <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Número</label>
+                            <input 
+                              type="text" 
+                              id={`address-number-input-${activeAddressIndex}`}
+                              value={currentAddress.number || ''}
+                              onChange={e => updateActiveAddressField('number', e.target.value)}
+                              placeholder="Nº"
+                              className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        <div className="w-full sm:w-1/2">
+                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Bairro</label>
+                           <input 
+                             type="text" 
+                             value={currentAddress.neighborhood || ''}
+                             onChange={e => updateActiveAddressField('neighborhood', e.target.value)}
+                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                           />
+                        </div>
+                        <div className="w-full sm:w-1/2">
+                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Cidade / UF</label>
+                           <div className="flex gap-2">
+                             <input 
+                               type="text" 
+                               value={currentAddress.city || ''}
+                               onChange={e => updateActiveAddressField('city', e.target.value)}
+                               className="w-2/3 px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                             />
+                             <input 
+                               type="text" 
+                               value={currentAddress.state || ''}
+                               onChange={e => updateActiveAddressField('state', e.target.value)}
+                               placeholder="UF"
+                               className="w-1/3 px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all text-center uppercase"
+                               maxLength={2}
+                             />
+                           </div>
+                        </div>
+                      </div>
+
+                      {/* Novos campos: Ap, Bloco e Referência */}
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        <div className="w-full sm:w-1/4">
+                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Ap / Apto</label>
+                           <input 
+                             type="text" 
+                             value={currentAddress.apartment || ''}
+                             onChange={e => updateActiveAddressField('apartment', e.target.value)}
+                             placeholder="Ex: Apto 12"
+                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                           />
+                        </div>
+                        <div className="w-full sm:w-1/4">
+                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Bloco</label>
+                           <input 
+                             type="text" 
+                             value={currentAddress.block || ''}
+                             onChange={e => updateActiveAddressField('block', e.target.value)}
+                             placeholder="Ex: Bloco B"
+                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                           />
+                        </div>
+                        <div className="w-full sm:w-2/4">
+                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Ponto de Referência</label>
+                           <input 
+                             type="text" 
+                             value={currentAddress.reference || ''}
+                             onChange={e => updateActiveAddressField('reference', e.target.value)}
+                             placeholder="Ex: Próximo ao mercado"
+                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                           />
+                        </div>
+                      </div>
+
+                      {/* Latitude & Longitude */}
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        <div className="w-full sm:w-1/2">
+                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Latitude</label>
+                           <input 
+                             type="text" 
+                             value={currentAddress.latitude || ''}
+                             onChange={e => updateActiveAddressField('latitude', e.target.value)}
+                             placeholder="-23.550520"
+                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
+                           />
+                        </div>
+                        <div className="w-full sm:w-1/2">
+                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Longitude</label>
+                           <input 
+                             type="text" 
+                             value={currentAddress.longitude || ''}
+                             onChange={e => updateActiveAddressField('longitude', e.target.value)}
+                             placeholder="-46.633308"
+                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
+                           />
+                        </div>
+                      </div>
+
+                      {/* Distância & Tempo (GastroFood) */}
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        <div className="w-full sm:w-1/2">
+                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Distância (km)</label>
+                           <input 
+                             type="text" 
+                             value={currentAddress.Distancia || ''}
+                             onChange={e => updateActiveAddressField('Distancia', e.target.value)}
+                             placeholder="Ex: 2,5"
+                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                           />
+                        </div>
+                        <div className="w-full sm:w-1/2">
+                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Tempo de Entrega</label>
+                           <input 
+                             type="text" 
+                             value={currentAddress.Tempo || ''}
+                             onChange={e => updateActiveAddressField('Tempo', e.target.value)}
+                             placeholder="Ex: 10 mins"
+                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
+                           />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+             </div>
 
             {/* Notas Rápidas */}
             <div className="bg-white dark:bg-[#202c33] p-5 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm">
@@ -1943,6 +2394,14 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
         .eq('id', realContactId);
 
       if (error) throw error;
+
+      await useChatStore.getState().logOperation(
+        'UPDATE',
+        'contacts',
+        realContactId,
+        { document_number: contact.document_number },
+        { document_number: cleanDoc }
+      );
 
       // Update locally in useChatStore (contacts list)
       const currentContacts = useChatStore.getState().contacts;

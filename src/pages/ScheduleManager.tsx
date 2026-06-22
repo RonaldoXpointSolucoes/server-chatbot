@@ -17,7 +17,9 @@ import {
   Check, 
   ArrowRight,
   Sparkles,
-  CheckSquare
+  CheckSquare,
+  ArrowLeft,
+  SlidersHorizontal
 } from 'lucide-react';
 import { format, isToday, isTomorrow, isPast, addMonths, subMonths, startOfWeek, addDays, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -43,6 +45,7 @@ export function ScheduleManager() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'month' | 'week' | 'day'>('month');
   const [filterType, setFilterType] = useState<'all' | 'appointments' | 'snoozed'>('all');
+  const [showSidebar, setShowSidebar] = useState(false);
 
   // Estados para Modal de Criação / Edição
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -414,12 +417,26 @@ export function ScheduleManager() {
     <div className="flex-1 flex bg-[#f0f2f5] dark:bg-[#111b21] h-screen overflow-hidden min-w-0 font-sans">
       
       {/* 1. PAINEL LATERAL ESQUERDO: Mini Calendário e Ações */}
-      <div className="w-72 bg-white dark:bg-[#202c33] border-r border-black/5 dark:border-white/5 flex flex-col shrink-0 overflow-y-auto scrollbar-thin">
+      {showSidebar && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden"
+          onClick={() => setShowSidebar(false)}
+        />
+      )}
+
+      <div className={`w-72 bg-white dark:bg-[#202c33] border-r border-black/5 dark:border-white/5 flex flex-col shrink-0 overflow-y-auto scrollbar-thin
+        fixed inset-y-0 left-0 z-40 transform transition-transform duration-300
+        lg:static lg:translate-x-0
+        ${showSidebar ? 'translate-x-0' : '-translate-x-full'}
+      `}>
         
         {/* Criar Evento */}
         <div className="p-4 border-b border-black/5 dark:border-white/5">
           <button
-            onClick={() => openCreateModal()}
+            onClick={() => {
+              openCreateModal();
+              setShowSidebar(false);
+            }}
             className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl flex items-center justify-center gap-2 text-sm font-bold shadow-lg shadow-indigo-600/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
           >
             <Plus size={18} />
@@ -467,6 +484,7 @@ export function ScheduleManager() {
                   onClick={() => {
                     setSelectedDate(day);
                     setCurrentDate(day);
+                    setShowSidebar(false);
                   }}
                   className={`
                     h-8 w-8 mx-auto rounded-full text-xs font-semibold transition-all flex items-center justify-center
@@ -490,7 +508,10 @@ export function ScheduleManager() {
           </span>
           <div className="flex flex-col gap-1.5">
             <button
-              onClick={() => setFilterType('all')}
+              onClick={() => {
+                setFilterType('all');
+                setShowSidebar(false);
+              }}
               className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition-colors ${filterType === 'all' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border border-indigo-500/10' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[#202c33]'}`}
             >
               <span>Todos os Eventos</span>
@@ -499,7 +520,10 @@ export function ScheduleManager() {
               </span>
             </button>
             <button
-              onClick={() => setFilterType('appointments')}
+              onClick={() => {
+                setFilterType('appointments');
+                setShowSidebar(false);
+              }}
               className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition-colors ${filterType === 'appointments' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border border-indigo-500/10' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[#202c33]'}`}
             >
               <span>Compromissos CRM</span>
@@ -508,7 +532,10 @@ export function ScheduleManager() {
               </span>
             </button>
             <button
-              onClick={() => setFilterType('snoozed')}
+              onClick={() => {
+                setFilterType('snoozed');
+                setShowSidebar(false);
+              }}
               className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition-colors ${filterType === 'snoozed' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border border-indigo-500/10' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[#202c33]'}`}
             >
               <span>Retornos de Contatos</span>
@@ -536,6 +563,7 @@ export function ScheduleManager() {
                     onClick={() => {
                       setSelectedEvent(evt);
                       setIsDetailModalOpen(true);
+                      setShowSidebar(false);
                     }}
                     className={`p-3 rounded-2xl border text-left cursor-pointer transition-all hover:scale-[1.02] flex flex-col gap-1.5 ${
                       evt.status === 'completed'
@@ -573,48 +601,69 @@ export function ScheduleManager() {
       <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
         
         {/* Cabeçalho da Agenda */}
-        <div className="h-16 px-6 flex items-center justify-between bg-white dark:bg-[#202c33] border-b border-black/5 dark:border-white/5 shrink-0 shadow-sm z-10 select-none">
-          <div className="flex items-center gap-6">
+        <div className="h-auto md:h-16 py-3 md:py-0 px-3 md:px-6 flex flex-col md:flex-row items-center justify-between bg-white dark:bg-[#202c33] border-b border-black/5 dark:border-white/5 shrink-0 shadow-sm z-10 select-none gap-3 md:gap-0">
+          <div className="flex flex-wrap items-center gap-2 md:gap-4 lg:gap-6 w-full md:w-auto justify-between md:justify-start">
+            
             <div className="flex items-center gap-2">
-              <CalendarDays className="text-indigo-600 dark:text-indigo-400" size={20} />
-              <h1 className="text-base font-extrabold text-gray-800 dark:text-gray-100 uppercase tracking-wider">
-                Agenda Interna
-              </h1>
+              {/* Botão Voltar */}
+              <button
+                onClick={() => navigate(-1)}
+                className="p-1.5 hover:bg-gray-150 dark:hover:bg-gray-800 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                title="Voltar"
+              >
+                <ArrowLeft size={20} />
+              </button>
+
+              {/* Botão Menu Lateral (Mobile) */}
+              <button
+                onClick={() => setShowSidebar(!showSidebar)}
+                className="lg:hidden p-1.5 hover:bg-gray-150 dark:hover:bg-gray-800 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                title="Filtros e Calendário"
+              >
+                <SlidersHorizontal size={20} />
+              </button>
+
+              <div className="flex items-center gap-2">
+                <CalendarDays className="text-indigo-600 dark:text-indigo-400 hidden sm:block" size={20} />
+                <h1 className="text-sm md:text-base font-extrabold text-gray-800 dark:text-gray-100 uppercase tracking-wider hidden sm:block">
+                  Agenda Interna
+                </h1>
+              </div>
             </div>
 
             {/* Controles de Navegação */}
-            <div className="flex items-center gap-2 bg-gray-100 dark:bg-[#111b21] p-1.5 rounded-xl border border-black/5 dark:border-white/5">
+            <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-[#111b21] p-1 rounded-xl border border-black/5 dark:border-white/5">
               <button
                 onClick={() => handleNavigate('prev')}
-                className="p-1 hover:bg-white dark:hover:bg-gray-800 rounded-lg text-gray-600 dark:text-gray-300 transition-all active:scale-95"
+                className="p-1 hover:bg-white dark:hover:bg-gray-800 rounded-lg text-gray-655 dark:text-gray-300 transition-all active:scale-95"
               >
                 <ChevronLeft size={16} />
               </button>
               <button
                 onClick={() => handleNavigate('today')}
-                className="px-3 py-1 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-xs font-bold text-gray-700 dark:text-gray-200 rounded-lg shadow-sm transition-all active:scale-95"
+                className="px-2.5 py-0.5 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-[10px] md:text-xs font-bold text-gray-700 dark:text-gray-200 rounded-lg shadow-sm transition-all active:scale-95"
               >
                 Hoje
               </button>
               <button
                 onClick={() => handleNavigate('next')}
-                className="p-1 hover:bg-white dark:hover:bg-gray-800 rounded-lg text-gray-600 dark:text-gray-300 transition-all active:scale-95"
+                className="p-1 hover:bg-white dark:hover:bg-gray-800 rounded-lg text-gray-655 dark:text-gray-300 transition-all active:scale-95"
               >
                 <ChevronRight size={16} />
               </button>
             </div>
 
             {/* Título de Data Ativa */}
-            <span className="text-base font-extrabold text-gray-800 dark:text-gray-100 capitalize">
+            <span className="text-xs md:text-sm lg:text-base font-extrabold text-gray-800 dark:text-gray-100 capitalize w-full min-[400px]:w-auto text-center min-[400px]:text-left">
               {format(currentDate, viewMode === 'day' ? "dd 'de' MMMM, yyyy" : 'MMMM yyyy', { locale: ptBR })}
             </span>
           </div>
 
           {/* Seletor de Modos de Visualização (Mês, Semana, Dia) */}
-          <div className="flex items-center bg-gray-100 dark:bg-[#111b21] p-1.5 rounded-xl border border-black/5 dark:border-white/5">
+          <div className="flex items-center bg-gray-100 dark:bg-[#111b21] p-1 rounded-xl border border-black/5 dark:border-white/5 select-none self-end md:self-auto">
             <button
               onClick={() => setViewMode('month')}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+              className={`px-2.5 py-0.5 rounded-lg text-[10px] md:text-xs font-bold transition-all ${
                 viewMode === 'month' 
                   ? 'bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 shadow-sm scale-105' 
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
@@ -624,7 +673,7 @@ export function ScheduleManager() {
             </button>
             <button
               onClick={() => setViewMode('week')}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+              className={`px-2.5 py-0.5 rounded-lg text-[10px] md:text-xs font-bold transition-all ${
                 viewMode === 'week' 
                   ? 'bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 shadow-sm scale-105' 
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
@@ -634,7 +683,7 @@ export function ScheduleManager() {
             </button>
             <button
               onClick={() => setViewMode('day')}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+              className={`px-2.5 py-0.5 rounded-lg text-[10px] md:text-xs font-bold transition-all ${
                 viewMode === 'day' 
                   ? 'bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 shadow-sm scale-105' 
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
@@ -646,15 +695,16 @@ export function ScheduleManager() {
         </div>
 
         {/* Corpo Principal da Grade */}
-        <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-[#111b21]">
+        <div className="flex-1 overflow-auto bg-gray-50 dark:bg-[#111b21]">
           
           {/* A) MODO MÊS */}
           {viewMode === 'month' && (
-            <div className="grid grid-cols-7 grid-rows-6 h-full border-t border-l border-black/5 dark:border-white/5">
+            <div className="grid grid-cols-7 grid-rows-6 h-full border-t border-l border-black/5 dark:border-white/5 min-w-[650px]">
               {/* Nomes dos Dias da Semana */}
               {['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'].map((dayName, idx) => (
                 <div key={idx} className="bg-white dark:bg-[#202c33] py-2 border-b border-r border-black/5 dark:border-white/5 text-center text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500 shrink-0">
-                  {dayName}
+                  <span className="hidden sm:inline">{dayName}</span>
+                  <span className="sm:hidden">{dayName.substring(0, 3)}</span>
                 </div>
               ))}
 
@@ -672,7 +722,7 @@ export function ScheduleManager() {
                       setSelectedDate(day);
                     }}
                     className={`
-                      min-h-[100px] p-2 bg-white dark:bg-[#202c33] border-b border-r border-black/5 dark:border-white/5 transition-all flex flex-col gap-1.5 relative group cursor-pointer
+                      min-h-[85px] sm:min-h-[100px] p-1.5 sm:p-2 bg-white dark:bg-[#202c33] border-b border-r border-black/5 dark:border-white/5 transition-all flex flex-col gap-1 sm:gap-1.5 relative group cursor-pointer
                       ${isCurrentMonth ? '' : 'bg-gray-50/40 dark:bg-gray-800/10 opacity-55'}
                       ${isSameDay(day, selectedDate) ? 'ring-2 ring-indigo-500/20 bg-indigo-500/5 dark:bg-indigo-500/5' : ''}
                     `}
@@ -699,7 +749,7 @@ export function ScheduleManager() {
                     </div>
 
                     {/* Lista de Eventos no Quadrado */}
-                    <div className="flex-1 flex flex-col gap-1.5 overflow-hidden">
+                    <div className="flex-1 flex flex-col gap-1 sm:gap-1.5 overflow-hidden">
                       {dayEvts.slice(0, 3).map(evt => (
                         <div
                           key={evt.id}
@@ -709,7 +759,7 @@ export function ScheduleManager() {
                             setIsDetailModalOpen(true);
                           }}
                           className={`
-                            px-2 py-1 rounded-lg text-[10px] font-bold truncate transition-all hover:scale-[1.02] border text-left
+                            px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg text-[9px] sm:text-[10px] font-bold truncate transition-all hover:scale-[1.02] border text-left
                             ${evt.status === 'completed'
                               ? 'bg-gray-100/60 text-gray-400 dark:bg-gray-800/50 dark:text-gray-500 border-gray-200/50 dark:border-gray-800'
                               : evt.type === 'snoozed_contact'
@@ -718,7 +768,7 @@ export function ScheduleManager() {
                             }
                           `}
                         >
-                          <span className="font-semibold text-[9px] opacity-75 mr-1 font-mono">
+                          <span className="font-semibold text-[8px] sm:text-[9px] opacity-75 mr-1 font-mono">
                             {format(evt.start_time, 'HH:mm')}
                           </span>
                           {evt.title}
@@ -1221,7 +1271,7 @@ export function ScheduleManager() {
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 flex flex-col gap-4 text-left">
+            <div className="p-6 flex flex-col gap-4 text-left max-h-[70vh] overflow-y-auto scrollbar-thin">
               
               {/* Título */}
               <div className="flex flex-col gap-1">

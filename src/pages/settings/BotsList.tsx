@@ -501,9 +501,11 @@ export default function BotsList() {
 
   const handleDelete = async (id: string) => {
     if (confirm("Deseja realmente remover este Robô de I.A?")) {
+      const botBefore = bots.find(b => b.id === id);
       const { error } = await supabase.from('bots').delete().eq('id', id);
       if (!error) {
         setBots(bots.filter(b => b.id !== id));
+        await useChatStore.getState().logOperation('DELETE', 'bots', id, botBefore, null);
       } else {
         alert("Erro ao excluir robô: " + error.message);
       }
@@ -512,6 +514,7 @@ export default function BotsList() {
 
   const handleSaveBot = async (botData: any) => {
     if (botToEdit) {
+      const botBefore = bots.find(b => b.id === botToEdit.id);
       const { data, error } = await supabase
         .from('bots')
         .update(botData)
@@ -521,6 +524,7 @@ export default function BotsList() {
         
       if (!error && data) {
         setBots(bots.map(b => b.id === botToEdit.id ? data : b));
+        await useChatStore.getState().logOperation('UPDATE', 'bots', botToEdit.id, botBefore, data);
       }
     } else {
       const { data, error } = await supabase
@@ -531,6 +535,7 @@ export default function BotsList() {
         
       if (!error && data) {
         setBots([data, ...bots]);
+        await useChatStore.getState().logOperation('INSERT', 'bots', data.id, null, data);
       } else if (error) {
          console.error("Error creating bot:", error);
       }

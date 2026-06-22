@@ -10,6 +10,7 @@ import ClientLogin from './pages/ClientLogin';
 import BaileysFeatures from './pages/BaileysFeatures';
 import InstancesDashboard from './pages/InstancesDashboard';
 import KnowledgeBase from './pages/KnowledgeBase';
+import HelpCenter from './pages/HelpCenter';
 import InboxesList from './pages/settings/InboxesList';
 import InboxSettings from './pages/settings/InboxSettings';
 import AgentsList from './pages/settings/AgentsList';
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="/crm" element={<ErrorBoundary><CrmDashboard /></ErrorBoundary>} />
             <Route path="/instances" element={<InstancesDashboard />} />
             <Route path="/knowledge" element={<ErrorBoundary><KnowledgeBase /></ErrorBoundary>} />
+            <Route path="/help" element={<HelpCenter />} />
 
 
             {/* Configurações Globais originais conectadas à Sidebar Principal */}

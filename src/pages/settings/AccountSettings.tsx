@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useChatStore } from '../../store/chatStore';
-import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus, ChevronDown, ChevronUp } from 'lucide-react';
+import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus, ChevronDown, ChevronUp, Sparkles, QrCode, UserPlus } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../services/supabase';
 
@@ -46,11 +46,13 @@ const CEP_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/ConsultaCepServic
 const CLIENTE_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/LoginService/ValidaTelefone`;
 const PEDIDO_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/server/nuvem/PedidoCardapioService/FinalizeOrder`;
 
+const STATUS_PEDIDO_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/server/nuvem/BnPedido(50DA243C-4F4F-4293-95C8-34FFC00391D1)`;
+const PAGAMENTO_PIX_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v1/pagamentos/PixCardapioService/IniciarTransacao`;
+const CADASTRO_CLIENTE_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/UsuarioService/CreateUserWithAuthentication`;
+
 const GASTROFOOD_DEFAULT_TOKEN = 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw';
 
-const DEFAULT_CARDAPIO_PAYLOAD = `{
-  "AGuidEstab": "6D0187D9-E905-4479-AB15-B908F0222607"
-}`;
+const DEFAULT_CARDAPIO_PAYLOAD = `{}`;
 
 const DEFAULT_CEP_PAYLOAD = `{
   "ACep": "06764365"
@@ -60,11 +62,23 @@ const DEFAULT_CLIENTE_PAYLOAD = `{
   "ATelefone": "973933247"
 }`;
 
+const DEFAULT_PAGAMENTO_PIX_PAYLOAD = `{
+  "APaymentData": {},
+  "AIdPedido": "B7D7ADDD-AC17-4F63-994B-072BE6CE48D4"
+}`;
+
+const DEFAULT_CADASTRO_CLIENTE_PAYLOAD = `{
+  "JSONUser": {
+    "name": "Valmir Teixeira",
+    "phone": "11973933247",
+    "verified": true
+  }
+}`;
+
 const DEFAULT_PEDIDO_PAYLOAD = `{
   "jsOrder": {
     "module": 1,
     "fkCustomer": "9EA3F679-5565-4DA0-930F-0971A8B8A3CD",
-    "fkStore": "6A728D2A-8612-4DC1-8676-0B10E4D38AD5",
     "subTotal": 37,
     "received": 41,
     "txDelivery": 4,
@@ -132,6 +146,172 @@ const DEFAULT_PEDIDO_PAYLOAD = `{
   }
 }`;
 
+const extractUUID = (val: string): string => {
+  const cleanVal = val.replace(/["']/g, ''); // Remove aspas
+  const match = cleanVal.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+  return match ? match[0].toUpperCase() : val.trim();
+};
+
+const injectStoreId = (payloadObj: any, storeId: string): any => {
+  if (!storeId || !payloadObj || typeof payloadObj !== 'object') return payloadObj;
+  const clone = Array.isArray(payloadObj) ? [...payloadObj] : { ...payloadObj };
+  
+  if (!Array.isArray(clone)) {
+    // Sempre injeta ou sobrescreve o ID global
+    clone.AGuidEstab = storeId;
+    clone.AIdEstab = storeId;
+    
+    if (clone.jsOrder && typeof clone.jsOrder === 'object') {
+      clone.jsOrder = { 
+        ...clone.jsOrder,
+        fkStore: storeId 
+      };
+    }
+  }
+  
+  return clone;
+};
+
+const cleanObjectRecursively = (obj: any): any => {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(item => {
+      if (typeof item === 'object' && item !== null) {
+        return cleanObjectRecursively(item);
+      }
+      return item;
+    });
+  }
+  if (typeof obj === 'object') {
+    const cleaned: any = {};
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const val = obj[key];
+        // Remove null, undefined e strings vazias (desnecessárias)
+        if (val !== null && val !== undefined && val !== '') {
+          if (typeof val === 'object') {
+            cleaned[key] = cleanObjectRecursively(val);
+          } else {
+            cleaned[key] = val;
+          }
+        }
+      }
+    }
+    return cleaned;
+  }
+  return obj;
+};
+
+const balanceAndWrapJson = (repaired: string): string => {
+  let str = repaired.trim();
+  
+  // Determina se devemos envolver em objeto ou array
+  let wrapCharStart = '';
+  let wrapCharEnd = '';
+  
+  if (!str.startsWith('{') && !str.startsWith('[')) {
+    if (/^[a-zA-Z0-9_"\s\-+]+:/.test(str)) {
+      wrapCharStart = '{';
+      wrapCharEnd = '}';
+    } else {
+      wrapCharStart = '[';
+      wrapCharEnd = ']';
+    }
+  }
+
+  // Prepara a string inicial com o caractere de abertura se necessário
+  let result = wrapCharStart + str;
+
+  // Conta aberturas e fechamentos
+  let openBraces = (result.match(/\{/g) || []).length;
+  let closeBraces = (result.match(/\}/g) || []).length;
+  let openBrackets = (result.match(/\[/g) || []).length;
+  let closeBrackets = (result.match(/\]/g) || []).length;
+
+  // Balanceamento de chaves {}
+  if (closeBraces > openBraces) {
+    while (closeBraces > openBraces && result.endsWith('}')) {
+      result = result.slice(0, -1).trim();
+      closeBraces--;
+    }
+  } else if (openBraces > closeBraces) {
+    while (openBraces > closeBraces) {
+      result += '}';
+      closeBraces++;
+    }
+  }
+
+  // Balanceamento de colchetes []
+  if (closeBrackets > openBrackets) {
+    while (closeBrackets > openBrackets && result.endsWith(']')) {
+      result = result.slice(0, -1).trim();
+      closeBrackets--;
+    }
+  } else if (openBrackets > closeBrackets) {
+    while (openBrackets > closeBrackets) {
+      result += ']';
+      closeBrackets++;
+    }
+  }
+
+  return result;
+};
+
+const tryRepairAndFormatJson = (inputStr: string): { success: boolean; formatted: string; error?: string } => {
+  let cleanedStr = inputStr.trim();
+  if (!cleanedStr) {
+    return { success: false, formatted: '', error: 'O campo está vazio.' };
+  }
+
+  // 1. Tentar fazer parse direto
+  try {
+    const parsed = JSON.parse(cleanedStr);
+    const cleaned = cleanObjectRecursively(parsed);
+    return { success: true, formatted: JSON.stringify(cleaned, null, 2) };
+  } catch (e) {}
+
+  // 2. Se falhar, tentar reparar o JSON
+  // Remove lixo comum no início (ex: '],', '},', ',', e colchetes/chaves soltos)
+  let repaired = cleanedStr.replace(/^[\s,\]\}]+/, '');
+
+  // Tentar encontrar a primeira chave '{' ou colchete '[' e extrair a partir dali se NÃO for um snippet de chave-valor
+  const startsWithSnippetPattern = /^[a-zA-Z0-9_"\s\-+]+:/.test(repaired);
+  if (!startsWithSnippetPattern && !repaired.startsWith('{') && !repaired.startsWith('[')) {
+    const firstBrace = repaired.indexOf('{');
+    const firstBracket = repaired.indexOf('[');
+    let startIndex = -1;
+    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+      startIndex = firstBrace;
+    } else if (firstBracket !== -1) {
+      startIndex = firstBracket;
+    }
+
+    if (startIndex !== -1) {
+      repaired = repaired.substring(startIndex);
+    }
+  }
+
+  // Tentar balancear e fechar/envolver
+  const balanced = balanceAndWrapJson(repaired);
+
+  // Tentar fazer parse
+  try {
+    const parsed = JSON.parse(balanced);
+    const cleaned = cleanObjectRecursively(parsed);
+    return { success: true, formatted: JSON.stringify(cleaned, null, 2) };
+  } catch (e) {}
+
+  // Se falhar, tentar remover vírgulas soltas no final de itens antes de fechar chaves/colchetes
+  let lastChance = balanced.replace(/,\s*([\}\]])/g, '$1');
+  try {
+    const parsed = JSON.parse(lastChance);
+    const cleaned = cleanObjectRecursively(parsed);
+    return { success: true, formatted: JSON.stringify(cleaned, null, 2) };
+  } catch (e) {
+    return { success: false, formatted: inputStr, error: e instanceof Error ? e.message : String(e) };
+  }
+};
+
 export default function AccountSettings() {
   const tenantInfo = useChatStore(state => state.tenantInfo);
   const updateTenantSettings = useChatStore(state => state.updateTenantSettings);
@@ -140,6 +320,7 @@ export default function AccountSettings() {
   const [endereco, setEndereco] = useState('');
   const [diasHorarios, setDiasHorarios] = useState<DiaTrabalho[]>(DIAS_PADRAO);
   const [linkCardapio, setLinkCardapio] = useState('');
+  const [gfoodStoreId, setGfoodStoreId] = useState('6D0187D9-E905-4479-AB15-B908F0222607');
   const [instagram, setInstagram] = useState('');
   const [googleMaps, setGoogleMaps] = useState('');
   const [youtube, setYoutube] = useState('');
@@ -202,13 +383,41 @@ export default function AccountSettings() {
   const [pedidoResult, setPedidoResult] = useState<any>(null);
   const [pedidoError, setPedidoError] = useState('');
 
+  // Estados para Status de Pedido
+  const [statusPedidoJsonUrl, setStatusPedidoJsonUrl] = useState(STATUS_PEDIDO_DEFAULT_URL);
+  const [statusPedidoJsonToken, setStatusPedidoJsonToken] = useState(GASTROFOOD_DEFAULT_TOKEN);
+  const [statusPedidoJsonPayload, setStatusPedidoJsonPayload] = useState('');
+  const [statusPedidoLoading, setStatusPedidoLoading] = useState(false);
+  const [statusPedidoResult, setStatusPedidoResult] = useState<any>(null);
+  const [statusPedidoError, setStatusPedidoError] = useState('');
+  const [isStatusPedidoExpanded, setIsStatusPedidoExpanded] = useState(false);
+
+  // Estados para Pagamento PIX
+  const [pagamentoPixJsonUrl, setPagamentoPixJsonUrl] = useState(PAGAMENTO_PIX_DEFAULT_URL);
+  const [pagamentoPixJsonToken, setPagamentoPixJsonToken] = useState(GASTROFOOD_DEFAULT_TOKEN);
+  const [pagamentoPixJsonPayload, setPagamentoPixJsonPayload] = useState(DEFAULT_PAGAMENTO_PIX_PAYLOAD);
+  const [pagamentoPixLoading, setPagamentoPixLoading] = useState(false);
+  const [pagamentoPixResult, setPagamentoPixResult] = useState<any>(null);
+  const [pagamentoPixError, setPagamentoPixError] = useState('');
+  const [isPagamentoPixExpanded, setIsPagamentoPixExpanded] = useState(false);
+
+  // Estados para Cadastro Cliente
+  const [cadastroClienteJsonUrl, setCadastroClienteJsonUrl] = useState(CADASTRO_CLIENTE_DEFAULT_URL);
+  const [cadastroClienteJsonToken, setCadastroClienteJsonToken] = useState(GASTROFOOD_DEFAULT_TOKEN);
+  const [cadastroClienteJsonPayload, setCadastroClienteJsonPayload] = useState(DEFAULT_CADASTRO_CLIENTE_PAYLOAD);
+  const [cadastroClienteLoading, setCadastroClienteLoading] = useState(false);
+  const [cadastroClienteResult, setCadastroClienteResult] = useState<any>(null);
+  const [cadastroClienteError, setCadastroClienteError] = useState('');
+  const [isCadastroClienteExpanded, setIsCadastroClienteExpanded] = useState(false);
+
   const handleTestGeneric = async (
     url: string,
     token: string,
     payload: string,
     setLoading: (l: boolean) => void,
     setResult: (r: any) => void,
-    setError: (e: string) => void
+    setError: (e: string) => void,
+    method: string = 'POST'
   ) => {
     setLoading(true);
     setResult(null);
@@ -219,12 +428,16 @@ export default function AccountSettings() {
       }
 
       let parsedPayload = null;
-      if (payload) {
+      if (payload && method !== 'GET') {
         try {
           parsedPayload = JSON.parse(payload);
         } catch (e) {
           throw new Error('O corpo da requisição (JSON Payload) não é um JSON válido. Verifique se aspas duplas, vírgulas e chaves estão corretas.');
         }
+      }
+
+      if (method !== 'GET') {
+        parsedPayload = injectStoreId(parsedPayload || {}, gfoodStoreId);
       }
 
       const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
@@ -236,7 +449,8 @@ export default function AccountSettings() {
         body: JSON.stringify({
           url,
           token,
-          payload: parsedPayload
+          payload: parsedPayload,
+          method
         })
       });
 
@@ -251,6 +465,20 @@ export default function AccountSettings() {
       setError(err.message || 'Ocorreu um erro desconhecido.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCleanAndFormatJson = (
+    payload: string,
+    setPayload: (p: string) => void,
+    setError: (e: string) => void
+  ) => {
+    const result = tryRepairAndFormatJson(payload);
+    if (result.success) {
+      setPayload(result.formatted);
+      setError('');
+    } else {
+      setError(`Erro na validação do JSON: ${result.error}`);
     }
   };
   
@@ -356,7 +584,7 @@ export default function AccountSettings() {
         body: JSON.stringify({
           url: cardapioJsonUrl,
           token: cardapioJsonToken,
-          payload: cardapioJsonPayload ? JSON.parse(cardapioJsonPayload) : null
+          payload: cardapioJsonPayload ? injectStoreId(JSON.parse(cardapioJsonPayload), gfoodStoreId) : injectStoreId({}, gfoodStoreId)
         })
       });
 
@@ -597,6 +825,7 @@ export default function AccountSettings() {
       setNomeIa(tenantInfo.settings.nome_ia || '');
       setEndereco(tenantInfo.settings.endereco || '');
       setLinkCardapio(tenantInfo.settings.link_cardapio || '');
+      setGfoodStoreId(tenantInfo.settings.gfood_store_id || '6D0187D9-E905-4479-AB15-B908F0222607');
       setInstagram(tenantInfo.settings.instagram || '');
       setGoogleMaps(tenantInfo.settings.google_maps || '');
       setYoutube(tenantInfo.settings.youtube || '');
@@ -616,6 +845,18 @@ export default function AccountSettings() {
       setPedidoJsonUrl(tenantInfo.settings.pedido_json_url || PEDIDO_DEFAULT_URL);
       setPedidoJsonToken(tenantInfo.settings.pedido_json_token || GASTROFOOD_DEFAULT_TOKEN);
       setPedidoJsonPayload(tenantInfo.settings.pedido_json_payload || DEFAULT_PEDIDO_PAYLOAD);
+
+      setStatusPedidoJsonUrl(tenantInfo.settings.status_pedido_json_url || STATUS_PEDIDO_DEFAULT_URL);
+      setStatusPedidoJsonToken(tenantInfo.settings.status_pedido_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setStatusPedidoJsonPayload(tenantInfo.settings.status_pedido_json_payload || '');
+
+      setPagamentoPixJsonUrl(tenantInfo.settings.pagamento_pix_json_url || PAGAMENTO_PIX_DEFAULT_URL);
+      setPagamentoPixJsonToken(tenantInfo.settings.pagamento_pix_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setPagamentoPixJsonPayload(tenantInfo.settings.pagamento_pix_json_payload || DEFAULT_PAGAMENTO_PIX_PAYLOAD);
+
+      setCadastroClienteJsonUrl(tenantInfo.settings.cadastro_cliente_json_url || CADASTRO_CLIENTE_DEFAULT_URL);
+      setCadastroClienteJsonToken(tenantInfo.settings.cadastro_cliente_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setCadastroClienteJsonPayload(tenantInfo.settings.cadastro_cliente_json_payload || DEFAULT_CADASTRO_CLIENTE_PAYLOAD);
       
       if (tenantInfo.settings.horarios_estrutura) {
         setDiasHorarios(tenantInfo.settings.horarios_estrutura);
@@ -629,7 +870,7 @@ export default function AccountSettings() {
     setSaving(true);
     setSuccess(false);
     const textoGerado = gerarTextoHorario(diasHorarios);
-    console.log("Iniciando save com variáveis:", { nomeIa, endereco, textoGerado, linkCardapio, instagram, googleMaps, youtube, tiktok });
+    console.log("Iniciando save com variáveis:", { nomeIa, endereco, textoGerado, linkCardapio, gfoodStoreId, instagram, googleMaps, youtube, tiktok });
     try {
       await updateTenantSettings({ 
         nome_ia: nomeIa,
@@ -637,6 +878,7 @@ export default function AccountSettings() {
         horario_funcionamento: textoGerado,
         horarios_estrutura: diasHorarios,
         link_cardapio: linkCardapio,
+        gfood_store_id: gfoodStoreId,
         instagram,
         google_maps: googleMaps,
         youtube,
@@ -652,11 +894,19 @@ export default function AccountSettings() {
         cliente_json_payload: clienteJsonPayload,
         pedido_json_url: pedidoJsonUrl,
         pedido_json_token: pedidoJsonToken,
-        pedido_json_payload: pedidoJsonPayload
+        pedido_json_payload: pedidoJsonPayload,
+        status_pedido_json_url: statusPedidoJsonUrl,
+        status_pedido_json_token: statusPedidoJsonToken,
+        status_pedido_json_payload: statusPedidoJsonPayload,
+        pagamento_pix_json_url: pagamentoPixJsonUrl,
+        pagamento_pix_json_token: pagamentoPixJsonToken,
+        pagamento_pix_json_payload: pagamentoPixJsonPayload,
+        cadastro_cliente_json_url: cadastroClienteJsonUrl,
+        cadastro_cliente_json_token: cadastroClienteJsonToken,
+        cadastro_cliente_json_payload: cadastroClienteJsonPayload
       });
       console.log("Save concluído!");
       setSuccess(true);
-      
       // Limpa cache no backend para refletir alterações globais e de cardápio instantaneamente
       const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
       const currentTenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
@@ -702,7 +952,7 @@ export default function AccountSettings() {
         body: JSON.stringify({
           url: cardapioJsonUrl,
           token: cardapioJsonToken,
-          payload: cardapioJsonPayload ? JSON.parse(cardapioJsonPayload) : null
+          payload: cardapioJsonPayload ? injectStoreId(JSON.parse(cardapioJsonPayload), gfoodStoreId) : injectStoreId({}, gfoodStoreId)
         })
       });
 
@@ -1051,6 +1301,27 @@ export default function AccountSettings() {
                   <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-2">
                     Será substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[LINK_CARDAPIO]</code>.
                   </p>
+
+                  <div className="mt-2 pl-3 border-l-2 border-indigo-500/30 dark:border-indigo-500/20">
+                    <label className="text-[10px] uppercase tracking-wider font-extrabold text-indigo-500 dark:text-indigo-400 flex items-center gap-1.5 mb-1 select-none">
+                      <Store size={12} />
+                      ID Loja gFood (UUID Estabelecimento)
+                    </label>
+                    <input 
+                      type="text"
+                      value={gfoodStoreId}
+                      onChange={(e) => {
+                        const cleaned = extractUUID(e.target.value);
+                        setGfoodStoreId(cleaned);
+                      }}
+                      onBlur={(e) => {
+                        const cleaned = extractUUID(e.target.value);
+                        setGfoodStoreId(cleaned);
+                      }}
+                      placeholder="Ex: 6D0187D9-E905-4479-AB15-B908F0222607"
+                      className="w-full max-w-xs bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#304046] rounded-lg px-2.5 py-1 text-[11px] text-gray-700 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400/70 font-mono shadow-sm"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1292,7 +1563,7 @@ export default function AccountSettings() {
                     <textarea 
                       value={cardapioJsonPayload}
                       onChange={(e) => setCardapioJsonPayload(e.target.value)}
-                      placeholder='{"AGuidEstab": "6D0187D9-E905-4479-AB15-B908F0222607"}'
+                      placeholder='{} (o ID da loja será injetado automaticamente)'
                       rows={3}
                       className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
                     />
@@ -1306,6 +1577,14 @@ export default function AccountSettings() {
                       className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-purple-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {testLoading && !testResult?.fromSupabase ? 'Testando...' : 'Testar Requisição'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanAndFormatJson(cardapioJsonPayload, setCardapioJsonPayload, setTestError)}
+                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <Sparkles size={14} />
+                      Organizar e Validar JSON
                     </button>
                     <button
                       type="button"
@@ -1876,6 +2155,14 @@ export default function AccountSettings() {
                     >
                       {cepLoading ? 'Testando...' : 'Testar Requisição'}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanAndFormatJson(cepJsonPayload, setCepJsonPayload, setCepError)}
+                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <Sparkles size={14} />
+                      Organizar e Validar JSON
+                    </button>
                   </div>
 
                   {cepError && (
@@ -1947,6 +2234,14 @@ export default function AccountSettings() {
                       className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {clienteLoading ? 'Testando...' : 'Testar Requisição'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanAndFormatJson(clienteJsonPayload, setClienteJsonPayload, setClienteError)}
+                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <Sparkles size={14} />
+                      Organizar e Validar JSON
                     </button>
                   </div>
 
@@ -2020,6 +2315,14 @@ export default function AccountSettings() {
                     >
                       {pedidoLoading ? 'Testando...' : 'Testar Requisição'}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanAndFormatJson(pedidoJsonPayload, setPedidoJsonPayload, setPedidoError)}
+                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <Sparkles size={14} />
+                      Organizar e Validar JSON
+                    </button>
                   </div>
 
                   {pedidoError && (
@@ -2038,6 +2341,310 @@ export default function AccountSettings() {
                       </div>
                       <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
                         {JSON.stringify(pedidoResult.data, null, 2)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Seção Status Pedido gFood - Colapsável */}
+          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+            <button
+              type="button"
+              onClick={() => setIsStatusPedidoExpanded(!isStatusPedidoExpanded)}
+              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-500">
+                  <Search size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Status Pedido gFood</h2>
+                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a busca de status de pedidos diretamente no Gastrofood.</p>
+                </div>
+              </div>
+              <div className="text-gray-400 dark:text-gray-500 pr-2">
+                {isStatusPedidoExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+              </div>
+            </button>
+
+            {isStatusPedidoExpanded && (
+              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="space-y-6 max-w-2xl">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        URL do Endpoint
+                      </label>
+                      <input 
+                        type="url"
+                        value={statusPedidoJsonUrl}
+                        onChange={(e) => setStatusPedidoJsonUrl(e.target.value)}
+                        placeholder="https://..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Token de Autorização
+                      </label>
+                      <input 
+                        type="text"
+                        value={statusPedidoJsonToken}
+                        onChange={(e) => setStatusPedidoJsonToken(e.target.value)}
+                        placeholder="Bearer ..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
+                      />
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-gray-500 dark:text-[#8696a0] leading-relaxed">
+                    Este endpoint utiliza o método <strong>GET</strong>. Para testar outro pedido, altere o ID dentro de <code>BnPedido(ID_DO_PEDIDO)</code> na URL acima.
+                  </p>
+
+                  <div className="pt-4 flex flex-wrap items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => handleTestGeneric(statusPedidoJsonUrl, statusPedidoJsonToken, '', setStatusPedidoLoading, setStatusPedidoResult, setStatusPedidoError, 'GET')}
+                      disabled={statusPedidoLoading || !statusPedidoJsonUrl}
+                      className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-white font-semibold rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {statusPedidoLoading ? 'Testando...' : 'Testar Requisição'}
+                    </button>
+                  </div>
+
+                  {statusPedidoError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro no teste:</strong> {statusPedidoError}
+                    </div>
+                  )}
+
+                  {statusPedidoResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado do Status:</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/10 text-amber-500">
+                          Status: {statusPedidoResult.status}
+                        </span>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
+                        {JSON.stringify(statusPedidoResult.data, null, 2)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Seção Pagamento-PIX gFood - Colapsável */}
+          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+            <button
+              type="button"
+              onClick={() => setIsPagamentoPixExpanded(!isPagamentoPixExpanded)}
+              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-500">
+                  <QrCode size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Pagamento-PIX gFood</h2>
+                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a geração e consulta de QR Code PIX para pagamentos no Gastrofood.</p>
+                </div>
+              </div>
+              <div className="text-gray-400 dark:text-gray-500 pr-2">
+                {isPagamentoPixExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+              </div>
+            </button>
+
+            {isPagamentoPixExpanded && (
+              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="space-y-6 max-w-2xl">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        URL do Endpoint
+                      </label>
+                      <input 
+                        type="url"
+                        value={pagamentoPixJsonUrl}
+                        onChange={(e) => setPagamentoPixJsonUrl(e.target.value)}
+                        placeholder="https://..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Token de Autorização
+                      </label>
+                      <input 
+                        type="text"
+                        value={pagamentoPixJsonToken}
+                        onChange={(e) => setPagamentoPixJsonToken(e.target.value)}
+                        placeholder="Bearer ..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                      Corpo da Requisição (JSON Payload)
+                    </label>
+                    <textarea 
+                      value={pagamentoPixJsonPayload}
+                      onChange={(e) => setPagamentoPixJsonPayload(e.target.value)}
+                      placeholder="Corpo da Requisição (JSON)"
+                      rows={5}
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="pt-4 flex flex-wrap items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => handleTestGeneric(pagamentoPixJsonUrl, pagamentoPixJsonToken, pagamentoPixJsonPayload, setPagamentoPixLoading, setPagamentoPixResult, setPagamentoPixError, 'POST')}
+                      disabled={pagamentoPixLoading || !pagamentoPixJsonUrl}
+                      className="px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-semibold rounded-xl shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {pagamentoPixLoading ? 'Testando...' : 'Testar Requisição'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanAndFormatJson(pagamentoPixJsonPayload, setPagamentoPixJsonPayload, setPagamentoPixError)}
+                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <Sparkles size={14} />
+                      Organizar e Validar JSON
+                    </button>
+                  </div>
+
+                  {pagamentoPixError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro no teste:</strong> {pagamentoPixError}
+                    </div>
+                  )}
+
+                  {pagamentoPixResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado do Pagamento:</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-500/10 text-indigo-500">
+                          Status: {pagamentoPixResult.status}
+                        </span>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
+                        {JSON.stringify(pagamentoPixResult.data, null, 2)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Seção Cadastro Cliente gFood - Colapsável */}
+          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+            <button
+              type="button"
+              onClick={() => setIsCadastroClienteExpanded(!isCadastroClienteExpanded)}
+              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500">
+                  <UserPlus size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Cadastro Cliente gFood</h2>
+                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure o cadastro de novos clientes diretamente no Gastrofood.</p>
+                </div>
+              </div>
+              <div className="text-gray-400 dark:text-gray-500 pr-2">
+                {isCadastroClienteExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+              </div>
+            </button>
+
+            {isCadastroClienteExpanded && (
+              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="space-y-6 max-w-2xl">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        URL do Endpoint
+                      </label>
+                      <input 
+                        type="url"
+                        value={cadastroClienteJsonUrl}
+                        onChange={(e) => setCadastroClienteJsonUrl(e.target.value)}
+                        placeholder="https://..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Token de Autorização
+                      </label>
+                      <input 
+                        type="text"
+                        value={cadastroClienteJsonToken}
+                        onChange={(e) => setCadastroClienteJsonToken(e.target.value)}
+                        placeholder="Bearer ..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                      Corpo da Requisição (JSON Payload)
+                    </label>
+                    <textarea 
+                      value={cadastroClienteJsonPayload}
+                      onChange={(e) => setCadastroClienteJsonPayload(e.target.value)}
+                      placeholder="Corpo da Requisição (JSON)"
+                      rows={6}
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="pt-4 flex flex-wrap items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => handleTestGeneric(cadastroClienteJsonUrl, cadastroClienteJsonToken, cadastroClienteJsonPayload, setCadastroClienteLoading, setCadastroClienteResult, setCadastroClienteError, 'POST')}
+                      disabled={cadastroClienteLoading || !cadastroClienteJsonUrl}
+                      className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {cadastroClienteLoading ? 'Testando...' : 'Testar Requisição'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanAndFormatJson(cadastroClienteJsonPayload, setCadastroClienteJsonPayload, setCadastroClienteError)}
+                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <Sparkles size={14} />
+                      Organizar e Validar JSON
+                    </button>
+                  </div>
+
+                  {cadastroClienteError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro no teste:</strong> {cadastroClienteError}
+                    </div>
+                  )}
+
+                  {cadastroClienteResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado do Cadastro:</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-500">
+                          Status: {cadastroClienteResult.status}
+                        </span>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
+                        {JSON.stringify(cadastroClienteResult.data, null, 2)}
                       </div>
                     </div>
                   )}

@@ -1,3 +1,4 @@
+import { useChatStore } from '../store/chatStore';
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
@@ -313,8 +314,12 @@ function FlowBuilderContent() {
     );
 
     const saveFlow = async () => {
-        if (!versionData) return;
+        if (!versionData || !flowData) return;
         setSaving(true);
+
+        // Captura o estado anterior para auditoria
+        const { data: beforeVersion } = await supabase.from('flow_versions').select('*').eq('id', versionData.id).maybeSingle();
+        const { data: beforeFlow } = await supabase.from('flows').select('*').eq('id', flowData.id).maybeSingle();
 
         await supabase.from('flow_versions').update({
             nodes,
@@ -325,6 +330,13 @@ function FlowBuilderContent() {
         await supabase.from('flows').update({
             active_version_id: versionData.id
         }).eq('id', flowData.id);
+
+        // Registrar logs de auditoria
+        const afterVersion = { ...beforeVersion, nodes, edges, status: 'PUBLISHED' };
+        await useChatStore.getState().logOperation('UPDATE', 'flow_versions', versionData.id, beforeVersion || null, afterVersion);
+
+        const afterFlow = { ...beforeFlow, active_version_id: versionData.id };
+        await useChatStore.getState().logOperation('UPDATE', 'flows', flowData.id, beforeFlow || null, afterFlow);
 
         setSaving(false);
         alert("Salvo e Publicado com sucesso!");

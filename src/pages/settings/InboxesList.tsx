@@ -4,11 +4,14 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Settings2, Trash2, Smartphone, Inbox, MessageSquare } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 
+const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+
 interface WhatsAppInstance {
   id: string;
   display_name: string;
   status: string;
   created_at: string;
+  api_key?: string;
 }
 
 export default function InboxesList() {
@@ -28,7 +31,7 @@ export default function InboxesList() {
     const fetchInstances = async () => {
       try {
         const { data, error } = await supabase.from('whatsapp_instances')
-          .select('id, display_name, status, created_at')
+          .select('id, display_name, status, created_at, api_key')
           .eq('tenant_id', tenantId)
           .order('created_at', { ascending: false });
           
@@ -73,18 +76,61 @@ export default function InboxesList() {
       const defaultSettings = { reject_calls: false, ignore_groups: false, always_online: true, sync_history: false, read_messages: false };
       
       const currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || tenantId;
-      const { error } = await supabase.from('whatsapp_instances').insert([{
+      const newInstPayload = {
         display_name: nameStr,
         status: 'offline',
         settings: defaultSettings,
         tenant_id: currentTenantId
-      }]);
+      };
+      const { data: insertedData, error } = await supabase.from('whatsapp_instances').insert([newInstPayload]).select().single();
+      if (!error) {
+        const insertedObj = insertedData || newInstPayload;
+        await useChatStore.getState().logOperation('INSERT', 'whatsapp_instances', insertedObj.id || 'new-inst', null, insertedObj);
+      }
       
       if (error) throw error;
       setIsCreating(false);
       setNewInstanceName('');
     } catch (err) {
       alert('Falha ao criar caixa de entrada!');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteInstance = async (inst: WhatsAppInstance) => {
+    if (!window.confirm(`Deseja realmente excluir a caixa de entrada "${inst.display_name}"? Esta ação é irreversível e apagará todas as conexões e conversas.`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || tenantId;
+      
+      // 1. Chamar a API de delete do motor Antigravity
+      await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}`, { 
+          method: 'DELETE',
+          headers: { 
+            'x-tenant-id': currentTenantId!,
+            'apikey': inst.api_key || ''
+          }
+      }).catch((err) => {
+         console.warn('Erro ao chamar api de delete da engine:', err);
+      });
+      
+      // 2. Apagar no Supabase
+      const { error } = await supabase.from('whatsapp_instances').delete().eq('id', inst.id);
+      if (error) throw error;
+
+      // 3. Log de operação
+      await useChatStore.getState().logOperation('DELETE', 'whatsapp_instances', inst.id, inst, null);
+      
+      // 4. Atualizar lista local
+      setInstances(prev => prev.filter(item => item.id !== inst.id));
+      alert('Caixa de entrada excluída com sucesso!');
+    } catch (err) {
+      alert('Falha ao excluir a caixa de entrada!');
       console.error(err);
     } finally {
       setLoading(false);
@@ -151,7 +197,13 @@ export default function InboxesList() {
                         <button onClick={() => navigate(`/settings/inboxes/${inst.id}`)} className="p-3 bg-[#202c33] hover:bg-emerald-500 hover:text-white text-gray-400 rounded-xl transition-all border border-white/5 hover:border-emerald-500 hover:shadow-[0_0_15px_rgba(16,185,129,0.3)]">
                            <Settings2 size={18} />
                         </button>
-                        <button className="p-3 bg-[#202c33] hover:bg-red-500 hover:text-white text-gray-400 rounded-xl transition-all border border-white/5 hover:border-red-500">
+                        <button 
+                           onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteInstance(inst);
+                           }}
+                           className="p-3 bg-[#202c33] hover:bg-red-500 hover:text-white text-gray-400 rounded-xl transition-all border border-white/5 hover:border-red-500"
+                        >
                            <Trash2 size={18} />
                         </button>
                      </div>

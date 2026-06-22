@@ -1259,72 +1259,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
        console.warn("[sendHumanMessage] Contact not found in store!", contactId);
        return;
     }
-    
-    // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato
-    const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
-    const expectedInstance = compositeInstance || contact.instance_id;
-    const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
 
-    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', finalTargetInstance);
-    const resolvedExpectedInstance = await resolveInstanceUuid(state.tenantInfo?.id || '', expectedInstance);
-
-    // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
-    if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
-       console.warn(`[Security Guard] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
-    }
-    
-    // Verifica a conexão da instância específica da conversa
-    if (resolvedInstanceId && state.instancesStatus[resolvedInstanceId] && state.instancesStatus[resolvedInstanceId] !== 'connected') {
-       set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar mensagens.' });
-       return;
-    }
-    
     // Injeção Mágica de Assinatura Síncrona (Signature) para evitar atrasos na UI
     let finalMessageText = text;
     try {
-       const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-       if (currentUserEmail) {
-           let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
-           let useSignature = false;
-           let signature = '';
+        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+        if (currentUserEmail) {
+            let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+            let useSignature = false;
+            let signature = '';
 
-           if (agent) {
-               useSignature = !!agent.use_signature;
-               signature = agent.signature || '';
-           } else {
-               // Fallback síncrono do cache no localStorage
-               useSignature = localStorage.getItem('current_user_use_signature') === 'true';
-               signature = localStorage.getItem('current_user_signature') || '';
-           }
+            if (agent) {
+                useSignature = !!agent.use_signature;
+                signature = agent.signature || '';
+            } else {
+                // Fallback síncrono do cache no localStorage
+                useSignature = localStorage.getItem('current_user_use_signature') === 'true';
+                signature = localStorage.getItem('current_user_signature') || '';
+            }
 
-           if (useSignature && signature.trim().length > 0) {
-              finalMessageText = `*${signature}*\n\n${text}`;
-           }
+            if (useSignature && signature.trim().length > 0) {
+               finalMessageText = `*${signature}*\n\n${text}`;
+            }
 
-           // Se o agente não está mapeado no cache local de forma alguma,
-           // disparamos uma query em background para popular o localStorage para futuros envios,
-           // mas SEM usar await para não bloquear o render do chat atual.
-           if (!agent && !signature && state.tenantInfo) {
-              supabase.from('tenant_users')
-                 .select('use_signature, signature')
-                 .eq('email', currentUserEmail)
-                 .eq('tenant_id', state.tenantInfo.id)
-                 .limit(1)
-                 .maybeSingle()
-                 .then(({ data: agentData }) => {
-                    if (agentData) {
-                       localStorage.setItem('current_user_signature', agentData.signature || '');
-                       localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
-                    }
-                 })
-                 .catch(e => console.warn('[sendHumanMessage] Falha ao recuperar assinatura em background:', e));
-           }
-       }
+            // Se o agente não está mapeado no cache local de forma alguma,
+            // disparamos uma query em background para popular o localStorage para futuros envios,
+            // mas SEM usar await para não bloquear o render do chat atual.
+            if (!agent && !signature && state.tenantInfo) {
+               supabase.from('tenant_users')
+                  .select('use_signature, signature')
+                  .eq('email', currentUserEmail)
+                  .eq('tenant_id', state.tenantInfo.id)
+                  .limit(1)
+                  .maybeSingle()
+                  .then(({ data: agentData }) => {
+                     if (agentData) {
+                        localStorage.setItem('current_user_signature', agentData.signature || '');
+                        localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
+                     }
+                  })
+                  .catch(e => console.warn('[sendHumanMessage] Falha ao recuperar assinatura em background:', e));
+            }
+        }
     } catch (e) {
       console.error("Erro na injeção de assinatura síncrona:", e);
     }
 
-    // Atualiza otimista UI (Instantâneo)
+    // Atualiza otimista UI imediatamente (Instantâneo)
     const pseudoId = 'optimistic-' + Math.random().toString();
     state.addMessageLocally(contactId, { id: pseudoId, text: finalMessageText, sender: 'human', timestamp: new Date() });
 
@@ -1335,6 +1316,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     try {
+      // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato
+      const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
+      const expectedInstance = compositeInstance || contact.instance_id;
+      const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
+
+      const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', finalTargetInstance);
+      const resolvedExpectedInstance = await resolveInstanceUuid(state.tenantInfo?.id || '', expectedInstance);
+
+      // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
+      if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
+         console.warn(`[Security Guard] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
+      }
+      
+      // Verifica a conexão da instância específica da conversa
+      if (resolvedInstanceId && state.instancesStatus[resolvedInstanceId] && state.instancesStatus[resolvedInstanceId] !== 'connected') {
+         set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar mensagens.' });
+         throw new Error('whatsapp_offline');
+      }
+
       const { sendTextMessage } = await import('../services/whatsappEngine');
       // 1. Manda pra Baileys Engine Local
       if (!state.tenantInfo) return;
@@ -1357,6 +1357,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return c;
         })
       }));
+      
+      if (err.message === 'whatsapp_offline') {
+         return;
+      }
       
       if (err.message === 'Failed to fetch') {
          alert('Falha crítica de comunicação com o Motor Baileys. Verifique se o backend está rodando e online.');
@@ -1716,24 +1720,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
 
-    // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato
-    const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
-    const expectedInstance = compositeInstance || contact.instance_id;
-    const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
-
-    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
-    const resolvedExpectedInstance = await resolveInstanceUuid(state.tenantInfo.id, expectedInstance);
-
-    // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
-    if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
-       console.warn(`[Security Guard - Canned Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
-    }
-
-    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
-        set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar mídias.' });
-        return;
-    }
-
     // Injeção Mágica de Assinatura Síncrona na mídia para evitar atrasos na UI
     let finalCaption = caption?.trim() ? caption.trim() : '';
     
@@ -1799,6 +1785,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     try {
+      // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato
+      const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
+      const expectedInstance = compositeInstance || contact.instance_id;
+      const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
+
+      const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
+      const resolvedExpectedInstance = await resolveInstanceUuid(state.tenantInfo.id, expectedInstance);
+
+      // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
+      if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
+         console.warn(`[Security Guard - Canned Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
+      }
+
+      if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
+          set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar mídias.' });
+          throw new Error('whatsapp_offline');
+      }
+
       const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
@@ -1843,6 +1847,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     } catch (err: any) {
       console.error('[sendMediaFromUrl] Falha:', err);
+      
+      // Reverter mídia otimista
+      set((s) => ({
+        contacts: s.contacts.map(c => {
+          if (c.id === contactId) {
+            return { ...c, messages: c.messages.filter(m => m.id !== pseudoId) };
+          }
+          return c;
+        })
+      }));
+
+      if (err.message === 'whatsapp_offline') {
+         return;
+      }
+      
       alert('Falha ao enviar mídia da resposta pronta: ' + err.message);
     }
   },
@@ -2059,18 +2078,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let foundAny = false;
       const updatedContacts = state.contacts.map((c) => {
          const cRealId = getRealContactId(c.id);
-         
-         // Se o payload do contato possuir uma instância específica, 
-         // só deve bater com a conversa se for daquela mesma instância.
-         // Se o payload NÃO possuir instância (ex: update global da tabela 'contacts'),
-         // atualiza todas as instâncias existentes daquele contato.
-         const instanceMatches = !contact.instance_id || !c.instance_id || c.instance_id === contact.instance_id;
-         
-         const isMatch = instanceMatches && (
-                          cRealId === realContactId ||
-                          (c.whatsapp_jid && contact.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) ||
-                          (c.phone && contactPhoneMatch && c.phone === contactPhoneMatch)
-                         );
+         const isMatch = cRealId === realContactId ||
+                         (c.whatsapp_jid && contact.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) ||
+                         (c.phone && contactPhoneMatch && c.phone === contactPhoneMatch);
                          
          if (isMatch) {
             foundAny = true;
@@ -2083,7 +2093,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const finalId = c.id.includes('_') ? c.id : (baseId.includes('temp-') ? baseId : `${baseId}_${effectiveInstanceId}`);
             
             const finalCustomName = c.custom_name || contact.custom_name;
-            const fallbackName = (c.name !== c.phone && c.name ? c.name : contact.name) || contact.push_name;
+            const fallbackName = c.name !== c.phone && c.name ? c.name : contact.name;
             
             const tname = get().tenantInfo?.name || '';
             let finalName = finalCustomName || fallbackName;
@@ -2111,7 +2121,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
          const effectiveInstanceId = contact.instance_id || 'default';
          const compositeId = contact.id.includes('_') ? contact.id : `${contact.id}_${effectiveInstanceId}`;
          const tname = get().tenantInfo?.name || '';
-         let finalName = contact.custom_name || contact.name || contact.push_name;
+         let finalName = contact.custom_name || contact.name;
          finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
          
          const updatedTags = Array.isArray(contact.tags) ? contact.tags : [];
@@ -2185,10 +2195,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const { error } = await supabase.from('contacts').update(dbPayload).eq('id', realContactId);
       if (error) throw error;
-
-      if (payload.tags) {
-        await get().syncConversationLabelsWithTags(realContactId, payload.tags);
-      }
 
       // Log Operation
       if (rawBeforeState) {
@@ -3564,7 +3570,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Gera um UUID local para o user_id provisório
       const { v4: uuidv4 } = await import('uuid');
       const tempUserId = uuidv4();
-      const { error } = await supabase.from('tenant_users').insert([{
+      const agentPayload = {
         tenant_id: tenantId,
         user_id: tempUserId,
         role: payload.role,
@@ -3575,8 +3581,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         allowed_companies: payload.allowed_companies || [],
         signature: payload.signature || null,
         use_signature: payload.use_signature || false
-      }]);
+      };
+      const { data, error } = await supabase.from('tenant_users').insert([agentPayload]).select().single();
       if (error) throw error;
+
+      const insertedAgent = data || { ...agentPayload, id: tempUserId };
+      await get().logOperation('INSERT', 'tenant_users', insertedAgent.id, null, insertedAgent);
+
       await get().fetchTenantAgents();
     } catch (e) {
       console.error('Erro ao criar agente:', e);
@@ -3588,6 +3599,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const tenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
     if (!tenantId) return;
     try {
+      const agentBefore = get().agents.find(a => a.id === id);
       const { error } = await supabase.from('tenant_users').update({
         role: payload.role,
         full_name: payload.full_name,
@@ -3600,6 +3612,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }).eq('id', id).eq('tenant_id', tenantId);
       
       if (error) throw error;
+
+      const agentAfter = { ...agentBefore, ...payload };
+      await get().logOperation('UPDATE', 'tenant_users', id, agentBefore || null, agentAfter);
 
       // Update storage if the updated agent is the currently logged in user
       const currentEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
@@ -3625,10 +3640,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const tenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
     if (!tenantId) return;
     try {
+      const agentBefore = get().agents.find(a => a.id === id);
       const { error } = await supabase.from('tenant_users').delete()
         .eq('id', id).eq('tenant_id', tenantId);
       
       if (error) throw error;
+      await get().logOperation('DELETE', 'tenant_users', id, agentBefore || null, null);
       await get().fetchTenantAgents();
     } catch (e) {
       console.error('Erro ao deletar agente:', e);
@@ -3659,7 +3676,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // Criar on the fly para o Owner (Company Admin)
           const { v4: uuidv4 } = await import('uuid');
           const tempUserId = uuidv4();
-          const { data: newMe, error: insertErr } = await supabase.from('tenant_users').insert([{
+          const newAgentPayload = {
              tenant_id: tenantId,
              user_id: tempUserId,
              role: 'admin',
@@ -3667,17 +3684,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
              email: currentUserEmail,
              signature: signature,
              use_signature: use_signature
-          }]).select('id').single();
+          };
+          const { data: newMe, error: insertErr } = await supabase.from('tenant_users').insert([newAgentPayload]).select().single();
           
           if (insertErr) throw insertErr;
           me = newMe as any;
+          await get().logOperation('INSERT', 'tenant_users', me.id, null, me);
       } else {
+          const agentBefore = { ...me };
           const { error } = await supabase.from('tenant_users')
               .update({ full_name: fullName, signature: signature, use_signature: use_signature })
               .eq('tenant_id', tenantId)
               .eq('id', me.id);
           
           if (error) throw error;
+          const agentAfter = { ...me, full_name: fullName, signature: signature, use_signature: use_signature };
+          await get().logOperation('UPDATE', 'tenant_users', me.id, agentBefore, agentAfter);
       }
 
       // Sincroniza no cache do localStorage local
@@ -4316,9 +4338,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return { contacts: updatedContacts };
          });
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
          const t = get().tenantInfo;
          if (!t || !t.evolution_api_instance) return;
+         
+         if (payload.eventType === 'DELETE') {
+            const deletedInstId = payload.old.id;
+            if (deletedInstId === t.evolution_api_instance) {
+               if ((window as any)._disconnectTimer) {
+                  clearInterval((window as any)._disconnectTimer);
+                  (window as any)._disconnectTimer = null;
+               }
+               (window as any)._failCheckCount = 0;
+               set({ evolutionConnected: false, modalReason: 'A instância do WhatsApp foi excluída.' });
+            }
+            return;
+         }
+
          const inst = payload.new as any;
          if (inst.id) {
             instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '');
@@ -4347,7 +4383,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         (window as any)._failCheckCount++;
                         
                         // Faz uma verificação de segurança no banco
-                        const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', inst.id).single();
+                        const { data, error } = await supabase.from('whatsapp_instances').select('status').eq('id', inst.id).single();
+                        
+                        if (error || !data) {
+                           clearInterval((window as any)._disconnectTimer);
+                           (window as any)._disconnectTimer = null;
+                           (window as any)._failCheckCount = 0;
+                           return;
+                        }
                         
                         if (data && data.status === 'connected') {
                            clearInterval((window as any)._disconnectTimer);
@@ -4693,13 +4736,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
      const tenant = get().tenantInfo;
      if (!tenant) return;
      try {
-       const { data, error } = await supabase
-         .from('appointments')
-         .select('*')
-         .eq('tenant_id', tenant.id)
-         .order('start_time', { ascending: true });
-       if (error) throw error;
-       set({ appointments: data || [] });
+        const { data, error } = await supabase
+          .from('appointments')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .order('start_time', { ascending: true });
+        if (error) throw error;
+        set({ appointments: data || [] });
      } catch (e) {
        console.error('[fetchAppointments] Erro:', e);
      }
@@ -4724,6 +4767,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
          set((s) => ({ 
            appointments: [...s.appointments, data].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()) 
          }));
+         await get().logOperation('INSERT', 'appointments', data.id, null, data);
        }
      } catch (e) {
        console.error('[createAppointment] Erro:', e);
@@ -4733,6 +4777,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
    updateAppointment: async (id, payload) => {
      try {
+       const apptBefore = get().appointments.find(a => a.id === id);
        const { data, error } = await supabase
          .from('appointments')
          .update(payload)
@@ -4744,6 +4789,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
          set((s) => ({
            appointments: s.appointments.map(a => a.id === id ? data : a)
          }));
+         await get().logOperation('UPDATE', 'appointments', id, apptBefore, data);
        }
      } catch (e) {
        console.error('[updateAppointment] Erro:', e);
@@ -4753,6 +4799,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
    deleteAppointment: async (id) => {
      try {
+       const apptBefore = get().appointments.find(a => a.id === id);
        const { error } = await supabase
          .from('appointments')
          .delete()
@@ -4761,6 +4808,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
        set((s) => ({
          appointments: s.appointments.filter(a => a.id !== id)
        }));
+       await get().logOperation('DELETE', 'appointments', id, apptBefore, null);
      } catch (e) {
        console.error('[deleteAppointment] Erro:', e);
        throw e;

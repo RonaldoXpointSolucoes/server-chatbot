@@ -27,9 +27,11 @@ export default function ContactsManager() {
   const [filterType, setFilterType] = useState('all');
   const [sortOrder, setSortOrder] = useState('recent');
   const [filterGroup, setFilterGroup] = useState('all');
+  const [filterDate, setFilterDate] = useState('all');
   const pageSize = 50;
   
   const [allCompanies, setAllCompanies] = useState<ContactRow[]>([]);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
 
   useEffect(() => {
     if (!tenantId) return;
@@ -97,7 +99,8 @@ export default function ContactsManager() {
     currentFilter = 'all', 
     currentSort = 'recent', 
     currentGroup = 'all',
-    currentType = 'all'
+    currentType = 'all',
+    currentDate = 'all'
   ) => {
     if (!tenantId) return;
     setLoading(true);
@@ -176,6 +179,20 @@ export default function ContactsManager() {
       }
     }
 
+    if (currentDate !== 'all') {
+      const now = new Date();
+      if (currentDate === 'today') {
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        query = query.gte('created_at', startOfDay.toISOString());
+      } else if (currentDate === 'week') {
+        const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        query = query.gte('created_at', startOfWeek.toISOString());
+      } else if (currentDate === 'month') {
+        const startOfMonth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        query = query.gte('created_at', startOfMonth.toISOString());
+      }
+    }
+
     // Apply sorting
     if (currentSort === 'recent') {
       query = query.order('created_at', { ascending: false });
@@ -208,10 +225,10 @@ export default function ContactsManager() {
     setLoading(false);
   };
 
-  // Reset page to 1 when search, filter, sort, type, or group changes
+  // Reset page to 1 when search, filter, sort, type, group, or date changes
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, filterStatus, sortOrder, filterType, filterGroup]);
+  }, [searchTerm, filterStatus, sortOrder, filterType, filterGroup, filterDate]);
 
   // Debounce search term separately
   useEffect(() => {
@@ -224,8 +241,8 @@ export default function ContactsManager() {
 
   // Fetch contacts when any parameters change (no debounce delay for filters/sorting/pagination!)
   useEffect(() => {
-    fetchContacts(debouncedSearchTerm, page, filterStatus, sortOrder, filterGroup, filterType);
-  }, [tenantId, debouncedSearchTerm, filterStatus, sortOrder, page, filterGroup, filterType]);
+    fetchContacts(debouncedSearchTerm, page, filterStatus, sortOrder, filterGroup, filterType, filterDate);
+  }, [tenantId, debouncedSearchTerm, filterStatus, sortOrder, page, filterGroup, filterType, filterDate]);
 
   const handleOpenModal = (contact?: ContactRow) => {
     if (contact) {
@@ -273,9 +290,13 @@ export default function ContactsManager() {
        document_number: payload.document_number ? payload.document_number.replace(/\D/g, '') : null,
        cep: payload.cep,
        address_street: payload.address_street,
+       address_number: payload.address_number,
        address_neighborhood: payload.address_neighborhood,
        address_city: payload.address_city,
        address_state: payload.address_state,
+       latitude: payload.latitude,
+       longitude: payload.longitude,
+       addresses: payload.addresses,
        notes: payload.notes,
        bot_status: payload.bot_status || 'active',
        open_date: payload.open_date,
@@ -284,7 +305,8 @@ export default function ContactsManager() {
        main_activity: payload.main_activity,
        secondary_activities: payload.secondary_activities,
        company_ids: payload.company_ids,
-       tags: payload.tags
+       tags: payload.tags,
+       id_gastro_food: payload.id_gastro_food || null
     };
 
     if (defaultJid) {
@@ -294,77 +316,281 @@ export default function ContactsManager() {
     }
 
     if (editingContact) {
-        const { data, error } = await supabase.from('contacts').update(dataToSave).eq('id', editingContact.id).select().single();
-        if (!error && data) {
-          await useChatStore.getState().syncConversationLabelsWithTags(data.id, data.tags || []);
-          setContacts(prev => {
-           const filtered = prev.filter(c => c.id !== data.id);
-           return [data, ...filtered];
-         });
-       } else if (error) {
-         if (error.code === '23505') {
-            alert('Erro: Este número de celular já está cadastrado para outro contato em sua empresa.');
-            return;
-         } else {
-            alert('Erro ao salvar edição: ' + error.message);
-            return;
-         }
-       }
-    } else {
-       let existing = null;
-       if (cleanPhone && !cleanPhone.startsWith('NO_PHONE_')) {
-         const { data } = await supabase.from('contacts')
-            .select('*')
-            .eq('tenant_id', tenantId)
-            .eq('phone', cleanPhone)
-            .limit(1)
-            .maybeSingle();
-         existing = data;
-       }
-
-       if (existing) {
-           const { data, error } = await supabase.from('contacts').update(dataToSave).eq('id', existing.id).select().single();
-           if (!error && data) {
-             await useChatStore.getState().syncConversationLabelsWithTags(data.id, data.tags || []);
-             setContacts(prev => {
-              const filtered = prev.filter(c => c.id !== data.id);
-              return [data, ...filtered];
-            });
+         const contactBefore = contacts.find(c => c.id === editingContact.id);
+         const { data, error } = await supabase.from('contacts').update(dataToSave).eq('id', editingContact.id).select().single();
+         if (!error && data) {
+           await useChatStore.getState().syncConversationLabelsWithTags(data.id, data.tags || []);
+           setContacts(prev => {
+            const filtered = prev.filter(c => c.id !== data.id);
+            return [data, ...filtered];
+          });
+          await useChatStore.getState().logOperation('UPDATE', 'contacts', data.id, contactBefore, data);
+        } else if (error) {
+          if (error.code === '23505') {
+             alert('Erro: Este número de celular já está cadastrado para outro contato em sua empresa.');
+             return;
           } else {
-            alert('Erro ao atualizar contato existente: ' + error?.message);
+             alert('Erro ao salvar edição: ' + error.message);
+             return;
           }
-          handleCloseModal();
-          return;
-       }
+        }
+     } else {
+        let existing = null;
+        if (cleanPhone && !cleanPhone.startsWith('NO_PHONE_')) {
+          const { data } = await supabase.from('contacts')
+             .select('*')
+             .eq('tenant_id', tenantId)
+             .eq('phone', cleanPhone)
+             .limit(1)
+             .maybeSingle();
+          existing = data;
+        }
 
-        const { data, error } = await supabase.from('contacts').insert([dataToSave]).select().single();
-        if (!error && data) {
-          await useChatStore.getState().syncConversationLabelsWithTags(data.id, data.tags || []);
-          setContacts(prev => [data, ...prev]);
-         setTotalCount(prev => prev + 1);
-       } else if (error) {
-         if (error.code === '23505') {
-            alert('Erro: Este número de celular já está cadastrado para outro contato em sua empresa.');
-            return;
-         } else {
-            alert('Erro ao criar contato: ' + error.message);
-            return;
-         }
-       }
-    }
-    
-    handleCloseModal();
-  };
+        if (existing) {
+            const contactBefore = contacts.find(c => c.id === existing.id) || existing;
+            const { data, error } = await supabase.from('contacts').update(dataToSave).eq('id', existing.id).select().single();
+            if (!error && data) {
+              await useChatStore.getState().syncConversationLabelsWithTags(data.id, data.tags || []);
+              setContacts(prev => {
+               const filtered = prev.filter(c => c.id !== data.id);
+               return [data, ...filtered];
+             });
+             await useChatStore.getState().logOperation('UPDATE', 'contacts', data.id, contactBefore, data);
+           } else {
+             alert('Erro ao atualizar contato existente: ' + error?.message);
+           }
+           handleCloseModal();
+           return;
+        }
+
+         const { data, error } = await supabase.from('contacts').insert([dataToSave]).select().single();
+         if (!error && data) {
+           await useChatStore.getState().syncConversationLabelsWithTags(data.id, data.tags || []);
+           setContacts(prev => [data, ...prev]);
+           setTotalCount(prev => prev + 1);
+           await useChatStore.getState().logOperation('INSERT', 'contacts', data.id, null, data);
+        } else if (error) {
+          if (error.code === '23505') {
+             alert('Erro: Este número de celular já está cadastrado para outro contato em sua empresa.');
+             return;
+          } else {
+             alert('Erro ao criar contato: ' + error.message);
+             return;
+          }
+        }
+     }
+     
+     handleCloseModal();
+   };
 
   const handleDelete = async (id: string) => {
+    const contactBefore = contacts.find(c => c.id === id);
     const { error } = await supabase.from('contacts').delete().eq('id', id);
     if (!error) {
        setContacts(prev => prev.filter(c => c.id !== id));
+       await useChatStore.getState().logOperation('DELETE', 'contacts', id, contactBefore, null);
     }
     setDeleteConfirmId(null);
   };
 
+  const formatDateTime = (dateStr?: string) => {
+    if (!dateStr) return '-';
+    try {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return '-';
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${day}/${month}/${year} ${hours}:${minutes}`;
+    } catch {
+      return '-';
+    }
+  };
+
+  const hasActiveFilters = searchTerm !== '' || filterStatus !== 'all' || filterType !== 'all' || filterGroup !== 'all' || filterDate !== 'all';
+
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setFilterStatus('all');
+    setFilterType('all');
+    setFilterGroup('all');
+    setFilterDate('all');
+    setSortOrder('recent');
+  };
+
+  const handleExportCSV = async () => {
+    if (!tenantId) return;
+    try {
+      let query = supabase
+        .from('contacts')
+        .select('*')
+        .eq('tenant_id', tenantId);
+
+      // Apply the same filters as fetchContacts:
+      if (debouncedSearchTerm) {
+        const searchLower = debouncedSearchTerm.toLowerCase();
+        const { data: matchedContacts } = await supabase
+          .from('contacts')
+          .select('id, company_ids')
+          .eq('tenant_id', tenantId)
+          .or(`name.ilike.%${debouncedSearchTerm}%,custom_name.ilike.%${debouncedSearchTerm}%,fantasy_name.ilike.%${debouncedSearchTerm}%,document_number.ilike.%${debouncedSearchTerm}%,phone.ilike.%${debouncedSearchTerm}%`);
+        
+        const matchedContactIds = matchedContacts?.map(c => c.id) || [];
+        const linkedCompanyIds = matchedContacts?.flatMap(c => c.company_ids || []) || [];
+        const matchedCompanyIds = allCompanies
+          .filter(c => c.name?.toLowerCase().includes(searchLower) || c.fantasy_name?.toLowerCase().includes(searchLower))
+          .map(c => c.id);
+        
+        const explicitIds = Array.from(new Set([...matchedContactIds, ...linkedCompanyIds, ...matchedCompanyIds]));
+        
+        if (explicitIds.length > 0) {
+          if (matchedCompanyIds.length > 0) {
+            query = query.or(`id.in.(${explicitIds.join(',')}),company_ids.ov.{${matchedCompanyIds.join(',')}}`);
+          } else {
+            query = query.in('id', explicitIds);
+          }
+        } else {
+          query = query.eq('id', '00000000-0000-0000-0000-000000000000');
+        }
+      }
+
+      if (filterStatus !== 'all') {
+        if (filterStatus === 'blocked') {
+          query = query.eq('is_blocked', true);
+        } else {
+          query = query.eq('bot_status', filterStatus);
+        }
+      }
+
+      if (filterType === 'companies') {
+        const companyIds = allCompanies.map(c => c.id);
+        if (companyIds.length > 0) {
+          query = query.or(`document_type.eq.cnpj,id.in.(${companyIds.join(',')})`);
+        } else {
+          query = query.eq('document_type', 'cnpj');
+        }
+      } else if (filterType === 'contacts') {
+        const companyIds = allCompanies.map(c => c.id);
+        if (companyIds.length > 0) {
+          query = query
+            .or('document_type.neq.cnpj,document_type.is.null')
+            .not('id', 'in', `(${companyIds.join(',')})`);
+        } else {
+          query = query.or('document_type.neq.cnpj,document_type.is.null');
+        }
+      }
+
+      if (filterGroup !== 'all') {
+        const matchingCompanyIds = allCompanies
+          .filter(c => c.tags && c.tags.includes(filterGroup))
+          .map(c => c.id);
+
+        if (matchingCompanyIds.length > 0) {
+          query = query.or(`tags.cs.[ "${filterGroup}" ],company_ids.ov."{${matchingCompanyIds.join(',')}}"`);
+        } else {
+          query = query.contains('tags', [filterGroup]);
+        }
+      }
+
+      if (filterDate !== 'all') {
+        const now = new Date();
+        if (filterDate === 'today') {
+          const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          query = query.gte('created_at', startOfDay.toISOString());
+        } else if (filterDate === 'week') {
+          const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          query = query.gte('created_at', startOfWeek.toISOString());
+        } else if (filterDate === 'month') {
+          const startOfMonth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          query = query.gte('created_at', startOfMonth.toISOString());
+        }
+      }
+
+      // Apply sorting
+      if (sortOrder === 'recent') {
+        query = query.order('created_at', { ascending: false });
+      } else if (sortOrder === 'oldest') {
+        query = query.order('created_at', { ascending: true });
+      } else if (sortOrder === 'alpha_asc') {
+        query = query.order('name', { ascending: true });
+      } else if (sortOrder === 'alpha_desc') {
+        query = query.order('name', { ascending: false });
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        alert('Erro ao exportar contatos: ' + error.message);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        alert('Nenhum contato para exportar com os filtros atuais.');
+        return;
+      }
+
+      // Generate CSV
+      const headers = ['Nome', 'Celular', 'Email', 'Documento', 'Tipo Documento', 'Status Bot', 'Bloqueado', 'Criado Em'];
+      const rows = data.map(c => [
+        c.name || c.custom_name || '',
+        c.phone || '',
+        c.email || '',
+        c.document_number ? formatDocumentNumber(c.document_number, c.document_type || 'cpf') : '',
+        c.document_type || '',
+        c.bot_status || '',
+        c.is_blocked ? 'Sim' : 'Não',
+        formatDateTime(c.created_at)
+      ]);
+
+      const csvContent = [
+        '\uFEFF' + headers.join(','), // Add BOM for Excel UTF-8 support
+        ...rows.map(row => row.map(val => `"${val.replace(/"/g, '""')}"`).join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `contatos_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err: any) {
+      alert('Erro inesperado ao exportar: ' + err.message);
+    }
+  };
+
   // O filtro local não é mais necessário porque usamos paginação remota.
+  const handleSendMessage = (contact: ContactRow) => {
+     const stateContacts = useChatStore.getState().contacts;
+     const foundContact = stateContacts.find(c => 
+       c.id === contact.id || 
+       c.id.startsWith(contact.id + '_')
+     );
+
+     if (foundContact) {
+       useChatStore.getState().setActiveChat(foundContact.id);
+     } else {
+       const activeChannelFilter = useChatStore.getState().activeChannelFilter;
+       const connectedInstanceName = useChatStore.getState().connectedInstanceName;
+       const instanceId = activeChannelFilter || connectedInstanceName || 'default';
+       const compositeId = contact.id + '_' + instanceId;
+       
+       useChatStore.setState(state => ({
+         contacts: [{
+           ...contact,
+           id: compositeId,
+           instance_id: instanceId === 'default' ? null : instanceId,
+           messages: [],
+           unread: 0,
+           custom_name: contact.custom_name || contact.name,
+         } as any, ...state.contacts]
+       }));
+       useChatStore.getState().setActiveChat(compositeId);
+     }
+     navigate('/chat');
+  };
 
   return (
     <div className="flex-1 flex flex-col h-screen bg-[#111b21] text-[#e9edef] overflow-hidden relative">
@@ -372,37 +598,46 @@ export default function ContactsManager() {
       {/* Header Premium */}
       <div className="h-[72px] shrink-0 w-full bg-[#202c33]/80 backdrop-blur-md border-b border-[#2a3942] flex items-center px-6 justify-between z-10">
         <div className="flex items-center gap-4">
-           {/* Botão de voltar invisível móbile/desktop mas presente se necessário */}
-           <button onClick={() => navigate(-1)} className="p-2 hover:bg-[#2a3942] rounded-full transition-colors hidden md:block">
+           {/* Botão de voltar visível móbile/desktop */}
+           <button onClick={() => navigate(-1)} className="p-2 hover:bg-[#2a3942] rounded-full transition-colors">
               <ArrowLeft size={20} className="text-[#aebac1]" />
            </button>
            <div>
              <h1 className="text-xl font-semibold text-[#e9edef] tracking-tight">Gestão de Contatos</h1>
-             <p className="text-xs text-[#8696a0]">Sincronizado automaticamente via Baileys & Cadastro Manual</p>
+             <p className="text-xs text-[#8696a0] hidden md:block">Sincronizado automaticamente via Baileys & Cadastro Manual</p>
            </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button 
             onClick={() => setIsGroupModalOpen(true)}
-            className="bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center gap-2 hover:scale-[1.02] active:scale-95"
+            className="bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl font-semibold text-xs sm:text-sm transition-all flex items-center gap-1.5 sm:gap-2 hover:scale-[1.02] active:scale-95 shrink-0"
+            title="Grupos Empresariais"
           >
-            <Building2 size={18} /> Grupos Empresariais
+            <Building2 size={16} /> <span className="hidden sm:inline">Grupos Empresariais</span>
+          </button>
+          
+          <button 
+            onClick={handleExportCSV}
+            className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl font-semibold text-xs sm:text-sm transition-all flex items-center gap-1.5 sm:gap-2 hover:scale-[1.02] active:scale-95 shrink-0"
+            title="Exportar CSV"
+          >
+            <FileText size={16} /> <span className="hidden sm:inline">Exportar CSV</span>
           </button>
           
           <button 
             onClick={() => handleOpenModal()}
-            className="bg-emerald-500 hover:bg-emerald-600 text-[#111b21] px-5 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-[0_4px_14px_0_rgba(16,185,129,0.39)] flex items-center gap-2 hover:scale-[1.02] active:scale-95"
+            className="bg-emerald-500 hover:bg-emerald-600 text-[#111b21] px-3 py-2 sm:px-5 sm:py-2.5 rounded-xl font-semibold text-xs sm:text-sm transition-all shadow-[0_4px_14px_0_rgba(16,185,129,0.39)] flex items-center gap-1.5 sm:gap-2 hover:scale-[1.02] active:scale-95 shrink-0"
+            title="Novo Contato"
           >
-            <Plus size={18} /> Novo Contato
+            <Plus size={16} /> <span className="hidden sm:inline">Novo Contato</span><span className="inline sm:hidden">Novo</span>
           </button>
         </div>
       </div>
-
-      {/* Toolbox & Seach */}
-      <div className="px-6 py-5 flex items-center justify-between shrink-0 flex-wrap gap-4">
-         <div className="flex items-center gap-3 w-full max-w-5xl flex-wrap">
-            <div className="relative flex-1 min-w-[240px]">
+      {/* Toolbox & Search */}
+      <div className="px-6 py-4 flex flex-col gap-3 shrink-0 border-b border-[#2a3942]/40 bg-[#111b21]/50">
+         <div className="flex items-center gap-3 w-full">
+            <div className="relative flex-1">
                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8696a0]" />
                <input 
                  type="text" 
@@ -412,60 +647,130 @@ export default function ContactsManager() {
                  className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-10 pr-4 py-2.5 text-sm text-[#e9edef] placeholder-[#8696a0] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all shadow-sm"
                />
             </div>
-            <select 
-               value={sortOrder}
-               onChange={(e) => setSortOrder(e.target.value)}
-               className="bg-[#202c33] border border-[#2a3942] rounded-xl px-4 py-2.5 text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all shadow-sm appearance-none cursor-pointer min-w-[160px]"
+            
+            {/* Botão de Filtros no Mobile */}
+            <button
+              type="button"
+              onClick={() => setShowMobileFilters(!showMobileFilters)}
+              className={cn(
+                "md:hidden p-2.5 rounded-xl border transition-all flex items-center justify-center gap-1.5 text-sm font-semibold",
+                showMobileFilters || hasActiveFilters
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                  : "bg-[#202c33] border-[#2a3942] text-[#e9edef]"
+              )}
+              title="Filtros e Ordenação"
             >
-               <option value="recent">Mais Recentes</option>
-               <option value="oldest">Mais Antigos</option>
-               <option value="alpha_asc">Ordem Alfabética (A-Z)</option>
-               <option value="alpha_desc">Ordem Alfabética (Z-A)</option>
-               <option value="document_asc">CNPJ / CPF (Crescente)</option>
-               <option value="document_desc">CNPJ / CPF (Decrescente)</option>
-               <option value="phone_asc">Celular (Crescente)</option>
-               <option value="phone_desc">Celular (Decrescente)</option>
-            </select>
-            <select 
-               value={filterType}
-               onChange={(e) => setFilterType(e.target.value)}
-               className="bg-[#202c33] border border-[#2a3942] rounded-xl px-4 py-2.5 text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all shadow-sm appearance-none cursor-pointer min-w-[150px]"
-            >
-               <option value="all">Todos os Tipos</option>
-               <option value="companies">Apenas Empresas</option>
-               <option value="contacts">Apenas Contatos</option>
-            </select>
-            <select 
-               value={filterStatus}
-               onChange={(e) => setFilterStatus(e.target.value)}
-               className="bg-[#202c33] border border-[#2a3942] rounded-xl px-4 py-2.5 text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all shadow-sm appearance-none cursor-pointer min-w-[150px]"
-            >
-               <option value="all">Todos os Status</option>
-               <option value="active">Apenas Ativos</option>
-               <option value="paused">Apenas Pausados</option>
-               <option value="blocked">Apenas Bloqueados</option>
-            </select>
-            {useChatStore.getState().tenantInfo?.settings?.contactGroups?.length > 0 && (
-               <select 
-                 value={filterGroup}
-                 onChange={(e) => setFilterGroup(e.target.value)}
-                 className="bg-[#202c33] border border-[#2a3942] rounded-xl px-4 py-2.5 text-sm text-[#e9edef] focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all shadow-sm appearance-none cursor-pointer min-w-[150px]"
-               >
-                  <option value="all">Todos os Grupos</option>
-                  {useChatStore.getState().tenantInfo?.settings?.contactGroups.map((g: any) => (
-                    <option key={g.id} value={g.id}>{g.name}</option>
-                  ))}
-               </select>
-            )}
+               {/* SlidersHorizontal SVG */}
+               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-sliders-horizontal"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>
+               <span className="hidden sm:inline">Filtros</span>
+            </button>
+
+            {/* Totalizador visível ao lado da busca no desktop */}
+            <div className="hidden md:flex bg-[#202c33] border border-[#2a3942] rounded-xl p-1 text-xs font-semibold text-[#8696a0] shrink-0">
+               <div className="px-3 py-1.5 bg-[#2a3942] text-[#e9edef] rounded-lg shadow-sm font-bold">Total ({totalCount})</div>
+            </div>
          </div>
-         <div className="flex bg-[#202c33] border border-[#2a3942] rounded-lg p-1 text-xs font-semibold text-[#8696a0]">
-            <div className="px-3 py-1.5 bg-[#2a3942] text-[#e9edef] rounded shadow-sm">Total ({totalCount})</div>
+
+         {/* Painel de Filtros (Responsivo) */}
+         <div className={cn(
+           "md:flex flex-wrap items-center gap-3 w-full transition-all duration-300",
+           showMobileFilters ? "flex animate-in slide-in-from-top-2" : "hidden md:flex"
+         )}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-wrap gap-2.5 w-full">
+               <div className="flex flex-col gap-1 w-full md:w-auto">
+                 <select 
+                    value={sortOrder}
+                    onChange={(e) => setSortOrder(e.target.value)}
+                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl px-3 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none bg-no-repeat"
+                 >
+                    <option value="recent">Mais Recentes</option>
+                    <option value="oldest">Mais Antigos</option>
+                    <option value="alpha_asc">Ordem Alfabética (A-Z)</option>
+                    <option value="alpha_desc">Ordem Alfabética (Z-A)</option>
+                    <option value="document_asc">CNPJ / CPF (Crescente)</option>
+                    <option value="document_desc">CNPJ / CPF (Decrescente)</option>
+                    <option value="phone_asc">Celular (Crescente)</option>
+                    <option value="phone_desc">Celular (Decrescente)</option>
+                 </select>
+               </div>
+               
+               <div className="flex flex-col gap-1 w-full md:w-auto">
+                 <select 
+                    value={filterType}
+                    onChange={(e) => setFilterType(e.target.value)}
+                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl px-3 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
+                 >
+                    <option value="all">Todos os Tipos</option>
+                    <option value="companies">Apenas Empresas</option>
+                    <option value="contacts">Apenas Contatos</option>
+                 </select>
+               </div>
+
+               <div className="flex flex-col gap-1 w-full md:w-auto">
+                 <select 
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl px-3 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
+                 >
+                    <option value="all">Todos os Status</option>
+                    <option value="active">Apenas Ativos</option>
+                    <option value="paused">Apenas Pausados</option>
+                    <option value="blocked">Apenas Bloqueados</option>
+                 </select>
+               </div>
+
+               <div className="flex flex-col gap-1 w-full md:w-auto">
+                 <select 
+                    value={filterDate}
+                    onChange={(e) => setFilterDate(e.target.value)}
+                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl px-3 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
+                 >
+                    <option value="all">Todas as Datas</option>
+                    <option value="today">Cadastrado Hoje</option>
+                    <option value="week">Últimos 7 dias</option>
+                    <option value="month">Últimos 30 dias</option>
+                 </select>
+               </div>
+
+               {useChatStore.getState().tenantInfo?.settings?.contactGroups?.length > 0 && (
+                  <div className="flex flex-col gap-1 w-full md:w-auto col-span-2 sm:col-span-1">
+                    <select 
+                      value={filterGroup}
+                      onChange={(e) => setFilterGroup(e.target.value)}
+                      className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl px-3 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none cursor-pointer appearance-none"
+                    >
+                       <option value="all">Todos os Grupos</option>
+                       {useChatStore.getState().tenantInfo?.settings?.contactGroups.map((g: any) => (
+                         <option key={g.id} value={g.id}>{g.name}</option>
+                       ))}
+                    </select>
+                  </div>
+               )}
+
+               {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    className="col-span-2 sm:col-span-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-3 py-2 rounded-xl font-semibold text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 hover:scale-[1.01] active:scale-95 md:w-auto shrink-0"
+                  >
+                    <X size={14} /> Limpar Filtros
+                  </button>
+               )}
+            </div>
+         </div>
+
+         {/* Totalizador visível no mobile */}
+         <div className="flex md:hidden justify-between items-center bg-[#202c33]/50 border border-[#2a3942]/40 rounded-xl p-2.5 text-xs font-semibold text-[#8696a0] mt-1 w-full">
+            <span>Resultados Filtrados</span>
+            <span className="px-2.5 py-1 bg-[#2a3942] text-[#e9edef] rounded-lg shadow-sm font-bold">Total: {totalCount}</span>
          </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto styled-scrollbar px-6 pb-12">
-        <div className="bg-[#182229] border border-[#2a3942] rounded-2xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex-1 overflow-y-auto styled-scrollbar px-4 sm:px-6 pb-12">
+         
+         {/* Desktop View (Tabela Completa com Scroll Lateral se necessário) */}
+         <div className="hidden md:block bg-[#182229] border border-[#2a3942] rounded-2xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
            <div className="overflow-x-auto w-full">
            <table className="w-full text-left border-collapse min-w-[900px]">
               <thead>
@@ -473,6 +778,7 @@ export default function ContactsManager() {
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Identificação</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Celular (ID)</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Email & Docs</th>
+                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Criado em</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Status Bot</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider text-right">Ações</th>
                 </tr>
@@ -480,14 +786,14 @@ export default function ContactsManager() {
               <tbody className="divide-y divide-[#2a3942]/60">
                 {loading ? (
                   <tr>
-                    <td colSpan={5} className="py-20 text-center text-[#8696a0]">
+                    <td colSpan={6} className="py-20 text-center text-[#8696a0]">
                       <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
                       Carregando base de contatos...
                     </td>
                   </tr>
                 ) : contacts.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-20 text-center text-[#8696a0]">
+                    <td colSpan={6} className="py-20 text-center text-[#8696a0]">
                       Nenhum contato encontrado.
                     </td>
                   </tr>
@@ -517,7 +823,7 @@ export default function ContactsManager() {
                                />
                                <div className={`hidden w-10 h-10 rounded-full ${contact.document_type === 'cnpj' ? 'bg-blue-500/10 border border-blue-500/20 text-blue-500' : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-500'} items-center justify-center font-bold text-lg shrink-0`}>
                                   {contact.document_type === 'cnpj' ? <Building2 size={20} /> : (contact.custom_name || contact.name || 'U').charAt(0).toUpperCase()}
-                               </div>
+                                </div>
                             </>
                           ) : (
                             <div className={`w-10 h-10 rounded-full ${contact.document_type === 'cnpj' ? 'bg-blue-500/10 border border-blue-500/20 text-blue-500' : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-500'} flex items-center justify-center font-bold text-lg shrink-0`}>
@@ -537,7 +843,7 @@ export default function ContactsManager() {
                                      <Building2 size={10} />
                                      {contact.fantasy_name}
                                   </span>
-                               )}
+                                )}
                              </div>
                              {contact.custom_name && contact.name && contact.custom_name !== contact.name && (
                                 <span className="text-xs text-[#8696a0]">Orig: {contact.name}</span>
@@ -570,42 +876,42 @@ export default function ContactsManager() {
                              {contact.company_ids && contact.company_ids.length > 0 && (
                                <div className="flex flex-col gap-1.5 mt-2">
                                  {contact.company_ids.map((cId: string) => {
-                                   const company = allCompanies.find(c => c.id === cId);
-                                   if (!company) return null;
-                                   return (
-                                     <div key={`assoc-${cId}`} className="flex flex-col gap-1 p-1.5 rounded-lg bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
-                                       <span className="flex items-center gap-1.5 text-[11px] font-semibold text-[#54656f] dark:text-[#aebac1]">
-                                         <Building2 size={12} className="text-[#00a884]"/>
-                                         Empresa: {company.fantasy_name || company.name}
-                                       </span>
-                                       {company.tags && company.tags.length > 0 && (
-                                         <div className="flex items-center gap-1 flex-wrap pl-4">
-                                           {company.tags.map((tagId: string) => {
-                                              const grp = useChatStore.getState().tenantInfo?.settings?.contactGroups?.find((g: any) => g.id === tagId);
-                                              if (!grp) return null;
-                                              return (
-                                                 <span 
-                                                   key={`grp-${tagId}`} 
-                                                   className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold border bg-opacity-10 dark:bg-opacity-10 backdrop-blur-sm cursor-pointer hover:opacity-80 transition-opacity"
-                                                   style={{ 
-                                                      backgroundColor: `${grp.color}15`, 
-                                                      borderColor: `${grp.color}30`,
-                                                      color: grp.color 
-                                                   }}
-                                                   onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setFilterGroup(tagId);
-                                                   }}
-                                                   title="Filtrar contatos por este grupo"
-                                                 >
-                                                    Grupo: {grp.name}
-                                                 </span>
-                                              );
-                                           })}
-                                         </div>
-                                       )}
-                                     </div>
-                                   );
+                                    const company = allCompanies.find(c => c.id === cId);
+                                    if (!company) return null;
+                                    return (
+                                      <div key={`assoc-${cId}`} className="flex flex-col gap-1 p-1.5 rounded-lg bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
+                                        <span className="flex items-center gap-1.5 text-[11px] font-semibold text-[#54656f] dark:text-[#aebac1]">
+                                          <Building2 size={12} className="text-[#00a884]"/>
+                                          Empresa: {company.fantasy_name || company.name}
+                                        </span>
+                                        {company.tags && company.tags.length > 0 && (
+                                          <div className="flex items-center gap-1 flex-wrap pl-4">
+                                            {company.tags.map((tagId: string) => {
+                                               const grp = useChatStore.getState().tenantInfo?.settings?.contactGroups?.find((g: any) => g.id === tagId);
+                                               if (!grp) return null;
+                                               return (
+                                                  <span 
+                                                    key={`grp-${tagId}`} 
+                                                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold border bg-opacity-10 dark:bg-opacity-10 backdrop-blur-sm cursor-pointer hover:opacity-80 transition-opacity"
+                                                    style={{ 
+                                                       backgroundColor: `${grp.color}15`, 
+                                                       borderColor: `${grp.color}30`,
+                                                       color: grp.color 
+                                                    }}
+                                                    onClick={(e) => {
+                                                       e.stopPropagation();
+                                                       setFilterGroup(tagId);
+                                                    }}
+                                                    title="Filtrar contatos por este grupo"
+                                                  >
+                                                     Grupo: {grp.name}
+                                                  </span>
+                                               );
+                                            })}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
                                  })}
                                </div>
                              )}
@@ -641,26 +947,26 @@ export default function ContactsManager() {
                          </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
+                         <span className="text-sm text-[#d1d7db]">{formatDateTime(contact.created_at)}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
                          <span className={cn(
                            "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border",
                            contact.is_blocked
                              ? "bg-red-500/10 text-red-400 border-red-500/20"
                              : contact.bot_status === 'active' 
-                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
-                              : "bg-[#2a3942]/40 text-[#8696a0] border-[#2a3942]/60"
-                          )}>
+                               ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                               : "bg-[#2a3942]/40 text-[#8696a0] border-[#2a3942]/60"
+                         )}>
                            {contact.is_blocked ? 'Bloqueado' : contact.bot_status === 'active' ? 'Ativo' : 'Pausado'}
                          </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
                          <div className="flex items-center justify-end gap-2 opacity-50 hover:opacity-100 transition-opacity">
                             <button 
-                              onClick={() => {
-                                useChatStore.getState().setActiveChat(contact.id);
-                                navigate('/');
-                              }} 
-                              className="p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-colors" 
-                              title="Enviar Mensagem"
+                               onClick={() => handleSendMessage(contact)} 
+                               className="p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-colors" 
+                               title="Enviar Mensagem"
                             >
                                <MessageSquare size={16} />
                             </button>
@@ -687,33 +993,204 @@ export default function ContactsManager() {
               </tbody>
            </table>
            </div>
-           
-           {/* Pagination Controls */}
-           {totalPages > 1 && (
-             <div className="flex items-center justify-between px-6 py-4 bg-[#202c33]/80 border-t border-[#2a3942] shrink-0 backdrop-blur-md">
-                <span className="text-sm text-[#8696a0]">
-                   Página <span className="font-semibold text-[#e9edef]">{page}</span> de <span className="font-semibold text-[#e9edef]">{totalPages}</span>
-                </span>
-                <div className="flex items-center gap-2">
-                   <button 
-                     onClick={() => setPage(p => Math.max(1, p - 1))}
-                     disabled={page === 1}
-                     className="px-4 py-2 text-sm font-semibold rounded-lg bg-[#2a3942] text-[#e9edef] hover:bg-[#374b57] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                   >
-                      Anterior
-                   </button>
-                   <button 
-                     onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                     disabled={page === totalPages}
-                     className="px-4 py-2 text-sm font-semibold rounded-lg bg-[#2a3942] text-[#e9edef] hover:bg-[#374b57] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                   >
-                      Próximo
-                   </button>
-                </div>
-             </div>
-           )}
-           
-        </div>
+         </div>
+
+         {/* Mobile View (Card de 2 Linhas Prático e Extremamente Otimizado) */}
+         <div className="block md:hidden space-y-3">
+            {loading ? (
+              <div className="py-16 text-center text-[#8696a0] bg-[#182229] border border-[#2a3942] rounded-2xl shadow-xl">
+                <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                Carregando base de contatos...
+              </div>
+            ) : contacts.length === 0 ? (
+              <div className="py-16 text-center text-[#8696a0] bg-[#182229] border border-[#2a3942] rounded-2xl shadow-xl">
+                Nenhum contato encontrado.
+              </div>
+            ) : (
+              contacts.map(contact => {
+                const isPseudoPhone = contact.phone?.startsWith('NO_PHONE_') || contact.phone?.startsWith('CNPJ_');
+                const displayPhone = isPseudoPhone ? 'N/A' : (contact.phone?.startsWith('55') ? contact.phone.substring(2) : (contact.phone || 'N/A'));
+
+                return (
+                  <div 
+                    key={`mob-card-${contact.id}`} 
+                    className="p-4 bg-[#182229] border border-[#2a3942] rounded-2xl shadow-md hover:border-[#2a3942]/80 transition-colors flex flex-col gap-2.5"
+                  >
+                     {/* Linha 1: Avatar + Nome/Empresa + Status */}
+                     <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                           {contact.profile_picture_url ? (
+                              <img 
+                                src={contact.profile_picture_url} 
+                                alt="Profile" 
+                                className="w-10 h-10 rounded-full object-cover border border-[#2a3942] shrink-0" 
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                  if (e.currentTarget.nextElementSibling) {
+                                     e.currentTarget.nextElementSibling.classList.remove('hidden');
+                                     e.currentTarget.nextElementSibling.classList.add('flex');
+                                  }
+                                }}
+                              />
+                           ) : null}
+                           <div className={cn(
+                             "w-10 h-10 rounded-full flex items-center justify-center font-bold text-base shrink-0",
+                             contact.profile_picture_url ? "hidden" : "flex",
+                             contact.document_type === 'cnpj' ? 'bg-blue-500/10 border border-blue-500/20 text-blue-500' : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-500'
+                           )}>
+                              {contact.document_type === 'cnpj' ? <Building2 size={18} /> : (contact.custom_name || contact.name || 'U').charAt(0).toUpperCase()}
+                           </div>
+                           
+                           <div className="flex flex-col min-w-0">
+                              <span className={cn(
+                                "font-semibold text-sm truncate leading-tight",
+                                contact.document_type === 'cnpj' ? 'text-blue-400' : 'text-[#e9edef]'
+                              )}>
+                                 {contact.custom_name || contact.name}
+                              </span>
+                              {contact.document_type === 'cnpj' && !contact.fantasy_name && (
+                                 <span className="w-max px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 text-[9px] font-black uppercase text-blue-400 rounded-md mt-0.5">
+                                    Empresa
+                                 </span>
+                              )}
+                              
+                              {/* Nome Fantasia */}
+                              {contact.fantasy_name && (
+                                 <span className={cn(
+                                   "flex items-center gap-1 text-[10px] font-bold truncate mt-0.5",
+                                   contact.document_type === 'cnpj' ? 'text-blue-400/80' : 'text-emerald-400/80'
+                                 )}>
+                                    <Building2 size={10} className="shrink-0" />
+                                    {contact.fantasy_name}
+                                 </span>
+                              )}
+                           </div>
+                        </div>
+
+                        {/* Status Badge */}
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border shrink-0",
+                          contact.is_blocked
+                            ? "bg-red-500/10 text-red-400 border-red-500/20"
+                            : contact.bot_status === 'active' 
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                              : "bg-[#2a3942]/40 text-[#8696a0] border-[#2a3942]/60"
+                        )}>
+                          {contact.is_blocked ? 'Bloq.' : contact.bot_status === 'active' ? 'Ativo' : 'Paus.'}
+                        </span>
+                     </div>
+
+                     {/* Linha 2: Telefone/Docs + Ações Rápidas */}
+                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-[#2a3942]/30">
+                        <div className="flex flex-col gap-0.5 text-[11px] text-[#8696a0] min-w-0">
+                           <span className="flex items-center gap-1.5 font-mono text-[#d1d7db] font-semibold">
+                              <Phone size={11} className="text-[#8696a0]" /> {displayPhone}
+                           </span>
+                           <span className="flex items-center gap-1.5 truncate">
+                              {contact.email ? (
+                                <>
+                                  <Mail size={11} className="text-[#8696a0] shrink-0" /> 
+                                  <span className="truncate">{contact.email}</span>
+                                </>
+                              ) : contact.document_number ? (
+                                <>
+                                  <FileText size={11} className="text-[#8696a0] shrink-0" /> 
+                                  <span className="font-mono">{formatDocumentNumber(contact.document_number, contact.document_type || 'cpf')}</span>
+                                </>
+                              ) : (
+                                <span className="italic text-[#8696a0]/40">Sem e-mail / documento</span>
+                              )}
+                           </span>
+
+                           {/* Badges de grupos no mobile */}
+                           {contact.tags && contact.tags.length > 0 && (
+                             <div className="flex items-center gap-1 flex-wrap mt-1">
+                                {contact.tags.map((tagId: string) => {
+                                   const grp = useChatStore.getState().tenantInfo?.settings?.contactGroups?.find((g: any) => g.id === tagId);
+                                   if (!grp) return null;
+                                   return (
+                                      <span 
+                                        key={`mob-tag-${tagId}`} 
+                                        className="px-1 py-0.2 rounded text-[8px] font-black uppercase border shrink-0"
+                                        style={{ 
+                                           backgroundColor: `${grp.color}10`, 
+                                           borderColor: `${grp.color}25`,
+                                           color: grp.color 
+                                        }}
+                                      >
+                                         {grp.name}
+                                      </span>
+                                   );
+                                })}
+                             </div>
+                           )}
+                        </div>
+
+                        {/* Ações */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                           <button 
+                             onClick={() => handleSendMessage(contact)} 
+                             className="p-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-xl transition-all border border-blue-500/10" 
+                             title="Enviar Mensagem"
+                           >
+                              <MessageSquare size={14} />
+                           </button>
+
+                           <button 
+                             onClick={() => handleOpenModal(contact)} 
+                             className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded-xl transition-all border border-emerald-500/10" 
+                             title="Editar"
+                           >
+                              <Edit2 size={14} />
+                           </button>
+                           
+                           {deleteConfirmId === contact.id ? (
+                              <div className="flex items-center gap-1 bg-red-500/10 border border-red-500/20 rounded-xl p-1 animate-in zoom-in-95 duration-200">
+                                 <button onClick={() => handleDelete(contact.id)} className="px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-500 hover:text-white rounded transition-colors">Excluir</button>
+                                 <button onClick={() => setDeleteConfirmId(null)} className="px-1 text-[10px] text-[#8696a0] hover:bg-black/20 rounded transition-colors">X</button>
+                              </div>
+                           ) : (
+                              <button 
+                                onClick={() => setDeleteConfirmId(contact.id)} 
+                                className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl transition-all border border-red-500/10" 
+                                title="Remover"
+                              >
+                                 <Trash2 size={14} />
+                              </button>
+                           )}
+                        </div>
+                     </div>
+                  </div>
+                )
+              })
+            )}
+         </div>
+
+         {/* Pagination Controls */}
+         {totalPages > 1 && (
+           <div className="flex items-center justify-between px-4 sm:px-6 py-4 bg-[#202c33]/80 border border-[#2a3942] rounded-2xl shrink-0 backdrop-blur-md mt-4">
+              <span className="text-xs sm:text-sm text-[#8696a0]">
+                 Página <span className="font-semibold text-[#e9edef]">{page}</span> de <span className="font-semibold text-[#e9edef]">{totalPages}</span>
+              </span>
+              <div className="flex items-center gap-2">
+                 <button 
+                   onClick={() => setPage(p => Math.max(1, p - 1))}
+                   disabled={page === 1}
+                   className="px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold rounded-lg bg-[#2a3942] text-[#e9edef] hover:bg-[#374b57] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                 >
+                    Anterior
+                 </button>
+                 <button 
+                   onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                   disabled={page === totalPages}
+                   className="px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold rounded-lg bg-[#2a3942] text-[#e9edef] hover:bg-[#374b57] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                 >
+                    Próximo
+                 </button>
+              </div>
+           </div>
+         )}
+         
       </div>
 
       <RenameModal 

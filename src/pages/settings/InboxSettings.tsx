@@ -136,6 +136,7 @@ export default function InboxSettings() {
         bot_instructions: botInstructions
       };
 
+      const instBefore = { ...instance };
       const { error } = await supabase.from('whatsapp_instances')
         .update({ 
            display_name: displayName,
@@ -145,6 +146,10 @@ export default function InboxSettings() {
            settings: updatedSettings
         })
         .eq('id', instance.id);
+      if (!error) {
+         const instAfter = { ...instance, display_name: displayName, api_key: apiKey, color: instanceColor, notification_sound: notificationSound, settings: updatedSettings };
+         await useChatStore.getState().logOperation('UPDATE', 'whatsapp_instances', instance.id, instBefore, instAfter);
+      }
 
       if (error) throw error;
       
