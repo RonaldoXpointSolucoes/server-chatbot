@@ -1504,7 +1504,7 @@ class EventProcessor {
             if (connection === 'close') {
                 const reason = lastDisconnect?.error?.output?.statusCode;
                 const loggedOut = reason === 401;
-                const isTransient = [408, 428, 440, 503, 515].includes(reason);
+                const isTransient = [102, 408, 428, 440, 503, 515, 1006].includes(reason) || !reason;
 
                 if (isTransient) {
                     await supabase.from('whatsapp_instances')
