@@ -843,7 +843,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 nomeIa: companySettings.nome_ia || companyName || 'Luna',
                 endereco: companySettings.endereco || '',
                 horarioFuncionamento: companySettings.horario_funcionamento || '',
-                linkCardapio: companySettings.link_cardapio || '',
+                linkCardapio: (companySettings.link_cardapio || '').replace(/\/+$/, ''),
                 instagram: companySettings.instagram || '',
                 googleMaps: companySettings.google_maps || '',
                 youtube: companySettings.youtube || '',
@@ -1037,7 +1037,21 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             basePrompt += `\n\n### DIRETRIZES DO CARDÁPIO DIGITAL (ESTRITAS E OBRIGATÓRIAS) ###\n` +
                           `1. O link oficial do cardápio digital da empresa é: [LINK_CARDAPIO]. Você DEVE usar e enviar exatamente este link: [LINK_CARDAPIO] sempre que se referir ao cardápio digital, site, menu ou onde fazer pedidos.\n` +
                           `2. PRIORIDADE ABSOLUTA: NUNCA sob nenhuma circunstância use ou informe qualquer outro link ou URL de cardápio/site que você encontrar na Base de Conhecimento (RAG) ou no contexto dos arquivos. O link [LINK_CARDAPIO] é soberano e anula qualquer outro link divergente encontrado nos documentos.\n` +
-                          `3. Quando o cliente pedir o link do cardápio, envie apenas e exatamente o link [LINK_CARDAPIO].\n`;
+                          `3. Quando o cliente pedir o link do cardápio, envie apenas e exatamente o link [LINK_CARDAPIO].\n` +
+                          `4. Sempre que você citar ou enviar um produto do cardápio para o cliente, você DEVE enviar o link individual do produto para que ele possa acessar diretamente. Use o 'link_produto' retornado pela ferramenta 'Consultar_produtos_cardapio'. Se não estiver disponível no retorno, construa o link no formato: [LINK_CARDAPIO]/produto/CODIGO_DO_PRODUTO (onde CODIGO_DO_PRODUTO é o 'produto_id' retornado pela ferramenta).\n` +
+                          `5. DIRETRIZ DE FORMATAÇÃO E ESPAÇAMENTO DE MENSAGENS (ESTRITA):\n` +
+                          `   - Quando listar produtos ou enviar respostas para o cliente, NUNCA agrupe tudo em um único bloco de texto ou parágrafo longo. Isso torna a leitura cansativa e confusa no WhatsApp.\n` +
+                          `   - Você DEVE obrigatoriamente pular UMA ou DUAS linhas (usando quebras de linha duplas \\n\\n) entre cada produto apresentado ou seções da mensagem.\n` +
+                          `   - Para cada produto listado, use o seguinte padrão de formatação limpo e espaçado:\n` +
+                          `     *Nome do Produto*\n` +
+                          `     Descrição: [Descrição do produto]\n` +
+                          `     Preço: R$ [Preço]\n` +
+                          `     👉 Acesse e peça aqui: [link_produto]\n\n` +
+                          `     *Próximo Produto*\n` +
+                          `     Descrição: [Descrição do próximo produto]\n` +
+                          `     Preço: R$ [Preço]\n` +
+                          `     👉 Acesse e peça aqui: [link_produto]\n` +
+                          `   - Mantenha sempre um tom amigável e uma formatação arejada com bastante espaçamento visual (com duas quebras de linha) entre os itens apresentados.\n`;
 
             // Diretrizes de Vendas e Montagem de Pedido
             basePrompt += `\n\n### DIRETRIZES DE VENDAS, CARDÁPIO E MONTAGEM DE PEDIDO (ESTRITAS) ###\n` +
@@ -1984,13 +1998,21 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     );
                                 }
 
+                                let baseCardapioUrl = companySettings.link_cardapio || '';
+                                if (baseCardapioUrl) {
+                                    baseCardapioUrl = baseCardapioUrl.replace(/\/+$/, '');
+                                } else {
+                                    baseCardapioUrl = 'https://www.burguerplus.com.br/loja/burguerplus';
+                                }
+
                                 const formattedProducts = filteredProducts.slice(0, 30).map(p => ({
                                     produto_id: p.id,
                                     categoria: gruposMap[p.grupo_id] || 'Outros',
                                     nome: p.name,
                                     descricao: p.description || 'Sem descrição',
                                     preco: Number(p.price || 0),
-                                    link_imagem: p.image || ''
+                                    link_imagem: p.image || '',
+                                    link_produto: `${baseCardapioUrl}/produto/${p.id}`
                                 }));
 
                                 functionResult = { 
