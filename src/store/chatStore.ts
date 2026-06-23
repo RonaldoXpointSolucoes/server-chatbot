@@ -4166,7 +4166,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                  
                  // Impede notificação/Unread em mensagens antigas de sincronismo de histórico
                   if (isClient && !isHistorical && !updatedContact.is_blocked) {
-                     if (s.activeChatId !== cid) {
+                     const isFocused = typeof document !== 'undefined' && document.hasFocus();
+                     if (s.activeChatId !== cid || !isFocused) {
                          updatedContact.unread = (updatedContact.unread || 0) + 1;
                      } else {
                          updatedContact.isManuallyUnread = false;

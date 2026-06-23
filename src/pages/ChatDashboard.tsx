@@ -504,15 +504,40 @@ export default function ChatDashboard() {
   const [editingMessage, setEditingMessage] = useState<{ id: string, text: string } | null>(null);
   const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
 
-  // Garante que o chat ativo seja marcado como lido automaticamente ao ser aberto ou ao receber novas mensagens
+  // Garante que o chat ativo seja marcado como lido automaticamente ao ser aberto ou ao receber novas mensagens apenas se a tela/aba estiver com foco
   useEffect(() => {
     if (activeChatId) {
       const activeContact = contacts.find(c => c.id === activeChatId);
       if (activeContact && Number(activeContact.unread || 0) > 0 && !activeContact.isManuallyUnread) {
-        useChatStore.getState().markAsRead(activeChatId);
+        if (typeof document !== 'undefined' && document.hasFocus()) {
+          useChatStore.getState().markAsRead(activeChatId);
+        }
       }
     }
   }, [activeChatId, contacts]);
+
+  // Listener para marcar como lido quando o usuário retorna à aba ou foca a janela
+  useEffect(() => {
+    const handleFocusOrVisibility = () => {
+      if (typeof document !== 'undefined' && document.hasFocus()) {
+        const state = useChatStore.getState();
+        if (state.activeChatId) {
+          const activeContact = state.contacts.find(c => c.id === state.activeChatId);
+          if (activeContact && (Number(activeContact.unread || 0) > 0 || activeContact.isManuallyUnread)) {
+            state.markAsRead(state.activeChatId);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('focus', handleFocusOrVisibility);
+    document.addEventListener('visibilitychange', handleFocusOrVisibility);
+
+    return () => {
+      window.removeEventListener('focus', handleFocusOrVisibility);
+      document.removeEventListener('visibilitychange', handleFocusOrVisibility);
+    };
+  }, []);
 
   // Limpa o termo de pesquisa (input e filtro) sempre que a caixa comercial/instância (activeChannelFilter) ou o tipo de filtro (filterType) for alterado
   useEffect(() => {

@@ -1038,19 +1038,18 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `1. O link oficial do cardápio digital da empresa é: [LINK_CARDAPIO]. Você DEVE usar e enviar exatamente este link: [LINK_CARDAPIO] sempre que se referir ao cardápio digital, site, menu ou onde fazer pedidos.\n` +
                           `2. PRIORIDADE ABSOLUTA: NUNCA sob nenhuma circunstância use ou informe qualquer outro link ou URL de cardápio/site que você encontrar na Base de Conhecimento (RAG) ou no contexto dos arquivos. O link [LINK_CARDAPIO] é soberano e anula qualquer outro link divergente encontrado nos documentos.\n` +
                           `3. Quando o cliente pedir o link do cardápio, envie apenas e exatamente o link [LINK_CARDAPIO].\n` +
-                          `4. Sempre que você citar ou enviar um produto do cardápio para o cliente, você DEVE enviar o link individual do produto para que ele possa acessar diretamente. Use o 'link_produto' retornado pela ferramenta 'Consultar_produtos_cardapio'. Se não estiver disponível no retorno, construa o link no formato: [LINK_CARDAPIO]/produto/CODIGO_DO_PRODUTO (onde CODIGO_DO_PRODUTO é o 'produto_id' retornado pela ferramenta).\n` +
+                          `4. REGRAS PARA INCLUIR LINKS DE PRODUTOS E CARDÁPIO (CRÍTICAS):\n` +
+                          `   - Se você estiver listando ou recomendando até 3 produtos (no máximo 3), você DEVE incluir o link individual de cada produto logo abaixo dele, usando o 'link_produto' retornado pela ferramenta 'Consultar_produtos_cardapio'.\n` +
+                          `     * Formato do link do produto: se construir o link manualmente, ele deve seguir a estrutura exata: [LINK_CARDAPIO]/loja/burguerplus/produto/CODIGO_DO_PRODUTO (por exemplo: https://www.burguerplus.com.br/loja/burguerplus/produto/CODIGO_DO_PRODUTO).\n` +
+                          `   - Se a lista de produtos for grande (mais de 3 produtos), você NÃO DEVE incluir os links individuais de cada produto para não poluir a mensagem. Em vez disso, apresente os produtos de forma limpa e, ao final da lista, envie apenas o link geral do cardápio digital (ex: '[LINK_CARDAPIO]').\n` +
                           `5. DIRETRIZ DE FORMATAÇÃO E ESPAÇAMENTO DE MENSAGENS (ESTRITA):\n` +
                           `   - Quando listar produtos ou enviar respostas para o cliente, NUNCA agrupe tudo em um único bloco de texto ou parágrafo longo. Isso torna a leitura cansativa e confusa no WhatsApp.\n` +
                           `   - Você DEVE obrigatoriamente pular UMA ou DUAS linhas (usando quebras de linha duplas \\n\\n) entre cada produto apresentado ou seções da mensagem.\n` +
-                          `   - Para cada produto listado, use o seguinte padrão de formatação limpo e espaçado:\n` +
+                          `   - Para cada produto listado, use o seguinte padrão de formatação limpo e espaçado (incluindo o link apenas se a lista tiver no máximo 3 produtos):\n` +
                           `     *Nome do Produto*\n` +
                           `     Descrição: [Descrição do produto]\n` +
                           `     Preço: R$ [Preço]\n` +
-                          `     👉 Acesse e peça aqui: [link_produto]\n\n` +
-                          `     *Próximo Produto*\n` +
-                          `     Descrição: [Descrição do próximo produto]\n` +
-                          `     Preço: R$ [Preço]\n` +
-                          `     👉 Acesse e peça aqui: [link_produto]\n` +
+                          `     👉 Acesse e peça aqui: [link_produto] (INCLUIR ESTE LINK APENAS SE A LISTA DE PRODUTOS TIVER NO MÁXIMO 3 PRODUTOS)\n\n` +
                           `   - Mantenha sempre um tom amigável e uma formatação arejada com bastante espaçamento visual (com duas quebras de linha) entre os itens apresentados.\n`;
 
             // Diretrizes de Vendas e Montagem de Pedido
@@ -2003,6 +2002,16 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     baseCardapioUrl = baseCardapioUrl.replace(/\/+$/, '');
                                 } else {
                                     baseCardapioUrl = 'https://www.burguerplus.com.br/loja/burguerplus';
+                                }
+
+                                // Se a URL não contiver /loja/, adiciona o slug de forma inteligente
+                                if (baseCardapioUrl && !baseCardapioUrl.includes('/loja/')) {
+                                    if (baseCardapioUrl.includes('burguerplus') || baseCardapioUrl.includes('burgerplus')) {
+                                        baseCardapioUrl = `${baseCardapioUrl}/loja/burguerplus`;
+                                    } else {
+                                        const companySlug = (companySettings.slug || companyName || 'loja').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
+                                        baseCardapioUrl = `${baseCardapioUrl}/loja/${companySlug}`;
+                                    }
                                 }
 
                                 const formattedProducts = filteredProducts.slice(0, 30).map(p => ({
