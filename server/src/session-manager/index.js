@@ -7,10 +7,10 @@ import { supabase, NODE_ID } from '../supabase.js';
 
 const waitForSocketOpen = (sock, timeoutMs = 20000) => {
     return new Promise((resolve, reject) => {
-        if (sock.ws && sock.ws.readyState === 1) {
+        if (sock.ws && sock.ws.isOpen) {
             return resolve(true);
         }
-        if (sock.ws && (sock.ws.readyState === 2 || sock.ws.readyState === 3)) {
+        if (sock.ws && (sock.ws.isClosing || sock.ws.isClosed)) {
             return reject(new Error('WebSocket is closed or closing'));
         }
 
@@ -386,7 +386,7 @@ class SessionManager {
                                     let sendFn = originalSendMessage;
                                     
                                     // Se não for a primeira tentativa ou se o socket atual não estiver saudável (fechado/fechando), busca o socket mais recente
-                                    if (attempts > 0 || !activeSock.ws || activeSock.ws.readyState !== 1) {
+                                    if (attempts > 0 || !activeSock.ws || !activeSock.ws.isOpen) {
                                         const latestSession = this.sessions.get(instanceId);
                                         if (latestSession && latestSession.sock) {
                                             activeSock = latestSession.sock;
@@ -402,13 +402,13 @@ class SessionManager {
                                     }
                                     
                                     // Se o socket estiver inicializando/conectando, aguarda a abertura da conexão antes de prosseguir
-                                    if (activeSock && (!activeSock.ws || activeSock.ws.readyState === 0)) {
+                                    if (activeSock && (!activeSock.ws || activeSock.ws.isConnecting)) {
                                         console.log(`[SessionManager - Antiban] Socket de ${instanceId} está conectando. Aguardando conexão abrir...`);
                                         await waitForSocketOpen(activeSock);
                                     }
 
                                     // Se mesmo assim o socket ativo não estiver saudável, lança erro para forçar retentativa ou falhar
-                                    if (!activeSock || !activeSock.ws || activeSock.ws.readyState !== 1) {
+                                    if (!activeSock || !activeSock.ws || !activeSock.ws.isOpen) {
                                         throw new Error('Connection Closed (WebSocket not open or unhealthy)');
                                     }
                                     
@@ -463,8 +463,8 @@ class SessionManager {
 
         const sock = data.sock;
         // Valida se o WebSocket está saudável (não está CLOSING nem CLOSED)
-        if (sock.ws && (sock.ws.readyState === 2 || sock.ws.readyState === 3)) {
-            console.warn(`[SessionManager] Detectado socket zumbi para ${instanceId} com WebSocket fechado/fechando (readyState: ${sock.ws.readyState}). Descartando.`);
+        if (sock.ws && (sock.ws.isClosing || sock.ws.isClosed)) {
+            console.warn(`[SessionManager] Detectado socket zumbi para ${instanceId} com WebSocket fechado/fechando. Descartando.`);
             this.sessions.delete(instanceId);
             return null;
         }
