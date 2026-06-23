@@ -4,6 +4,62 @@ import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
 export const sessionCaches = new Map();
 export const pendingWrites = new Map(); // Fila de batch para DB Sync
 
+export async function flushPendingWrites(instanceId) {
+    const queue = pendingWrites.get(instanceId);
+    if (!queue) return;
+    
+    if (queue.timer) {
+        clearTimeout(queue.timer);
+    }
+    pendingWrites.delete(instanceId);
+    
+    try {
+        // Anti-violação de chave estrangeira: verifica se a instância ainda existe antes de rodar a sincronização
+        const { data: instanceExists } = await supabase
+            .from('whatsapp_instances')
+            .select('id')
+            .eq('id', instanceId)
+            .single();
+
+        if (!instanceExists) {
+            console.log(`[SessionManager] Instância ${instanceId} deletada do banco. Cancelando DB Sync pendente.`);
+            return;
+        }
+
+        const dels = Array.from(queue.keysToDelete);
+        if (dels.length > 0) {
+            const { error } = await supabase.from('wa_auth_keys')
+                .delete()
+                .eq('instance_id', instanceId)
+                .in('key_name', dels);
+            if(error) console.error(`[${instanceId}] Erro Sync DEL:`, error.message);
+        }
+        
+        const upserts = Array.from(queue.keysToUpsert.values());
+        if (upserts.length > 0) {
+            const CHUNK = 500;
+            for (let i = 0; i < upserts.length; i += CHUNK) {
+                const { error } = await supabase.from('wa_auth_keys')
+                    .upsert(upserts.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' });
+                if(error) console.error(`[${instanceId}] Erro Sync UPSERT (${i}):`, error.message);
+            }
+        }
+        if (upserts.length > 0 || dels.length > 0) {
+            console.log(`[SessionManager] DB Sync concluído para [${instanceId}]. Upserts: ${upserts.length}, Deletes: ${dels.length}`);
+        }
+    } catch (error) {
+        console.error(`[SessionManager] Erro fatal DB Sync [${instanceId}]:`, error.message);
+    }
+}
+
+export async function flushAllPendingWrites() {
+    const activeInstances = Array.from(pendingWrites.keys());
+    if (activeInstances.length === 0) return;
+    
+    console.log(`[SessionManager] Sincronizando chaves pendentes de todas as instâncias (${activeInstances.length})...`);
+    await Promise.all(activeInstances.map(instanceId => flushPendingWrites(instanceId)));
+}
+
 function scheduleDbSync(instanceId, tenantId) {
     if (pendingWrites.has(instanceId) && pendingWrites.get(instanceId).timer) {
         clearTimeout(pendingWrites.get(instanceId).timer);
@@ -12,53 +68,14 @@ function scheduleDbSync(instanceId, tenantId) {
            keysToUpsert: new Map(),
            keysToDelete: new Set(),
            timer: null
-        });
+         });
     }
 
     const queue = pendingWrites.get(instanceId);
 
     // Debounce de 2 segundos para aglomerar writes e proteger a API do Supabase
     queue.timer = setTimeout(async () => {
-        pendingWrites.delete(instanceId);
-        
-        try {
-            // Anti-violação de chave estrangeira: verifica se a instância ainda existe antes de rodar a sincronização
-            const { data: instanceExists } = await supabase
-                .from('whatsapp_instances')
-                .select('id')
-                .eq('id', instanceId)
-                .single();
-
-            if (!instanceExists) {
-                console.log(`[SessionManager] Instância ${instanceId} deletada do banco. Cancelando DB Sync pendente.`);
-                return;
-            }
-
-            const dels = Array.from(queue.keysToDelete);
-            if (dels.length > 0) {
-                const { error } = await supabase.from('wa_auth_keys')
-                    .delete()
-                    .eq('instance_id', instanceId)
-                    .in('key_name', dels);
-                if(error) console.error(`[${instanceId}] Erro Batch DEL:`, error.message);
-            }
-            
-            const upserts = Array.from(queue.keysToUpsert.values());
-            if (upserts.length > 0) {
-                // Dividir em chunks para não estourar o payload max do Supabase
-                const CHUNK = 500;
-                for (let i = 0; i < upserts.length; i += CHUNK) {
-                    const { error } = await supabase.from('wa_auth_keys')
-                        .upsert(upserts.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' });
-                    if(error) console.error(`[${instanceId}] Erro Batch UPSERT (${i}):`, error.message);
-                }
-            }
-            if (upserts.length > 0 || dels.length > 0) {
-                console.log(`[SessionManager] DB Sync em lote [${instanceId}]. Upserts: ${upserts.length}, Deletes: ${dels.length}`);
-            }
-        } catch (error) {
-            console.error(`[SessionManager] Erro fatal DB Sync [${instanceId}]:`, error.message);
-        }
+        await flushPendingWrites(instanceId);
     }, 2000);
 }
 
@@ -141,8 +158,31 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                                 cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
                             }
                             data[id] = cv;
+                        } else {
+                            // Fallback para o Banco de Dados se não encontrado em memória
+                            try {
+                                const { data: dbKey } = await supabase
+                                    .from('wa_auth_keys')
+                                    .select('key_data')
+                                    .eq('instance_id', instanceId)
+                                    .eq('key_name', name)
+                                    .maybeSingle();
+                                
+                                if (dbKey && dbKey.key_data) {
+                                    const parsed = JSON.parse(JSON.stringify(dbKey.key_data), BufferJSON.reviver);
+                                    memCache.set(name, parsed);
+                                    
+                                    let cv = parsed;
+                                    if (type === 'app-state-sync-key' && cv && cv.target) {
+                                        cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
+                                    }
+                                    data[id] = cv;
+                                    console.log(`[SessionManager] Chave recuperada via DB Fallback: ${name}`);
+                                }
+                            } catch (err) {
+                                console.error(`[SessionManager] Erro no DB Fallback para chave ${name}:`, err.message);
+                            }
                         }
-                        // Se não tem na RAM, enviamos undefined e o Baileys gerará uma nova. Sem queries Supabase no meio da crypto!
                     }
 
                     return data;

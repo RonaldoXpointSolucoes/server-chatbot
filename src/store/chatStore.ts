@@ -69,8 +69,14 @@ export interface AppointmentType {
   created_at?: string;
 }
 
-export const getRealContactId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
-export const getInstanceIdFromContact = (id: string) => id.includes('_') ? id.split('_')[1] : null;
+export const getRealContactId = (id: any) => {
+  if (typeof id !== 'string') return id ? String(id) : '';
+  return id.includes('_') ? id.split('_')[0] : id;
+};
+export const getInstanceIdFromContact = (id: any) => {
+  if (typeof id !== 'string') return null;
+  return id.includes('_') ? id.split('_')[1] : null;
+};
 
 // Cache em memória para evitar requisições redundantes de rede ao Supabase para instâncias
 export const instanceCache = {

@@ -403,3 +403,19 @@ app.listen(PORT, '0.0.0.0', async () => {
         console.error("[Worker Boot] Erro ao assinar realtime conversations:", err.message);
     }
 });
+
+// Desligamento gracioso: sincroniza as chaves do Baileys pendentes na RAM para o Supabase antes de sair
+const gracefulShutdown = async (signal) => {
+    console.log(`[Antigravity Boot] Recebido sinal ${signal}. Iniciando desligamento gracioso...`);
+    try {
+        const { flushAllPendingWrites } = await import('./session-manager/auth.js');
+        await flushAllPendingWrites();
+        console.log(`[Antigravity Boot] Sincronização de chaves concluída com sucesso.`);
+    } catch (err) {
+        console.error(`[Antigravity Boot] Erro durante o desligamento gracioso:`, err.message || err);
+    }
+    process.exit(0);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

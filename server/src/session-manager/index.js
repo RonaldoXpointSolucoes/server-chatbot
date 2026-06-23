@@ -1,5 +1,5 @@
 import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, Browsers } from '@whiskeysockets/baileys';
-import { useSupabaseAuthState } from './auth.js';
+import { useSupabaseAuthState, flushPendingWrites } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
 import pino from 'pino';
@@ -283,6 +283,7 @@ class SessionManager {
             });
             // --- Proteção Antiban e Fila de Mensagens Sequencial ---
             const originalSendMessage = sock.sendMessage.bind(sock);
+            sock.originalSendMessage = originalSendMessage;
             
             sock.sendMessage = async (jid, content, options) => {
                 // Obter ou inicializar a fila da instância
@@ -316,12 +317,59 @@ class SessionManager {
                     // Simular o delay antes do envio
                     setTimeout(async () => {
                         try {
-                            console.log(`[SessionManager - Antiban] Enviando mensagem na fila para ${jid} via instância ${instanceId} com delay de ${delay}ms`);
-                            const result = await originalSendMessage(jid, content, options);
-                            resolve(result);
-                        } catch (error) {
-                            console.error(`[SessionManager - Antiban] Erro ao enviar mensagem na fila para ${jid} via instância ${instanceId}:`, error);
-                            reject(error);
+                            let attempts = 0;
+                            const maxAttempts = 3;
+                            let lastError;
+                            
+                            while (attempts < maxAttempts) {
+                                try {
+                                    let activeSock = sock;
+                                    let sendFn = originalSendMessage;
+                                    
+                                    // Se não for a primeira tentativa ou se o socket atual não estiver saudável (fechado/fechando), busca o socket mais recente
+                                    if (attempts > 0 || !activeSock.ws || activeSock.ws.readyState !== 1) {
+                                        const latestSession = this.sessions.get(instanceId);
+                                        if (latestSession && latestSession.sock) {
+                                            activeSock = latestSession.sock;
+                                            sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
+                                        } else {
+                                            console.warn(`[SessionManager - Antiban] Sem sessão ativa saudável para ${instanceId}. Tentando acordar...`);
+                                            const wakedSock = await this.getSocketOrWake(tenantId, instanceId);
+                                            if (wakedSock) {
+                                                activeSock = wakedSock;
+                                                sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Se mesmo assim o socket ativo não estiver saudável, lança erro para forçar retentativa ou falhar
+                                    if (!activeSock || !activeSock.ws || activeSock.ws.readyState !== 1) {
+                                        throw new Error('Connection Closed (WebSocket not open or unhealthy)');
+                                    }
+                                    
+                                    if (attempts > 0) {
+                                        console.log(`[SessionManager - Antiban] Retentando envio para ${jid} via instância ${instanceId} com socket atualizado. Tentativa ${attempts + 1}/${maxAttempts}`);
+                                    } else {
+                                        console.log(`[SessionManager - Antiban] Enviando mensagem na fila para ${jid} via instância ${instanceId} com delay de ${delay}ms`);
+                                    }
+                                    
+                                    const result = await sendFn(jid, content, options);
+                                    resolve(result);
+                                    return; // Sucesso, interrompe o loop
+                                } catch (error) {
+                                    lastError = error;
+                                    attempts++;
+                                    console.error(`[SessionManager - Antiban] Erro na tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}:`, error.message || error);
+                                    
+                                    if (attempts < maxAttempts) {
+                                        const retryDelay = 2000 * attempts;
+                                        await new Promise(r => setTimeout(r, retryDelay));
+                                    }
+                                }
+                            }
+                            
+                            console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}.`);
+                            reject(lastError);
                         } finally {
                             // Independente de sucesso ou falha, resolve a fila interna para permitir o próximo envio
                             resolveQueue();
@@ -382,6 +430,14 @@ class SessionManager {
 
     async closeSession(instanceId) {
         this.clearWatchdog(instanceId);
+        
+        // Sincroniza qualquer chave pendente na fila de batch antes de fechar a sessão
+        try {
+            await flushPendingWrites(instanceId);
+        } catch (syncErr) {
+            console.error(`[SessionManager] Erro ao sincronizar chaves antes de fechar sessão ${instanceId}:`, syncErr.message);
+        }
+
         const data = this.sessions.get(instanceId);
         if (data && data.sock) {
             try { data.sock.ws.close(); } catch(e){}
