@@ -51,6 +51,7 @@ class SessionManager {
         this.reconnectAttempts = new Map();
         this.conflictAttempts = new Map();
         this.conflictTimeouts = new Map();
+        this.reconnectingTimers = new Map();
         this.queues = new Map();
         this.watchdogs = new Map();
         
@@ -121,6 +122,13 @@ class SessionManager {
     }
 
     async createSession(tenantId, instanceId) {
+        if (this.reconnectingTimers.has(instanceId)) {
+            const timer = this.reconnectingTimers.get(instanceId);
+            clearTimeout(timer);
+            this.reconnectingTimers.delete(instanceId);
+            console.log(`[SessionManager] Antecipando/limpando timer de reconexão pendente para a instância ${instanceId}.`);
+        }
+
         if (this.sessions.has(instanceId)) {
             console.log(`[SessionManager] Sessão ${instanceId} já estava em memória.`);
             return this.sessions.get(instanceId).sock;
@@ -245,7 +253,11 @@ class SessionManager {
                         
                         this.reconnectAttempts.delete(instanceId);
                         // Tentar reconectar limpo após 5s
-                        setTimeout(() => this.createSession(tenantId, instanceId), 5000);
+                        const timer = setTimeout(() => {
+                            this.reconnectingTimers.delete(instanceId);
+                            this.createSession(tenantId, instanceId);
+                        }, 5000);
+                        this.reconnectingTimers.set(instanceId, timer);
                     } else if (isConflict) {
                         const cAttempts = (this.conflictAttempts.get(instanceId) || 0) + 1;
                         this.conflictAttempts.set(instanceId, cAttempts);
@@ -268,7 +280,11 @@ class SessionManager {
                             });
                         } else {
                             console.warn(`[SessionManager] CONFLITO detectado na instância ${instanceId} (Tentativa ${cAttempts}/3). Outro dispositivo conectou? Aguardando 30s antes de tentar novamente...`);
-                            setTimeout(() => this.createSession(tenantId, instanceId), 30000);
+                            const timer = setTimeout(() => {
+                                this.reconnectingTimers.delete(instanceId);
+                                this.createSession(tenantId, instanceId);
+                            }, 30000);
+                            this.reconnectingTimers.set(instanceId, timer);
                         }
                     } else {
                         const attempts = this.reconnectAttempts.get(instanceId) || 0;
@@ -292,7 +308,11 @@ class SessionManager {
                                 .eq('id', instanceId);
                         }
 
-                        setTimeout(() => this.createSession(tenantId, instanceId), delay);
+                        const timer = setTimeout(() => {
+                            this.reconnectingTimers.delete(instanceId);
+                            this.createSession(tenantId, instanceId);
+                        }, delay);
+                        this.reconnectingTimers.set(instanceId, timer);
                     }
                 }
             });
@@ -357,7 +377,7 @@ class SessionManager {
                     setTimeout(async () => {
                         try {
                             let attempts = 0;
-                            const maxAttempts = 3;
+                            const maxAttempts = 5;
                             let lastError;
                             
                             while (attempts < maxAttempts) {
@@ -407,7 +427,7 @@ class SessionManager {
                                     console.error(`[SessionManager - Antiban] Erro na tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}:`, error.message || error);
                                     
                                     if (attempts < maxAttempts) {
-                                        const retryDelay = 2000 * attempts;
+                                        const retryDelay = 3000 * attempts;
                                         await new Promise(r => setTimeout(r, retryDelay));
                                     }
                                 }

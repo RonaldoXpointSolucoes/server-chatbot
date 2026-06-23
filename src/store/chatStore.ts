@@ -1369,11 +1369,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       
       if (err.message === 'Failed to fetch') {
-         alert('Falha crítica de comunicação com o Motor Baileys. Verifique se o backend está rodando e online.');
+         window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha crítica de comunicação com o Motor Baileys. Verifique se o backend está rodando e online.', type: 'error' } }));
       } else if (err.message.includes('Connection Closed')) {
-         alert('Conexão instável com o WhatsApp (Connection Closed). O motor Baileys está tentando reconectar em segundo plano. Aguarde 5 segundos e tente novamente.');
+         window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Conexão instável com o WhatsApp (Connection Closed). O motor Baileys está tentando reconectar em segundo plano. Aguarde 5 segundos e tente novamente.', type: 'warning', duration: 7000 } }));
       } else {
-         alert(`Não foi possível enviar a mensagem: ${err.message}`);
+         window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Não foi possível enviar a mensagem: ${err.message}`, type: 'error' } }));
       }
     }
   },
@@ -1415,7 +1415,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
      
      const msgToEdit = contact.messages.find(m => m.id === messageId);
      if (!msgToEdit || !msgToEdit.whatsapp_id) {
-        alert('Não é possível editar esta mensagem pois a chave nativa não foi encontrada.');
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Não é possível editar esta mensagem pois a chave nativa não foi encontrada.', type: 'warning' } }));
         return;
      }
  
@@ -1456,7 +1456,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     } catch(err: any) {
       console.error('Erro ao editar mensagem:', err);
-      alert(`Falha ao editar a mensagem: ${err.message}`);
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Falha ao editar a mensagem: ${err.message}`, type: 'error' } }));
     }
   },
 
@@ -1495,7 +1495,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     if (!msgToDelete.whatsapp_id) {
-       alert('Não é possível apagar remotamente esta mensagem (chave ausente). Ela será apagada apenas localmente.');
+       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Não é possível apagar remotamente esta mensagem (chave ausente). Ela será apagada apenas localmente.', type: 'warning' } }));
        // Still proceed to delete locally/DB if desired, but user expectation is remote delete.
     }
 
@@ -1542,7 +1542,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     } catch(err: any) {
       console.error('Erro ao apagar mensagem:', err);
-      alert(`Falha ao apagar a mensagem: ${err.message}`);
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Falha ao apagar a mensagem: ${err.message}`, type: 'error' } }));
     }
   },
 
@@ -1680,7 +1680,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     } catch (err: any) {
       console.error('[uploadAndSendMedia] Falha crítica:', err);
-      alert('Falha ao enviar arquivo para o WhatsApp: ' + (err.message || err));
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha ao enviar arquivo para o WhatsApp: ' + (err.message || err), type: 'error' } }));
       // Se der erro, pelo menos mostramos no componente que a media deu erro
       // Não removemos para o dev ver onde falhou
     }
@@ -1717,7 +1717,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       await state.uploadAndSendMedia(contactId, file, basicType as any, instanceName, false, message.text);
     } catch(err) {
       console.error("[forwardMessage] Erro ao extrair/encaminhar media:", err);
-      alert('Houve uma falha ao preparar a mídia para o envio. Se possível, faça o download e envio manual.');
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Houve uma falha ao preparar a mídia para o envio. Se possível, faça o download e envio manual.', type: 'error' } }));
     }
   },
 
@@ -1868,7 +1868,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
          return;
       }
       
-      alert('Falha ao enviar mídia da resposta pronta: ' + err.message);
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha ao enviar mídia da resposta pronta: ' + err.message, type: 'error' } }));
     }
   },
 
@@ -4522,7 +4522,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     } catch (e) {
       console.error('[createInternalNote] Erro ao criar nota interna:', e);
-      alert('Erro ao salvar a anotação interna no banco de dados.');
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Erro ao salvar a anotação interna no banco de dados.', type: 'error' } }));
     }
   },
 
@@ -4581,7 +4581,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     } catch (e) {
       console.error('[editInternalNote] Erro ao editar nota interna:', e);
-      alert('Erro ao atualizar a anotação no banco de dados.');
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Erro ao atualizar a anotação no banco de dados.', type: 'error' } }));
     }
   },
 
@@ -4664,7 +4664,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     } catch (e) {
       console.error('[toggleChecklistItem] Erro ao marcar checklist item:', e);
-      alert('Erro ao salvar alteração do checklist no banco de dados.');
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Erro ao salvar alteração do checklist no banco de dados.', type: 'error' } }));
     }
   },
 
@@ -4735,7 +4735,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
      } catch (e) {
        console.error('[deleteInternalNote] Erro ao excluir nota interna:', e);
-       alert('Erro ao excluir a anotação interna no banco de dados.');
+       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Erro ao excluir a anotação interna no banco de dados.', type: 'error' } }));
      }
    },
 

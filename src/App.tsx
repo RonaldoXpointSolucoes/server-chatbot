@@ -38,6 +38,7 @@ import ChecklistBuilder from './pages/checklist/ChecklistBuilder';
 import ChecklistTablet from './pages/checklist/ChecklistTablet';
 import ChecklistSettings from './pages/checklist/ChecklistSettings';
 import { NetworkStatusToast } from './components/NetworkStatusToast';
+import { GlobalToast } from './components/GlobalToast';
 
 // Inicializa o tema globalmente no boot
 const savedTheme = localStorage.getItem('theme') || 'light';
@@ -65,6 +66,7 @@ export default function App() {
       <DevLogger />
       <PushNotificationManager />
       <NetworkStatusToast />
+      <GlobalToast />
       <Routes>
         {/* Rota do Cliente Comum */}
         <Route path="/" element={<ClientLogin />} />
