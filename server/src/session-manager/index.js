@@ -5,6 +5,45 @@ import { addLog } from '../system-logger.js';
 import pino from 'pino';
 import { supabase, NODE_ID } from '../supabase.js';
 
+const waitForSocketOpen = (sock, timeoutMs = 20000) => {
+    return new Promise((resolve, reject) => {
+        if (sock.ws && sock.ws.readyState === 1) {
+            return resolve(true);
+        }
+        if (sock.ws && (sock.ws.readyState === 2 || sock.ws.readyState === 3)) {
+            return reject(new Error('WebSocket is closed or closing'));
+        }
+
+        let isClean = false;
+        const cleanUp = () => {
+            if (isClean) return;
+            isClean = true;
+            clearTimeout(timer);
+            try {
+                sock.ev.off('connection.update', connectionListener);
+            } catch (e) {}
+        };
+
+        const timer = setTimeout(() => {
+            cleanUp();
+            reject(new Error('Timeout waiting for connection to open'));
+        }, timeoutMs);
+
+        const connectionListener = (update) => {
+            const { connection } = update;
+            if (connection === 'open') {
+                cleanUp();
+                resolve(true);
+            } else if (connection === 'close') {
+                cleanUp();
+                reject(new Error('Connection closed while waiting to open'));
+            }
+        };
+
+        sock.ev.on('connection.update', connectionListener);
+    });
+};
+
 class SessionManager {
     constructor() {
         this.sessions = new Map();
@@ -342,6 +381,12 @@ class SessionManager {
                                         }
                                     }
                                     
+                                    // Se o socket estiver inicializando/conectando, aguarda a abertura da conexão antes de prosseguir
+                                    if (activeSock && (!activeSock.ws || activeSock.ws.readyState === 0)) {
+                                        console.log(`[SessionManager - Antiban] Socket de ${instanceId} está conectando. Aguardando conexão abrir...`);
+                                        await waitForSocketOpen(activeSock);
+                                    }
+
                                     // Se mesmo assim o socket ativo não estiver saudável, lança erro para forçar retentativa ou falhar
                                     if (!activeSock || !activeSock.ws || activeSock.ws.readyState !== 1) {
                                         throw new Error('Connection Closed (WebSocket not open or unhealthy)');
