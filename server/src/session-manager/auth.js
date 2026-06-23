@@ -2,81 +2,16 @@ import { supabase } from '../supabase.js';
 import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
 
 export const sessionCaches = new Map();
-export const pendingWrites = new Map(); // Fila de batch para DB Sync
+export const pendingWrites = new Map(); // Mantido por retrocompatibilidade
 
 export async function flushPendingWrites(instanceId) {
-    const queue = pendingWrites.get(instanceId);
-    if (!queue) return;
-    
-    if (queue.timer) {
-        clearTimeout(queue.timer);
-    }
-    pendingWrites.delete(instanceId);
-    
-    try {
-        // Anti-violação de chave estrangeira: verifica se a instância ainda existe antes de rodar a sincronização
-        const { data: instanceExists } = await supabase
-            .from('whatsapp_instances')
-            .select('id')
-            .eq('id', instanceId)
-            .single();
-
-        if (!instanceExists) {
-            console.log(`[SessionManager] Instância ${instanceId} deletada do banco. Cancelando DB Sync pendente.`);
-            return;
-        }
-
-        const dels = Array.from(queue.keysToDelete);
-        if (dels.length > 0) {
-            const { error } = await supabase.from('wa_auth_keys')
-                .delete()
-                .eq('instance_id', instanceId)
-                .in('key_name', dels);
-            if(error) console.error(`[${instanceId}] Erro Sync DEL:`, error.message);
-        }
-        
-        const upserts = Array.from(queue.keysToUpsert.values());
-        if (upserts.length > 0) {
-            const CHUNK = 500;
-            for (let i = 0; i < upserts.length; i += CHUNK) {
-                const { error } = await supabase.from('wa_auth_keys')
-                    .upsert(upserts.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' });
-                if(error) console.error(`[${instanceId}] Erro Sync UPSERT (${i}):`, error.message);
-            }
-        }
-        if (upserts.length > 0 || dels.length > 0) {
-            console.log(`[SessionManager] DB Sync concluído para [${instanceId}]. Upserts: ${upserts.length}, Deletes: ${dels.length}`);
-        }
-    } catch (error) {
-        console.error(`[SessionManager] Erro fatal DB Sync [${instanceId}]:`, error.message);
-    }
+    // No-op: chaves agora são salvas de forma síncrona/imediata no keys.set
+    return;
 }
 
 export async function flushAllPendingWrites() {
-    const activeInstances = Array.from(pendingWrites.keys());
-    if (activeInstances.length === 0) return;
-    
-    console.log(`[SessionManager] Sincronizando chaves pendentes de todas as instâncias (${activeInstances.length})...`);
-    await Promise.all(activeInstances.map(instanceId => flushPendingWrites(instanceId)));
-}
-
-function scheduleDbSync(instanceId, tenantId) {
-    if (pendingWrites.has(instanceId) && pendingWrites.get(instanceId).timer) {
-        clearTimeout(pendingWrites.get(instanceId).timer);
-    } else if (!pendingWrites.has(instanceId)) {
-        pendingWrites.set(instanceId, {
-           keysToUpsert: new Map(),
-           keysToDelete: new Set(),
-           timer: null
-         });
-    }
-
-    const queue = pendingWrites.get(instanceId);
-
-    // Debounce de 2 segundos para aglomerar writes e proteger a API do Supabase
-    queue.timer = setTimeout(async () => {
-        await flushPendingWrites(instanceId);
-    }, 2000);
+    // No-op
+    return;
 }
 
 export async function useSupabaseAuthState(tenantId, instanceId) {
@@ -172,10 +107,10 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                                     const parsed = JSON.parse(JSON.stringify(dbKey.key_data), BufferJSON.reviver);
                                     memCache.set(name, parsed);
                                     
-                                    let cv = parsed;
-                                    if (type === 'app-state-sync-key' && cv && cv.target) {
-                                        cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
-                                    }
+                                     let cv = parsed;
+                                     if (type === 'app-state-sync-key' && cv && cv.target) {
+                                         cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
+                                     }
                                     data[id] = cv;
                                     console.log(`[SessionManager] Chave recuperada via DB Fallback: ${name}`);
                                 }
@@ -188,11 +123,8 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                     return data;
                 },
                 set: async (data) => {
-                    let queue = pendingWrites.get(instanceId);
-                    if (!queue) {
-                        queue = { keysToUpsert: new Map(), keysToDelete: new Set(), timer: null };
-                        pendingWrites.set(instanceId, queue);
-                    }
+                    const keysToUpsert = [];
+                    const keysToDelete = [];
                     
                     for (const category in data) {
                         for (const id in data[category]) {
@@ -202,22 +134,50 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                             
                             if (isNull) {
                                 memCache.delete(name);
-                                queue.keysToDelete.add(name);
-                                queue.keysToUpsert.delete(name);
+                                keysToDelete.push(name);
                             } else {
                                 memCache.set(name, val);
-                                queue.keysToUpsert.set(name, {
+                                keysToUpsert.push({
                                     instance_id: instanceId,
                                     tenant_id: tenantId,
                                     key_name: name,
                                     key_data: JSON.parse(JSON.stringify(val, BufferJSON.replacer))
                                 });
-                                queue.keysToDelete.delete(name);
                             }
                         }
                     }
 
-                    scheduleDbSync(instanceId, tenantId);
+                    // Sincronização síncrona/imediata com Supabase
+                    try {
+                        const promises = [];
+                        if (keysToDelete.length > 0) {
+                            promises.push(
+                                supabase.from('wa_auth_keys')
+                                    .delete()
+                                    .eq('instance_id', instanceId)
+                                    .in('key_name', keysToDelete)
+                            );
+                        }
+                        if (keysToUpsert.length > 0) {
+                            const CHUNK = 500;
+                            for (let i = 0; i < keysToUpsert.length; i += CHUNK) {
+                                promises.push(
+                                    supabase.from('wa_auth_keys')
+                                        .upsert(keysToUpsert.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' })
+                                );
+                            }
+                        }
+
+                        if (promises.length > 0) {
+                            const results = await Promise.all(promises);
+                            for (const res of results) {
+                                if (res.error) throw res.error;
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`[${instanceId}] Erro fatal ao persistir chaves de autenticação:`, error.message);
+                        throw error; // Lança o erro para evitar ratchets dessincronizados
+                    }
                 }
             }
         },
