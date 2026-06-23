@@ -53,9 +53,30 @@ export function makeLibSignalRepository(
 	pnToLIDFunc?: (jids: string[]) => Promise<LIDMapping[] | undefined>
 ): SignalRepositoryWithLIDStore {
 	const lidMapping = new LIDMappingStore(auth.keys as SignalKeyStoreWithTransaction, logger, pnToLIDFunc)
-	const storage = signalStorage(auth, lidMapping)
-
 	const parsedKeys = auth.keys as SignalKeyStoreWithTransaction
+
+	// Shared function to resolve PN signal address to LID if mapping exists
+	const resolveLIDSignalAddress = async (id: string): Promise<string> => {
+		if (id.includes('.')) {
+			const [deviceId, device] = id.split('.')
+			const [user, domainType_] = deviceId!.split('_')
+			const domainType = parseInt(domainType_ || '0')
+
+			if (domainType === WAJIDDomains.LID || domainType === WAJIDDomains.HOSTED_LID) return id
+
+			const pnJid = `${user!}${device !== '0' ? `:${device}` : ''}@${domainType === WAJIDDomains.HOSTED ? 'hosted' : 's.whatsapp.net'}`
+
+			const lidForPN = await lidMapping.getLIDForPN(pnJid)
+			if (lidForPN) {
+				const lidAddr = jidToSignalProtocolAddress(lidForPN)
+				return lidAddr.toString()
+			}
+		}
+
+		return id
+	}
+
+	const storage = signalStorage(auth, lidMapping, resolveLIDSignalAddress)
 	const migratedSessionCache = new LRUCache<string, true>({
 		ttl: 3 * 24 * 60 * 60 * 1000, // 7 days
 		ttlAutopurge: true,
@@ -120,16 +141,34 @@ export function makeLibSignalRepository(
 
 			async function doDecrypt() {
 				let result: Buffer
-				switch (type) {
-					case 'pkmsg':
-						result = await session.decryptPreKeyWhisperMessage(ciphertext)
-						break
-					case 'msg':
-						result = await session.decryptWhisperMessage(ciphertext)
-						break
+				try {
+					switch (type) {
+						case 'pkmsg':
+							result = await session.decryptPreKeyWhisperMessage(ciphertext)
+							break
+						case 'msg':
+							result = await session.decryptWhisperMessage(ciphertext)
+							break
+					}
+					return result
+				} catch (err: any) {
+					const errMsg = err?.message || ''
+					if (
+						errMsg.includes('Bad MAC') ||
+						errMsg.includes('No session record') ||
+						errMsg.includes('Invalid PreKey ID') ||
+						errMsg.includes('PreKeyError') ||
+						errMsg.includes('SessionError') ||
+						errMsg.includes('Failed to decrypt')
+					) {
+						logger.warn({ jid, error: errMsg }, 'Critical decryption error detected (e.g. Bad MAC). Resetting Signal session key to force re-negotiation.')
+						const wireJid = await resolveLIDSignalAddress(addr.toString())
+						await parsedKeys.set({
+							session: { [wireJid]: null }
+						})
+					}
+					throw err
 				}
-
-				return result
 			}
 
 			// If it's not a sync message, we need to ensure atomicity
@@ -397,33 +436,13 @@ const jidToSignalSenderKeyName = (group: string, user: string): SenderKeyName =>
 
 function signalStorage(
 	{ creds, keys }: SignalAuthState,
-	lidMapping: LIDMappingStore
+	lidMapping: LIDMappingStore,
+	resolveLIDSignalAddress: (id: string) => Promise<string>
 ): SenderKeyStore &
 	libsignal.SignalStorage & {
 		loadIdentityKey(id: string): Promise<Uint8Array | undefined>
 		saveIdentity(id: string, identityKey: Uint8Array): Promise<boolean>
 	} {
-	// Shared function to resolve PN signal address to LID if mapping exists
-	const resolveLIDSignalAddress = async (id: string): Promise<string> => {
-		if (id.includes('.')) {
-			const [deviceId, device] = id.split('.')
-			const [user, domainType_] = deviceId!.split('_')
-			const domainType = parseInt(domainType_ || '0')
-
-			if (domainType === WAJIDDomains.LID || domainType === WAJIDDomains.HOSTED_LID) return id
-
-			const pnJid = `${user!}${device !== '0' ? `:${device}` : ''}@${domainType === WAJIDDomains.HOSTED ? 'hosted' : 's.whatsapp.net'}`
-
-			const lidForPN = await lidMapping.getLIDForPN(pnJid)
-			if (lidForPN) {
-				const lidAddr = jidToSignalProtocolAddress(lidForPN)
-				return lidAddr.toString()
-			}
-		}
-
-		return id
-	}
-
 	return {
 		loadSession: async (id: string) => {
 			try {

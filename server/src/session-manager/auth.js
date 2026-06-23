@@ -4,6 +4,25 @@ import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
 export const sessionCaches = new Map();
 export const pendingWrites = new Map(); // Mantido por retrocompatibilidade
 
+const writeQueues = new Map();
+
+function enqueueWrite(instanceId, writeFn) {
+    if (!writeQueues.has(instanceId)) {
+        writeQueues.set(instanceId, Promise.resolve());
+    }
+    const currentQueue = writeQueues.get(instanceId);
+    const nextPromise = currentQueue.then(async () => {
+        try {
+            await writeFn();
+        } catch (err) {
+            console.error(`[SessionManager] Erro na fila de escrita para instância ${instanceId}:`, err.message);
+            throw err;
+        }
+    });
+    writeQueues.set(instanceId, nextPromise);
+    return nextPromise;
+}
+
 export async function flushPendingWrites(instanceId) {
     // No-op: chaves agora são salvas de forma síncrona/imediata no keys.set
     return;
@@ -147,47 +166,51 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                         }
                     }
 
-                    // Sincronização síncrona/imediata com Supabase
-                    try {
-                        const promises = [];
-                        if (keysToDelete.length > 0) {
-                            promises.push(
-                                supabase.from('wa_auth_keys')
-                                    .delete()
-                                    .eq('instance_id', instanceId)
-                                    .in('key_name', keysToDelete)
-                            );
-                        }
-                        if (keysToUpsert.length > 0) {
-                            const CHUNK = 500;
-                            for (let i = 0; i < keysToUpsert.length; i += CHUNK) {
+                    // Sincronização em fila ordenada e imediata com Supabase
+                    return enqueueWrite(instanceId, async () => {
+                        try {
+                            const promises = [];
+                            if (keysToDelete.length > 0) {
                                 promises.push(
                                     supabase.from('wa_auth_keys')
-                                        .upsert(keysToUpsert.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' })
+                                        .delete()
+                                        .eq('instance_id', instanceId)
+                                        .in('key_name', keysToDelete)
                                 );
                             }
-                        }
-
-                        if (promises.length > 0) {
-                            const results = await Promise.all(promises);
-                            for (const res of results) {
-                                if (res.error) throw res.error;
+                            if (keysToUpsert.length > 0) {
+                                const CHUNK = 500;
+                                for (let i = 0; i < keysToUpsert.length; i += CHUNK) {
+                                    promises.push(
+                                        supabase.from('wa_auth_keys')
+                                            .upsert(keysToUpsert.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' })
+                                    );
+                                }
                             }
+
+                            if (promises.length > 0) {
+                                const results = await Promise.all(promises);
+                                for (const res of results) {
+                                    if (res.error) throw res.error;
+                                }
+                            }
+                        } catch (error) {
+                            console.error(`[${instanceId}] Erro fatal ao persistir chaves de autenticação na fila:`, error.message);
+                            throw error; // Lança o erro para evitar ratchets dessincronizados
                         }
-                    } catch (error) {
-                        console.error(`[${instanceId}] Erro fatal ao persistir chaves de autenticação:`, error.message);
-                        throw error; // Lança o erro para evitar ratchets dessincronizados
-                    }
+                    });
                 }
             }
         },
         saveCreds: async () => {
-             const { error } = await supabase.from('wa_auth_credentials').upsert({
-                 instance_id: instanceId,
-                 tenant_id: tenantId,
-                 creds_data: JSON.parse(JSON.stringify(creds, BufferJSON.replacer))
+             return enqueueWrite(instanceId, async () => {
+                 const { error } = await supabase.from('wa_auth_credentials').upsert({
+                     instance_id: instanceId,
+                     tenant_id: tenantId,
+                     creds_data: JSON.parse(JSON.stringify(creds, BufferJSON.replacer))
+                 });
+                 if (error) throw new Error(error.message);
              });
-             if (error) throw new Error(error.message);
         }
     }
 }
