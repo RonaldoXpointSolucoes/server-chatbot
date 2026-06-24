@@ -464,7 +464,7 @@ export default function BotsList() {
     setTrainResult(null);
 
     try {
-      const response = await fetch(`/api/v1/knowledge/train-multimodal`, {
+      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/train-multimodal`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

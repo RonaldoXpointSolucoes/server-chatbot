@@ -411,7 +411,7 @@ export default function DevLogger() {
           const isLocalFrontend = url.includes(window.location.host) || (!url.startsWith('http://') && !url.startsWith('https://'));
           const isStatus404 = url.includes('/status') && response.status === 404;
           
-          if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/realtime/') && !isExpectedOfflineError && !isAstsTest && !isLocalFrontend && !isStatus404) {
+          if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/debug/recent-errors') && !url.includes('/realtime/') && !isExpectedOfflineError && !isAstsTest && !isLocalFrontend && !isStatus404) {
              
              // Desduplicação de erros do Supabase
              if (url.includes('supabase.co')) {
@@ -455,7 +455,7 @@ export default function DevLogger() {
         const urlStr = typeof urlObj === 'string' ? urlObj : 'unknown';
         
         const isLocalFrontend = urlStr.includes(window.location.host) || (!urlStr.startsWith('http://') && !urlStr.startsWith('https://'));
-        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/realtime/') || urlStr.includes('system_logs') || isLocalFrontend;
+        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/debug/recent-errors') || urlStr.includes('/realtime/') || urlStr.includes('system_logs') || isLocalFrontend;
         
         if (!isSpammyUrl && !isAstsTest) {
           const isAbort = err.name === 'AbortError';
