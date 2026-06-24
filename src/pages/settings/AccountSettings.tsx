@@ -483,6 +483,7 @@ export default function AccountSettings() {
   };
   
   const cancelMappingRef = useRef(false);
+  const prevTenantIdRef = useRef<string | null>(null);
 
   const loadCardapioFromSupabase = async (tenantId: string) => {
     try {
@@ -820,46 +821,48 @@ export default function AccountSettings() {
   };
 
   useEffect(() => {
-    console.log("AccountSettings montou. tenantInfo:", tenantInfo);
-    if (tenantInfo?.settings) {
-      setNomeIa(tenantInfo.settings.nome_ia || '');
-      setEndereco(tenantInfo.settings.endereco || '');
-      setLinkCardapio(tenantInfo.settings.link_cardapio || '');
-      setGfoodStoreId(tenantInfo.settings.gfood_store_id || '6D0187D9-E905-4479-AB15-B908F0222607');
-      setInstagram(tenantInfo.settings.instagram || '');
-      setGoogleMaps(tenantInfo.settings.google_maps || '');
-      setYoutube(tenantInfo.settings.youtube || '');
-      setTiktok(tenantInfo.settings.tiktok || '');
-      setCardapioJsonUrl(tenantInfo.settings.cardapio_json_url || CARDAPIO_DEFAULT_URL);
-      setCardapioJsonToken(tenantInfo.settings.cardapio_json_token || GASTROFOOD_DEFAULT_TOKEN);
-      setCardapioJsonPayload(tenantInfo.settings.cardapio_json_payload || DEFAULT_CARDAPIO_PAYLOAD);
+    console.log("AccountSettings montou/atualizou. tenantInfo:", tenantInfo);
+    if (tenantInfo?.id && tenantInfo.id !== prevTenantIdRef.current) {
+      prevTenantIdRef.current = tenantInfo.id;
+      const settings = tenantInfo.settings || {};
+      setNomeIa(settings.nome_ia || '');
+      setEndereco(settings.endereco || '');
+      setLinkCardapio(settings.link_cardapio || '');
+      setGfoodStoreId(settings.gfood_store_id || '6D0187D9-E905-4479-AB15-B908F0222607');
+      setInstagram(settings.instagram || '');
+      setGoogleMaps(settings.google_maps || '');
+      setYoutube(settings.youtube || '');
+      setTiktok(settings.tiktok || '');
+      setCardapioJsonUrl(settings.cardapio_json_url || CARDAPIO_DEFAULT_URL);
+      setCardapioJsonToken(settings.cardapio_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setCardapioJsonPayload(settings.cardapio_json_payload || DEFAULT_CARDAPIO_PAYLOAD);
 
-      setCepJsonUrl(tenantInfo.settings.cep_json_url || CEP_DEFAULT_URL);
-      setCepJsonToken(tenantInfo.settings.cep_json_token || GASTROFOOD_DEFAULT_TOKEN);
-      setCepJsonPayload(tenantInfo.settings.cep_json_payload || DEFAULT_CEP_PAYLOAD);
+      setCepJsonUrl(settings.cep_json_url || CEP_DEFAULT_URL);
+      setCepJsonToken(settings.cep_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setCepJsonPayload(settings.cep_json_payload || DEFAULT_CEP_PAYLOAD);
 
-      setClienteJsonUrl(tenantInfo.settings.cliente_json_url || CLIENTE_DEFAULT_URL);
-      setClienteJsonToken(tenantInfo.settings.cliente_json_token || GASTROFOOD_DEFAULT_TOKEN);
-      setClienteJsonPayload(tenantInfo.settings.cliente_json_payload || DEFAULT_CLIENTE_PAYLOAD);
+      setClienteJsonUrl(settings.cliente_json_url || CLIENTE_DEFAULT_URL);
+      setClienteJsonToken(settings.cliente_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setClienteJsonPayload(settings.cliente_json_payload || DEFAULT_CLIENTE_PAYLOAD);
 
-      setPedidoJsonUrl(tenantInfo.settings.pedido_json_url || PEDIDO_DEFAULT_URL);
-      setPedidoJsonToken(tenantInfo.settings.pedido_json_token || GASTROFOOD_DEFAULT_TOKEN);
-      setPedidoJsonPayload(tenantInfo.settings.pedido_json_payload || DEFAULT_PEDIDO_PAYLOAD);
+      setPedidoJsonUrl(settings.pedido_json_url || PEDIDO_DEFAULT_URL);
+      setPedidoJsonToken(settings.pedido_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setPedidoJsonPayload(settings.pedido_json_payload || DEFAULT_PEDIDO_PAYLOAD);
 
-      setStatusPedidoJsonUrl(tenantInfo.settings.status_pedido_json_url || STATUS_PEDIDO_DEFAULT_URL);
-      setStatusPedidoJsonToken(tenantInfo.settings.status_pedido_json_token || GASTROFOOD_DEFAULT_TOKEN);
-      setStatusPedidoJsonPayload(tenantInfo.settings.status_pedido_json_payload || '');
+      setStatusPedidoJsonUrl(settings.status_pedido_json_url || STATUS_PEDIDO_DEFAULT_URL);
+      setStatusPedidoJsonToken(settings.status_pedido_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setStatusPedidoJsonPayload(settings.status_pedido_json_payload || '');
 
-      setPagamentoPixJsonUrl(tenantInfo.settings.pagamento_pix_json_url || PAGAMENTO_PIX_DEFAULT_URL);
-      setPagamentoPixJsonToken(tenantInfo.settings.pagamento_pix_json_token || GASTROFOOD_DEFAULT_TOKEN);
-      setPagamentoPixJsonPayload(tenantInfo.settings.pagamento_pix_json_payload || DEFAULT_PAGAMENTO_PIX_PAYLOAD);
+      setPagamentoPixJsonUrl(settings.pagamento_pix_json_url || PAGAMENTO_PIX_DEFAULT_URL);
+      setPagamentoPixJsonToken(settings.pagamento_pix_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setPagamentoPixJsonPayload(settings.pagamento_pix_json_payload || DEFAULT_PAGAMENTO_PIX_PAYLOAD);
 
-      setCadastroClienteJsonUrl(tenantInfo.settings.cadastro_cliente_json_url || CADASTRO_CLIENTE_DEFAULT_URL);
-      setCadastroClienteJsonToken(tenantInfo.settings.cadastro_cliente_json_token || GASTROFOOD_DEFAULT_TOKEN);
-      setCadastroClienteJsonPayload(tenantInfo.settings.cadastro_cliente_json_payload || DEFAULT_CADASTRO_CLIENTE_PAYLOAD);
+      setCadastroClienteJsonUrl(settings.cadastro_cliente_json_url || CADASTRO_CLIENTE_DEFAULT_URL);
+      setCadastroClienteJsonToken(settings.cadastro_cliente_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setCadastroClienteJsonPayload(settings.cadastro_cliente_json_payload || DEFAULT_CADASTRO_CLIENTE_PAYLOAD);
       
-      if (tenantInfo.settings.horarios_estrutura) {
-        setDiasHorarios(tenantInfo.settings.horarios_estrutura);
+      if (settings.horarios_estrutura) {
+        setDiasHorarios(settings.horarios_estrutura);
       } else {
         setDiasHorarios(DIAS_PADRAO);
       }
@@ -907,6 +910,15 @@ export default function AccountSettings() {
       });
       console.log("Save concluído!");
       setSuccess(true);
+      
+      // Dispatch global success toast so it is visible even if the user is scrolled down
+      window.dispatchEvent(new CustomEvent('toast', { 
+        detail: { 
+          message: `Configurações de "${tenantInfo?.name || 'sua empresa'}" salvas com sucesso!`, 
+          type: 'success' 
+        } 
+      }));
+
       // Limpa cache no backend para refletir alterações globais e de cardápio instantaneamente
       const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
       const currentTenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
@@ -921,6 +933,12 @@ export default function AccountSettings() {
       setTimeout(() => setSuccess(false), 3000);
     } catch (error) {
       console.error('Erro ao salvar as configurações:', error);
+      window.dispatchEvent(new CustomEvent('toast', { 
+        detail: { 
+          message: 'Erro ao salvar as configurações. Verifique sua conexão.', 
+          type: 'error' 
+        } 
+      }));
     } finally {
       setSaving(false);
     }
@@ -1225,7 +1243,7 @@ export default function AccountSettings() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-              Conta
+              Conta {tenantInfo?.name && <span className="text-indigo-500 dark:text-indigo-400 text-base font-normal">({tenantInfo.name})</span>}
             </h1>
             <p className="text-sm text-gray-500 dark:text-[#aebac1]">
               Gerencie as configurações e variáveis globais da sua empresa.
