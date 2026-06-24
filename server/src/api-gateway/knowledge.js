@@ -1038,7 +1038,7 @@ Por favor, analise a imagem (ou imagens) e o áudio fornecidos junto com a descr
             }
         }
 
-        console.log(\`[MultimodalTrain] Enviando requisição multimodal para o Gemini para o bot \${botId}\`);
+        console.log(`[MultimodalTrain] Enviando requisição multimodal para o Gemini para o bot ${botId}`);
         const result = await model.generateContent(parts);
         const responseText = result.response.text().trim();
 
@@ -1065,7 +1065,7 @@ Por favor, analise a imagem (ou imagens) e o áudio fornecidos junto com a descr
             const promptChanges = analysisResult.suggestedPromptChanges.trim();
             if (promptChanges.length > 5) {
                 promptChangesText = promptChanges;
-                const trainingHeader = `\\n\\n### REGRAS ADICIONAIS DE TREINAMENTO E CORREÇÃO DE ROTA (Atualizado em \${new Date().toLocaleDateString('pt-BR')}):\\n`;
+                const trainingHeader = `\n\n### REGRAS ADICIONAIS DE TREINAMENTO E CORREÇÃO DE ROTA (Atualizado em ${new Date().toLocaleDateString('pt-BR')}):\n`;
                 const updatedPrompt = currentPrompt + trainingHeader + promptChanges;
 
                 const { error: updateErr } = await supabase
@@ -1083,7 +1083,7 @@ Por favor, analise a imagem (ou imagens) e o áudio fornecidos junto com a descr
             const facts = analysisResult.ragFacts.filter(f => f && f.trim().length > 5);
             if (facts.length > 0) {
                 ragFactsCount = facts.length;
-                const docName = `Treinamento Multimodal (Áudio/Imagem) - Bot: \${bot.name}`;
+                const docName = `Treinamento Multimodal (Áudio/Imagem) - Bot: ${bot.name}`;
 
                 let { data: doc, error: docSeekErr } = await supabase.from('knowledge_documents')
                     .select('id')
