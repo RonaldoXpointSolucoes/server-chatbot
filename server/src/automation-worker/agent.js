@@ -157,7 +157,12 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
 
     let idUsuario = customer.IdUsuario || customer.idUsuario || customer.id || "9EA3F679-5565-4DA0-930F-0971A8B8A3CD";
     if (typeof idUsuario === 'string' && idUsuario.length > 20) {
-        idUsuario = idUsuario.substring(0, 20);
+        const cleanPhone = String(customer.Telefone || customer.telefone || "").replace(/\D/g, '');
+        if (cleanPhone && cleanPhone.length >= 8 && cleanPhone.length <= 20) {
+            idUsuario = cleanPhone;
+        } else {
+            idUsuario = (Math.random().toString(36).substring(2, 12) + Math.random().toString(36).substring(2, 12)).substring(0, 20).toUpperCase();
+        }
     }
 
     const normalizedCustomer = {
