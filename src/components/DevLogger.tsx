@@ -714,6 +714,47 @@ export default function DevLogger() {
     setTimeout(() => setCopyFeedback(null), 3000);
   };
 
+  const copyGastrofoodLogs = () => {
+    if (gastrofoodLogs.length === 0) {
+      navigator.clipboard.writeText('Nenhum log do Gastrofood para copiar.');
+      setCopyFeedback('Nenhum log para copiar');
+      setTimeout(() => setCopyFeedback(null), 3000);
+      return;
+    }
+
+    const formatted = gastrofoodLogs.map(log => {
+      const timeStr = new Date(log.timestamp).toLocaleString('pt-BR');
+      const isError = log.direction === 'error';
+      const isReq = log.direction === 'request';
+      const directionText = isError ? 'ERROR' : (isReq ? 'REQUEST' : 'RESPONSE');
+      const statusText = log.status ? ` (Status: ${log.status})` : '';
+      
+      let header = `[${timeStr}] ${log.action || 'API Gastrofood'} - ${log.method || 'POST'} - ${directionText}${statusText}`;
+      header += `\nURL: ${log.url || 'N/A'}`;
+      
+      const parts = [header];
+      
+      if (log.payload) {
+        const payloadStr = typeof log.payload === 'object' ? JSON.stringify(log.payload, null, 2) : String(log.payload);
+        parts.push(`Payload (Requisição):\n${payloadStr}`);
+      }
+      
+      if (isError && log.error) {
+        const errStr = typeof log.error === 'object' ? JSON.stringify(log.error, null, 2) : String(log.error);
+        parts.push(`Erro / Resposta com Falha:\n${errStr}`);
+      } else if (log.response) {
+        const respStr = typeof log.response === 'object' ? JSON.stringify(log.response, null, 2) : String(log.response);
+        parts.push(`Dados Recebidos:\n${respStr}`);
+      }
+      
+      return parts.join('\n\n');
+    }).join('\n\n' + '='.repeat(60) + '\n\n');
+
+    navigator.clipboard.writeText(formatted);
+    setCopyFeedback(`Copiado logs do Gastrofood`);
+    setTimeout(() => setCopyFeedback(null), 3000);
+  };
+
   const handleTestEngine = async () => {
     addLog({ type: 'info', message: `Testando conexão manual com o Motor Baileys...\n🔗 URL alvo: ${engineUrl}`, source: 'Tester' });
     const metaData = await checkEngineStatus();
@@ -1728,12 +1769,28 @@ export default function DevLogger() {
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping"></span>
                       <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">Monitor da API Gastrofood</span>
                     </div>
-                    <button
-                      onClick={() => setGastrofoodLogs([])}
-                      className="text-red-400 hover:text-red-300 font-bold text-[9px] uppercase tracking-wider bg-red-500/10 px-2 py-1 rounded border border-red-500/20 flex items-center gap-1 transition-colors cursor-pointer"
-                    >
-                      <Trash2 size={10} /> Limpar
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex items-center">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyGastrofoodLogs(); }}
+                          className="text-emerald-400 hover:text-emerald-300 font-bold text-[9px] uppercase tracking-wider bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 flex items-center gap-1 transition-colors cursor-pointer"
+                          title="Copiar todos os logs do Gastrofood"
+                        >
+                          <Copy size={10} /> Copiar
+                        </button>
+                        {copyFeedback && copyFeedback.includes('Gastrofood') && (
+                          <div className="absolute right-full mr-2 whitespace-nowrap bg-emerald-500 text-white text-[9px] font-bold px-2 py-1 rounded shadow-lg animate-in fade-in slide-in-from-right-2">
+                            {copyFeedback}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setGastrofoodLogs([])}
+                        className="text-red-400 hover:text-red-300 font-bold text-[9px] uppercase tracking-wider bg-red-500/10 px-2 py-1 rounded border border-red-500/20 flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <Trash2 size={10} /> Limpar
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="flex flex-col gap-2">
