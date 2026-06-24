@@ -1756,7 +1756,11 @@ export default function DevLogger() {
                       return (
                         <div 
                           key={log.id} 
-                          className={`p-2.5 rounded-xl border flex flex-col gap-1.5 transition-all bg-black/20 hover:bg-black/35 cursor-pointer ${isError ? 'border-red-500/20' : 'border-gray-800'}`}
+                          className={`p-2.5 rounded-xl border flex flex-col gap-1.5 transition-all cursor-pointer ${
+                            isError 
+                              ? 'border-red-500 bg-red-950/20 hover:bg-red-950/30 shadow-[0_0_12px_rgba(239,68,68,0.2)] animate-pulse' 
+                              : 'border-gray-800 bg-black/20 hover:bg-black/35'
+                          }`}
                           onClick={() => toggleExpandLog(log.id)}
                         >
                           <div className="flex justify-between items-center gap-2 select-none">
@@ -1764,7 +1768,8 @@ export default function DevLogger() {
                               <span className={`px-1.5 py-0.5 rounded text-[8px] font-black border uppercase tracking-wider ${badgeColor}`}>
                                 {statusText}
                               </span>
-                              <span className="font-bold text-gray-200 truncate">{log.action || 'API Gastrofood'}</span>
+                              {isError && <AlertTriangle size={12} className="text-red-500 animate-bounce shrink-0" />}
+                              <span className={`font-bold truncate ${isError ? 'text-red-400 font-extrabold text-[13px]' : 'text-gray-200'}`}>{log.action || 'API Gastrofood'}</span>
                               <span className="text-[9px] text-gray-500 font-bold uppercase">{log.method || 'POST'}</span>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0 font-mono text-[9px] text-gray-500">
@@ -1791,9 +1796,9 @@ export default function DevLogger() {
                               {(log.response || log.error) && (
                                 <div className="flex flex-col gap-1">
                                   <span className="text-[9px] text-gray-500 font-bold uppercase select-none">
-                                    {isError ? 'Erro (Resposta)' : 'Dados Recebidos'}
+                                    {isError ? 'Erro / Resposta com Falha' : 'Dados Recebidos'}
                                   </span>
-                                  <pre className={`bg-black/40 border border-gray-900 rounded-lg p-2 text-[10px] overflow-x-auto max-h-[200px] custom-scrollbar font-mono leading-relaxed select-all ${isError ? 'text-red-400' : 'text-emerald-300'}`}>
+                                  <pre className={`bg-black/40 border border-gray-900 rounded-lg p-2 text-[10px] overflow-x-auto max-h-[200px] custom-scrollbar font-mono leading-relaxed select-all ${isError ? 'text-red-400 border-red-500/25 bg-red-950/10' : 'text-emerald-300'}`}>
                                     {isError 
                                       ? (log.error ? (typeof log.error === 'object' ? JSON.stringify(log.error, null, 2) : String(log.error)) : 'Erro indefinido')
                                       : (typeof log.response === 'object' ? JSON.stringify(log.response, null, 2) : String(log.response))

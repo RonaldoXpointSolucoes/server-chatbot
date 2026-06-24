@@ -190,29 +190,52 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
 
 function logGastrofoodCall({ direction, action, method, url, payload, status, response, error }) {
     try {
+        const parsedResponse = typeof response === 'object' ? response : (response ? JSON.parse(response) : null);
+        
+        // Verifica se é uma resposta de sucesso HTTP (200), mas que contém erro lógico/negócio
+        const hasLogicalError = direction === 'response' && parsedResponse && (
+            parsedResponse.result === false || 
+            parsedResponse.success === false || 
+            parsedResponse.sucesso === false || 
+            parsedResponse.error
+        );
+
         const entry = {
             type: 'gastrofood_api',
-            direction,
+            direction: hasLogicalError ? 'error' : direction,
             action,
             method,
             url,
             payload: typeof payload === 'object' ? payload : (payload ? JSON.parse(payload) : null),
-            status,
-            response: typeof response === 'object' ? response : (response ? JSON.parse(response) : null),
-            error: error || null
+            status: hasLogicalError ? `${status} FAILED` : status,
+            response: parsedResponse,
+            error: error || (hasLogicalError ? parsedResponse : null)
         };
         console.log(`[Gastrofood API] ${JSON.stringify(entry)}`);
     } catch (e) {
+        let hasLogicalErrorInRaw = false;
+        try {
+            const rawResponseStr = String(response);
+            if (direction === 'response' && (
+                rawResponseStr.includes('"result":false') || 
+                rawResponseStr.includes('"success":false') || 
+                rawResponseStr.includes('"sucesso":false') || 
+                rawResponseStr.includes('"error":')
+            )) {
+                hasLogicalErrorInRaw = true;
+            }
+        } catch (rawErr) {}
+
         console.log(`[Gastrofood API] ${JSON.stringify({
             type: 'gastrofood_api',
-            direction,
+            direction: hasLogicalErrorInRaw ? 'error' : direction,
             action,
             method,
             url,
             payload: String(payload),
-            status,
+            status: hasLogicalErrorInRaw ? `${status} FAILED` : status,
             response: String(response),
-            error: error || e.message
+            error: error || (hasLogicalErrorInRaw ? response : null) || e.message
         })}`);
     }
 }
