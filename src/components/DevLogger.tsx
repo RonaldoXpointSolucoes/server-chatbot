@@ -19,7 +19,21 @@ export default function DevLogger() {
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   
   // Estados do Antigravity Application Simulator & Test Suite (ASTS)
-  const [showTestPanel, setShowTestPanel] = useState(false);
+  const [activeTab, setActiveTab] = useState<'console' | 'asts' | 'gastrofood'>('console');
+  const showTestPanel = activeTab === 'asts';
+  const setShowTestPanel = (val: boolean) => {
+    setActiveTab(val ? 'asts' : 'console');
+  };
+  const [gastrofoodLogs, setGastrofoodLogs] = useState<any[]>([]);
+  const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({});
+
+  const toggleExpandLog = (id: string) => {
+    setExpandedLogs(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
+
   const [isTestingApp, setIsTestingApp] = useState(false);
   const [testProgress, setTestProgress] = useState(0);
   const [testStepIndex, setTestStepIndex] = useState(0);
@@ -504,6 +518,70 @@ export default function DevLogger() {
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
     };
   }, [addLog]);
+
+  useEffect(() => {
+    if (!isVisible) return;
+
+    const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+    const sse = new EventSource(`${url}/api/v1/system/logs/stream`);
+
+    const parseGastrofoodMsg = (messageText: string, timestamp: string) => {
+      const prefix = '[Gastrofood API]';
+      if (messageText && messageText.includes(prefix)) {
+        try {
+          const jsonStr = messageText.substring(messageText.indexOf(prefix) + prefix.length).trim();
+          const parsed = JSON.parse(jsonStr);
+          return {
+            id: parsed.id || Math.random().toString(36).substring(2, 9),
+            timestamp: timestamp || new Date().toISOString(),
+            ...parsed
+          };
+        } catch (e) {
+          return {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: timestamp || new Date().toISOString(),
+            type: 'gastrofood_api',
+            direction: messageText.toLowerCase().includes('error') ? 'error' : 'info',
+            action: 'Gastrofood Call',
+            error: messageText
+          };
+        }
+      }
+      return null;
+    };
+
+    sse.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'init') {
+          const initLogs: any[] = [];
+          (data.logs || []).forEach((log: any) => {
+            const parsed = parseGastrofoodMsg(log.message, log.timestamp);
+            if (parsed) initLogs.push(parsed);
+          });
+          setGastrofoodLogs(initLogs);
+        } else if (data.message) {
+          const parsed = parseGastrofoodMsg(data.message, data.timestamp);
+          if (parsed) {
+            setGastrofoodLogs(prev => {
+              if (prev.some(l => l.id === parsed.id || (l.timestamp === parsed.timestamp && l.action === parsed.action && l.direction === parsed.direction && l.error === parsed.error))) {
+                return prev;
+              }
+              const next = [...prev, parsed];
+              if (next.length > 200) return next.slice(next.length - 200);
+              return next;
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error parsing SSE in DevLogger:', err);
+      }
+    };
+
+    return () => {
+      sse.close();
+    };
+  }, [isVisible, engineUrl]);
 
   useEffect(() => {
     if (isVisible && isEnabled && bottomRef.current) {
@@ -1335,16 +1413,22 @@ export default function DevLogger() {
         {isVisible && (
           <div className="flex border-b border-gray-800 bg-black/20 backdrop-blur-md relative z-20 shrink-0">
             <button 
-              onClick={(e) => { e.stopPropagation(); setShowTestPanel(false); }}
-              className={`flex-1 py-3 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer select-none ${!showTestPanel ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5 shadow-[0_0_15px_rgba(16,185,129,0.05)]' : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+              onClick={(e) => { e.stopPropagation(); setActiveTab('console'); }}
+              className={`flex-1 py-3 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer select-none ${activeTab === 'console' ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5 shadow-[0_0_15px_rgba(16,185,129,0.05)]' : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
             >
-              <Terminal size={12} /> Logs do Console ({logs.length})
+              <Terminal size={12} /> Console ({logs.length})
             </button>
             <button 
-              onClick={(e) => { e.stopPropagation(); setShowTestPanel(true); }}
-              className={`flex-1 py-3 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer select-none ${showTestPanel ? 'border-orange-500 text-orange-400 bg-orange-500/5 shadow-[0_0_15px_rgba(249,115,22,0.05)]' : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+              onClick={(e) => { e.stopPropagation(); setActiveTab('gastrofood'); }}
+              className={`flex-1 py-3 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer select-none ${activeTab === 'gastrofood' ? 'border-blue-500 text-blue-400 bg-blue-500/5 shadow-[0_0_15px_rgba(59,130,246,0.05)]' : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
             >
-              <Activity size={12} className={isTestingApp ? 'animate-pulse text-orange-500' : ''} /> Auditoria ASTS {testSummary ? `(${testSummary.healthScore}%)` : ''}
+              <Network size={12} /> Gastrofood ({gastrofoodLogs.length})
+            </button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); setActiveTab('asts'); }}
+              className={`flex-1 py-3 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer select-none ${activeTab === 'asts' ? 'border-orange-500 text-orange-400 bg-orange-500/5 shadow-[0_0_15px_rgba(249,115,22,0.05)]' : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+            >
+              <Activity size={12} className={isTestingApp ? 'animate-pulse text-orange-500' : ''} /> ASTS {testSummary ? `(${testSummary.healthScore}%)` : ''}
             </button>
           </div>
         )}
@@ -1592,6 +1676,105 @@ export default function DevLogger() {
                      </button>
                   </div>
                )}
+            </div>
+          ) : activeTab === 'gastrofood' ? (
+            /* Gastrofood API Logs Monitor */
+            <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5 font-mono text-xs custom-scrollbar min-h-[250px] max-h-[500px] bg-[#121b22]/90 relative rounded-b-2xl select-none">
+              {gastrofoodLogs.length === 0 ? (
+                <div className="m-auto text-gray-500 flex flex-col items-center gap-2 select-none animate-in fade-in duration-300">
+                  <Network size={24} className="opacity-50 text-blue-400 animate-pulse" />
+                  <p className="font-bold tracking-wide text-gray-400">Aguardando transações...</p>
+                  <p className="text-[9px] opacity-75 max-w-[280px] text-center text-gray-500 leading-relaxed">Interaja com o chat ou execute consultas no sistema para capturar requisições e respostas da API Gastrofood em tempo real.</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2.5">
+                  <div className="flex justify-between items-center bg-black/30 p-2 rounded-lg border border-gray-800/80 shrink-0 select-none">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping"></span>
+                      <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">Monitor da API Gastrofood</span>
+                    </div>
+                    <button
+                      onClick={() => setGastrofoodLogs([])}
+                      className="text-red-400 hover:text-red-300 font-bold text-[9px] uppercase tracking-wider bg-red-500/10 px-2 py-1 rounded border border-red-500/20 flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <Trash2 size={10} /> Limpar
+                    </button>
+                  </div>
+                  
+                  <div className="flex flex-col gap-2">
+                    {gastrofoodLogs.map((log) => {
+                      const isExpanded = !!expandedLogs[log.id];
+                      const isRequest = log.direction === 'request';
+                      const isResponse = log.direction === 'response';
+                      const isError = log.direction === 'error';
+                      
+                      let statusText = 'REQ';
+                      let badgeColor = 'bg-blue-500/10 border-blue-500/30 text-blue-400';
+                      if (isResponse) {
+                        statusText = log.status ? `${log.status} OK` : 'RESPONSE';
+                        badgeColor = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400';
+                      } else if (isError) {
+                        statusText = log.status ? `${log.status} ERR` : 'ERROR';
+                        badgeColor = 'bg-red-500/10 border-red-500/30 text-red-400';
+                      }
+                      
+                      return (
+                        <div 
+                          key={log.id} 
+                          className={`p-2.5 rounded-xl border flex flex-col gap-1.5 transition-all bg-black/20 hover:bg-black/35 cursor-pointer ${isError ? 'border-red-500/20' : 'border-gray-800'}`}
+                          onClick={() => toggleExpandLog(log.id)}
+                        >
+                          <div className="flex justify-between items-center gap-2 select-none">
+                            <div className="flex items-center gap-2 font-mono min-w-0">
+                              <span className={`px-1.5 py-0.5 rounded text-[8px] font-black border uppercase tracking-wider ${badgeColor}`}>
+                                {statusText}
+                              </span>
+                              <span className="font-bold text-gray-200 truncate">{log.action || 'API Gastrofood'}</span>
+                              <span className="text-[9px] text-gray-500 font-bold uppercase">{log.method || 'POST'}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0 font-mono text-[9px] text-gray-500">
+                              <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
+                              {isExpanded ? <ChevronUp size={12} className="text-gray-400" /> : <ChevronDown size={12} className="text-gray-400" />}
+                            </div>
+                          </div>
+
+                          <div className="text-[10px] text-gray-400 truncate opacity-85 select-all">
+                            <span className="text-gray-600 font-bold mr-1 select-none">URL:</span> {log.url || 'N/A'}
+                          </div>
+
+                          {isExpanded && (
+                            <div className="flex flex-col gap-2 mt-1.5 pt-2 border-t border-gray-800/80 animate-in fade-in duration-200" onClick={(e) => e.stopPropagation()}>
+                              {log.payload && (
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[9px] text-gray-500 font-bold uppercase select-none">Payload (Requisição)</span>
+                                  <pre className="bg-black/40 border border-gray-900 rounded-lg p-2 text-[10px] text-blue-300 overflow-x-auto max-h-[150px] custom-scrollbar font-mono leading-relaxed select-all">
+                                    {typeof log.payload === 'object' ? JSON.stringify(log.payload, null, 2) : String(log.payload)}
+                                  </pre>
+                                </div>
+                              )}
+                              
+                              {(log.response || log.error) && (
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[9px] text-gray-500 font-bold uppercase select-none">
+                                    {isError ? 'Erro (Resposta)' : 'Dados Recebidos'}
+                                  </span>
+                                  <pre className={`bg-black/40 border border-gray-900 rounded-lg p-2 text-[10px] overflow-x-auto max-h-[200px] custom-scrollbar font-mono leading-relaxed select-all ${isError ? 'text-red-400' : 'text-emerald-300'}`}>
+                                    {isError 
+                                      ? (log.error ? (typeof log.error === 'object' ? JSON.stringify(log.error, null, 2) : String(log.error)) : 'Erro indefinido')
+                                      : (typeof log.response === 'object' ? JSON.stringify(log.response, null, 2) : String(log.response))
+                                    }
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div ref={bottomRef} />
+                </div>
+              )}
             </div>
           ) : (
             /* Console Logs */

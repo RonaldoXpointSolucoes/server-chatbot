@@ -70,6 +70,35 @@ function injectStoreId(payloadObj, storeId) {
     return clone;
 }
 
+function logGastrofoodCall({ direction, action, method, url, payload, status, response, error }) {
+    try {
+        const entry = {
+            type: 'gastrofood_api',
+            direction,
+            action,
+            method,
+            url,
+            payload: typeof payload === 'object' ? payload : (payload ? JSON.parse(payload) : null),
+            status,
+            response: typeof response === 'object' ? response : (response ? JSON.parse(response) : null),
+            error: error || null
+        };
+        console.log(`[Gastrofood API] ${JSON.stringify(entry)}`);
+    } catch (e) {
+        console.log(`[Gastrofood API] ${JSON.stringify({
+            type: 'gastrofood_api',
+            direction,
+            action,
+            method,
+            url,
+            payload: String(payload),
+            status,
+            response: String(response),
+            error: error || e.message
+        })}`);
+    }
+}
+
 async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) {
     const now = Date.now();
     const cacheKey = tenantId + '_' + (botSettings?.id || 'default');
@@ -146,6 +175,14 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                     headers['Authorization'] = cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`;
                 }
                 
+                logGastrofoodCall({
+                    direction: 'request',
+                    action: 'Consultar Cardápio',
+                    method: 'POST',
+                    url: cardapioUrl,
+                    payload: bodyObj
+                });
+
                 const res = await fetch(cardapioUrl, {
                     method: 'POST',
                     headers,
@@ -154,6 +191,15 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                 
                 if (res.ok) {
                     const apiResponse = await res.json();
+                    logGastrofoodCall({
+                        direction: 'response',
+                        action: 'Consultar Cardápio',
+                        method: 'POST',
+                        url: cardapioUrl,
+                        status: res.status,
+                        response: apiResponse
+                    });
+
                     const apiProdutos = apiResponse.produtos || apiResponse.data?.produtos || [];
                     const apiGrupos = apiResponse.grupos || apiResponse.data?.grupos || [];
                     
@@ -198,9 +244,26 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                         
                         return cache;
                     }
+                } else {
+                    const errText = await res.text();
+                    logGastrofoodCall({
+                        direction: 'error',
+                        action: 'Consultar Cardápio',
+                        method: 'POST',
+                        url: cardapioUrl,
+                        status: res.status,
+                        error: errText
+                    });
                 }
             } catch (apiErr) {
                 console.error(`[CardapioCache - API] Erro ao consultar API externa para a chave ${cacheKey}:`, apiErr);
+                logGastrofoodCall({
+                    direction: 'error',
+                    action: 'Consultar Cardápio',
+                    method: 'POST',
+                    url: cardapioUrl,
+                    error: apiErr.message
+                });
             }
         }
     }
@@ -303,6 +366,14 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
             await new Promise(resolve => setTimeout(resolve, 200));
             
             try {
+                logGastrofoodCall({
+                    direction: 'request',
+                    action: 'Consultar Adicionais',
+                    method: 'POST',
+                    url: stepsUrl,
+                    payload: { AIdProduto: product.id }
+                });
+
                 const resSteps = await fetch(stepsUrl, {
                     method: 'POST',
                     headers: {
@@ -314,6 +385,15 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                 
                 if (resSteps.ok) {
                     const stepsData = await resSteps.json();
+                    logGastrofoodCall({
+                        direction: 'response',
+                        action: 'Consultar Adicionais',
+                        method: 'POST',
+                        url: stepsUrl,
+                        status: resSteps.status,
+                        response: stepsData
+                    });
+
                     if (stepsData.status === 200 && stepsData.data) {
                         const passosRaw = stepsData.data.passos || stepsData.data.Passos || [];
                         const passos = Array.isArray(passosRaw) ? passosRaw : [];
@@ -378,9 +458,26 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                             }
                         }
                     }
+                } else {
+                    const errText = await resSteps.text();
+                    logGastrofoodCall({
+                        direction: 'error',
+                        action: 'Consultar Adicionais',
+                        method: 'POST',
+                        url: stepsUrl,
+                        status: resSteps.status,
+                        error: errText
+                    });
                 }
             } catch (stepErr) {
                 console.error(`[AutoHealing] Erro ao sincronizar adicionais para o produto ${product.name}:`, stepErr);
+                logGastrofoodCall({
+                    direction: 'error',
+                    action: 'Consultar Adicionais',
+                    method: 'POST',
+                    url: stepsUrl,
+                    error: stepErr.message
+                });
             }
         }
     }
@@ -1579,6 +1676,14 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     }
 
                                     console.log(`[AutomationWorker - CEP] Consultando CEP ${rawCep} via Gastrofood API...`);
+                                    logGastrofoodCall({
+                                        direction: 'request',
+                                        action: 'Validar CEP',
+                                        method: 'POST',
+                                        url: cepUrl,
+                                        payload: bodyObj
+                                    });
+
                                     const response = await fetch(cepUrl, {
                                         method: 'POST',
                                         headers,
@@ -1587,6 +1692,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
                                     if (response.ok) {
                                         const resData = await response.json();
+                                        logGastrofoodCall({
+                                            direction: 'response',
+                                            action: 'Validar CEP',
+                                            method: 'POST',
+                                            url: cepUrl,
+                                            status: response.status,
+                                            response: resData
+                                        });
+
                                         const data = resData.data || resData;
                                         if (data && !data.erro && !data.error && (data.logradouro || data.Logradouro || data.rua || data.Rua)) {
                                             functionResult = {
@@ -1606,9 +1720,24 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     } else {
                                         const errText = await response.text();
                                         console.warn(`[AutomationWorker - CEP] Falha HTTP na consulta de CEP ${rawCep} via Gastrofood (Status: ${response.status}). Detalhes: ${errText}`);
+                                        logGastrofoodCall({
+                                            direction: 'error',
+                                            action: 'Validar CEP',
+                                            method: 'POST',
+                                            url: cepUrl,
+                                            status: response.status,
+                                            error: errText
+                                        });
                                     }
                                 } catch (errGastroCep) {
                                     console.error("[AutomationWorker - CEP] Erro na consulta do CEP via Gastrofood API:", errGastroCep);
+                                    logGastrofoodCall({
+                                        direction: 'error',
+                                        action: 'Validar CEP',
+                                        method: 'POST',
+                                        url: cepUrl,
+                                        error: errGastroCep.message
+                                    });
                                 }
 
                                 // Fallback para ViaCEP se falhar ou não retornar dados válidos
@@ -1719,6 +1848,14 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     }
 
                                     console.log(`[AutomationWorker - Cliente] Validando telefone ${rawPhone} via Gastrofood API...`);
+                                    logGastrofoodCall({
+                                        direction: 'request',
+                                        action: 'Validar Cliente',
+                                        method: 'POST',
+                                        url: clienteUrl,
+                                        payload: bodyObj
+                                    });
+
                                     const response = await fetch(clienteUrl, {
                                         method: 'POST',
                                         headers,
@@ -1727,6 +1864,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
                                     if (response.ok) {
                                         const resData = await response.json();
+                                        logGastrofoodCall({
+                                            direction: 'response',
+                                            action: 'Validar Cliente',
+                                            method: 'POST',
+                                            url: clienteUrl,
+                                            status: response.status,
+                                            response: resData
+                                        });
+
                                         const data = resData.data || resData;
                                         functionResult = {
                                             cadastrado: data.cadastrado !== false && !data.erro && (!!data.id || !!data.IdUsuario || !!data.NomeRazao || !!data.nome || !!data.customer || data.status === 200),
@@ -1735,10 +1881,25 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     } else {
                                         const errText = await response.text();
                                         console.error(`[AutomationWorker - Cliente] Falha HTTP ao validar cliente ${rawPhone} (Status: ${response.status}). Detalhes: ${errText}`);
+                                        logGastrofoodCall({
+                                            direction: 'error',
+                                            action: 'Validar Cliente',
+                                            method: 'POST',
+                                            url: clienteUrl,
+                                            status: response.status,
+                                            error: errText
+                                        });
                                         functionResult = { erro: `Serviço de validação de cliente indisponível (Status: ${response.status})` };
                                     }
                                 } catch (errCli) {
                                     console.error("[AutomationWorker - Cliente] Erro ao validar telefone:", errCli);
+                                    logGastrofoodCall({
+                                        direction: 'error',
+                                        action: 'Validar Cliente',
+                                        method: 'POST',
+                                        url: clienteUrl,
+                                        error: errCli.message
+                                    });
                                     functionResult = { erro: `Erro ao conectar-se ao serviço de validação: ${errCli.message}` };
                                 }
                             }
@@ -1774,6 +1935,14 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
 
                                     console.log(`[AutomationWorker - Pedido] Enviando pedido para Gastrofood...`);
+                                    logGastrofoodCall({
+                                        direction: 'request',
+                                        action: 'Enviar Pedido',
+                                        method: 'POST',
+                                        url: pedidoUrl,
+                                        payload: finalPayload
+                                    });
+
                                     const response = await fetch(pedidoUrl, {
                                         method: 'POST',
                                         headers,
@@ -1782,6 +1951,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
                                     if (response.ok) {
                                         const resData = await response.json();
+                                        logGastrofoodCall({
+                                            direction: 'response',
+                                            action: 'Enviar Pedido',
+                                            method: 'POST',
+                                            url: pedidoUrl,
+                                            status: response.status,
+                                            response: resData
+                                        });
+
                                         functionResult = {
                                             sucesso: response.status === 200 || response.status === 201,
                                             status: response.status,
@@ -1793,10 +1971,25 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     } else {
                                         const errText = await response.text();
                                         console.error(`[AutomationWorker - Pedido] Falha HTTP ao enviar pedido (Status: ${response.status}). Detalhes: ${errText}`);
+                                        logGastrofoodCall({
+                                            direction: 'error',
+                                            action: 'Enviar Pedido',
+                                            method: 'POST',
+                                            url: pedidoUrl,
+                                            status: response.status,
+                                            error: errText
+                                        });
                                         functionResult = { erro: `Erro ao enviar pedido para o Gastrofood (Status: ${response.status}). Detalhes: ${errText}` };
                                     }
                                 } catch (errPed) {
                                     console.error("[AutomationWorker - Pedido] Erro ao enviar pedido:", errPed);
+                                    logGastrofoodCall({
+                                        direction: 'error',
+                                        action: 'Enviar Pedido',
+                                        method: 'POST',
+                                        url: pedidoUrl,
+                                        error: errPed.message
+                                    });
                                     functionResult = { erro: `Erro ao conectar-se ao serviço de pedidos: ${errPed.message}` };
                                 }
                             }
@@ -1828,6 +2021,14 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     }
 
                                     console.log(`[AutomationWorker - Status Pedido] Buscando status do pedido ${idPedido} via Gastrofood API...`);
+                                    logGastrofoodCall({
+                                        direction: 'request',
+                                        action: 'Consultar Status',
+                                        method: 'GET',
+                                        url: requestUrl,
+                                        payload: null
+                                    });
+
                                     const response = await fetch(requestUrl, {
                                         method: 'GET',
                                         headers
@@ -1835,6 +2036,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
                                     if (response.ok) {
                                         const resData = await response.json();
+                                        logGastrofoodCall({
+                                            direction: 'response',
+                                            action: 'Consultar Status',
+                                            method: 'GET',
+                                            url: requestUrl,
+                                            status: response.status,
+                                            response: resData
+                                        });
+
                                         functionResult = {
                                             sucesso: true,
                                             status_http: response.status,
@@ -1843,10 +2053,25 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     } else {
                                         const errText = await response.text();
                                         console.error(`[AutomationWorker - Status Pedido] Falha HTTP ao buscar status (Status: ${response.status}). Detalhes: ${errText}`);
+                                        logGastrofoodCall({
+                                            direction: 'error',
+                                            action: 'Consultar Status',
+                                            method: 'GET',
+                                            url: requestUrl,
+                                            status: response.status,
+                                            error: errText
+                                        });
                                         functionResult = { erro: `Erro ao buscar status do pedido (Status: ${response.status})` };
                                     }
                                 } catch (errStat) {
                                     console.error("[AutomationWorker - Status Pedido] Erro ao buscar status:", errStat);
+                                    logGastrofoodCall({
+                                        direction: 'error',
+                                        action: 'Consultar Status',
+                                        method: 'GET',
+                                        url: requestUrl,
+                                        error: errStat.message
+                                    });
                                     functionResult = { erro: `Erro ao conectar-se ao serviço de status de pedido: ${errStat.message}` };
                                 }
                             }
@@ -1887,6 +2112,14 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     }
 
                                     console.log(`[AutomationWorker - Pagamento PIX] Iniciando transação PIX para pedido ${idPedido}...`);
+                                    logGastrofoodCall({
+                                        direction: 'request',
+                                        action: 'Iniciar Pix',
+                                        method: 'POST',
+                                        url: pixUrl,
+                                        payload: bodyObj
+                                    });
+
                                     const response = await fetch(pixUrl, {
                                         method: 'POST',
                                         headers,
@@ -1895,6 +2128,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
                                     if (response.ok) {
                                         const resData = await response.json();
+                                        logGastrofoodCall({
+                                            direction: 'response',
+                                            action: 'Iniciar Pix',
+                                            method: 'POST',
+                                            url: pixUrl,
+                                            status: response.status,
+                                            response: resData
+                                        });
+
                                         functionResult = {
                                             sucesso: true,
                                             status_http: response.status,
@@ -1903,10 +2145,25 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     } else {
                                         const errText = await response.text();
                                         console.error(`[AutomationWorker - Pagamento PIX] Falha HTTP ao iniciar PIX (Status: ${response.status}). Detalhes: ${errText}`);
+                                        logGastrofoodCall({
+                                            direction: 'error',
+                                            action: 'Iniciar Pix',
+                                            method: 'POST',
+                                            url: pixUrl,
+                                            status: response.status,
+                                            error: errText
+                                        });
                                         functionResult = { erro: `Erro ao iniciar transação PIX (Status: ${response.status})` };
                                     }
                                 } catch (errPix) {
                                     console.error("[AutomationWorker - Pagamento PIX] Erro ao iniciar PIX:", errPix);
+                                    logGastrofoodCall({
+                                        direction: 'error',
+                                        action: 'Iniciar Pix',
+                                        method: 'POST',
+                                        url: pixUrl,
+                                        error: errPix.message
+                                    });
                                     functionResult = { erro: `Erro ao conectar-se ao serviço de pagamento PIX: ${errPix.message}` };
                                 }
                             }
@@ -1950,6 +2207,14 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     }
 
                                     console.log(`[AutomationWorker - Cadastro Cliente] Cadastrando cliente ${nome} (${telefone}) via Gastrofood API...`);
+                                    logGastrofoodCall({
+                                        direction: 'request',
+                                        action: 'Cadastrar Cliente',
+                                        method: 'POST',
+                                        url: cadastrarUrl,
+                                        payload: bodyObj
+                                    });
+
                                     const response = await fetch(cadastrarUrl, {
                                         method: 'POST',
                                         headers,
@@ -1958,6 +2223,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
                                     if (response.ok) {
                                         const resData = await response.json();
+                                        logGastrofoodCall({
+                                            direction: 'response',
+                                            action: 'Cadastrar Cliente',
+                                            method: 'POST',
+                                            url: cadastrarUrl,
+                                            status: response.status,
+                                            response: resData
+                                        });
+
                                         functionResult = {
                                             sucesso: response.status === 200 || response.status === 201,
                                             status_http: response.status,
@@ -1966,10 +2240,25 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     } else {
                                         const errText = await response.text();
                                         console.error(`[AutomationWorker - Cadastro Cliente] Falha HTTP ao cadastrar cliente (Status: ${response.status}). Detalhes: ${errText}`);
+                                        logGastrofoodCall({
+                                            direction: 'error',
+                                            action: 'Cadastrar Cliente',
+                                            method: 'POST',
+                                            url: cadastrarUrl,
+                                            status: response.status,
+                                            error: errText
+                                        });
                                         functionResult = { erro: `Erro ao cadastrar cliente no sistema (Status: ${response.status})` };
                                     }
                                 } catch (errCad) {
                                     console.error("[AutomationWorker - Cadastro Cliente] Erro ao cadastrar cliente:", errCad);
+                                    logGastrofoodCall({
+                                        direction: 'error',
+                                        action: 'Cadastrar Cliente',
+                                        method: 'POST',
+                                        url: cadastrarUrl,
+                                        error: errCad.message
+                                    });
                                     functionResult = { erro: `Erro ao conectar-se ao serviço de cadastro de cliente: ${errCad.message}` };
                                 }
                             }
