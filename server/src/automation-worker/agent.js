@@ -1488,6 +1488,8 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             let loopCount = 0;
             const MAX_LOOPS = 5;
 
+            const toolExecutionHistory = [];
+
             // Executa com Function Calling Loop
             while (keepLooping && loopCount < MAX_LOOPS) {
                 loopCount++;
@@ -1499,6 +1501,11 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                     if (calls && calls.length > 0) {
                         const call = calls[0];
                         console.log(`[AutomationWorker] AI quer chamar a tool: ${call.name}`);
+                        toolExecutionHistory.push({
+                            step: loopCount,
+                            toolName: call.name,
+                            args: call.args
+                        });
                         
                         let functionResult = {};
 
@@ -2416,6 +2423,11 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                             functionResult = { erro: "Ferramenta desconhecida" };
                         }
 
+                        // Registra o resultado no histórico de execução de tools
+                        if (toolExecutionHistory.length > 0) {
+                            toolExecutionHistory[toolExecutionHistory.length - 1].result = functionResult;
+                        }
+
                         // Envia o resultado da função de volta para a IA continuar o raciocínio
                         currentMessageText = [{
                             functionResponse: {
@@ -2432,19 +2444,28 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                     const errMsg = loopError?.message || String(loopError);
                     const errStatus = loopError?.status || loopError?.response?.status || 'N/A';
                     const errName = loopError?.name || loopError?.constructor?.name || 'UnknownError';
-                    console.error(`[AutomationWorker] Erro durante o loop de função (Iteração ${loopCount}):`, {
-                        name: errName,
-                        message: errMsg,
-                        status: errStatus,
-                        stack: loopError?.stack?.split('\n').slice(0, 5).join('\n')
-                    });
+                    
+                    const errorDetail = `[AutomationWorker] Erro crítico no loop de função (Iteração ${loopCount}) para conversa ${conversationId}:\n` +
+                        `Mensagem de gatilho do cliente: "${textMessage}"\n` +
+                        `Erro: ${errName} - ${errMsg} (Status: ${errStatus})\n` +
+                        `Histórico de chamadas de tools executadas até a falha:\n` +
+                        JSON.stringify(toolExecutionHistory, null, 2);
+
+                    console.error(errorDetail);
+                    
                     finalResponseText = "Desculpe, ocorreu um pequeno erro interno ao processar sua requisição. Pode tentar novamente?";
                     keepLooping = false;
                 }
             }
 
             if (loopCount >= MAX_LOOPS) {
-                console.warn(`[AutomationWorker] Loop infinito detectado para a conversa ${conversationId}. Abortando geração.`);
+                const loopDetail = `[AutomationWorker] Falha de Execução: Loop infinito de I.A. (mais de 5 iterações) detectado na conversa ${conversationId}.\n` +
+                    `Mensagem de gatilho do cliente: "${textMessage}"\n` +
+                    `Histórico completo de chamadas e retornos de ferramentas durante o loop:\n` +
+                    JSON.stringify(toolExecutionHistory, null, 2) + `\n` +
+                    `Isso costuma acontecer quando o prompt do bot instrui a IA a chamar ferramentas repetidamente ou quando o retorno de uma ferramenta não satisfaz os critérios da IA. Corrija o prompt ou adicione validações nas ferramentas correspondentes.`;
+
+                console.error(loopDetail);
                 finalResponseText = finalResponseText || "Desculpe, encontrei uma dificuldade técnica. Em que posso ajudar?";
             }
 
