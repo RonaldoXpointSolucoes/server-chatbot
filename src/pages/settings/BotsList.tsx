@@ -35,7 +35,15 @@ import {
   UtensilsCrossed,
   Bike,
   LifeBuoy,
-  HeartHandshake
+  HeartHandshake,
+  Mic,
+  Square,
+  Play,
+  Pause,
+  Image as ImageIcon,
+  UploadCloud,
+  Volume2,
+  HelpCircle
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { BotModal } from '../../components/modals/BotModal';
@@ -193,6 +201,15 @@ const extractTextFromMessageContent = (m: any) => {
   return typeof replyText === 'string' ? replyText : '...';
 };
 
+const trainingDraftsMemory: Record<string, {
+  text: string;
+  images: Array<{ id: string; name: string; base64: string; mimeType: string }>;
+  audioBase64: string | null;
+  audioMimeType: string | null;
+  audioUrl: string | null;
+  destination: 'prompt' | 'rag' | 'both';
+}> = {};
+
 export default function BotsList() {
   const [activeTab, setActiveTab] = useState<'bots' | 'comercio' | 'simulador'>('bots');
   const [searchTerm, setSearchTerm] = useState('');
@@ -205,6 +222,291 @@ export default function BotsList() {
 
   const [bots, setBots] = useState<any[]>([]);
   const [ragDocsCount, setRagDocsCount] = useState(0);
+
+  // Estados para o Treinamento Multimodal do Robô (Áudio e Imagem)
+  const [isTrainingOpen, setIsTrainingOpen] = useState(false);
+  const [trainingBot, setTrainingBot] = useState<any | null>(null);
+  const [trainText, setTrainText] = useState('');
+  const [trainImages, setTrainImages] = useState<Array<{ id: string; name: string; base64: string; mimeType: string }>>([]);
+  const [trainAudioUrl, setTrainAudioUrl] = useState<string | null>(null);
+  const [trainAudioBase64, setTrainAudioBase64] = useState<string | null>(null);
+  const [trainAudioMimeType, setTrainAudioMimeType] = useState<string | null>(null);
+  const [trainDestination, setTrainDestination] = useState<'prompt' | 'rag' | 'both'>('both');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [isSubmittingTrain, setIsSubmittingTrain] = useState(false);
+  const [trainResult, setTrainResult] = useState<{ success: boolean; analysis?: string; message?: string } | null>(null);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingIntervalRef = useRef<any>(null);
+
+  // Helper para salvar rascunho de treinamento em memória para não perder
+  const saveTrainingDraft = (
+    botId: string, 
+    updates: Partial<{
+      text: string;
+      images: Array<{ id: string; name: string; base64: string; mimeType: string }>;
+      audioBase64: string | null;
+      audioMimeType: string | null;
+      audioUrl: string | null;
+      destination: 'prompt' | 'rag' | 'both';
+    }>
+  ) => {
+    if (!trainingDraftsMemory[botId]) {
+      trainingDraftsMemory[botId] = {
+        text: '',
+        images: [],
+        audioBase64: null,
+        audioMimeType: null,
+        audioUrl: null,
+        destination: 'both'
+      };
+    }
+    trainingDraftsMemory[botId] = { ...trainingDraftsMemory[botId], ...updates };
+  };
+
+  const loadTrainingDraft = (botId: string) => {
+    const draft = trainingDraftsMemory[botId];
+    const savedText = localStorage.getItem(`bot_train_text_${botId}`) || '';
+    
+    if (draft) {
+      setTrainText(draft.text || savedText);
+      setTrainImages(draft.images || []);
+      setTrainAudioUrl(draft.audioUrl || null);
+      setTrainAudioBase64(draft.audioBase64 || null);
+      setTrainAudioMimeType(draft.audioMimeType || null);
+      setTrainDestination(draft.destination || 'both');
+    } else {
+      setTrainText(savedText);
+      setTrainImages([]);
+      setTrainAudioUrl(null);
+      setTrainAudioBase64(null);
+      setTrainAudioMimeType(null);
+      setTrainDestination('both');
+    }
+  };
+
+  const handleOpenTraining = (bot: any) => {
+    setTrainingBot(bot);
+    setTrainResult(null);
+    loadTrainingDraft(bot.id);
+    setIsTrainingOpen(true);
+  };
+
+  const handleCloseTraining = () => {
+    // Guarda o estado atual antes de fechar para não perder
+    if (trainingBot?.id) {
+      saveTrainingDraft(trainingBot.id, {
+        text: trainText,
+        images: trainImages,
+        audioUrl: trainAudioUrl,
+        audioBase64: trainAudioBase64,
+        audioMimeType: trainAudioMimeType,
+        destination: trainDestination
+      });
+      localStorage.setItem(`bot_train_text_${trainingBot.id}`, trainText);
+    }
+    
+    stopRecording();
+    setIsTrainingOpen(false);
+    setTrainingBot(null);
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64data = reader.result as string;
+          setTrainAudioUrl(audioUrl);
+          setTrainAudioBase64(base64data);
+          setTrainAudioMimeType('audio/webm');
+          
+          if (trainingBot?.id) {
+            saveTrainingDraft(trainingBot.id, {
+              audioUrl,
+              audioBase64: base64data,
+              audioMimeType: 'audio/webm'
+            });
+          }
+        };
+        reader.readAsDataURL(audioBlob);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+
+    } catch (err) {
+      console.error("Erro ao iniciar gravação:", err);
+      alert("Não foi possível acessar seu microfone. Verifique as permissões do navegador.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+      
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+    }
+  };
+
+  const deleteRecording = () => {
+    stopRecording();
+    setTrainAudioUrl(null);
+    setTrainAudioBase64(null);
+    setTrainAudioMimeType(null);
+    if (trainingBot?.id) {
+      saveTrainingDraft(trainingBot.id, {
+        audioUrl: null,
+        audioBase64: null,
+        audioMimeType: null
+      });
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      Array.from(e.target.files).forEach(file => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = reader.result as string;
+          const newImg = {
+            id: crypto.randomUUID(),
+            name: file.name,
+            base64,
+            mimeType: file.type
+          };
+          setTrainImages(prev => {
+            const next = [...prev, newImg];
+            if (trainingBot?.id) {
+              saveTrainingDraft(trainingBot.id, { images: next });
+            }
+            return next;
+          });
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64 = reader.result as string;
+            const newImg = {
+              id: crypto.randomUUID(),
+              name: `colado_${new Date().getTime()}.png`,
+              base64,
+              mimeType: file.type
+            };
+            setTrainImages(prev => {
+              const next = [...prev, newImg];
+              if (trainingBot?.id) {
+                saveTrainingDraft(trainingBot.id, { images: next });
+              }
+              return next;
+            });
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  };
+
+  const handleRemoveImage = (imgId: string) => {
+    setTrainImages(prev => {
+      const next = prev.filter(img => img.id !== imgId);
+      if (trainingBot?.id) {
+        saveTrainingDraft(trainingBot.id, { images: next });
+      }
+      return next;
+    });
+  };
+
+  const handleSendTraining = async () => {
+    if (!trainingBot) return;
+    if (!trainText.trim() && !trainAudioBase64 && trainImages.length === 0) {
+      alert("Por favor, adicione alguma instrução em texto, áudio ou imagem para realizar o treinamento.");
+      return;
+    }
+
+    setIsSubmittingTrain(true);
+    setTrainResult(null);
+
+    try {
+      const response = await fetch(`/api/v1/knowledge/train-multimodal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': tenantId || ''
+        },
+        body: JSON.stringify({
+          botId: trainingBot.id,
+          text: trainText,
+          images: trainImages.map(img => ({ base64: img.base64, mimeType: img.mimeType })),
+          audio: trainAudioBase64 ? { base64: trainAudioBase64, mimeType: trainAudioMimeType } : null,
+          destination: trainDestination
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Erro ao processar treinamento.");
+      }
+
+      setTrainResult({
+        success: true,
+        analysis: data.analysis,
+        message: data.message
+      });
+
+      if (trainingBot.id) {
+        delete trainingDraftsMemory[trainingBot.id];
+        localStorage.removeItem(`bot_train_text_${trainingBot.id}`);
+      }
+
+      fetchBots();
+
+    } catch (err: any) {
+      console.error(err);
+      setTrainResult({
+        success: false,
+        message: err.message || "Erro desconhecido ao processar treinamento."
+      });
+    } finally {
+      setIsSubmittingTrain(false);
+    }
+  };
 
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
   const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
@@ -1291,7 +1593,14 @@ Instruções importantes:
                                     </span>
                                   </div>
 
-                                  <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                   <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                    <button 
+                                      onClick={() => handleOpenTraining(bot)}
+                                      className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-400 hover:text-amber-300 transition-all shadow-sm text-xs font-bold flex items-center gap-1"
+                                      title="Treinamento de IA com Áudio e Imagem"
+                                    >
+                                      <Sparkles className="w-3.5 h-3.5" /> Treinar
+                                    </button>
                                     <button 
                                       onClick={() => handleEditClick(bot)}
                                       className="p-2 rounded-xl bg-white/5 hover:bg-indigo-500/20 hover:border-indigo-500/30 border border-transparent text-white/40 hover:text-indigo-400 transition-all shadow-sm text-xs font-bold flex items-center gap-1"
@@ -1867,6 +2176,290 @@ Instruções importantes:
         availableBots={bots.filter(b => b.id !== botToEdit?.id)}
         initialTemplate={selectedOnboardingTemplate}
       />
+
+      {/* Modal de Treinamento Multimodal (Áudio/Imagem) */}
+      {isTrainingOpen && trainingBot && (
+        <div 
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-[#0f1013]/90 backdrop-blur-[20px] animate-in fade-in duration-300"
+          onPaste={handlePaste}
+        >
+          <div className="bg-[#14151a]/95 border border-white/10 rounded-[2rem] shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[95vh] relative">
+            <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-amber-500/5 rounded-full blur-[80px] pointer-events-none" />
+            
+            {/* Cabeçalho */}
+            <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.01]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                  <Sparkles className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white/95 flex items-center gap-2">
+                    Treinamento I.A. <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-white/60">{trainingBot.name}</span>
+                  </h2>
+                  <p className="text-xs text-white/40 mt-0.5">Alinhamento de comportamento por áudio, screenshots e texto.</p>
+                </div>
+              </div>
+              <button 
+                onClick={handleCloseTraining}
+                className="p-2 text-white/40 hover:text-white/90 hover:bg-white/10 rounded-xl transition-colors"
+                title="Fechar e manter rascunho em memória"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Corpo com Scroll */}
+            <div className="p-6 overflow-y-auto space-y-5 flex-1 select-none">
+              
+              {/* Rascunho status */}
+              <div className="flex items-center justify-between text-[11px] bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl text-amber-400">
+                <div className="flex items-center gap-1.5 font-semibold text-left">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping shrink-0" />
+                  Rascunho Protegido
+                </div>
+                <span className="text-right text-white/60 ml-2">Se você fechar esta janela ou alternar abas, os arquivos e dados digitados continuarão salvos!</span>
+              </div>
+
+              {/* Área 1: Texto Explicativo */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-white/60 uppercase tracking-widest block text-left">Explicação do Caso / Comportamento Desejado</label>
+                <textarea
+                  value={trainText}
+                  onChange={(e) => {
+                    setTrainText(e.target.value);
+                    if (trainingBot?.id) {
+                      saveTrainingDraft(trainingBot.id, { text: e.target.value });
+                    }
+                    localStorage.setItem(`bot_train_text_${trainingBot.id}`, e.target.value);
+                  }}
+                  placeholder="Exemplo: 'Quando o cliente confirmar o resumo do pedido dizendo ok, você deve enviar o pedido imediatamente para o Gastrofood, mas na última conversa você disse que enviou e não enviou. Certifique-se de acionar a ferramenta correspondente!'"
+                  className="w-full h-32 bg-white/[0.02] border border-white/10 rounded-2xl p-4 text-white text-sm focus:outline-none focus:border-amber-500/50 placeholder:text-white/20 transition-all resize-none text-left"
+                />
+              </div>
+
+              {/* Área 2: Prints / Imagens (Suporte a paste do clipboard!) */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-white/60 uppercase tracking-widest block text-left">Imagens do Caso / Capturas de Tela (Cole com Ctrl+V aqui)</label>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Dropzone / Upload button */}
+                  <label className="flex flex-col items-center justify-center border border-dashed border-white/10 hover:border-amber-500/30 bg-white/[0.01] hover:bg-white/[0.03] rounded-2xl p-4 transition-all cursor-pointer min-h-[110px]">
+                    <UploadCloud className="w-8 h-8 text-white/30 mb-2" />
+                    <span className="text-xs font-bold text-white/60">Anexar Prints / Fotos</span>
+                    <span className="text-[10px] text-white/30 mt-1">Ou cole uma imagem direto</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      multiple 
+                      onChange={handleImageUpload} 
+                      className="hidden" 
+                    />
+                  </label>
+
+                  {/* Thumbnail List */}
+                  <div className="col-span-1 flex flex-wrap gap-2 overflow-y-auto max-h-[110px] items-start p-1 border border-white/5 rounded-2xl bg-white/[0.01]">
+                    {trainImages.length === 0 ? (
+                      <div className="text-xs text-white/20 italic self-center w-full text-center py-8">Nenhum print em anexo.</div>
+                    ) : (
+                      trainImages.map(img => (
+                        <div key={img.id} className="relative group w-16 h-16 rounded-xl overflow-hidden border border-white/10 bg-white/5">
+                          <img src={img.base64} alt={img.name} className="w-full h-full object-cover" />
+                          <button
+                            onClick={() => handleRemoveImage(img.id)}
+                            className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity"
+                            title="Remover imagem"
+                          >
+                            <Trash className="w-4 h-4 text-rose-400" />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Área 3: Gravação de Áudio */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-white/60 uppercase tracking-widest block text-left">Explicação em Áudio (Fale o que a IA deve fazer)</label>
+                <div className="bg-white/[0.01] border border-white/5 rounded-2xl p-4 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 text-left">
+                    {isRecording ? (
+                      <div className="w-10 h-10 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 animate-pulse">
+                        <Volume2 className="w-5 h-5" />
+                      </div>
+                    ) : trainAudioUrl ? (
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                        <Volume2 className="w-5 h-5" />
+                      </div>
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/30">
+                        <Mic className="w-5 h-5" />
+                      </div>
+                    )}
+                    
+                    <div>
+                      {isRecording ? (
+                        <>
+                          <div className="text-xs font-bold text-rose-400">Gravando Áudio...</div>
+                          <div className="text-[10px] text-white/40 mt-0.5">Tempo decorrido: {recordingTime}s</div>
+                        </>
+                      ) : trainAudioUrl ? (
+                        <>
+                          <div className="text-xs font-bold text-emerald-400">Áudio Gravado e Seguro</div>
+                          <div className="text-[10px] text-white/40 mt-0.5">Pronto para ser enviado à I.A.</div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-xs font-bold text-white/70">Gravar Mensagem de Voz</div>
+                          <div className="text-[10px] text-white/30 mt-0.5">Explique em detalhes o comportamento desejado.</div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {isRecording ? (
+                      <button
+                        onClick={stopRecording}
+                        className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-rose-500/15"
+                      >
+                        <Square className="w-3.5 h-3.5" /> Parar
+                      </button>
+                    ) : trainAudioUrl ? (
+                      <div className="flex items-center gap-2">
+                        <audio src={trainAudioUrl} controls className="h-8 max-w-[180px] bg-transparent text-xs" />
+                        <button
+                          onClick={deleteRecording}
+                          className="p-2 bg-white/5 hover:bg-rose-500/10 text-white/40 hover:text-rose-400 border border-white/10 rounded-xl transition-colors"
+                          title="Excluir áudio"
+                        >
+                          <Trash className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={startRecording}
+                        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-md shadow-amber-500/15"
+                      >
+                        <Mic className="w-3.5 h-3.5" /> Gravar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Área 4: Destino do Aprendizado */}
+              <div className="space-y-2 bg-[#1b1c24]/50 border border-white/5 rounded-2xl p-4 text-left">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-white/60 uppercase tracking-widest block flex items-center gap-1">
+                    Onde salvar as regras do treinamento?
+                  </label>
+                  <span className="text-[10px] text-white/40 flex items-center gap-1">
+                    <HelpCircle size={12} /> Escolha onde a IA integrará as novidades
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    onClick={() => {
+                      setTrainDestination('prompt');
+                      if (trainingBot?.id) saveTrainingDraft(trainingBot.id, { destination: 'prompt' });
+                    }}
+                    className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 ${
+                      trainDestination === 'prompt'
+                        ? 'bg-amber-500/10 border-amber-500/40 text-amber-400 font-bold'
+                        : 'bg-white/[0.01] border-white/5 hover:bg-white/[0.03] text-white/55'
+                    }`}
+                  >
+                    <FileText size={18} />
+                    <span className="text-xs">Prompt do Robô</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setTrainDestination('rag');
+                      if (trainingBot?.id) saveTrainingDraft(trainingBot.id, { destination: 'rag' });
+                    }}
+                    className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 ${
+                      trainDestination === 'rag'
+                        ? 'bg-amber-500/10 border-amber-500/40 text-amber-400 font-bold'
+                        : 'bg-white/[0.01] border-white/5 hover:bg-white/[0.03] text-white/55'
+                    }`}
+                  >
+                    <Database size={18} />
+                    <span className="text-xs">Base RAG (Fatos)</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setTrainDestination('both');
+                      if (trainingBot?.id) saveTrainingDraft(trainingBot.id, { destination: 'both' });
+                    }}
+                    className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 ${
+                      trainDestination === 'both'
+                        ? 'bg-amber-500/10 border-amber-500/40 text-amber-400 font-bold'
+                        : 'bg-white/[0.01] border-white/5 hover:bg-white/[0.03] text-white/55'
+                    }`}
+                  >
+                    <Sparkles size={18} />
+                    <span className="text-xs">Ambos (Recomendado)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Resultado do treinamento */}
+              {trainResult && (
+                <div className={`p-4 rounded-2xl border text-sm space-y-2 animate-in slide-in-from-bottom duration-300 text-left ${
+                  trainResult.success 
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+                    : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                }`}>
+                  <div className="flex items-center gap-2 font-bold">
+                    {trainResult.success ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                    {trainResult.success ? 'Treinamento Concluído!' : 'Falha no Treinamento'}
+                  </div>
+                  <p className="text-xs text-white/70 leading-relaxed">{trainResult.message || 'O robô analisou todos os dados e aprendeu a nova regra.'}</p>
+                  
+                  {trainResult.analysis && (
+                    <div className="bg-black/20 p-3 rounded-xl mt-2 border border-white/5">
+                      <div className="text-[10px] uppercase font-bold text-white/40 mb-1">Raciocínio & Análise da I.A:</div>
+                      <div className="text-xs text-white/70 italic leading-relaxed">{trainResult.analysis}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+            </div>
+
+            {/* Rodapé */}
+            <div className="p-6 border-t border-white/5 flex items-center justify-end gap-3 bg-white/[0.01]">
+              <button
+                onClick={handleCloseTraining}
+                disabled={isSubmittingTrain}
+                className="px-5 py-3 border border-white/10 text-white/60 font-semibold rounded-xl hover:bg-white/5 transition-colors disabled:opacity-50 text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSendTraining}
+                disabled={isSubmittingTrain}
+                className="px-6 py-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:from-white/5 disabled:to-white/5 disabled:border-white/10 disabled:text-white/30 border border-transparent text-black font-extrabold rounded-xl shadow-lg shadow-amber-500/10 flex items-center gap-2 transition-all disabled:opacity-50 text-xs"
+              >
+                {isSubmittingTrain ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Processando...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" /> Enviar Treinamento
+                  </>
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* Modal de Debug Prompt */}
       {promptModalMsg && (

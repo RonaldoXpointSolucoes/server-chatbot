@@ -925,4 +925,232 @@ Responda APENAS com o texto empático reescrito, sem introduções, sem explica�
     }
 });
 
+// Rota de treinamento multimodal (Imagens e Áudio) para alinhar e calibrar o robô
+router.post('/train-multimodal', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.body?.tenant_id;
+        const { botId, text, images, audio, destination } = req.body;
+
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+        if (!botId) return res.status(400).json({ error: 'botId required' });
+
+        const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            return res.status(500).json({ error: 'Chave API Gemini não configurada no servidor.' });
+        }
+
+        // 1. Busca o robô no banco
+        const { data: bot, error: botErr } = await supabase
+            .from('bots')
+            .select('*')
+            .eq('id', botId)
+            .single();
+
+        if (botErr || !bot) {
+            return res.status(404).json({ error: 'Robô não encontrado.' });
+        }
+
+        const currentPrompt = bot.systemPrompt || bot.system_prompt || '';
+
+        // 2. Inicializa o Gemini
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ 
+            model: 'gemini-2.5-flash',
+            generationConfig: { responseMimeType: 'application/json' }
+        });
+
+        const systemPrompt = `Você é um Engenheiro de Prompt e Analista de Treinamento de IA de Elite.
+Você está analisando feedback de treinamento para um chatbot (atendente virtual).
+O usuário enviará:
+- Um texto explicando a situação e qual é o comportamento desejado.
+- Prints (capturas de tela) que mostram o comportamento incorreto da IA ou como ela agiu e como gostaríamos que ela se comportasse.
+- Um áudio opcional com explicações adicionais sobre o caso.
+- O prompt de sistema atual do robô.
+
+Sua missão é deduzir a regra de negócio/comportamento desejado e gerar correções.
+Você deve retornar ESTRITAMENTE um JSON com três campos:
+{
+  "analysis": "Explicação curta do que foi identificado de erro e como foi corrigido",
+  "suggestedPromptChanges": "Novas diretrizes ou regras bem estruturadas (em formato de lista de tópicos em português) que devem ser adicionadas ao prompt do robô para corrigir a rota. Devem ser claras e fáceis de a IA obedecer. Não inclua os campos técnicos do prompt original, apenas as regras adicionais de comportamento de forma textual.",
+  "ragFacts": ["Fato/regra de negócio 1 extraída em português", "Fato/regra de negócio 2 extraída em português"]
+}
+
+REGRAS DE CONTEÚDO:
+1. Gere regras e fatos concisos, diretos e declarativos, em português brasileiro nativo.
+2. Evite mencionar dados pessoais confidenciais do cliente nas regras (como telefones reais, CPFs, nomes).
+3. Se a intenção do usuário for alterar o prompt, foque em gerar regras de comportamento para 'suggestedPromptChanges'.
+4. Se for para adicionar conhecimento (RAG), gere fatos objetivos sobre a empresa ou regras gerais em 'ragFacts'.
+`;
+
+        const userInstructions = `
+Aqui estão os dados para treinamento do robô:
+- Nome do Robô: "${bot.name}"
+- Descrição do Robô: "${bot.description || ''}"
+- Prompt de Sistema Atual do Robô:
+"""
+${currentPrompt}
+"""
+
+- Explicação do usuário sobre o comportamento desejado/situação:
+"${text || 'Sem descrição em texto.'}"
+
+Por favor, analise a imagem (ou imagens) e o áudio fornecidos junto com a descrição acima para entender o erro ocorrido e como a rota do robô deve ser corrigida. Retorne o JSON com as correções sugeridas.
+`;
+
+        const parts = [
+            { text: systemPrompt },
+            { text: userInstructions }
+        ];
+
+        // Helper para limpar base64
+        const cleanBase64 = (base64Str) => {
+            if (!base64Str) return null;
+            const commaIdx = base64Str.indexOf(',');
+            if (commaIdx !== -1) {
+                return base64Str.substring(commaIdx + 1);
+            }
+            return base64Str;
+        };
+
+        if (images && Array.isArray(images)) {
+            for (const img of images) {
+                const cleaned = cleanBase64(img.base64);
+                if (cleaned) {
+                    parts.push({
+                        inlineData: {
+                            data: cleaned,
+                            mimeType: img.mimeType || 'image/png'
+                        }
+                    });
+                }
+            }
+        }
+
+        if (audio && audio.base64) {
+            const cleanedAudio = cleanBase64(audio.base64);
+            if (cleanedAudio) {
+                parts.push({
+                    inlineData: {
+                        data: cleanedAudio,
+                        mimeType: audio.mimeType || 'audio/webm'
+                    }
+                });
+            }
+        }
+
+        console.log(\`[MultimodalTrain] Enviando requisição multimodal para o Gemini para o bot \${botId}\`);
+        const result = await model.generateContent(parts);
+        const responseText = result.response.text().trim();
+
+        let analysisResult;
+        try {
+            analysisResult = JSON.parse(responseText);
+        } catch (parseErr) {
+            let cleanText = responseText;
+            if (cleanText.includes('```json')) {
+                cleanText = cleanText.split('```json')[1].split('```')[0].trim();
+            } else if (cleanText.includes('```')) {
+                cleanText = cleanText.split('```')[1].split('```')[0].trim();
+            }
+            analysisResult = JSON.parse(cleanText);
+        }
+
+        let savedToPrompt = false;
+        let savedToRag = false;
+        let ragFactsCount = 0;
+        let promptChangesText = '';
+
+        // Se destino for prompt ou ambos
+        if ((destination === 'prompt' || destination === 'both') && analysisResult.suggestedPromptChanges) {
+            const promptChanges = analysisResult.suggestedPromptChanges.trim();
+            if (promptChanges.length > 5) {
+                promptChangesText = promptChanges;
+                const trainingHeader = `\\n\\n### REGRAS ADICIONAIS DE TREINAMENTO E CORREÇÃO DE ROTA (Atualizado em \${new Date().toLocaleDateString('pt-BR')}):\\n`;
+                const updatedPrompt = currentPrompt + trainingHeader + promptChanges;
+
+                const { error: updateErr } = await supabase
+                    .from('bots')
+                    .update({ systemPrompt: updatedPrompt, updated_at: new Date().toISOString() })
+                    .eq('id', botId);
+
+                if (updateErr) throw updateErr;
+                savedToPrompt = true;
+            }
+        }
+
+        // Se destino for RAG ou ambos
+        if ((destination === 'rag' || destination === 'both') && analysisResult.ragFacts && Array.isArray(analysisResult.ragFacts)) {
+            const facts = analysisResult.ragFacts.filter(f => f && f.trim().length > 5);
+            if (facts.length > 0) {
+                ragFactsCount = facts.length;
+                const docName = `Treinamento Multimodal (Áudio/Imagem) - Bot: \${bot.name}`;
+
+                let { data: doc, error: docSeekErr } = await supabase.from('knowledge_documents')
+                    .select('id')
+                    .eq('tenant_id', tenant_id)
+                    .eq('agent_id', botId)
+                    .eq('name', docName)
+                    .maybeSingle();
+
+                if (docSeekErr || !doc) {
+                    const { data: newDoc, error: createErr } = await supabase.from('knowledge_documents')
+                        .insert({
+                            tenant_id,
+                            agent_id: botId,
+                            name: docName,
+                            type: 'text/plain',
+                            status: 'processed',
+                            metadata: { source: 'multimodal-trainer', trained_at: new Date().toISOString() }
+                        })
+                        .select('id')
+                        .single();
+
+                    if (createErr || !newDoc) throw createErr;
+                    doc = newDoc;
+                }
+
+                const docId = doc.id;
+                const transformer = await EmbeddingsPipeline.getInstance();
+
+                for (let i = 0; i < facts.length; i++) {
+                    const fact = facts[i];
+                    const output = await transformer(fact, { pooling: 'mean', normalize: true });
+                    const embeddingVector = Array.from(output.data);
+
+                    const { error: chunkErr } = await supabase.from('knowledge_chunks').insert({
+                        document_id: docId,
+                        tenant_id,
+                        agent_id: botId,
+                        content: fact,
+                        embedding: embeddingVector,
+                        chunk_index: i,
+                        metadata: {
+                            source: 'multimodal-trainer',
+                            trained_at: new Date().toISOString()
+                        }
+                    });
+                    if (chunkErr) {
+                        console.error("[MultimodalTrain] Erro ao inserir chunk RAG:", chunkErr);
+                    }
+                }
+                savedToRag = true;
+            }
+        }
+
+        res.json({
+            success: true,
+            analysis: analysisResult.analysis,
+            savedToPrompt,
+            savedToRag,
+            ragFactsCount,
+            promptChangesText,
+            message: 'Treinamento multimodal processado com sucesso.'
+        });
+
+    } catch (e) {
+        console.error('[MultimodalTrain API] Erro:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 export default router;

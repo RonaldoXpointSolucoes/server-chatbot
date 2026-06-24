@@ -72,7 +72,8 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'x-agent-id', 'apikey', 'x-asts-test', 'X-Asts-Test']
 }));
 app.use(helmet());
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use(morgan('dev'));
 
 app.get('/debug/healthz', async (req, res) => {
