@@ -888,9 +888,44 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
         let job = this.pendingJobs.get(key);
         if (job) {
-            // Cancela os cronômetros pendentes (tanto geração quanto envio)
-            if (job.generationTimeout) clearTimeout(job.generationTimeout);
-            if (job.sendTimeout) clearTimeout(job.sendTimeout);
+            // Cancela os cronômetros de geração pendentes
+            if (job.generationTimeout) {
+                clearTimeout(job.generationTimeout);
+                job.generationTimeout = null;
+            }
+
+            // Havia uma resposta gerada esperando para ser enviada, mas o cliente mandou nova mensagem!
+            if (job.sendTimeout) {
+                clearTimeout(job.sendTimeout);
+                job.sendTimeout = null;
+
+                if (job.responseText) {
+                    if (!job.injectedHistory) job.injectedHistory = [];
+                    if (!job.accumulatedResponses) job.accumulatedResponses = [];
+
+                    // Adiciona a mensagem do usuário que gerou a resposta anterior ao histórico injetado
+                    const lastUserText = job.lastGeneratedUserText || job.textMessages.join('\n');
+                    job.injectedHistory.push({
+                        role: 'user',
+                        parts: [{ text: lastUserText }]
+                    });
+
+                    // Adiciona a resposta que ia ser enviada ao histórico injetado
+                    job.injectedHistory.push({
+                        role: 'model',
+                        parts: [{ text: job.responseText }]
+                    });
+
+                    // Guarda a resposta para ser consolidada no envio final
+                    job.accumulatedResponses.push(job.responseText);
+
+                    console.log(`[AutomationWorker] Pausada resposta anterior e anexada ao contexto para ${key}.`);
+                    
+                    // Limpa mensagens e resposta anteriores para a nova rodada
+                    job.responseText = null;
+                    job.textMessages = [];
+                }
+            }
 
             job.textMessages.push(textMessage);
             job.params = params; // Atualiza parâmetros para usar os mais recentes
@@ -912,7 +947,10 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 sendTimeout: null,
                 generating: false,
                 obsolete: false,
-                responseText: null
+                responseText: null,
+                injectedHistory: [],
+                accumulatedResponses: [],
+                lastGeneratedUserText: null
             };
             this.pendingJobs.set(key, job);
             job.generationTimeout = setTimeout(() => this.triggerGeneration(key), 1500);
@@ -940,13 +978,30 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
         job.obsolete = false;
         job.generationTimeout = null;
 
+        const messagesCount = job.textMessages.length;
         const combinedText = job.textMessages.join('\n');
+        job.lastGeneratedUserText = combinedText;
         console.log(`[AutomationWorker] Iniciando geração da IA para ${key} com mensagens:\n"${combinedText}"`);
 
         try {
+            // Carrega o histórico do banco de dados primeiro
+            let dbHistory = [];
+            try {
+                dbHistory = await this.getConversationHistory(job.params.tenantId, job.params.conversationId, 12);
+            } catch (histErr) {
+                console.error('[AutomationWorker] Erro ao obter histórico do banco de dados no triggerGeneration:', histErr);
+            }
+
+            // Mescla com o injectedHistory (respostas canceladas/acumuladas)
+            let mergedHistory = [...dbHistory];
+            if (job.injectedHistory && job.injectedHistory.length > 0) {
+                mergedHistory.push(...job.injectedHistory);
+            }
+
             const responseText = await this.generateResponse({
                 ...job.params,
-                textMessage: combinedText
+                textMessage: combinedText,
+                history: mergedHistory
             });
 
             if (!responseText) {
@@ -959,7 +1014,25 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             // Se novas mensagens chegaram durante a geração, descarta e regera
             if (job.obsolete) {
                 console.log(`[AutomationWorker] Geração finalizada para ${key}, mas nova mensagem chegou durante a chamada de API. Descartando resposta obsoleta.`);
+                
+                if (!job.injectedHistory) job.injectedHistory = [];
+                if (!job.accumulatedResponses) job.accumulatedResponses = [];
+
+                job.injectedHistory.push({
+                    role: 'user',
+                    parts: [{ text: combinedText }]
+                });
+                job.injectedHistory.push({
+                    role: 'model',
+                    parts: [{ text: responseText }]
+                });
+                job.accumulatedResponses.push(responseText);
+
+                // Remove as mensagens processadas nesta rodada
+                job.textMessages = job.textMessages.slice(messagesCount);
+
                 job.generating = false;
+                job.obsolete = false;
                 job.generationTimeout = setTimeout(() => this.triggerGeneration(key), 1500);
                 return;
             }
@@ -977,7 +1050,12 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                     const activeJob = this.pendingJobs?.get(key);
                     if (activeJob && activeJob.responseText === responseText) {
                         this.pendingJobs.delete(key);
-                        await this.sendFinalResponse(activeJob.params, responseText);
+                        
+                        // Coleta todas as respostas acumuladas mais a resposta final
+                        const allResponses = [...(activeJob.accumulatedResponses || []), responseText];
+                        const finalCombinedResponse = allResponses.join('\n\n');
+                        
+                        await this.sendFinalResponse(activeJob.params, finalCombinedResponse);
                     }
                 } catch (sendErr) {
                     console.error('[AutomationWorker] Erro ao enviar resposta após 15s:', sendErr);
