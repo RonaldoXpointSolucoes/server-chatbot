@@ -1998,6 +1998,18 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                             cadastrado: data.cadastrado !== false && !data.erro && (!!data.id || !!data.IdUsuario || !!data.NomeRazao || !!data.nome || !!data.customer || data.status === 200),
                                             dados_cadastro: data
                                         };
+                                    } else if (response.status === 404) {
+                                        const errText = await response.text();
+                                        console.log(`[AutomationWorker - Cliente] Cliente ${rawPhone} não cadastrado (Status: 404). Detalhes: ${errText}`);
+                                        logGastrofoodCall({
+                                            direction: 'response',
+                                            action: 'Validar Cliente',
+                                            method: 'POST',
+                                            url: clienteUrl,
+                                            status: response.status,
+                                            response: { cadastrado: false, mensagem: "Cliente não cadastrado" }
+                                        });
+                                        functionResult = { cadastrado: false };
                                     } else {
                                         const errText = await response.text();
                                         console.error(`[AutomationWorker - Cliente] Falha HTTP ao validar cliente ${rawPhone} (Status: ${response.status}). Detalhes: ${errText}`);

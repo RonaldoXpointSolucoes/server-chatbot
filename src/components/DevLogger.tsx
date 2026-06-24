@@ -592,6 +592,38 @@ export default function DevLogger() {
   useEffect(() => {
     if (!isVisible || !isEnabled) return;
     
+    let lastGastrofoodCheck = '0';
+    
+    const fetchGastrofoodLogs = async () => {
+      try {
+        const response = await fetch(`${engineUrl}/api/v1/system/logs/gastrofood?since=${lastGastrofoodCheck}`);
+        if (response.ok) {
+           const data = await response.json();
+           if (data.success && data.logs && data.logs.length > 0) {
+              setGastrofoodLogs(prev => {
+                const nextLogs = [...prev];
+                data.logs.forEach((log: any) => {
+                  if (!nextLogs.some(l => l.id === log.id)) {
+                    nextLogs.push(log);
+                  }
+                });
+                nextLogs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                if (nextLogs.length > 200) return nextLogs.slice(nextLogs.length - 200);
+                return nextLogs;
+              });
+
+              const timestamps = data.logs.map((l: any) => new Date(l.timestamp).getTime());
+              const maxTime = Math.max(...timestamps);
+              if (maxTime > 0) {
+                lastGastrofoodCheck = maxTime.toString();
+              }
+           }
+        }
+      } catch (err) {
+         // ignore
+      }
+    };
+
     const fetchTelemetry = async () => {
       try {
         const response = await fetch(`${engineUrl}/debug/metrics`);
@@ -637,10 +669,13 @@ export default function DevLogger() {
 
     fetchTelemetry();
     fetchRecentErrors();
+    fetchGastrofoodLogs();
     const intervalTelemetry = setInterval(fetchTelemetry, 5000);
+    const intervalGastrofood = setInterval(fetchGastrofoodLogs, 5000);
     const intervalErrors = setInterval(fetchRecentErrors, 300000); // 5 minutos
     return () => {
        clearInterval(intervalTelemetry);
+       clearInterval(intervalGastrofood);
        clearInterval(intervalErrors);
     };
   }, [isVisible, isEnabled, engineUrl, addLog]);

@@ -4,6 +4,8 @@ const MAX_LOGS = 200;
 const MAX_ERRORS = 100;
 const logBuffer = [];
 export const errorBuffer = [];
+const gastrofoodBuffer = [];
+const MAX_GASTROFOOD_LOGS = 100;
 let clients = [];
 
 const router = express.Router();
@@ -54,6 +56,36 @@ function interceptConsole() {
     if (level === 'error' || level === 'warn') {
       errorBuffer.push(logEntry);
       if (errorBuffer.length > MAX_ERRORS) errorBuffer.shift();
+    }
+    
+    if (text.includes('[Gastrofood API]')) {
+      try {
+        const prefix = '[Gastrofood API]';
+        const jsonStr = text.substring(text.indexOf(prefix) + prefix.length).trim();
+        const parsed = JSON.parse(jsonStr);
+        const gastroEntry = {
+          id: parsed.id || Math.random().toString(36).substring(2, 9),
+          timestamp: logEntry.timestamp,
+          ...parsed
+        };
+        gastrofoodBuffer.push(gastroEntry);
+        if (gastrofoodBuffer.length > MAX_GASTROFOOD_LOGS) {
+          gastrofoodBuffer.shift();
+        }
+      } catch (e) {
+        const gastroEntry = {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: logEntry.timestamp,
+          type: 'gastrofood_api',
+          direction: text.toLowerCase().includes('error') ? 'error' : 'info',
+          action: 'Gastrofood Call',
+          error: text
+        };
+        gastrofoodBuffer.push(gastroEntry);
+        if (gastrofoodBuffer.length > MAX_GASTROFOOD_LOGS) {
+          gastrofoodBuffer.shift();
+        }
+      }
     }
     
     broadcast(logEntry);
@@ -131,6 +163,21 @@ router.get('/recent-errors', (req, res) => {
       newErrors = errorBuffer.filter(e => new Date(e.timestamp).getTime() > sinceTime);
     }
     res.json({ success: true, errors: newErrors });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para polling de logs da API Gastrofood
+router.get('/gastrofood', (req, res) => {
+  try {
+    const since = req.query.since;
+    let logs = gastrofoodBuffer;
+    if (since && since !== '0') {
+      const sinceTime = parseInt(since, 10);
+      logs = gastrofoodBuffer.filter(e => new Date(e.timestamp).getTime() > sinceTime);
+    }
+    res.json({ success: true, logs });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
