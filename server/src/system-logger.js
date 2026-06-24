@@ -183,4 +183,13 @@ router.get('/gastrofood', (req, res) => {
   }
 });
 
+// Endpoint para obter todos os logs recentes (diagnóstico avançado)
+router.get('/all', (req, res) => {
+  try {
+    res.json({ success: true, logs: logBuffer });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
