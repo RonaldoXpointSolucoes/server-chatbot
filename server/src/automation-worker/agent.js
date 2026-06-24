@@ -155,8 +155,13 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
         Ap: address.Ap || address.ap || ""
     };
 
+    let idUsuario = customer.IdUsuario || customer.idUsuario || customer.id || "9EA3F679-5565-4DA0-930F-0971A8B8A3CD";
+    if (typeof idUsuario === 'string' && idUsuario.length > 20) {
+        idUsuario = idUsuario.substring(0, 20);
+    }
+
     const normalizedCustomer = {
-        IdUsuario: customer.IdUsuario || customer.idUsuario || customer.id || "9EA3F679-5565-4DA0-930F-0971A8B8A3CD",
+        IdUsuario: idUsuario,
         NomeRazao: customer.NomeRazao || customer.nomeRazao || customer.name || "Cliente",
         Ddi: customer.Ddi || "+55",
         Telefone: String(customer.Telefone || customer.telefone || "").replace(/\D/g, '')
@@ -2095,13 +2100,31 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                             response: resData
                                         });
 
-                                        functionResult = {
-                                            sucesso: response.status === 200 || response.status === 201,
-                                            status: response.status,
-                                            dados_resposta: resData
-                                        };
-                                        if (!functionResult.sucesso) {
+                                        const sucessoLogico = (response.status === 200 || response.status === 201) && (resData && resData.result !== false);
+
+                                        if (sucessoLogico) {
+                                            functionResult = {
+                                                sucesso: true,
+                                                status: response.status,
+                                                dados_resposta: resData
+                                            };
+                                        } else {
+                                            const aRetorno = resData?.ARetorno || '';
+                                            let mensagemErro = "O sistema Gastrofood rejeitou a criação do pedido.";
+                                            
+                                            if (aRetorno.includes('value too long') || aRetorno.includes('FireDAC') || aRetorno.includes('ERROR:')) {
+                                                mensagemErro = `Falha técnica definitiva no banco de dados do Gastrofood: ${aRetorno}. NÃO TENTE ENVIAR NOVAMENTE. O pedido não pode ser processado de forma automática devido a essa incompatibilidade de campos. Peça desculpas ao cliente informando que ocorreu uma falha no sistema do restaurante e informe que o atendimento foi transferido para um atendente humano.`;
+                                            } else if (aRetorno) {
+                                                mensagemErro = `Erro retornado pelo Gastrofood: ${aRetorno}. Não tente re-enviar sem corrigir o problema reportado.`;
+                                            }
+
                                             console.error(`[AutomationWorker - Pedido] Gastrofood recusou o pedido (Status: ${response.status}). Resposta:`, resData);
+                                            functionResult = {
+                                                sucesso: false,
+                                                status: response.status,
+                                                erro: mensagemErro,
+                                                dados_resposta: resData
+                                            };
                                         }
                                     } else {
                                         const errText = await response.text();

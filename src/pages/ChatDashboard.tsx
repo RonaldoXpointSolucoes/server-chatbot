@@ -7418,12 +7418,14 @@ export default function ChatDashboard() {
                   Cancelar
                 </button>
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     if (!activeChatId) return;
                     const instanceToUse = activeChat?.instance_id || activeChat?.whatsapp_instance;
                     if (!instanceToUse) return;
                     
-                    await deleteHumanMessage(activeChatId, messageToDelete, instanceToUse);
+                    // Executa a deleção em segundo plano e trata erros
+                    deleteHumanMessage(activeChatId, messageToDelete, instanceToUse).catch(() => {});
+                    // Fecha o modal de confirmação imediatamente
                     setMessageToDelete(null);
                   }}
                   className="flex-1 py-3 rounded-xl font-medium text-white bg-red-600 hover:bg-red-700 shadow-md hover:shadow-lg transition-all active:scale-95"

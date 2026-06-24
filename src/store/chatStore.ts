@@ -1496,8 +1496,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     if (!msgToDelete.whatsapp_id) {
        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Não é possível apagar remotamente esta mensagem (chave ausente). Ela será apagada apenas localmente.', type: 'warning' } }));
-       // Still proceed to delete locally/DB if desired, but user expectation is remote delete.
     }
+
+    const originalStatus = msgToDelete.status;
+
+    // Atualização otimista imediata do estado local
+    set((s) => ({
+      contacts: s.contacts.map(c => {
+        if (c.id === contactId) {
+          return {
+             ...c, 
+             messages: c.messages.map(m => m.id === messageId ? {
+                ...m, 
+                status: 'deleted'
+             } : m)
+          };
+        }
+        return c;
+      })
+    }));
 
     try {
       if (msgToDelete && msgToDelete.whatsapp_id) {
@@ -1524,7 +1541,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         
       if (dbError) throw dbError;
 
-      // Update Local State Optimistically
+    } catch(err: any) {
+      console.error('Erro ao apagar mensagem:', err);
+      
+      // Reversão para o status original em caso de erro nas chamadas assíncronas
       set((s) => ({
         contacts: s.contacts.map(c => {
           if (c.id === contactId) {
@@ -1532,7 +1552,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                ...c, 
                messages: c.messages.map(m => m.id === messageId ? {
                   ...m, 
-                  status: 'deleted'
+                  status: originalStatus
                } : m)
             };
           }
@@ -1540,8 +1560,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         })
       }));
 
-    } catch(err: any) {
-      console.error('Erro ao apagar mensagem:', err);
       window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Falha ao apagar a mensagem: ${err.message}`, type: 'error' } }));
     }
   },
