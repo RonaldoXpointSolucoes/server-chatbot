@@ -70,6 +70,119 @@ function injectStoreId(payloadObj, storeId) {
     return clone;
 }
 
+function normalizeGastrofoodPayload(payload, defaultStoreId) {
+    if (!payload || typeof payload !== 'object') return payload;
+
+    let jsOrder = payload.jsOrder;
+    if (!jsOrder) {
+        if (payload.items || payload.subTotal || payload.total || payload.client) {
+            jsOrder = { ...payload };
+        } else {
+            jsOrder = {};
+        }
+    } else {
+        jsOrder = { ...jsOrder };
+    }
+
+    const storeId = jsOrder.fkStore || defaultStoreId || "6A728D2A-8612-4DC1-8676-0B10E4D38AD5";
+    
+    let calculatedSubTotal = 0;
+    const rawItems = jsOrder.items || [];
+    const normalizedItems = rawItems.map(item => {
+        const price = Number(item.price || item.unitaryPrice || item.unitary || 0);
+        const amount = Number(item.amount || item.quantity || item.qtd || 1);
+        calculatedSubTotal += price * amount;
+
+        const rawCustom = item.itemsCuston || item.customItems || item.adicionais || [];
+        const normalizedCustom = rawCustom.map(c => ({
+            code: c.code || c.id || "",
+            name: c.name || "",
+            amount: Number(c.amount || c.quantity || 1),
+            price: Number(c.price || 0),
+            typeCalc: c.typeCalc !== undefined ? c.typeCalc : 0,
+            fkPasso: c.fkPasso || c.stepId || "",
+            numberPasso: c.numberPasso !== undefined ? c.numberPasso : 1
+        }));
+
+        return {
+            code: item.code || item.id || "",
+            name: item.name || "",
+            amount: amount,
+            unitary: item.unitary || "UN",
+            price: price,
+            complement: item.complement || item.notes || "",
+            itemsCuston: normalizedCustom
+        };
+    });
+
+    const txDelivery = Number(jsOrder.txDelivery !== undefined ? jsOrder.txDelivery : (jsOrder.deliveryTax !== undefined ? jsOrder.deliveryTax : 0));
+    const subTotal = Number(jsOrder.subTotal || calculatedSubTotal || 0);
+    const discount = Number(jsOrder.discount || 0);
+    const total = Number(jsOrder.total || (subTotal + txDelivery - discount));
+    const received = Number(jsOrder.received || total || 0);
+
+    const client = jsOrder.client || {};
+    const address = jsOrder.address || {
+        Cep: client.cep || "",
+        Logradouro: client.address || client.street || "",
+        Numero: client.number || "",
+        Bairro: client.neighborhood || "",
+        Cidade: client.city || "",
+        Complemento: client.complement || "",
+        Referencia: client.reference || "",
+        Uf: client.state || "SP",
+        Bloco: client.block || "",
+        Ap: client.apartment || client.ap || ""
+    };
+
+    const customer = jsOrder.customer || jsOrder.custumer || {
+        IdUsuario: jsOrder.fkCustomer || client.id || "9EA3F679-5565-4DA0-930F-0971A8B8A3CD",
+        NomeRazao: client.name || "Cliente",
+        Ddi: "+55",
+        Telefone: client.phone || ""
+    };
+
+    const normalizedAddress = {
+        Cep: address.Cep || address.cep || "",
+        Logradouro: address.Logradouro || address.logradouro || address.street || "",
+        Numero: String(address.Numero || address.numero || ""),
+        Bairro: address.Bairro || address.bairro || "",
+        Cidade: address.Cidade || address.cidade || "",
+        Complemento: address.Complemento || address.complemento || "",
+        Referencia: address.Referencia || address.referencia || "",
+        Uf: address.Uf || address.uf || "SP",
+        Bloco: address.Bloco || address.bloco || "",
+        Ap: address.Ap || address.ap || ""
+    };
+
+    const normalizedCustomer = {
+        IdUsuario: customer.IdUsuario || customer.idUsuario || customer.id || "9EA3F679-5565-4DA0-930F-0971A8B8A3CD",
+        NomeRazao: customer.NomeRazao || customer.nomeRazao || customer.name || "Cliente",
+        Ddi: customer.Ddi || "+55",
+        Telefone: String(customer.Telefone || customer.telefone || "").replace(/\D/g, '')
+    };
+
+    return {
+        jsOrder: {
+            module: Number(jsOrder.module !== undefined ? jsOrder.module : 1),
+            fkCustomer: normalizedCustomer.IdUsuario,
+            fkStore: storeId,
+            subTotal: subTotal,
+            received: received,
+            txDelivery: txDelivery,
+            discount: discount,
+            cpf: jsOrder.cpf || "",
+            pagto: jsOrder.pagto || jsOrder.paymentMethod || "Dinheiro",
+            address: normalizedAddress,
+            items: normalizedItems,
+            customer: normalizedCustomer,
+            origin: Number(jsOrder.origin !== undefined ? jsOrder.origin : 2),
+            estimatedDeliveryInMinutes: jsOrder.estimatedDeliveryInMinutes || "30 mins",
+            total: total
+        }
+    };
+}
+
 function logGastrofoodCall({ direction, action, method, url, payload, status, response, error }) {
     try {
         const entry = {
@@ -1936,6 +2049,9 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                             finalPayload = JSON.parse(finalPayload);
                                         } catch (e) {}
                                     }
+                                    
+                                    finalPayload = normalizeGastrofoodPayload(finalPayload, companySettings?.gfood_store_id);
+                                    
                                     if (companySettings && companySettings.gfood_store_id) {
                                         finalPayload = injectStoreId(finalPayload, companySettings.gfood_store_id);
                                     }
