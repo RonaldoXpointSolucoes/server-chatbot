@@ -236,6 +236,11 @@ export default function BotsList() {
   const [recordingTime, setRecordingTime] = useState(0);
   const [isSubmittingTrain, setIsSubmittingTrain] = useState(false);
   const [trainResult, setTrainResult] = useState<{ success: boolean; analysis?: string; message?: string } | null>(null);
+  const [currentStep, setCurrentStep] = useState<number | null>(null);
+  const [totalSteps, setTotalSteps] = useState<number>(3);
+  const [stepMessage, setStepMessage] = useState<string>('');
+  const [hasTrainError, setHasTrainError] = useState<boolean>(false);
+  const [trainErrorMessage, setTrainErrorMessage] = useState<string>('');
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -290,6 +295,9 @@ export default function BotsList() {
   const handleOpenTraining = (bot: any) => {
     setTrainingBot(bot);
     setTrainResult(null);
+    setCurrentStep(null);
+    setHasTrainError(false);
+    setTrainErrorMessage('');
     loadTrainingDraft(bot.id);
     setIsTrainingOpen(true);
   };
@@ -311,6 +319,9 @@ export default function BotsList() {
     stopRecording();
     setIsTrainingOpen(false);
     setTrainingBot(null);
+    setCurrentStep(null);
+    setHasTrainError(false);
+    setTrainErrorMessage('');
   };
 
   const startRecording = async () => {
@@ -462,9 +473,18 @@ export default function BotsList() {
 
     setIsSubmittingTrain(true);
     setTrainResult(null);
+    setHasTrainError(false);
+    setTrainErrorMessage('');
+
+    const stepsCount = trainDestination === 'both' ? 3 : 2;
+    setTotalSteps(stepsCount);
 
     try {
-      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/train-multimodal`, {
+      // Passo 1: Analisar com o Gemini
+      setCurrentStep(1);
+      setStepMessage(`Passo 1/${stepsCount}: Analisando áudio, imagens e textos via I.A. Gemini...`);
+
+      const analyzeRes = await fetch(`${ENGINE_URL}/api/v1/knowledge/train-multimodal/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -474,31 +494,86 @@ export default function BotsList() {
           botId: trainingBot.id,
           text: trainText,
           images: trainImages.map(img => ({ base64: img.base64, mimeType: img.mimeType })),
-          audio: trainAudioBase64 ? { base64: trainAudioBase64, mimeType: trainAudioMimeType } : null,
-          destination: trainDestination
+          audio: trainAudioBase64 ? { base64: trainAudioBase64, mimeType: trainAudioMimeType } : null
         })
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Erro ao processar treinamento.");
+      const analyzeData = await analyzeRes.json();
+      if (!analyzeRes.ok) {
+        throw new Error(analyzeData.error || "Erro na análise da I.A.");
+      }
+
+      const { analysis, suggestedPromptChanges, ragFacts } = analyzeData;
+      let stepIdx = 2;
+
+      // Passo 2 (ou 3): Salvar no Prompt
+      if (trainDestination === 'prompt' || trainDestination === 'both') {
+        setCurrentStep(stepIdx);
+        setStepMessage(`Passo ${stepIdx}/${stepsCount}: Atualizando System Prompt com novas regras de comportamento...`);
+
+        const promptRes = await fetch(`${ENGINE_URL}/api/v1/knowledge/train-multimodal/save-prompt`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tenant-id': tenantId || ''
+          },
+          body: JSON.stringify({
+            botId: trainingBot.id,
+            suggestedPromptChanges
+          })
+        });
+
+        const promptData = await promptRes.json();
+        if (!promptRes.ok) {
+          throw new Error(promptData.error || "Erro ao salvar o System Prompt.");
+        }
+        stepIdx++;
+      }
+
+      // Passo 3 (ou 2): Salvar no RAG
+      if (trainDestination === 'rag' || trainDestination === 'both') {
+        setCurrentStep(stepIdx);
+        setStepMessage(`Passo ${stepIdx}/${stepsCount}: Vetorizando fatos e gravando na base de conhecimento RAG...`);
+
+        const ragRes = await fetch(`${ENGINE_URL}/api/v1/knowledge/train-multimodal/save-rag`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tenant-id': tenantId || ''
+          },
+          body: JSON.stringify({
+            botId: trainingBot.id,
+            ragFacts
+          })
+        });
+
+        const ragData = await ragRes.json();
+        if (!ragRes.ok) {
+          throw new Error(ragData.error || "Erro ao salvar na base RAG.");
+        }
       }
 
       setTrainResult({
         success: true,
-        analysis: data.analysis,
-        message: data.message
+        analysis: analysis,
+        message: 'Treinamento concluído com sucesso e gravado nos destinos selecionados!'
       });
+
+      // Alerta de sucesso
+      alert("Treinamento processado e salvo com sucesso!");
 
       if (trainingBot.id) {
         delete trainingDraftsMemory[trainingBot.id];
         localStorage.removeItem(`bot_train_text_${trainingBot.id}`);
       }
 
+      handleCloseTraining();
       fetchBots();
 
     } catch (err: any) {
       console.error(err);
+      setHasTrainError(true);
+      setTrainErrorMessage(err.message || "Erro desconhecido ao processar treinamento.");
       setTrainResult({
         success: false,
         message: err.message || "Erro desconhecido ao processar treinamento."
@@ -2406,6 +2481,47 @@ Instruções importantes:
                   </button>
                 </div>
               </div>
+
+              {/* Progresso de etapas ou erro em tempo real */}
+              {(isSubmittingTrain || hasTrainError) && currentStep !== null && (
+                <div className={`border rounded-2xl p-4 space-y-3 animate-in fade-in duration-300 text-left ${
+                  hasTrainError 
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' 
+                    : 'bg-[#1b1c24]/80 border-amber-500/20 text-amber-400'
+                }`}>
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="flex items-center gap-1.5">
+                      {hasTrainError ? (
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                      ) : (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                      )}
+                      <span className={hasTrainError ? 'text-rose-400' : 'text-amber-400'}>
+                        {hasTrainError ? `Erro na Etapa ${currentStep}: ${trainErrorMessage}` : stepMessage}
+                      </span>
+                    </span>
+                    <span className={hasTrainError ? 'text-rose-400/70' : 'text-white/40'}>
+                      Etapa {currentStep} de {totalSteps}
+                    </span>
+                  </div>
+                  
+                  {/* Progress Bar */}
+                  <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                    <div 
+                      className={`h-1.5 transition-all duration-500 rounded-full ${
+                        hasTrainError ? 'bg-rose-500' : 'bg-amber-500'
+                      }`}
+                      style={{ width: `${(currentStep / totalSteps) * 100}%` }}
+                    />
+                  </div>
+
+                  {hasTrainError && (
+                    <div className="text-[11px] text-white/60 bg-black/20 p-2.5 rounded-xl border border-white/5 mt-1 select-text">
+                      <strong>Detalhes do erro:</strong> {trainErrorMessage}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Resultado do treinamento */}
               {trainResult && (
