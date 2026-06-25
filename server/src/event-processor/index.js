@@ -925,7 +925,7 @@ class EventProcessor {
                  // Filtra timestamps mais velhos que 60 segundos
                  rateData.timestamps = rateData.timestamps.filter(ts => now - ts < 60000);
                  
-                 if (rateData.timestamps.length >= 5) { // Limite de 5 respostas de bot por minuto
+                 if (rateData.timestamps.length >= 15) { // Limite de 15 respostas de bot por minuto
                      console.warn(`[EventProcessor] Anti-Spam Ativado para convId ${convId}. Excesso de disparos de bot detectados (${rateData.timestamps.length} em 60s). Pausando IA.`);
                      
                      try {
