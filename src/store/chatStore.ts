@@ -564,25 +564,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
          const maxChecks = 3;
          const checkIntervalMs = 30000; // 30s
          
-         console.log(`[Status Debounce] Instância ${id} sinalizou status ${status}. Iniciando verificação de 3 etapas a cada 30s.`);
-         
          const intervalId = setInterval(async () => {
             checkCount++;
             try {
                const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', id).maybeSingle();
                const dbStatus = data?.status || 'offline';
                
-               console.log(`[Status Debounce] Checagem ${checkCount}/${maxChecks} para ${id}: status no banco = ${dbStatus}`);
-               
                if (dbStatus === 'connected') {
-                  console.log(`[Status Debounce] Instância ${id} restabelecida como conectada. Cancelando checagens.`);
                   clearInterval(intervalId);
                   delete (window as any)[`_offline_checks_${id}`];
                   return;
                }
                
                if (checkCount >= maxChecks) {
-                  console.warn(`[Status Debounce] Instância ${id} confirmada como desconectada após 3 checagens (90s). Atualizando UI.`);
                   set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
                   clearInterval(intervalId);
                   delete (window as any)[`_offline_checks_${id}`];
