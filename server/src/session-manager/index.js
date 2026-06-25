@@ -3,7 +3,7 @@ import { useSupabaseAuthState, flushPendingWrites } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
 import pino from 'pino';
-import { supabase, NODE_ID } from '../supabase.js';
+import { supabase, NODE_ID, retryWithBackoff } from '../supabase.js';
 
 const waitForSocketOpen = (sock, timeoutMs = 20000) => {
     return new Promise((resolve, reject) => {
@@ -108,12 +108,14 @@ class SessionManager {
             const activeIds = Array.from(this.sessions.keys());
             if (activeIds.length > 0) {
                 try {
-                    await supabase.from('whatsapp_instances')
-                        .update({
-                            lease_until: new Date(Date.now() + 60000).toISOString()
-                        })
-                        .in('id', activeIds)
-                        .eq('assigned_node_id', NODE_ID);
+                    await retryWithBackoff(() =>
+                        supabase.from('whatsapp_instances')
+                            .update({
+                                lease_until: new Date(Date.now() + 60000).toISOString()
+                            })
+                            .in('id', activeIds)
+                            .eq('assigned_node_id', NODE_ID)
+                    );
                 } catch (e) {
                     console.error("[SessionManager/Heartbeat] Erro ao renovar leases:", e.message);
                 }
@@ -153,11 +155,13 @@ class SessionManager {
     async _createSessionInner(tenantId, instanceId) {
         try {
             // Verifica se a instância ainda existe no banco de dados para evitar violação de chave estrangeira
-            const { data: instance, error: findError } = await supabase
-                .from('whatsapp_instances')
-                .select('id')
-                .eq('id', instanceId)
-                .single();
+            const { data: instance, error: findError } = await retryWithBackoff(() =>
+                supabase
+                    .from('whatsapp_instances')
+                    .select('id')
+                    .eq('id', instanceId)
+                    .single()
+            );
 
             if (findError || !instance) {
                 const errorMsg = `Instância ${instanceId} não encontrada no banco de dados (provavelmente deletada).`;
@@ -166,10 +170,12 @@ class SessionManager {
             }
 
             // Assume o lease e trava a posse do worker antes de iniciar
-            await supabase.from('whatsapp_instances').update({
-                assigned_node_id: NODE_ID,
-                lease_until: new Date(Date.now() + 60000).toISOString()
-            }).eq('id', instanceId);
+            await retryWithBackoff(() =>
+                supabase.from('whatsapp_instances').update({
+                    assigned_node_id: NODE_ID,
+                    lease_until: new Date(Date.now() + 60000).toISOString()
+                }).eq('id', instanceId)
+            );
 
             const { state, saveCreds } = await useSupabaseAuthState(tenantId, instanceId);
             const { version, isLatest } = await fetchLatestBaileysVersion();
@@ -247,9 +253,9 @@ class SessionManager {
 
                     if (loggedOut || status === 401 || status === 403 || status === 400) {
                         console.log(`[SessionManager] Instância ${instanceId} desconectada ou erro crítico (status: ${status}). Limpando credenciais.`);
-                        await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
-                        await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
-                        await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
+                        await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));
+                        await retryWithBackoff(() => supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId));
+                        await retryWithBackoff(() => supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId));
                         
                         this.reconnectAttempts.delete(instanceId);
                         // Tentar reconectar limpo após 5s
@@ -265,13 +271,15 @@ class SessionManager {
 
                         if (cAttempts >= 3) {
                             console.error(`[SessionManager] Limite de conflitos atingido na instância ${instanceId}. Interrompendo reconexão automática para evitar banimento.`);
-                            await supabase.from('whatsapp_instances')
-                                .update({ 
-                                    status: 'offline', 
-                                    last_error: 'Desconectado por conflito. Outro dispositivo se conectou a esta conta de WhatsApp. O sistema interrompeu as reconexões automáticas para evitar banimento. Reconecte manualmente no painel.' 
-                                })
-                                .eq('id', instanceId)
-                                .eq('assigned_node_id', NODE_ID);
+                            await retryWithBackoff(() =>
+                                supabase.from('whatsapp_instances')
+                                    .update({ 
+                                        status: 'offline', 
+                                        last_error: 'Desconectado por conflito. Outro dispositivo se conectou a esta conta de WhatsApp. O sistema interrompeu as reconexões automáticas para evitar banimento. Reconecte manualmente no painel.' 
+                                    })
+                                    .eq('id', instanceId)
+                                    .eq('assigned_node_id', NODE_ID)
+                            );
                             
                             // Publica evento de status offline para o frontend
                             await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
@@ -301,11 +309,13 @@ class SessionManager {
                         console.log(`[SessionManager] Instância ${instanceId} fechou. Motivo: ${status} (Erro 503: ${is503}). Tentativa ${nextAttempt}. Reconectando em ${delay / 1000}s...`);
 
                         if (is503) {
-                            await supabase.from('whatsapp_instances')
-                                .update({ 
-                                    last_error: `WhatsApp temporariamente indisponível (Erro 503). Próxima tentativa de reconexão em ${delay / 1000}s (Tentativa ${nextAttempt}).`
-                                })
-                                .eq('id', instanceId);
+                            await retryWithBackoff(() =>
+                                supabase.from('whatsapp_instances')
+                                    .update({ 
+                                        last_error: `WhatsApp temporariamente indisponível (Erro 503). Próxima tentativa de reconexão em ${delay / 1000}s (Tentativa ${nextAttempt}).`
+                                    })
+                                    .eq('id', instanceId)
+                            );
                         }
 
                         const timer = setTimeout(() => {
@@ -445,10 +455,12 @@ class SessionManager {
             
             this.sessions.set(instanceId, { sock, tenantId });
 
-            await supabase.from('whatsapp_instances').update({
-                assigned_node_id: NODE_ID,
-                lease_until: new Date(Date.now() + 60000).toISOString()
-            }).eq('id', instanceId);
+            await retryWithBackoff(() =>
+                supabase.from('whatsapp_instances').update({
+                    assigned_node_id: NODE_ID,
+                    lease_until: new Date(Date.now() + 60000).toISOString()
+                }).eq('id', instanceId)
+            );
 
             return sock;
         } catch (error) {
@@ -484,7 +496,7 @@ class SessionManager {
         }
 
         // Fallback para acordar a instância (Lazy Load) se o Node foi reiniciado
-        const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', instanceId).single();
+        const { data } = await retryWithBackoff(() => supabase.from('whatsapp_instances').select('status').eq('id', instanceId).single());
         if (data && ['connected', 'connecting', 'qr_ready'].includes(data.status)) {
             console.log(`[SessionManager] Lazy loading instance ${instanceId} (DB status: ${data.status})...`);
             return await this.createSession(tenantId, instanceId);
@@ -508,11 +520,13 @@ class SessionManager {
             try { data.sock.ws.close(); } catch(e){}
             this.sessions.delete(instanceId);
             
-            await supabase.from('whatsapp_instances').update({
-                status: 'offline',
-                assigned_node_id: null
-            }).eq('id', instanceId)
-            .eq('assigned_node_id', NODE_ID);
+            await retryWithBackoff(() =>
+                supabase.from('whatsapp_instances').update({
+                    status: 'offline',
+                    assigned_node_id: null
+                }).eq('id', instanceId)
+                .eq('assigned_node_id', NODE_ID)
+            );
         }
     }
 

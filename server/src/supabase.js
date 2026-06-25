@@ -30,3 +30,25 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 export const NODE_ID = process.env.NODE_ID || `worker-local-${Math.random().toString(36).substring(7)}`;
 console.log(`[Worker Boot] Inicializado com NODE_ID: ${NODE_ID}`);
 
+export async function retryWithBackoff(fn, retries = 3, delay = 1000) {
+  try {
+    return await fn();
+  } catch (error) {
+    const isNetworkError = 
+      error.message?.includes('fetch failed') ||
+      error.message?.includes('Timeout') ||
+      error.message?.includes('timeout') ||
+      error.code === 'UND_ERR_CONNECT_TIMEOUT' ||
+      error.message?.includes('ConnectTimeoutError') ||
+      error.message?.includes('database connection') ||
+      error.status >= 500;
+        
+    if (retries > 0 && isNetworkError) {
+      console.warn(`[Supabase/Network] Falha de rede/timeout (${error.message || error}). Retentando em ${delay}ms... (${retries} restantes)`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return retryWithBackoff(fn, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+}
+

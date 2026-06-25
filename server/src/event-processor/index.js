@@ -1,4 +1,4 @@
-import { supabase, NODE_ID } from '../supabase.js';
+import { supabase, NODE_ID, retryWithBackoff } from '../supabase.js';
 import realtime from '../realtime-publisher/index.js';
 import qrcode from 'qrcode';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
@@ -149,7 +149,9 @@ class EventProcessor {
         }
 
         try {
-            const { data } = await supabase.from('companies').select('ignore_groups').eq('tenant_id', tenantId).single();
+            const { data } = await retryWithBackoff(() => 
+                supabase.from('companies').select('ignore_groups').eq('tenant_id', tenantId).single()
+            );
             // Default é true (ignorar grupos) para retrocompatibilidade
             const config = { ignore_groups: data && data.ignore_groups !== null ? data.ignore_groups : true };
             this.tenantConfigs.set(tenantId, { config, timestamp: Date.now() });
@@ -166,7 +168,9 @@ class EventProcessor {
             return cached.config;
         }
         try {
-            const { data, error } = await supabase.from('whatsapp_instances').select('settings').eq('id', instanceId).single();
+            const { data, error } = await retryWithBackoff(() =>
+                supabase.from('whatsapp_instances').select('settings').eq('id', instanceId).single()
+            );
             if (error) console.error('[EventProcessor] Erro ao buscar config da instância:', error);
             const config = data?.settings || {};
             this.instanceConfigs.set(instanceId, { config, timestamp: Date.now() });

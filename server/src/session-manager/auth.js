@@ -1,4 +1,4 @@
-import { supabase } from '../supabase.js';
+import { supabase, retryWithBackoff } from '../supabase.js';
 import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
 
 export const sessionCaches = new Map();
@@ -39,11 +39,13 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
     }
     const memCache = sessionCaches.get(instanceId);
 
-    const { data: credsData } = await supabase
-        .from('wa_auth_credentials')
-        .select('creds_data')
-        .eq('instance_id', instanceId)
-        .single();
+    const { data: credsData } = await retryWithBackoff(() =>
+        supabase
+            .from('wa_auth_credentials')
+            .select('creds_data')
+            .eq('instance_id', instanceId)
+            .single()
+    );
     
     let creds;
     if (credsData && credsData.creds_data) {
@@ -53,22 +55,26 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
         creds = init();
 
         // Anti-violação de chave estrangeira: verifica se a instância ainda existe antes do upsert
-        const { data: instanceExists } = await supabase
-            .from('whatsapp_instances')
-            .select('id')
-            .eq('id', instanceId)
-            .single();
+        const { data: instanceExists } = await retryWithBackoff(() =>
+            supabase
+                .from('whatsapp_instances')
+                .select('id')
+                .eq('id', instanceId)
+                .single()
+        );
 
         if (!instanceExists) {
             console.warn(`[SessionManager] Tentativa de upsert de credenciais abortada: Instância ${instanceId} não existe.`);
             throw new Error(`Instância ${instanceId} não existe no banco de dados.`);
         }
 
-        await supabase.from('wa_auth_credentials').upsert({
-            instance_id: instanceId,
-            tenant_id: tenantId,
-            creds_data: JSON.parse(JSON.stringify(creds, BufferJSON.replacer))
-        }).throwOnError();
+        await retryWithBackoff(() =>
+            supabase.from('wa_auth_credentials').upsert({
+                instance_id: instanceId,
+                tenant_id: tenantId,
+                creds_data: JSON.parse(JSON.stringify(creds, BufferJSON.replacer))
+            }).throwOnError()
+        );
     }
 
     // Pre-load absoluto de todas as chaves para a RAM (Evita congestionar a rede e previne o Timeout 408)
@@ -76,11 +82,13 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
         let hasMore = true;
         let page = 0;
         while (hasMore) {
-            const { data: allKeys, error } = await supabase
-                .from('wa_auth_keys')
-                .select('key_name, key_data')
-                .eq('instance_id', instanceId)
-                .range(page * 1000, (page + 1) * 1000 - 1);
+            const { data: allKeys, error } = await retryWithBackoff(() =>
+                supabase
+                    .from('wa_auth_keys')
+                    .select('key_name, key_data')
+                    .eq('instance_id', instanceId)
+                    .range(page * 1000, (page + 1) * 1000 - 1)
+            );
             
             if (error || !allKeys || allKeys.length === 0) {
                 hasMore = false;
@@ -115,12 +123,14 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                         } else {
                             // Fallback para o Banco de Dados se não encontrado em memória
                             try {
-                                const { data: dbKey } = await supabase
-                                    .from('wa_auth_keys')
-                                    .select('key_data')
-                                    .eq('instance_id', instanceId)
-                                    .eq('key_name', name)
-                                    .maybeSingle();
+                                const { data: dbKey } = await retryWithBackoff(() =>
+                                    supabase
+                                        .from('wa_auth_keys')
+                                        .select('key_data')
+                                        .eq('instance_id', instanceId)
+                                        .eq('key_name', name)
+                                        .maybeSingle()
+                                );
                                 
                                 if (dbKey && dbKey.key_data) {
                                     const parsed = JSON.parse(JSON.stringify(dbKey.key_data), BufferJSON.reviver);
@@ -168,7 +178,7 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
 
                     // Sincronização em fila ordenada e imediata com Supabase
                     return enqueueWrite(instanceId, async () => {
-                        try {
+                        await retryWithBackoff(async () => {
                             const promises = [];
                             if (keysToDelete.length > 0) {
                                 promises.push(
@@ -194,22 +204,25 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                                     if (res.error) throw res.error;
                                 }
                             }
-                        } catch (error) {
-                            console.error(`[${instanceId}] Erro fatal ao persistir chaves de autenticação na fila:`, error.message);
-                            throw error; // Lança o erro para evitar ratchets dessincronizados
-                        }
+                        });
+                    }).catch(error => {
+                        console.error(`[${instanceId}] Erro fatal ao persistir chaves de autenticação na fila após retentativas:`, error.message);
                     });
                 }
             }
         },
         saveCreds: async () => {
              return enqueueWrite(instanceId, async () => {
-                 const { error } = await supabase.from('wa_auth_credentials').upsert({
-                     instance_id: instanceId,
-                     tenant_id: tenantId,
-                     creds_data: JSON.parse(JSON.stringify(creds, BufferJSON.replacer))
+                 await retryWithBackoff(async () => {
+                     const { error } = await supabase.from('wa_auth_credentials').upsert({
+                         instance_id: instanceId,
+                         tenant_id: tenantId,
+                         creds_data: JSON.parse(JSON.stringify(creds, BufferJSON.replacer))
+                     });
+                     if (error) throw new Error(error.message);
                  });
-                 if (error) throw new Error(error.message);
+             }).catch(error => {
+                 console.error(`[${instanceId}] Erro fatal ao salvar credenciais após retentativas:`, error.message);
              });
         }
     }

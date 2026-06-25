@@ -2268,14 +2268,37 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     const statusToken = companySettings.status_pedido_json_token || GASTROFOOD_DEFAULT_TOKEN;
 
                                     let requestUrl = statusUrl;
-                                    if (requestUrl.includes('BnPedido(')) {
-                                        requestUrl = requestUrl.replace(/BnPedido\([^)]+\)/, `BnPedido(${idPedido})`);
-                                    } else {
-                                        const uuidRegex = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
-                                        if (uuidRegex.test(requestUrl)) {
-                                            requestUrl = requestUrl.replace(uuidRegex, idPedido);
+                                    const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+                                    const isUuid = uuidRegex.test(String(idPedido).trim());
+
+                                    if (!isUuid) {
+                                        // It's a sequential ID (like 12675). Use OData $filter on CdPedido and FkUsuarioEstab
+                                        if (requestUrl.includes('BnPedido(')) {
+                                            requestUrl = requestUrl.replace(/BnPedido\([^)]+\)/, 'BnPedido');
+                                        }
+                                        
+                                        let filter = `CdPedido eq ${idPedido}`;
+                                        const storeId = companySettings.gfood_store_id || "";
+                                        if (storeId) {
+                                            filter += ` and FkUsuarioEstab eq ${storeId}`;
+                                        }
+                                        
+                                        if (requestUrl.includes('?')) {
+                                            requestUrl += `&$filter=${encodeURIComponent(filter)}`;
                                         } else {
-                                            requestUrl = requestUrl.endsWith('/') ? `${requestUrl}${idPedido}` : `${requestUrl}/${idPedido}`;
+                                            requestUrl += `?$filter=${encodeURIComponent(filter)}`;
+                                        }
+                                    } else {
+                                        // Standard UUID key lookup replacement
+                                        if (requestUrl.includes('BnPedido(')) {
+                                            requestUrl = requestUrl.replace(/BnPedido\([^)]+\)/, `BnPedido(${idPedido})`);
+                                        } else {
+                                            const fullUuidRegex = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
+                                            if (fullUuidRegex.test(requestUrl)) {
+                                                requestUrl = requestUrl.replace(fullUuidRegex, idPedido);
+                                            } else {
+                                                requestUrl = requestUrl.endsWith('/') ? `${requestUrl}${idPedido}` : `${requestUrl}/${idPedido}`;
+                                            }
                                         }
                                     }
 
@@ -2284,7 +2307,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                         headers['Authorization'] = statusToken.startsWith('Bearer ') ? statusToken : `Bearer ${statusToken}`;
                                     }
 
-                                    console.log(`[AutomationWorker - Status Pedido] Buscando status do pedido ${idPedido} via Gastrofood API...`);
+                                    console.log(`[AutomationWorker - Status Pedido] Buscando status do pedido ${idPedido} via Gastrofood API... URL: ${requestUrl}`);
                                     logGastrofoodCall({
                                         direction: 'request',
                                         action: 'Consultar Status',
@@ -2309,11 +2332,24 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                             response: resData
                                         });
 
-                                        functionResult = {
-                                            sucesso: true,
-                                            status_http: response.status,
-                                            dados: resData.data || resData
-                                        };
+                                        let finalData = resData.data || resData;
+                                        if (finalData && Array.isArray(finalData.value)) {
+                                            if (finalData.value.length > 0) {
+                                                finalData = finalData.value[0];
+                                            } else {
+                                                finalData = null;
+                                            }
+                                        }
+
+                                        if (!finalData) {
+                                            functionResult = { erro: `Pedido número ${idPedido} não encontrado.` };
+                                        } else {
+                                            functionResult = {
+                                                sucesso: true,
+                                                status_http: response.status,
+                                                dados: finalData
+                                            };
+                                        }
                                     } else {
                                         const errText = await response.text();
                                         console.error(`[AutomationWorker - Status Pedido] Falha HTTP ao buscar status (Status: ${response.status}). Detalhes: ${errText}`);
