@@ -4355,7 +4355,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      snoozed_by: conv.snoozed_by,
                      instance_id: conv.instance_id || c.instance_id,
                      ai_paused: conv.ai_paused,
-                     ai_paused_manually: conv.ai_paused_manually
+                     ai_paused_manually: conv.ai_paused_manually,
+                     lastMsgTimestamp: conv.last_message_at ? new Date(conv.last_message_at).getTime() : c.lastMsgTimestamp
                   };
                }
                return c;

@@ -7,12 +7,21 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Credenciais do Supabase ausentes no .env");
 }
 
-const customFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries = 3, delay = 1000): Promise<Response> => {
   try {
     return await fetch(input, init);
   } catch (error: any) {
-    if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
-      console.warn('[Supabase Network] Falha de conexão detectada. Verifique sua internet.', error);
+    const isNetworkError = 
+      error.name === 'TypeError' && error.message === 'Failed to fetch';
+      
+    if (retries > 0 && isNetworkError) {
+      console.warn(`[Supabase Network] Falha de conexão. Retentando em ${delay}ms... (Tentativas restantes: ${retries})`, error);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return customFetch(input, init, retries - 1, delay * 2);
+    }
+    
+    if (isNetworkError) {
+      console.error('[Supabase Network] Falha definitiva de conexão. Verifique sua internet.', error);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('supabase-network-error', {
           detail: { 

@@ -1413,30 +1413,21 @@ export default function ChatDashboard() {
 
        return true;
     }).sort((a,b) => {
-       const aPinned = isContactPinned(a);
-       const bPinned = isContactPinned(b);
-       if (aPinned && !bPinned) return -1;
-       if (!aPinned && bPinned) return 1;
-       
-       let aLastMsg;
-       if (a.messages) {
-         for (let i = a.messages.length - 1; i >= 0; i--) {
-           if (!a.messages[i].isIgnoredSilent && !a.messages[i].isIgnored) { aLastMsg = a.messages[i]; break; }
-         }
-       }
-
-       let bLastMsg;
-       if (b.messages) {
-         for (let i = b.messages.length - 1; i >= 0; i--) {
-           if (!b.messages[i].isIgnoredSilent && !b.messages[i].isIgnored) { bLastMsg = b.messages[i]; break; }
-         }
-       }
-       
-       const aTime = Math.max(a.lastMsgTimestamp || 0, aLastMsg ? new Date(aLastMsg.timestamp).getTime() : 0);
-       const bTime = Math.max(b.lastMsgTimestamp || 0, bLastMsg ? new Date(bLastMsg.timestamp).getTime() : 0);
-       
-       return bTime - aTime;
-    });
+        const aPinned = isContactPinned(a);
+        const bPinned = isContactPinned(b);
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+        
+        const aTime = a.lastMsgTimestamp || 0;
+        const bTime = b.lastMsgTimestamp || 0;
+        
+        if (bTime !== aTime) {
+           return bTime - aTime;
+        }
+        
+        // Critério de desempate estável secundário por ID do contato
+        return String(a.id).localeCompare(String(b.id));
+     });
 
     // Deduplicação rígida de contatos na mesma caixa de atendimento (caixa_efetiva)
     const seenKeys = new Set<string>();
