@@ -156,13 +156,9 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
     };
 
     let idUsuario = customer.IdUsuario || customer.idUsuario || customer.id || "9EA3F679-5565-4DA0-930F-0971A8B8A3CD";
-    if (typeof idUsuario === 'string' && idUsuario.length > 20) {
-        const cleanPhone = String(customer.Telefone || customer.telefone || "").replace(/\D/g, '');
-        if (cleanPhone && cleanPhone.length >= 8 && cleanPhone.length <= 20) {
-            idUsuario = cleanPhone;
-        } else {
-            idUsuario = (Math.random().toString(36).substring(2, 12) + Math.random().toString(36).substring(2, 12)).substring(0, 20).toUpperCase();
-        }
+    const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+    if (!uuidRegex.test(String(idUsuario).trim())) {
+        idUsuario = "9EA3F679-5565-4DA0-930F-0971A8B8A3CD";
     }
 
     const normalizedCustomer = {
@@ -836,7 +832,38 @@ class AutomationWorker {
         }
     }
 
-    async routeMessageToBot(eligibleBots, textMessage) {
+    async getRecentMessagesForRouting(tenantId, conversationId, limit = 6) {
+        if (!conversationId) return '';
+        try {
+            const { data } = await supabase.from('messages')
+                .select('text_content, sender_type, raw_payload')
+                .eq('tenant_id', tenantId)
+                .eq('conversation_id', conversationId)
+                .order('timestamp', { ascending: false })
+                .limit(limit);
+            
+            if (!data || data.length === 0) return '';
+            
+            const formatted = data.reverse().map(m => {
+                const isUser = m.sender_type !== 'bot' && m.sender_type !== 'agent' && m.sender_type !== 'system';
+                if (isUser) {
+                    return `Cliente: ${m.text_content || ''}`;
+                } else if (m.sender_type === 'system') {
+                    return `Sistema: ${m.text_content || ''}`;
+                } else {
+                    const botName = m.raw_payload?.bot_name || 'Atendente';
+                    return `${botName}: ${m.text_content || ''}`;
+                }
+            });
+            
+            return formatted.join('\n');
+        } catch (e) {
+            console.error('[AutomationWorker] Erro ao obter histórico para roteamento:', e);
+            return '';
+        }
+    }
+
+    async routeMessageToBot(eligibleBots, textMessage, tenantId, conversationId) {
         if (!eligibleBots || eligibleBots.length === 0) return null;
         if (eligibleBots.length === 1) return eligibleBots[0];
 
@@ -849,13 +876,25 @@ class AutomationWorker {
 
             const model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-            const prompt = `Você é um orquestrador de atendimento inteligente. Analise a mensagem do cliente e decida qual dos seguintes agentes (bots) é o mais adequado para responder ao cliente com base em seus nomes e descrições.
+            let historyText = '';
+            if (tenantId && conversationId) {
+                const history = await this.getRecentMessagesForRouting(tenantId, conversationId, 8);
+                if (history) {
+                    historyText = `\nHistórico recente da conversa (mensagens mais antigas primeiro):\n${history}\n`;
+                }
+            }
+
+            const prompt = `Você é um orquestrador de atendimento inteligente para negócios de alimentação. Analise a mensagem atual do cliente e o histórico recente da conversa para decidir qual dos seguintes agentes (bots) é o mais adequado para responder ao cliente com base em seus nomes e descrições.
 
 Agentes disponíveis:
 ${eligibleBots.map(b => `- ID: "${b.id}" | Nome: "${b.name}" | Descrição: "${b.description || 'Sem descrição.'}"`).join('\n')}
-
-Mensagem do cliente:
+${historyText}
+Mensagem atual do cliente:
 "${textMessage}"
+
+Regras importantes de roteamento:
+1. Se a conversa estiver ativamente no fluxo de um pedido (ex: o cliente está escolhendo produtos, adicionais, informando endereço de entrega, selecionando a forma de pagamento, ou confirmando o resumo do pedido), você deve continuar roteando para o bot de pedido (ex: "Luna Pedido"). Respostas curtas como "não", "sim", "está certo", "crédito", "débito", "pix", "dinheiro" ou dados de endereço fazem parte do fechamento de pedido e devem permanecer com o bot de pedido.
+2. Só mude de agente se o cliente de fato mudar claramente o assunto (ex: pedir para falar com humano, reclamar de um pedido anterior, ou fazer uma pergunta sobre o horário de funcionamento/endereço físico).
 
 Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem formatações adicionais, sem markdown, sem aspas. Exemplo de resposta: "53a2db6c-d9c2-4760-8cbd-454ceccd280c".`;
 
@@ -908,7 +947,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
     async processMessage(params) {
         const { tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock, botDelay, botInstructions } = params;
-        const key = conversationId || jid;
+        const key = jid || conversationId;
 
         if (!this.pendingJobs) {
             this.pendingJobs = new Map();
@@ -989,12 +1028,28 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
     cancelPendingMessage(conversationIdOrJid) {
         if (!conversationIdOrJid) return;
         const key = conversationIdOrJid;
+        
+        // Se a chave direta do job na memória (geralmente o jid ou o conversationId) existir
         if (this.pendingJobs && this.pendingJobs.has(key)) {
             const job = this.pendingJobs.get(key);
             console.log(`[AutomationWorker] Cancelando resposta automática pendente para ${key} devido a ação/mensagem do atendente humano.`);
             if (job.generationTimeout) clearTimeout(job.generationTimeout);
             if (job.sendTimeout) clearTimeout(job.sendTimeout);
             this.pendingJobs.delete(key);
+            return;
+        }
+
+        // Caso contrário, busca por conversationId ou jid nos parâmetros de cada job ativo
+        if (this.pendingJobs) {
+            for (const [k, job] of this.pendingJobs.entries()) {
+                if (job.params?.conversationId === key || job.params?.jid === key) {
+                    console.log(`[AutomationWorker] Cancelando resposta automática pendente para job ${k} (relacionado a ${key}) devido a ação/mensagem do atendente humano.`);
+                    if (job.generationTimeout) clearTimeout(job.generationTimeout);
+                    if (job.sendTimeout) clearTimeout(job.sendTimeout);
+                    this.pendingJobs.delete(k);
+                    break;
+                }
+            }
         }
     }
 
@@ -2762,6 +2817,96 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 finalResponseText = finalResponseText || "Desculpe, encontrei uma dificuldade técnica. Em que posso ajudar?";
             }
 
+            // Gera a prévia do JSON de pedido em background se for o bot de pedido
+            if (botSettings?.id === 'd233db28-cf3a-494b-91f9-f0e258e6bb88' || String(botSettings?.name || '').toLowerCase().includes('pedido')) {
+                // Roda de forma totalmente assíncrona
+                (async () => {
+                    try {
+                        const historyForDraft = passedHistory || [];
+                        const formattedHist = historyForDraft.map(h => `${h.role === 'model' ? 'Bot' : 'Cliente'}: ${h.parts[0].text}`).join('\n') + `\nCliente: ${textMessage}\nBot: ${finalResponseText}`;
+
+                        const draftModel = this.genAI.getGenerativeModel({ 
+                            model: 'gemini-2.5-flash',
+                            generationConfig: { responseMimeType: "application/json" }
+                        });
+
+                        const draftPrompt = `Você é um extrator de dados de pedidos. Analise a conversa abaixo e monte o estado atual do pedido no formato JSON esperado pela API do Gastrofood (jsOrder). Extraia todos os itens, adicionais, dados do cliente, endereço e forma de pagamento identificados.
+
+Conversa:
+${formattedHist}
+
+Estrutura JSON de exemplo:
+{
+  "jsOrder": {
+    "module": 1,
+    "fkCustomer": "GUID_DO_CLIENTE_OU_PADRAO",
+    "fkStore": "${companySettings.gfood_store_id || '6D0187D9-E905-4479-AB15-B908F0222607'}",
+    "subTotal": 0,
+    "received": 0,
+    "txDelivery": 0,
+    "discount": 0,
+    "cpf": "",
+    "pagto": "Forma de pagamento (dinheiro, pix, credito, debito)",
+    "address": {
+      "Cep": "00000000",
+      "Logradouro": "Rua",
+      "Numero": "S/N",
+      "Bairro": "Bairro",
+      "Cidade": "Cidade",
+      "Uf": "SP"
+    },
+    "items": [
+      {
+        "code": "ID_DO_PRODUTO",
+        "name": "Nome do Produto",
+        "amount": 1,
+        "price": 0,
+        "itemsCuston": []
+      }
+    ],
+    "customer": {
+      "IdUsuario": "GUID_DO_CLIENTE_OU_PADRAO",
+      "NomeRazao": "Nome do Cliente",
+      "Ddi": "+55",
+      "Telefone": "Telefone do Cliente"
+    }
+  }
+}
+
+Preencha apenas os campos que você conseguir identificar na conversa. Mantenha os outros vazios ou com valores padrão de forma segura. Responda APENAS com o JSON puro, seguindo estritamente a estrutura exemplificada.`;
+
+                        const draftResult = await draftModel.generateContent(draftPrompt);
+                        const draftText = draftResult.response.text().trim();
+                        
+                        try {
+                            const parsedDraft = JSON.parse(draftText);
+                            const normalizedDraft = normalizeGastrofoodPayload(parsedDraft, companySettings.gfood_store_id);
+                            
+                            logGastrofoodCall({
+                                direction: 'request',
+                                action: 'Montagem de Pedido (Tempo Real)',
+                                method: 'POST',
+                                url: `${GASTROFOOD_BASE_URL}/v6/server/nuvem/PedidoCardapioService/RascunhoPedido`,
+                                payload: normalizedDraft
+                            });
+
+                            logGastrofoodCall({
+                                direction: 'response',
+                                action: 'Montagem de Pedido (Tempo Real)',
+                                method: 'POST',
+                                url: `${GASTROFOOD_BASE_URL}/v6/server/nuvem/PedidoCardapioService/RascunhoPedido`,
+                                status: 200,
+                                response: { sucesso: true, mensagem: "Rascunho em tempo real atualizado", state: "draft" }
+                            });
+                        } catch (e) {
+                            console.warn("[AutomationWorker - Draft] Falha ao parsear ou normalizar o JSON de rascunho gerado:", e.message);
+                        }
+                    } catch (draftErr) {
+                        console.error("[AutomationWorker - Draft] Erro ao extrair rascunho do pedido em tempo real:", draftErr);
+                    }
+                })();
+            }
+
             return finalResponseText;
 
         } catch (error) {
@@ -2807,7 +2952,8 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         sender_type: 'bot',
                         raw_payload: {
                             ...msgResult,
-                            bot_name: botSettings?.name || 'IA ChatBoot'
+                            bot_name: botSettings?.name || 'IA ChatBoot',
+                            bot_id: botSettings?.id
                         }
                     }).select('*').single();
 

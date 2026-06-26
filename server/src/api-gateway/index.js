@@ -37,13 +37,23 @@ router.get('/v1/utils/link-preview', async (req, res) => {
 
 // Proxy para testar a requisição de Cardápio JSON Online sem bloqueios de CORS
 router.post('/v1/utils/test-cardapio', async (req, res) => {
+    let action = 'Teste de API';
+    let { url, token, payload, method = 'POST' } = req.body;
+    let bodyObj = null;
+
     try {
-        const { url, token, payload, method = 'POST' } = req.body;
         if (!url) {
             return res.status(400).json({ error: 'A URL do endpoint é obrigatória.' });
         }
 
-        let bodyObj = null;
+        if (url.includes('ValidaTelefone')) action = 'Validar Cliente';
+        else if (url.includes('FinalizeOrder')) action = 'Enviar Pedido';
+        else if (url.includes('BnPedido')) action = 'Consultar Status';
+        else if (url.includes('IniciarTransacao')) action = 'Iniciar Pix';
+        else if (url.includes('CreateUserWithAuthentication')) action = 'Cadastrar Cliente';
+        else if (url.includes('GetCardapioCompleto')) action = 'Buscar Cardapio';
+        else if (url.includes('ConsultaCepService')) action = 'Consultar CEP';
+
         if (payload && method !== 'GET') {
             try {
                 bodyObj = typeof payload === 'string' ? JSON.parse(payload) : payload;
@@ -59,7 +69,34 @@ router.post('/v1/utils/test-cardapio', async (req, res) => {
             headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
         }
 
+        // Função local para enviar o log ao Dev Logger
+        const logTestCall = (direction, statusVal, responseData, errDetail) => {
+            try {
+                const parsedResponse = typeof responseData === 'object' ? responseData : (responseData ? JSON.parse(responseData) : null);
+                const hasLogicalError = direction === 'response' && parsedResponse && (
+                    parsedResponse.result === false || 
+                    parsedResponse.success === false || 
+                    parsedResponse.sucesso === false || 
+                    parsedResponse.error
+                );
+
+                const entry = {
+                    type: 'gastrofood_api',
+                    direction: hasLogicalError ? 'error' : direction,
+                    action,
+                    method,
+                    url,
+                    payload: bodyObj,
+                    status: hasLogicalError ? `${statusVal} FAILED` : (statusVal || ''),
+                    response: parsedResponse,
+                    error: errDetail || (hasLogicalError ? parsedResponse : null)
+                };
+                console.log(`[Gastrofood API] ${JSON.stringify(entry)}`);
+            } catch (e) {}
+        };
+
         console.log(`[test-cardapio] Fazendo requisição ${method} para ${url}`);
+        logTestCall('request');
         
         const fetchOptions = {
             method,
@@ -81,12 +118,29 @@ router.post('/v1/utils/test-cardapio', async (req, res) => {
             data = await response.text();
         }
 
+        logTestCall('response', status, data);
+
         return res.json({
             status,
             data
         });
     } catch (e) {
         console.error('[test-cardapio] Erro ao testar requisição:', e.message);
+        
+        try {
+            const entry = {
+                type: 'gastrofood_api',
+                direction: 'error',
+                action,
+                method,
+                url,
+                payload: bodyObj,
+                status: '500 ERROR',
+                error: e.message
+            };
+            console.log(`[Gastrofood API] ${JSON.stringify(entry)}`);
+        } catch (err) {}
+
         return res.status(500).json({ error: e.message });
     }
 });

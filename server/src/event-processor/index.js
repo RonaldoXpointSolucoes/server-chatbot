@@ -1027,7 +1027,7 @@ class EventProcessor {
                           if (eligibleBots.length > 0) {
                               if (eligibleBots.length > 1) {
                                   console.log(`[EventProcessor] Múltiplos bots ativos (${eligibleBots.length}) elegíveis. Iniciando roteamento por assunto...`);
-                                  botData = await AutomationWorker.routeMessageToBot(eligibleBots, b.textMessage);
+                                  botData = await AutomationWorker.routeMessageToBot(eligibleBots, b.textMessage, b.tenantId, b.conversationId);
                               } else {
                                   botData = eligibleBots[0];
                               }
@@ -1046,7 +1046,7 @@ class EventProcessor {
                                if (channelBots.length > 0) {
                                    if (channelBots.length > 1) {
                                        console.log(`[EventProcessor] Fallback Múltiplos bots (${channelBots.length}) no canal ${b.instanceId}. Roteando por assunto...`);
-                                       botData = await AutomationWorker.routeMessageToBot(channelBots, b.textMessage);
+                                       botData = await AutomationWorker.routeMessageToBot(channelBots, b.textMessage, b.tenantId, b.conversationId);
                                    } else {
                                        botData = channelBots[0];
                                    }
