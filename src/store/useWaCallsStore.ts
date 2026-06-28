@@ -188,8 +188,9 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
     const response = await fetch(`${API_URL}/api/v1/wacalls/sessions`);
     if (!response.ok) throw new Error("Erro ao buscar sessões WaCalls.");
     const data = await response.json();
-    set({ sessions: data });
-    return data;
+    const sessionsList = data.sessions || [];
+    set({ sessions: sessionsList });
+    return sessionsList;
   },
 
   createSession: async (sid) => {
@@ -205,9 +206,10 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
   },
 
   logoutSession: async (sid) => {
-    await fetch(`${API_URL}/api/v1/wacalls/sessions/${sid}`, {
-      method: "DELETE"
+    const response = await fetch(`${API_URL}/api/v1/wacalls/sessions/${sid}/logout`, {
+      method: "POST"
     });
+    if (!response.ok) throw new Error("Erro ao desconectar sessão de voz.");
     await get().fetchSessions();
   },
 

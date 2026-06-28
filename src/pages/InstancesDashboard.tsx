@@ -56,8 +56,20 @@ export default function InstancesDashboard() {
   const handleStartWacallsPair = async (sid: string) => {
     setShowWacallsQr(sid);
     try {
-      await createWacallsSession(sid);
-      await pairWacallsSession(sid);
+      const existingSession = wacallsSessions.find(s => s.id === sid);
+      
+      if (existingSession) {
+        if (existingSession.paired) {
+          // Se já estiver pareada, desloga primeiro para limpar as credenciais antigas no Go e liberar re-pareamento
+          await logoutWacallsSession(sid);
+        }
+        // Inicia o pareamento
+        await pairWacallsSession(sid);
+      } else {
+        // Se não existir no Go, cria e inicia o pareamento
+        await createWacallsSession(sid);
+        await pairWacallsSession(sid);
+      }
     } catch (err: any) {
       alert(err.message || "Erro ao iniciar pareamento de chamadas de voz.");
       setShowWacallsQr(null);
