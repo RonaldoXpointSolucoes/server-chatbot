@@ -3218,14 +3218,40 @@ export default function ChatDashboard() {
       return;
     }
 
-    // Atualiza o estado das sessões da API do WaCalls antes de prosseguir
+    const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+    const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || localStorage.getItem('tenantId');
+
+    // 1. Validar se a conexão do WhatsApp (Baileys) está conectada e operacional no backend
+    try {
+      const res = await fetch(`${ENGINE_URL}/api/v1/instances/${instanceId}/status`, {
+        headers: {
+          'x-tenant-id': tenantId || ''
+        }
+      });
+      
+      if (!res.ok) {
+        throw new Error(`Servidor respondeu com status ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (data.status !== 'connected') {
+        alert(`A conexão do WhatsApp correspondente está offline no momento (Status: ${data.status || 'desconhecido'}). Para realizar ligações, a instância de WhatsApp precisa estar conectada no Gerenciador de Instâncias.`);
+        navigate('/instances');
+        return;
+      }
+    } catch (err: any) {
+      alert(`Não foi possível verificar a saúde da conexão do WhatsApp: ${err.message || err}. Certifique-se de que o servidor principal está online.`);
+      return;
+    }
+
+    // 2. Atualiza o estado das sessões da API do WaCalls antes de prosseguir
     try {
       await useWaCallsStore.getState().fetchSessions();
     } catch (e) {
       console.warn("Falha ao buscar sessões do WaCalls:", e);
     }
 
-    // Verifica se o módulo de voz (WaCalls) está ativado e pareado para esta instância
+    // 3. Verifica se o módulo de voz (WaCalls) está ativado e pareado para esta instância
     const wacallSession = useWaCallsStore.getState().sessions.find(s => s.id === instanceId);
     
     if (!wacallSession || !wacallSession.paired) {
