@@ -3,6 +3,8 @@ import { Outlet } from 'react-router-dom';
 import { MainSidebar } from './MainSidebar';
 import EvolutionModal from './EvolutionModal';
 import { useChatStore } from '../store/chatStore';
+import { useWaCallsStore } from '../store/useWaCallsStore';
+import WaCallsWidget from './WaCallsWidget';
 export function MainLayout() {
   const [showMainSidebar, setShowMainSidebar] = useState(() => window.innerWidth >= 1024);
   const isQRModalOpen = useChatStore(s => s.isQRModalOpen);
@@ -12,6 +14,12 @@ export function MainLayout() {
     // Garante que o tenantInfo esteja sempre carregado globalmente no Layout,
     // essencial se o usuário der F5 diretamente em páginas como /settings/account ou /settings/logs
     useChatStore.getState().fetchTenantConfig();
+
+    // Inicializa a conexão SSE do WaCalls para recebimento de chamadas de voz
+    useWaCallsStore.getState().initSSE();
+    return () => {
+      useWaCallsStore.getState().closeSSE();
+    };
   }, []);
 
   return (
@@ -52,6 +60,9 @@ export function MainLayout() {
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
         <Outlet context={{ showMainSidebar, setShowMainSidebar }} />
       </div>
+
+      {/* Widget Flutuante do WaCalls */}
+      <WaCallsWidget />
     </div>
   );
 }

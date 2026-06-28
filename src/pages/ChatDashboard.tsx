@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
+import { useWaCallsStore } from '../store/useWaCallsStore';
+import { Phone } from 'lucide-react';
 import { playNotificationSound } from '../utils/AudioEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal, CompanyDetailsModal, SnoozedListModal } from '../components/ChatModals';
@@ -3202,7 +3204,35 @@ export default function ChatDashboard() {
     }
   };
 
+  const handleCallContact = async () => {
+    const instanceId = useChatStore.getState().evolution_api_instance;
+    
+    if (!instanceId) {
+      alert("Nenhuma conexão de WhatsApp ativa foi selecionada para esta empresa. Para realizar chamadas de voz, é necessário ter uma conexão de WhatsApp ativa e pareada no módulo de voz. Redirecionando você para o Gerenciador de Instâncias...");
+      navigate('/instances');
+      return;
+    }
 
+    if (!activeChat || !activeChat.phone) {
+      alert("Este contato não possui um número de telefone associado.");
+      return;
+    }
+
+    // Verifica se o módulo de voz (WaCalls) está ativado e pareado para esta instância
+    const wacallSession = useWaCallsStore.getState().sessions.find(s => s.id === instanceId);
+    
+    if (!wacallSession || !wacallSession.paired) {
+      alert("O Módulo de Ligações de Voz (WaCalls) não está ativado ou não está pareado para esta conexão. Por favor, ative as ligações de voz escaneando o QR Code de Voz no card correspondente. Redirecionando...");
+      navigate('/instances');
+      return;
+    }
+
+    try {
+      await useWaCallsStore.getState().startCall(instanceId, activeChat.phone);
+    } catch (err: any) {
+      alert(err.message || "Erro ao efetuar chamada de voz.");
+    }
+  };
 
   return (
     <div className="flex w-full h-[100dvh] min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
@@ -5671,6 +5701,17 @@ export default function ChatDashboard() {
             {/* Right Header Area */}
             <div className="flex items-center gap-2 sm:gap-4">
               
+              {/* Botão de Chamada de Voz WaCalls */}
+              {activeChat && activeChat.phone && (
+                <button
+                  onClick={handleCallContact}
+                  className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] dark:hover:text-[#00a884] transition-all duration-200 flex items-center justify-center"
+                  title="Fazer ligação de voz via WhatsApp"
+                >
+                  <Phone size={18} className="stroke-[2.5]" />
+                </button>
+              )}
+
               <div className="hidden lg:flex items-center gap-2">
                 {/* Botão Premium de Controle da I.A (Desktop) */}
                 {globalAiEnabled ? (

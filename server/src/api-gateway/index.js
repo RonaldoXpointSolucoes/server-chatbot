@@ -2,6 +2,7 @@ import express from 'express';
 import instanceRoutes from './instances.js';
 import messageRoutes from './messages.js';
 import knowledgeRoutes from './knowledge.js';
+import wacallsRoutes from './wacalls.js';
 import { supabase } from '../supabase.js';
 import { getUrlInfo } from '@whiskeysockets/baileys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -12,6 +13,7 @@ const router = express.Router();
 router.use('/v1', instanceRoutes);
 router.use('/v1', messageRoutes);
 router.use('/v1/knowledge', knowledgeRoutes);
+router.use('/v1', wacallsRoutes);
 
 // Rota de link preview para contornar CORS no frontend e expor o resolvedor do Baileys
 router.get('/v1/utils/link-preview', async (req, res) => {

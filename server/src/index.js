@@ -18,6 +18,7 @@ import { supabase } from './supabase.js';
 import sessionManager from './session-manager/index.js';
 import snoozeManager from './snooze-manager.js';
 import autoRagTrainer from './automation-worker/auto-rag-trainer.js';
+import { startWaCallsListener } from './wacalls-listener.js';
 import { dispatchWebhookTriggers } from './event-processor/index.js';
 import fs from 'fs';
 import pidusage from 'pidusage';
@@ -344,6 +345,13 @@ app.listen(PORT, '0.0.0.0', async () => {
         snoozeManager.start();
     } catch(err) {
         console.error("[Worker Boot] Erro ao iniciar SnoozeManager:", err.message);
+    }
+
+    try {
+        console.log("[Worker Boot] Inicializando WaCalls Background Listener...");
+        startWaCallsListener();
+    } catch(err) {
+        console.error("[Worker Boot] Erro ao iniciar WaCalls Listener:", err.message);
     }
 
     try {

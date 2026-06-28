@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { useWaCallsStore } from '../store/useWaCallsStore';
 import { Smartphone, CheckCircle, Loader2, AlertCircle, RefreshCw, Key, Shield, MessageSquare, Terminal, Eye, Link, Unlink, Activity, ShieldAlert, Cpu, Network, FileDown, Lock, Server, Users, StopCircle, QrCode, RefreshCcw, LogOut, Download, Clock, Zap, Building2, HelpCircle, Archive, Trash2, Edit3, Save, X, PlusCircle, Maximize2, MoreVertical, Copy, ArrowRight, Settings, CheckCircle2, ChevronRight, Phone, UserCircle2, Signal, Plus, EyeOff, EyeIcon, User } from 'lucide-react';
 
 interface WhatsAppInstance {
@@ -39,8 +40,46 @@ export default function InstancesDashboard() {
   const [userName, setUserName] = useState<string>('');
 
 
+  // WaCalls States and Actions
+  const { 
+    sessions: wacallsSessions, 
+    qrCodes: wacallsQrCodes,
+    createSession: createWacallsSession,
+    pairSession: pairWacallsSession,
+    logoutSession: logoutWacallsSession,
+    fetchSessions: fetchWacallsSessions
+  } = useWaCallsStore();
+  
+  const [showWacallsQr, setShowWacallsQr] = useState<string | null>(null);
+
+  const handleStartWacallsPair = async (sid: string) => {
+    setShowWacallsQr(sid);
+    try {
+      await createWacallsSession(sid);
+      await pairWacallsSession(sid);
+    } catch (err: any) {
+      alert(err.message || "Erro ao iniciar pareamento de chamadas de voz.");
+      setShowWacallsQr(null);
+    }
+  };
+
+  const handleCancelWacallsPair = (sid: string) => {
+    setShowWacallsQr(null);
+  };
+
+  const handleDisconnectWacalls = async (sid: string) => {
+    if (window.confirm("Desativar as chamadas de voz neste número? O dispositivo virtual de ligações pareado no WhatsApp será desconectado.")) {
+      try {
+        await logoutWacallsSession(sid);
+      } catch (err: any) {
+        alert(err.message || "Erro ao desativar chamadas de voz.");
+      }
+    }
+  };
+
   useEffect(() => {
     fetchInstances();
+    fetchWacallsSessions().catch(console.error);
 
     // Inscrição para Realtime Sync
     const channel = supabase
@@ -524,6 +563,78 @@ export default function InstancesDashboard() {
                         </span>
                       </div>
                    </div>
+
+                  {/* Seção WaCalls (Chamadas de Voz) */}
+                  {(() => {
+                    const wacallSession = wacallsSessions.find((s) => s.id === inst.id);
+                    const wacallsQrCode = wacallsQrCodes[inst.id];
+                    
+                    return (
+                      <div className="mt-4 pt-4 border-t border-dashed border-gray-200 dark:border-[#2a3942] flex flex-col gap-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Phone size={14} className="text-emerald-500" />
+                            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Módulo de Chamadas (Voz)</span>
+                          </div>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                            wacallSession?.paired 
+                              ? "bg-emerald-100 dark:bg-emerald-950/40 text-[#00a884]"
+                              : wacallSession?.status === "connecting"
+                              ? "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 animate-pulse"
+                              : "bg-gray-100 dark:bg-[#202c33] text-gray-500 dark:text-gray-400"
+                          }`}>
+                            {wacallSession?.paired ? "Ativo" : wacallSession?.status === "connecting" ? "Pareando" : "Inativo"}
+                          </span>
+                        </div>
+
+                        {/* QR Code de Voz Inline */}
+                        {showWacallsQr === inst.id && wacallsQrCode && (
+                          <div className="flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-black/30 rounded-2xl border border-gray-100 dark:border-white/5 animate-in fade-in duration-300">
+                            <p className="text-[10px] text-gray-400 mb-3 text-center">{"Escaneie o código com o WhatsApp > Aparelhos Conectados"}</p>
+                            <div className="w-40 h-40 bg-white p-2 rounded-xl flex items-center justify-center overflow-hidden border border-gray-200 dark:border-gray-800 shadow-sm">
+                              <img src={wacallsQrCode} alt="QR Code WaCalls" className="w-full h-full object-cover" />
+                            </div>
+                            <button 
+                              onClick={() => handleCancelWacallsPair(inst.id)} 
+                              className="mt-3 text-xs text-red-500 hover:text-red-600 font-bold transition-colors"
+                            >
+                              Cancelar Pareamento
+                            </button>
+                          </div>
+                        )}
+
+                        {showWacallsQr !== inst.id && (
+                          <div className="flex gap-2">
+                            {!wacallSession?.paired ? (
+                              <button
+                                onClick={() => handleStartWacallsPair(inst.id)}
+                                className="flex-1 text-xs py-2.5 bg-emerald-500/10 hover:bg-[#00a884] text-[#00a884] hover:text-white font-semibold rounded-xl border border-emerald-500/20 hover:border-emerald-500 transition-all flex justify-center items-center gap-1.5 active:scale-95 shadow-sm"
+                              >
+                                <QrCode size={14} /> Ativar Chamadas de Voz
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleStartWacallsPair(inst.id)}
+                                  className="flex-1 text-xs py-2.5 bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-500 dark:text-blue-400 font-semibold rounded-xl border border-blue-500/20 hover:border-blue-500 transition-all flex justify-center items-center gap-1.5 active:scale-95"
+                                  title="Gerar novo QR code para re-conectar"
+                                >
+                                  <RefreshCcw size={14} /> Re-parear Voz
+                                </button>
+                                <button
+                                  onClick={() => handleDisconnectWacalls(inst.id)}
+                                  className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-500 font-semibold rounded-xl border border-red-500/20 hover:border-red-500 transition-all flex justify-center items-center gap-1.5 active:scale-95"
+                                  title="Desativar voz e desparear device de chamadas"
+                                >
+                                  <LogOut size={14} /> Desativar Voz
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Instancias List Card */}
