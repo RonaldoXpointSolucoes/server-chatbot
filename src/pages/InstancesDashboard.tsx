@@ -119,8 +119,13 @@ export default function InstancesDashboard() {
         source: 'WaCalls Diagnostic'
       });
       
+      const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || localStorage.getItem('tenantId');
       const nodeStatusStart = Date.now();
-      const nodeResponse = await fetch(`${ENGINE_URL}/api/v1/instances/${sid}/status`).catch(() => null);
+      const nodeResponse = await fetch(`${ENGINE_URL}/api/v1/instances/${sid}/status`, {
+        headers: {
+          'x-tenant-id': tenantId || ''
+        }
+      }).catch(() => null);
       
       if (nodeResponse && nodeResponse.ok) {
         logger.addLog({
@@ -169,7 +174,7 @@ export default function InstancesDashboard() {
       if (currentSession) {
         logger.addLog({
           type: 'success',
-          message: `✔ Sessão de VoIP encontrada no WaCalls! Estado: ${currentSession.status} | Pareado: ${currentSession.paired ? "SIM" : "NÃO"}`,
+          message: `✔ Sessão de VoIP encontrada no WaCalls! Estado: ${currentSession.state} | Pareado: ${currentSession.paired ? "SIM" : "NÃO"}`,
           source: 'WaCalls Diagnostic',
           details: currentSession
         });
