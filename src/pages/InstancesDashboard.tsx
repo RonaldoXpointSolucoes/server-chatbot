@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { useWaCallsStore } from '../store/useWaCallsStore';
+import QRCode from 'react-qr-code';
 import { Smartphone, CheckCircle, Loader2, AlertCircle, RefreshCw, Key, Shield, MessageSquare, Terminal, Eye, Link, Unlink, Activity, ShieldAlert, Cpu, Network, FileDown, Lock, Server, Users, StopCircle, QrCode, RefreshCcw, LogOut, Download, Clock, Zap, Building2, HelpCircle, Archive, Trash2, Edit3, Save, X, PlusCircle, Maximize2, MoreVertical, Copy, ArrowRight, Settings, CheckCircle2, ChevronRight, Phone, UserCircle2, Signal, Plus, EyeOff, EyeIcon, User } from 'lucide-react';
 
 interface WhatsAppInstance {
@@ -620,8 +621,8 @@ export default function InstancesDashboard() {
                         {showWacallsQr === inst.id && wacallsQrCode && (
                           <div className="flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-black/30 rounded-2xl border border-gray-100 dark:border-white/5 animate-in fade-in duration-300">
                             <p className="text-[10px] text-gray-400 mb-3 text-center">{"Escaneie o código com o WhatsApp > Aparelhos Conectados"}</p>
-                            <div className="w-40 h-40 bg-white p-2 rounded-xl flex items-center justify-center overflow-hidden border border-gray-200 dark:border-gray-800 shadow-sm">
-                              <img src={wacallsQrCode} alt="QR Code WaCalls" className="w-full h-full object-cover" />
+                            <div className="w-40 h-40 bg-white p-3 rounded-xl flex items-center justify-center border border-gray-200 dark:border-gray-800 shadow-sm">
+                              <QRCode value={wacallsQrCode} size={136} style={{ height: "auto", maxWidth: "100%", width: "100%" }} />
                             </div>
                             <button 
                               onClick={() => handleCancelWacallsPair(inst.id)} 
