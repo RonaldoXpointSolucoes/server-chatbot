@@ -3218,6 +3218,13 @@ export default function ChatDashboard() {
       return;
     }
 
+    // Atualiza o estado das sessões da API do WaCalls antes de prosseguir
+    try {
+      await useWaCallsStore.getState().fetchSessions();
+    } catch (e) {
+      console.warn("Falha ao buscar sessões do WaCalls:", e);
+    }
+
     // Verifica se o módulo de voz (WaCalls) está ativado e pareado para esta instância
     const wacallSession = useWaCallsStore.getState().sessions.find(s => s.id === instanceId);
     
