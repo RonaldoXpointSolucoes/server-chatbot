@@ -218,8 +218,8 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
       method: "POST"
     });
     if (!response.ok) throw new Error("Erro ao re-parear sessão WaCalls.");
-    const data = await response.json();
-    return data;
+    // O endpoint /pair do Go retorna 204 No Content, sem corpo JSON
+    return true;
   },
 
   initSSE: () => {
