@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import QRCode from 'react-qr-code';
+import { useDevStore } from '../store/devStore';
 import { Smartphone, CheckCircle, Loader2, AlertCircle, RefreshCw, Key, Shield, MessageSquare, Terminal, Eye, Link, Unlink, Activity, ShieldAlert, Cpu, Network, FileDown, Lock, Server, Users, StopCircle, QrCode, RefreshCcw, LogOut, Download, Clock, Zap, Building2, HelpCircle, Archive, Trash2, Edit3, Save, X, PlusCircle, Maximize2, MoreVertical, Copy, ArrowRight, Settings, CheckCircle2, ChevronRight, Phone, UserCircle2, Signal, Plus, EyeOff, EyeIcon, User } from 'lucide-react';
 
 interface WhatsAppInstance {
@@ -91,6 +92,155 @@ export default function InstancesDashboard() {
     }
   };
 
+  const handleTestWacallsConnection = async (sid: string, instName: string) => {
+    const logger = useDevStore.getState();
+    
+    // Força a exibição do painel do Dev Logger se ele não estiver visível
+    if (!logger.isVisible) {
+      logger.toggleVisibility();
+    }
+    
+    logger.addLog({
+      type: 'info',
+      message: `==================================================`,
+      source: 'WaCalls Diagnostic'
+    });
+    logger.addLog({
+      type: 'info',
+      message: `INICIANDO DIAGNÓSTICO DE VOZ (WaCalls) PARA A INSTÂNCIA: "${instName}" (${sid})`,
+      source: 'WaCalls Diagnostic'
+    });
+
+    try {
+      // 1. Validando Conexão do Frontend com o Backend Node.js
+      logger.addLog({
+        type: 'info',
+        message: `Passo 1/5: Testando resposta do Backend Node.js local...`,
+        source: 'WaCalls Diagnostic'
+      });
+      
+      const nodeStatusStart = Date.now();
+      const nodeResponse = await fetch(`${ENGINE_URL}/api/v1/instances/${sid}/status`).catch(() => null);
+      
+      if (nodeResponse && nodeResponse.ok) {
+        logger.addLog({
+          type: 'success',
+          message: `✔ Backend Node.js respondendo na porta 9000! Latência: ${Date.now() - nodeStatusStart}ms`,
+          source: 'WaCalls Diagnostic'
+        });
+      } else {
+        logger.addLog({
+          type: 'error',
+          message: `✖ Falha ao conectar no Backend Node.js (${ENGINE_URL}). Verifique se a porta 9000 está ativa!`,
+          source: 'WaCalls Diagnostic'
+        });
+      }
+
+      // 2. Validando Proxy de Eventos SSE do WaCalls no Backend
+      logger.addLog({
+        type: 'info',
+        message: `Passo 2/5: Testando endpoint de sessões WaCalls no Backend...`,
+        source: 'WaCalls Diagnostic'
+      });
+      
+      const sessions = await fetchWacallsSessions().catch(() => null);
+      if (sessions) {
+        logger.addLog({
+          type: 'success',
+          message: `✔ Sucesso ao buscar sessões do WaCalls Go! Retornadas ${sessions.length} sessões ativas.`,
+          source: 'WaCalls Diagnostic'
+        });
+      } else {
+        logger.addLog({
+          type: 'error',
+          message: `✖ Falha de comunicação com o WaCalls Go (porta 8080) através do proxy do backend. Verifique se o servidor Go está ativo!`,
+          source: 'WaCalls Diagnostic'
+        });
+      }
+
+      // 3. Verificando se a Sessão da Instância existe no WaCalls
+      logger.addLog({
+        type: 'info',
+        message: `Passo 3/5: Verificando se a instância atual tem sessão criada no WaCalls...`,
+        source: 'WaCalls Diagnostic'
+      });
+      
+      const currentSession = wacallsSessions.find(s => s.id === sid);
+      if (currentSession) {
+        logger.addLog({
+          type: 'success',
+          message: `✔ Sessão de VoIP encontrada no WaCalls! Estado: ${currentSession.status} | Pareado: ${currentSession.paired ? "SIM" : "NÃO"}`,
+          source: 'WaCalls Diagnostic',
+          details: currentSession
+        });
+      } else {
+        logger.addLog({
+          type: 'warn',
+          message: `⚠ Nenhuma sessão de VoIP encontrada para esta instância no WaCalls. Ela precisará ser criada ao clicar em 'Ativar Voz'.`,
+          source: 'WaCalls Diagnostic'
+        });
+      }
+
+      // 4. Verificando o Canal de Eventos em Tempo Real (SSE)
+      logger.addLog({
+        type: 'info',
+        message: `Passo 4/5: Verificando a conexão do canal de eventos em tempo real (SSE)...`,
+        source: 'WaCalls Diagnostic'
+      });
+      
+      const isConnectedSSE = useWaCallsStore.getState().isConnectedSSE;
+      if (isConnectedSSE) {
+        logger.addLog({
+          type: 'success',
+          message: `✔ Canal SSE de voz está CONECTADO e pronto para receber eventos!`,
+          source: 'WaCalls Diagnostic'
+        });
+      } else {
+        logger.addLog({
+          type: 'warn',
+          message: `⚠ Canal SSE de voz não está conectado no frontend. O recebimento de chamadas pode não funcionar em tempo real.`,
+          source: 'WaCalls Diagnostic'
+        });
+      }
+
+      // 5. Consolidando Diagnóstico
+      logger.addLog({
+        type: 'info',
+        message: `Passo 5/5: Consolidando status final...`,
+        source: 'WaCalls Diagnostic'
+      });
+      
+      const isEverythingOk = nodeResponse?.ok && sessions && isConnectedSSE;
+      if (isEverythingOk) {
+        logger.addLog({
+          type: 'success',
+          message: `🎉 DIAGNÓSTICO CONCLUÍDO COM SUCESSO! A infraestrutura local do WaCalls está 100% saudável.`,
+          source: 'WaCalls Diagnostic'
+        });
+      } else {
+        logger.addLog({
+          type: 'warn',
+          message: `⚠ Diagnóstico concluído com alguns alertas. Verifique os passos acima!`,
+          source: 'WaCalls Diagnostic'
+        });
+      }
+
+    } catch (e: any) {
+      logger.addLog({
+        type: 'error',
+        message: `✖ Erro inesperado durante o diagnóstico: ${e.message}`,
+        source: 'WaCalls Diagnostic',
+        details: e
+      });
+    }
+    
+    logger.addLog({
+      type: 'info',
+      message: `==================================================`,
+      source: 'WaCalls Diagnostic'
+    });
+  };
+
   useEffect(() => {
     fetchInstances();
     fetchWacallsSessions().catch(console.error);
@@ -109,6 +259,16 @@ export default function InstancesDashboard() {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  // Limpa o estado de pareamento quando a sessão do WaCalls é conectada com sucesso
+  useEffect(() => {
+    if (showWacallsQr) {
+      const sess = wacallsSessions.find(s => s.id === showWacallsQr);
+      if (sess?.paired) {
+        setShowWacallsQr(null);
+      }
+    }
+  }, [wacallsSessions, showWacallsQr]);
 
   const fetchActiveInstance = async () => {
     try {
@@ -657,6 +817,13 @@ export default function InstancesDashboard() {
                                   title="Desativar voz e desparear device de chamadas"
                                 >
                                   <LogOut size={14} /> Desativar Voz
+                                </button>
+                                <button
+                                  onClick={() => handleTestWacallsConnection(inst.id, inst.display_name)}
+                                  className="px-3 py-2.5 bg-violet-500/10 hover:bg-violet-500 hover:text-white text-violet-500 font-semibold rounded-xl border border-violet-500/20 hover:border-violet-500 transition-all flex justify-center items-center gap-1.5 active:scale-95"
+                                  title="Testar conexões de ligações de voz e logar no Dev Logger"
+                                >
+                                  <Activity size={14} /> Testar
                                 </button>
                               </>
                             )}
