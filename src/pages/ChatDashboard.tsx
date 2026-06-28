@@ -3205,7 +3205,7 @@ export default function ChatDashboard() {
   };
 
   const handleCallContact = async () => {
-    const instanceId = useChatStore.getState().evolution_api_instance;
+    const instanceId = useChatStore.getState().evolution_api_instance || useChatStore.getState().tenantInfo?.evolution_api_instance || useChatStore.getState().connectedInstanceName;
     
     if (!instanceId) {
       alert("Nenhuma conexão de WhatsApp ativa foi selecionada para esta empresa. Para realizar chamadas de voz, é necessário ter uma conexão de WhatsApp ativa e pareada no módulo de voz. Redirecionando você para o Gerenciador de Instâncias...");
