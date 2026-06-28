@@ -32,10 +32,7 @@ router.post('/messages/send', requireTenant, async (req, res) => {
         
         // Anti-Bug: Se o socket não existe na memória (servidor reiniciou e não carregou ainda), força o boot!
         if (!sock) {
-             if (process.env.DISABLE_AUTO_START_SESSIONS === 'true') {
-                 console.log(`[Messages API] Boot emergencial ignorado na rota de envio para evitar conflito com a produção (DISABLE_AUTO_START_SESSIONS=true): ${instanceId}`);
-                 return res.status(400).json({ error: 'WhatsApp offline. Ative a conexão no painel para evitar conflito com o servidor de produção.' });
-             }
+         // Removido bloqueio emergencial local para permitir que instâncias ativas funcionem em desenvolvimento local.
              console.log(`[Messages API] Forçando boot emergencial do socket na rota de envio: ${instanceId}`);
              try {
                  sock = await sessionManager.createSession(tenantId, instanceId);
@@ -146,10 +143,7 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
         
         // Anti-Bug: Se o socket não existe na memória (servidor reiniciou e não carregou ainda), força o boot!
         if (!sock) {
-             if (process.env.DISABLE_AUTO_START_SESSIONS === 'true') {
-                 console.log(`[Sync-History API] Boot emergencial ignorado na rota de sync para evitar conflito com a produção (DISABLE_AUTO_START_SESSIONS=true): ${instanceId}`);
-                 return res.status(400).json({ error: 'WhatsApp offline. Ative a conexão no painel para evitar conflito com o servidor de produção.' });
-             }
+             // Removido bloqueio emergencial local para permitir que instâncias ativas funcionem em desenvolvimento local.
              console.log(`[Sync-History API] Forçando boot emergencial do socket na rota de sync: ${instanceId}`);
              try {
                  sock = await sessionManager.createSession(tenantId, instanceId);

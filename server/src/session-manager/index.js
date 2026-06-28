@@ -489,11 +489,8 @@ class SessionManager {
         if (sock) return sock;
 
         // Se estiver configurado para desativar auto-start (ambiente local de desenvolvimento),
-        // não acorda a instância automaticamente para evitar conflito com o servidor de produção.
-        if (process.env.DISABLE_AUTO_START_SESSIONS === 'true') {
-            console.log(`[SessionManager] getSocketOrWake ignorado para evitar conflito com a produção (DISABLE_AUTO_START_SESSIONS=true): ${instanceId}`);
-            return null;
-        }
+        // permitimos o lazy loading sob demanda quando o desenvolvedor interage ativamente,
+        // mas o auto-start em lote na inicialização do servidor continuará desativado.
 
         // Fallback para acordar a instância (Lazy Load) se o Node foi reiniciado
         const { data } = await retryWithBackoff(() => supabase.from('whatsapp_instances').select('status').eq('id', instanceId).single());
