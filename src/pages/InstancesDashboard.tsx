@@ -38,6 +38,7 @@ export default function InstancesDashboard() {
   const [showSettings, setShowSettings] = useState<string | null>(null);
   const [activeInstanceId, setActiveInstanceId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('');
+  const [showHelpModal, setShowHelpModal] = useState<string | null>(null);
 
 
   // WaCalls States and Actions
@@ -509,7 +510,23 @@ export default function InstancesDashboard() {
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     {getStatusBadge(inst.status)}
-                    <button onClick={() => setShowSettings(showSettings === inst.id ? null : inst.id)} className={`p-2.5 rounded-xl transition-all ${showSettings === inst.id ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'text-gray-400 hover:text-emerald-500 bg-gray-100 dark:bg-[#202c33] hover:dark:bg-emerald-500/10'}`}>
+                    <button 
+                      onClick={() => {
+                        setShowHelpModal(showHelpModal === inst.id ? null : inst.id);
+                        setShowSettings(null); // Fecha configurações se abrir ajuda
+                      }} 
+                      className={`p-2.5 rounded-xl transition-all ${showHelpModal === inst.id ? 'bg-[#00a884] text-white shadow-lg shadow-[#00a884]/20' : 'text-gray-400 hover:text-[#00a884] bg-gray-100 dark:bg-[#202c33] hover:dark:bg-[#00a884]/10'}`}
+                      title="Guia Explicativo das Ações"
+                    >
+                      <HelpCircle size={18} />
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setShowSettings(showSettings === inst.id ? null : inst.id);
+                        setShowHelpModal(null); // Fecha ajuda se abrir configurações
+                      }} 
+                      className={`p-2.5 rounded-xl transition-all ${showSettings === inst.id ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'text-gray-400 hover:text-emerald-500 bg-gray-100 dark:bg-[#202c33] hover:dark:bg-emerald-500/10'}`}
+                    >
                       <Settings size={18} />
                     </button>
                   </div>
@@ -725,6 +742,33 @@ export default function InstancesDashboard() {
                      </div>
                    </div>
                 )}
+
+                 {/* Painel Ajuda Explicativo */}
+                 {showHelpModal === inst.id && (
+                    <div className="mb-6 bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-2xl p-5 shadow-inner animate-in fade-in slide-in-from-top-2 duration-200 max-h-[400px] overflow-y-auto custom-scrollbar">
+                      <h5 className="text-sm font-bold text-gray-800 dark:text-gray-200 mb-4 flex items-center gap-2 border-b dark:border-white/5 pb-3">
+                        <HelpCircle size={16} className="text-[#00a884]" /> Guia de Funções e Ações
+                      </h5>
+                      <div className="space-y-4">
+                        {[
+                          { title: '📞 Módulo de Chamadas (Voz)', desc: 'Gera um QR code secundário exclusivo de VoIP. Permite fazer e receber ligações telefônicas nativas de WhatsApp diretamente pela tela do operador no navegador.' },
+                          { title: '🟢 Status da Conexão', desc: 'Mostra a saúde do bot de texto. "Conectado" significa que o chatbot principal e o envio de mensagens de texto estão funcionando normalmente.' },
+                          { title: '🔄 Sync (Sincronizar Contatos)', desc: 'Força a atualização imediata dos contatos do celular com o painel do sistema. Sincroniza fotos, nomes e conversas recentes.' },
+                          { title: '📶 Forçar ON', desc: 'Envia sinal de atividade para o WhatsApp. Deixa o robô ou atendente visível como "Online" para os clientes, otimizando as interações e tempo de resposta.' },
+                          { title: '🗑️ Limpar Memória (Cache)', desc: 'Limpa a memória temporária (RAM) de mensagens cacheadas no servidor para evitar lentidão, sem apagar nenhum dado do banco de dados principal.' },
+                          { title: '⚡ Reiniciar', desc: 'Recarrega a conexão do soquete do WhatsApp no servidor. Útil se houver queda de sinal, atraso no envio ou desconexão momentânea.' },
+                          { title: '🔌 Desparear', desc: 'Desconecta e desvincula a conta do WhatsApp do servidor do sistema (remove o dispositivo conectado nas configurações do seu celular).' },
+                          { title: '⭐ Usar Existente (Primária)', desc: 'Seleciona essa instância como a conexão primária de envio. As mensagens disparadas por essa empresa no chat usarão este número.' },
+                          { title: '🔴 Excluir Instância (Lixeira)', desc: 'Apaga permanentemente todas as chaves, sessões salvas e conexões daquela instância do servidor do sistema. Ação irreversível.' },
+                        ].map((item, idx) => (
+                          <div key={idx} className="border-b border-gray-100 dark:border-white/5 pb-3 last:border-none last:pb-0 text-left">
+                            <p className="text-xs font-bold text-gray-800 dark:text-white mb-0.5">{item.title}</p>
+                            <p className="text-[11px] text-gray-500 dark:text-[#8696a0] leading-relaxed">{item.desc}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                 )}
 
                  {/* Área de Pareamento Inline (Substitui Modal) */}
                  {showQrModal === inst.id && (
