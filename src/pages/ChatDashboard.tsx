@@ -2098,6 +2098,7 @@ export default function ChatDashboard() {
   const wacallSessions = useWaCallsStore((s) => s.sessions) || [];
   const chatInstanceId = activeChat ? (getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName) : null;
   const isCurrentBoxVoipReady = chatInstanceId ? wacallSessions.some(s => s.id === chatInstanceId && s.paired) : false;
+  const isOpenWidget = useWaCallsStore((s) => s.isOpenWidget);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -6499,7 +6500,7 @@ export default function ChatDashboard() {
                 
                 {/* Alternador de Modo de Chat Premium (WhatsApp vs Anotação Interna) */}
                 {activeChat && (
-                  <div className="flex items-center gap-2 px-4.5 py-2.5 border-t border-black/[0.03] dark:border-white/[0.03] bg-[#f0f2f5]/30 dark:bg-[#111b21]/30 backdrop-blur-lg select-none shrink-0 animate-in fade-in duration-300">
+                  <div className="flex items-center justify-between gap-2 px-4.5 py-2.5 border-t border-black/[0.03] dark:border-white/[0.03] bg-[#f0f2f5]/30 dark:bg-[#111b21]/30 backdrop-blur-lg select-none shrink-0 animate-in fade-in duration-300">
                     <div className="flex bg-gray-200/50 dark:bg-black/20 p-1 rounded-2xl gap-1 border border-black/[0.02] dark:border-white/[0.02] shadow-inner">
                       <button
                         type="button"
@@ -6533,6 +6534,22 @@ export default function ChatDashboard() {
                         <span>Anotação CRM</span>
                       </button>
                     </div>
+
+                    {isCurrentBoxVoipReady && (
+                      <button
+                        type="button"
+                        onClick={() => useWaCallsStore.getState().setIsOpenWidget(!isOpenWidget)}
+                        className={cn(
+                          "flex items-center justify-center p-2 rounded-xl transition-all duration-300 active:scale-95 border",
+                          isOpenWidget
+                            ? "bg-[#00a884] text-white border-[#00a884] shadow-md shadow-emerald-500/20 scale-105"
+                            : "bg-[#25d366]/10 border-[#25d366]/20 hover:bg-[#25d366]/25 text-[#00a884] hover:scale-105"
+                        )}
+                        title="Abrir/Fechar Discador VoIP"
+                      >
+                        <Phone size={14} className={cn("stroke-[2.5]", isOpenWidget && "animate-pulse")} />
+                      </button>
+                    )}
                   </div>
                 )}
                 

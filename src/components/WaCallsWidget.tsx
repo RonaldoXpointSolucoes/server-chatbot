@@ -32,16 +32,17 @@ export default function WaCallsWidget() {
     micDeviceId,
     isConnectedSSE,
     sessions,
+    isOpenWidget,
     setMicDeviceId,
     startCall,
     acceptCall,
     rejectCall,
-    endCall
+    endCall,
+    setIsOpenWidget
   } = useWaCallsStore();
 
   const activeInstanceId = evolution_api_instance || activeChannelFilter || connectedInstanceName;
 
-  const [isOpen, setIsOpen] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -222,53 +223,44 @@ export default function WaCallsWidget() {
     : (activeChannelFilter || evolution_api_instance || connectedInstanceName);
   const isCurrentBoxVoipReady = chatInstanceId ? (sessions || []).some(s => s.id === chatInstanceId && s.paired) : false;
 
-  // Se não houver chamada ativa local, nem chamada recebida, e a inbox selecionada atualmente
-  // não tiver VoIP pareado/ativado, o botão flutuante de voz não deve aparecer.
-  if (!activeCall && !incoming && !isCurrentBoxVoipReady) {
-    return null;
-  }
+  const shouldShowPanel = !!(isOpenWidget || activeCall || incoming);
 
   return (
-    <>
-      {/* Botão flutuante de trigger no canto inferior direito do painel */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={`fixed bottom-24 right-6 z-[100] flex items-center justify-center w-14 h-14 rounded-full shadow-2xl transition-all duration-300 ${
-          activeCall
-            ? "bg-[#00a884] text-white animate-pulse scale-110"
-            : isOpen
-            ? "bg-[#f15c5c] text-white rotate-90"
-            : "bg-[#25d366] text-white hover:scale-105"
-        }`}
-      >
-        {activeCall ? <Phone className="w-6 h-6 animate-bounce" /> : isOpen ? <X className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
-      </button>
-
-      <AnimatePresence>
-        {/* Painel Widget de Chamadas */}
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 50, scale: 0.95 }}
-            transition={{ type: "spring", stiffness: 300, damping: 25 }}
-            className="fixed bottom-40 right-6 z-[100] w-80 overflow-hidden rounded-2xl border border-white/20 dark:border-white/10 shadow-2xl backdrop-blur-xl bg-white/80 dark:bg-[#111b21]/90 font-sans"
-          >
-            {/* Cabeçalho */}
-            <div className="flex items-center justify-between px-4 py-3 bg-[#00a884] text-white">
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${isConnectedSSE ? "bg-green-300" : "bg-red-400"}`} />
-                <span className="text-sm font-semibold">Chamadas de Voz VoIP</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowSettings(!showSettings)}
-                  className="p-1 rounded-full hover:bg-white/10 transition-colors"
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
-              </div>
+    <AnimatePresence>
+      {/* Painel Widget de Chamadas */}
+      {shouldShowPanel && (
+        <motion.div
+          initial={{ opacity: 0, y: 50, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 50, scale: 0.95 }}
+          transition={{ type: "spring", stiffness: 300, damping: 25 }}
+          className="fixed bottom-24 right-6 z-[100] w-80 overflow-hidden rounded-2xl border border-white/20 dark:border-white/10 shadow-2xl backdrop-blur-xl bg-white/80 dark:bg-[#111b21]/90 font-sans"
+        >
+          {/* Cabeçalho */}
+          <div className="flex items-center justify-between px-4 py-3 bg-[#00a884] text-white">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${isConnectedSSE ? "bg-green-300" : "bg-red-400"}`} />
+              <span className="text-sm font-semibold">Chamadas de Voz VoIP</span>
             </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSettings(!showSettings)}
+                className="p-1 rounded-full hover:bg-white/10 transition-colors"
+                title="Configurações de Áudio"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsOpenWidget(false)}
+                className="p-1 rounded-full hover:bg-white/10 transition-colors"
+                title="Fechar Discador"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
 
             {/* Menu de Configurações do Microfone */}
             {showSettings && (
@@ -411,6 +403,5 @@ export default function WaCallsWidget() {
           </motion.div>
         )}
       </AnimatePresence>
-    </>
   );
 }

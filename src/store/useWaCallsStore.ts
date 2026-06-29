@@ -41,6 +41,7 @@ type State = {
   qrCodes: Record<string, string>; // sid -> qr
   clientId: string;
   isConnectedSSE: boolean;
+  isOpenWidget: boolean;
 };
 
 type Actions = {
@@ -55,6 +56,7 @@ type Actions = {
   createSession: (sid: string) => Promise<any>;
   logoutSession: (sid: string) => Promise<void>;
   pairSession: (sid: string) => Promise<any>;
+  setIsOpenWidget: (open: boolean) => void;
 };
 
 const getClientId = (): string => {
@@ -80,8 +82,10 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
   qrCodes: {},
   clientId: getClientId(),
   isConnectedSSE: false,
+  isOpenWidget: false,
 
   setMicDeviceId: (id) => set({ micDeviceId: id }),
+  setIsOpenWidget: (open) => set({ isOpenWidget: open }),
 
   startCall: async (sid, phone, record = false) => {
     const cleanPhone = phone.replace(/\D/g, "");
