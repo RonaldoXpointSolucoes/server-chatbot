@@ -1,7 +1,7 @@
 {
   "name": "chatboot",
   "private": true,
-  "version": "3.6.56",
+  "version": "3.7.1",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
