@@ -3205,63 +3205,83 @@ export default function ChatDashboard() {
   };
 
   const handleCallContact = async () => {
-    const instanceId = useChatStore.getState().evolution_api_instance || useChatStore.getState().tenantInfo?.evolution_api_instance || useChatStore.getState().connectedInstanceName;
-    
-    if (!instanceId) {
-      alert("Nenhuma conexão de WhatsApp ativa foi selecionada para esta empresa. Para realizar chamadas de voz, é necessário ter uma conexão de WhatsApp ativa e pareada no módulo de voz. Redirecionando você para o Gerenciador de Instâncias...");
-      navigate('/instances');
-      return;
-    }
-
     if (!activeChat || !activeChat.phone) {
       alert("Este contato não possui um número de telefone associado.");
       return;
     }
 
-    const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-    const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || localStorage.getItem('tenantId');
-
-    // 1. Validar se a conexão do WhatsApp (Baileys) está conectada e operacional no backend
-    try {
-      const res = await fetch(`${ENGINE_URL}/api/v1/instances/${instanceId}/status`, {
-        headers: {
-          'x-tenant-id': tenantId || ''
-        }
-      });
-      
-      if (!res.ok) {
-        throw new Error(`Servidor respondeu com status ${res.status}`);
-      }
-
-      const data = await res.json();
-      if (data.status !== 'connected') {
-        alert(`A conexão do WhatsApp correspondente está offline no momento (Status: ${data.status || 'desconhecido'}). Para realizar ligações, a instância de WhatsApp precisa estar conectada no Gerenciador de Instâncias.`);
-        navigate('/instances');
-        return;
-      }
-    } catch (err: any) {
-      alert(`Não foi possível verificar a saúde da conexão do WhatsApp: ${err.message || err}. Certifique-se de que o servidor principal está online.`);
-      return;
-    }
-
-    // 2. Atualiza o estado das sessões da API do WaCalls antes de prosseguir
+    const chatInstanceId = getStrictInstance(activeChat) || activeChannelFilter || useChatStore.getState().evolution_api_instance || useChatStore.getState().connectedInstanceName;
+    
+    // Atualiza o estado das sessões da API do WaCalls antes de prosseguir
     try {
       await useWaCallsStore.getState().fetchSessions();
     } catch (e) {
       console.warn("Falha ao buscar sessões do WaCalls:", e);
     }
 
-    // 3. Verifica se o módulo de voz (WaCalls) está ativado e pareado para esta instância
-    const wacallSession = useWaCallsStore.getState().sessions.find(s => s.id === instanceId);
-    
-    if (!wacallSession || !wacallSession.paired) {
+    const wacallSessions = useWaCallsStore.getState().sessions || [];
+    const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+    const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || localStorage.getItem('tenantId');
+
+    let targetInstanceId = chatInstanceId;
+    let fallbackUsed = false;
+
+    // Função auxiliar para validar se a conexão da Baileys está conectada no backend
+    const checkWhatsappStatus = async (id: string) => {
+      try {
+        const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/status`, {
+          headers: { 'x-tenant-id': tenantId || '' }
+        });
+        if (!res.ok) return false;
+        const data = await res.json();
+        const statusStr = data.data?.status || data.status;
+        return statusStr === 'connected' || statusStr === 'connected_local';
+      } catch (e) {
+        return false;
+      }
+    };
+
+    // 1. Verificar se a instância original do chat está pareada no WaCalls e online no WhatsApp
+    const primarySession = wacallSessions.find(s => s.id === chatInstanceId);
+    const primaryWppOk = chatInstanceId ? await checkWhatsappStatus(chatInstanceId) : false;
+    let isPrimaryReady = primarySession?.paired && primaryWppOk;
+
+    if (!isPrimaryReady) {
+      // 2. Fallback: procurar por qualquer outra conexão do tenant que esteja pareada de voz e ativa no WhatsApp (ex: Ronaldo-Web)
+      const readyFallback = wacallSessions.find(s => s.paired);
+      if (readyFallback && readyFallback.id && await checkWhatsappStatus(readyFallback.id)) {
+        targetInstanceId = readyFallback.id;
+        fallbackUsed = true;
+      }
+    }
+
+    // 3. Se nenhuma instância pareada e conectada estiver disponível
+    if (!targetInstanceId) {
+      alert("Nenhuma conexão de WhatsApp ativa foi selecionada para esta empresa. Para realizar chamadas de voz, é necessário ter uma conexão de WhatsApp ativa e pareada no módulo de voz. Redirecionando você para o Gerenciador de Instâncias...");
+      navigate('/instances');
+      return;
+    }
+
+    // Validar status final da conexão selecionada
+    const finalSession = wacallSessions.find(s => s.id === targetInstanceId);
+    const finalWhatsAppConnected = await checkWhatsappStatus(targetInstanceId);
+
+    if (!finalSession || !finalSession.paired || !finalWhatsAppConnected) {
       alert("O Módulo de Ligações de Voz (WaCalls) não está ativado ou não está pareado para esta conexão. Por favor, ative as ligações de voz escaneando o QR Code de Voz no card correspondente. Redirecionando...");
       navigate('/instances');
       return;
     }
 
+    if (fallbackUsed) {
+      // Loga de forma discreta o fallback
+      try {
+        const { useDevStore } = await import('../store/devStore');
+        useDevStore.getState().log('info', `[WaCalls Discador] A conexão de origem do chat '${chatInstanceId}' não está ativa/pareada. Redirecionando a chamada através da sua conexão ativa '${targetInstanceId}' (Ronaldo-Web).`);
+      } catch(e) {}
+    }
+
     try {
-      await useWaCallsStore.getState().startCall(instanceId, activeChat.phone);
+      await useWaCallsStore.getState().startCall(targetInstanceId, activeChat.phone);
     } catch (err: any) {
       alert(err.message || "Erro ao efetuar chamada de voz.");
     }
