@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useWaCallsStore, CallSummary } from "../store/useWaCallsStore";
-import { useChatStore } from "../store/chatStore";
+import { useChatStore, instanceCache } from "../store/chatStore";
 import { 
   Phone, 
   PhoneOff, 
@@ -221,7 +221,10 @@ export default function WaCallsWidget() {
   const chatInstanceId = activeChat 
     ? (activeChat.instance_id || activeChannelFilter || evolution_api_instance || connectedInstanceName)
     : (activeChannelFilter || evolution_api_instance || connectedInstanceName);
-  const isCurrentBoxVoipReady = chatInstanceId ? (sessions || []).some(s => s.id === chatInstanceId && s.paired) : false;
+  const chatInstanceNameResolved = chatInstanceId ? (instanceCache.getName(chatInstanceId) || chatInstanceId) : null;
+  const isCurrentBoxVoipReady = chatInstanceNameResolved 
+    ? (sessions || []).some(s => s && (s.id === chatInstanceNameResolved || s.id === chatInstanceId) && s.paired) 
+    : false;
 
   const shouldShowPanel = !!(isOpenWidget || activeCall || incoming);
 

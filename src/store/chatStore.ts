@@ -81,17 +81,25 @@ export const getInstanceIdFromContact = (id: any) => {
 // Cache em memória para evitar requisições redundantes de rede ao Supabase para instâncias
 export const instanceCache = {
   byName: {} as Record<string, string>,   // display_name.toLowerCase() -> id
+  byId: {} as Record<string, string>,     // id -> display_name
   apiKeys: {} as Record<string, string>,  // id -> api_key
   phoneNumbers: {} as Record<string, string>, // id -> phone_number
   
   set(id: string, name: string, apiKey: string, phoneNumber?: string) {
-    if (name) this.byName[name.toLowerCase()] = id;
+    if (name) {
+      this.byName[name.toLowerCase()] = id;
+      this.byId[id] = name;
+    }
     if (apiKey) this.apiKeys[id] = apiKey;
     if (phoneNumber) this.phoneNumbers[id] = phoneNumber;
   },
   
   getId(name: string): string | null {
     return this.byName[name.toLowerCase()] || null;
+  },
+  
+  getName(id: string): string | null {
+    return this.byId[id] || null;
   },
   
   getApiKey(id: string): string | null {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
-import { useChatStore } from '../store/chatStore';
+import { useChatStore, instanceCache } from '../store/chatStore';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import { Phone } from 'lucide-react';
 import { playNotificationSound } from '../utils/AudioEngine';
@@ -2097,7 +2097,10 @@ export default function ChatDashboard() {
   const activeChat = contacts.find(c => c.id === activeChatId);
   const wacallSessions = useWaCallsStore((s) => s.sessions) || [];
   const chatInstanceId = activeChat ? (getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName) : null;
-  const isCurrentBoxVoipReady = chatInstanceId ? wacallSessions.some(s => s.id === chatInstanceId && s.paired) : false;
+  const chatInstanceNameResolved = chatInstanceId ? (instanceCache.getName(chatInstanceId) || chatInstanceId) : null;
+  const isCurrentBoxVoipReady = chatInstanceNameResolved 
+    ? wacallSessions.some(s => s && (s.id === chatInstanceNameResolved || s.id === chatInstanceId) && s.paired) 
+    : false;
   const isOpenWidget = useWaCallsStore((s) => s.isOpenWidget);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -3246,16 +3249,20 @@ export default function ChatDashboard() {
     };
 
     // 1. Verificar se a instância original do chat está pareada no WaCalls e online no WhatsApp
-    const primarySession = wacallSessions.find(s => s.id === chatInstanceId);
+    const chatInstanceNameResolved = chatInstanceId ? (instanceCache.getName(chatInstanceId) || chatInstanceId) : null;
+    const primarySession = wacallSessions.find(s => s && (s.id === chatInstanceNameResolved || s.id === chatInstanceId));
     const primaryWppOk = chatInstanceId ? await checkWhatsappStatus(chatInstanceId) : false;
     let isPrimaryReady = primarySession?.paired && primaryWppOk;
 
     if (!isPrimaryReady) {
       // 2. Fallback: procurar por qualquer outra conexão do tenant que esteja pareada de voz e ativa no WhatsApp (ex: Ronaldo-Web)
       const readyFallback = wacallSessions.find(s => s.paired);
-      if (readyFallback && readyFallback.id && await checkWhatsappStatus(readyFallback.id)) {
-        targetInstanceId = readyFallback.id;
-        fallbackUsed = true;
+      if (readyFallback && readyFallback.id) {
+        const fallbackUuid = instanceCache.getId(readyFallback.id) || readyFallback.id;
+        if (await checkWhatsappStatus(fallbackUuid)) {
+          targetInstanceId = fallbackUuid;
+          fallbackUsed = true;
+        }
       }
     }
 
@@ -3267,7 +3274,8 @@ export default function ChatDashboard() {
     }
 
     // Validar status final da conexão selecionada
-    const finalSession = wacallSessions.find(s => s.id === targetInstanceId);
+    const targetInstanceNameResolved = targetInstanceId ? (instanceCache.getName(targetInstanceId) || targetInstanceId) : null;
+    const finalSession = wacallSessions.find(s => s && (s.id === targetInstanceNameResolved || s.id === targetInstanceId));
     const finalWhatsAppConnected = await checkWhatsappStatus(targetInstanceId);
 
     if (!finalSession || !finalSession.paired || !finalWhatsAppConnected) {
@@ -3280,12 +3288,12 @@ export default function ChatDashboard() {
       // Loga de forma discreta o fallback
       try {
         const { useDevStore } = await import('../store/devStore');
-        useDevStore.getState().log('info', `[WaCalls Discador] A conexão de origem do chat '${chatInstanceId}' não está ativa/pareada. Redirecionando a chamada através da sua conexão ativa '${targetInstanceId}' (Ronaldo-Web).`);
+        useDevStore.getState().log('info', `[WaCalls Discador] A conexão de origem do chat '${chatInstanceId}' não está ativa/pareada. Redirecionando a chamada através da sua conexão ativa '${targetInstanceId}' (${targetInstanceNameResolved || 'Ronaldo-Web'}).`);
       } catch(e) {}
     }
 
     try {
-      await useWaCallsStore.getState().startCall(targetInstanceId, activeChat.phone);
+      await useWaCallsStore.getState().startCall(targetInstanceNameResolved || targetInstanceId, activeChat.phone);
     } catch (err: any) {
       alert(err.message || "Erro ao efetuar chamada de voz.");
     }
