@@ -13,6 +13,7 @@ import KnowledgeBase from './pages/KnowledgeBase';
 import HelpCenter from './pages/HelpCenter';
 import InboxesList from './pages/settings/InboxesList';
 import InboxSettings from './pages/settings/InboxSettings';
+import InstanceSettings from './pages/settings/InstanceSettings';
 import AgentsList from './pages/settings/AgentsList';
 import LabelsSettings from './pages/settings/LabelsSettings';
 import BotsList from './pages/settings/BotsList';
@@ -78,6 +79,7 @@ export default function App() {
             <Route path="/contacts" element={<ErrorBoundary><ContactsManager /></ErrorBoundary>} />
             <Route path="/crm" element={<ErrorBoundary><CrmDashboard /></ErrorBoundary>} />
             <Route path="/instances" element={<InstancesDashboard />} />
+            <Route path="/instances/:id/settings" element={<InstanceSettings />} />
             <Route path="/knowledge" element={<ErrorBoundary><KnowledgeBase /></ErrorBoundary>} />
             <Route path="/help" element={<HelpCenter />} />
 
