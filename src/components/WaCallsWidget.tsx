@@ -233,7 +233,7 @@ export default function WaCallsWidget() {
       {/* Botão flutuante de trigger no canto inferior direito do painel */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`fixed bottom-6 right-6 z-[100] flex items-center justify-center w-14 h-14 rounded-full shadow-2xl transition-all duration-300 ${
+        className={`fixed bottom-24 right-6 z-[100] flex items-center justify-center w-14 h-14 rounded-full shadow-2xl transition-all duration-300 ${
           activeCall
             ? "bg-[#00a884] text-white animate-pulse scale-110"
             : isOpen
@@ -252,7 +252,7 @@ export default function WaCallsWidget() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 50, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 300, damping: 25 }}
-            className="fixed bottom-24 right-6 z-[100] w-80 overflow-hidden rounded-2xl border border-white/20 dark:border-white/10 shadow-2xl backdrop-blur-xl bg-white/80 dark:bg-[#111b21]/90 font-sans"
+            className="fixed bottom-40 right-6 z-[100] w-80 overflow-hidden rounded-2xl border border-white/20 dark:border-white/10 shadow-2xl backdrop-blur-xl bg-white/80 dark:bg-[#111b21]/90 font-sans"
           >
             {/* Cabeçalho */}
             <div className="flex items-center justify-between px-4 py-3 bg-[#00a884] text-white">
