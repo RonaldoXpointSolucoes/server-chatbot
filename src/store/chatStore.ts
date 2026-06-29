@@ -3942,7 +3942,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     console.log('[Realtime Monitor] Detectado canal desconectado. Forçando auto-reparo do realtime...');
                     get().subscribeToNewMessages(true);
                 }
-            }, 30000); // 30 segundos
+            }, 10000); // Checa a cada 10 segundos para reconexão super rápida
+        }
+
+        if (!win._hasRealtimeListeners) {
+            win._hasRealtimeListeners = true;
+            
+            const triggerRepair = () => {
+                const currentStatus = get().realtimeStatus;
+                // Se estiver offline ou se não houver canais ativos no cliente Supabase
+                if (currentStatus === 'disconnected' || supabase.getChannels().length === 0) {
+                    console.log('[Realtime Window Events] Foco ou rede restabelecidos, mas Realtime inativo. Reparando...');
+                    get().subscribeToNewMessages(true);
+                }
+            };
+            
+            window.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    triggerRepair();
+                }
+            });
+            window.addEventListener('online', triggerRepair);
+            window.addEventListener('focus', triggerRepair);
         }
     }
 

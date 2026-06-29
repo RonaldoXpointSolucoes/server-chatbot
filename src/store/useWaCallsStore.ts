@@ -308,9 +308,42 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
     };
 
     eventSource.onerror = (e) => {
-      console.warn("[useWaCallsStore/SSE Connection Error]:", e);
+      console.warn("[useWaCallsStore/SSE Connection Error] Falha de conexão detectada. Programando reconexão em 5s...", e);
       set({ isConnectedSSE: false });
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      
+      // Auto-reconexão em 5 segundos
+      setTimeout(() => {
+        const currentClientId = get().clientId;
+        if (currentClientId) {
+          console.log("[useWaCallsStore/SSE] Restabelecendo SSE...");
+          get().initSSE();
+        }
+      }, 5000);
     };
+
+    // Registrar ouvinte de visibilidade para reconectar o SSE instantaneamente ao focar a aba
+    if (typeof window !== 'undefined' && !(window as any)._hasWaCallsSseListeners) {
+      (window as any)._hasWaCallsSseListeners = true;
+      
+      const checkAndReconnectSse = () => {
+        if (!eventSource && get().clientId) {
+          console.log("[useWaCallsStore/SSE Window Event] Foco restabelecido, reiniciando SSE...");
+          get().initSSE();
+        }
+      };
+
+      window.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          checkAndReconnectSse();
+        }
+      });
+      window.addEventListener('focus', checkAndReconnectSse);
+      window.addEventListener('online', checkAndReconnectSse);
+    }
   },
 
   closeSSE: () => {

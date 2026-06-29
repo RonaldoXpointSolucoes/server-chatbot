@@ -459,12 +459,13 @@ export default function DevLogger() {
         
         if (!isSpammyUrl && !isAstsTest) {
           const isAbort = err.name === 'AbortError';
+          const isNetworkError = err.message === 'Failed to fetch' || (typeof navigator !== 'undefined' && !navigator.onLine);
           
-          // Desduplicação de erros críticos do Supabase na rede
+          // Desduplicação de erros críticos do Supabase ou falhas normais de rede
           let skipLog = false;
-          if (urlStr.includes('supabase.co')) {
+          if (urlStr.includes('supabase.co') || isNetworkError) {
             const now = Date.now();
-            if (now - lastSupabaseErrorTime < 5000) {
+            if (now - lastSupabaseErrorTime < 8000) {
               skipLog = true;
             }
             lastSupabaseErrorTime = now;
@@ -472,9 +473,17 @@ export default function DevLogger() {
 
           if (!skipLog) {
             addLog({
-              type: isAbort ? 'info' : 'error',
-              message: isAbort ? `Requisição abortada de forma esperada: ${err.message}` : (err.message || 'Network Fetch Failed'),
-              source: isAbort ? `Fetch Aborted (${method})` : `Fetch Critical (${method})`,
+              type: (isAbort || isNetworkError) ? 'info' : 'error',
+              message: isAbort 
+                ? `Requisição abortada de forma esperada: ${err.message}` 
+                : isNetworkError 
+                ? `Falha temporária de conexão com o servidor de destino (Internet instável ou VPS offline).`
+                : (err.message || 'Network Fetch Failed'),
+              source: isAbort 
+                ? `Fetch Aborted (${method})` 
+                : isNetworkError 
+                ? `Rede Instável (${method})` 
+                : `Fetch Critical (${method})`,
               details: {
                 name: err.name,
                 message: err.message,
