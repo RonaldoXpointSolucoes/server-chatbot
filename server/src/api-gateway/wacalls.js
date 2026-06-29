@@ -1,5 +1,7 @@
 import express from 'express';
 
+const router = express.Router();
+
 const getWaCallsUrl = () => {
     const envUrl = process.env.WACALLS_URL?.trim();
     if (envUrl) return envUrl;
