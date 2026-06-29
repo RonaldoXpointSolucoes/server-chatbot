@@ -1,6 +1,16 @@
 import { supabase } from './supabase.js';
 
-const WACALLS_URL = process.env.WACALLS_URL?.trim() || 'http://localhost:8080';
+const getWaCallsUrl = () => {
+    const envUrl = process.env.WACALLS_URL?.trim();
+    if (envUrl) return envUrl;
+    
+    // Fallback inteligente para Docker Host no ambiente VPS Linux de produção
+    if (process.env.NODE_ENV === 'production' || process.platform === 'linux') {
+        return 'http://172.17.0.1:8080';
+    }
+    return 'http://localhost:8080';
+};
+const WACALLS_URL = getWaCallsUrl();
 
 export function startWaCallsListener() {
     let active = true;
