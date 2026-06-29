@@ -1106,6 +1106,120 @@ export default function EvolutionModal({
                   </div>
                 )}
 
+                {configTab === "voip" && (
+                  <div className="w-full mt-4 flex flex-col items-center animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="w-full flex flex-col gap-4 border border-gray-250/20 dark:border-white/5 bg-black/5 dark:bg-black/20 p-5 rounded-3xl backdrop-blur-md">
+                      
+                      <div className="flex items-center justify-between">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-widest font-bold">Módulo de Chamadas (Voz)</span>
+                          <span className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Pareie um dispositivo de áudio virtual.</span>
+                        </div>
+                        {(() => {
+                          const wacallsSid = targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
+                          const sessionsList = wacallsSessions || [];
+                          const currentWacallSession = sessionsList.find(s => s && s.id === wacallsSid);
+                          return (
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                              currentWacallSession?.paired 
+                                ? "bg-emerald-100 dark:bg-emerald-950/40 text-[#00a884]"
+                                : currentWacallSession?.status === "connecting"
+                                ? "bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 animate-pulse"
+                                : "bg-gray-100 dark:bg-[#202c33] text-gray-500 dark:text-gray-400"
+                            }`}>
+                              {currentWacallSession?.paired ? "Ativo" : currentWacallSession?.status === "connecting" ? "Pareando" : "Inativo"}
+                            </span>
+                          );
+                        })()}
+                      </div>
+
+                      {(() => {
+                        const wacallsSid = targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
+                        const sessionsList = wacallsSessions || [];
+                        const qrCodesObj = wacallsQrCodes || {};
+                        const currentWacallSession = sessionsList.find(s => s && s.id === wacallsSid);
+                        const currentWacallsQrCode = qrCodesObj[wacallsSid || ''];
+
+                        return (
+                          <>
+                            {/* QR Code Inline */}
+                            {showWacallsQr === wacallsSid && currentWacallsQrCode && (
+                              <div className="flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-black/30 rounded-2xl border border-gray-100 dark:border-white/5 mt-2 animate-in zoom-in-95 duration-200 w-full">
+                                <p className="text-[10px] text-gray-400 mb-3 text-center">{"Escaneie o código com o WhatsApp > Aparelhos Conectados"}</p>
+                                <div className="w-40 h-40 bg-white p-3 rounded-xl flex items-center justify-center border border-gray-200 shadow-sm">
+                                  <img 
+                                    src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(currentWacallsQrCode)}`} 
+                                    alt="QR Code" 
+                                    className="w-36 h-36 object-contain" 
+                                  />
+                                </div>
+                                <button 
+                                  onClick={() => handleCancelWacallsPair(wacallsSid!)} 
+                                  className="mt-3 text-xs text-red-500 hover:text-red-600 font-bold transition-colors"
+                                >
+                                  Cancelar Pareamento
+                                </button>
+                              </div>
+                            )}
+
+                            {showWacallsQr !== wacallsSid && (
+                              <div className="flex flex-col gap-2 mt-2 w-full">
+                                {!currentWacallSession?.paired ? (
+                                  <button
+                                    onClick={() => handleStartWacallsPair(wacallsSid!)}
+                                    className="w-full text-xs py-3 bg-emerald-500/10 hover:bg-[#00a884] text-[#00a884] hover:text-white font-semibold rounded-2xl border border-emerald-500/20 hover:border-emerald-500 transition-all flex justify-center items-center gap-1.5 active:scale-95 shadow-sm"
+                                  >
+                                    <QrCode size={14} /> Ativar Chamadas de Voz
+                                  </button>
+                                ) : (
+                                  <div className="grid grid-cols-3 gap-2">
+                                    <button
+                                      onClick={() => handleStartWacallsPair(wacallsSid!)}
+                                      className="text-[11px] py-3 bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-500 dark:text-blue-400 font-semibold rounded-2xl border border-blue-500/20 hover:border-blue-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
+                                      title="Gerar novo QR code para re-conectar"
+                                    >
+                                      <RefreshCcw size={14} /> Re-parear Voz
+                                    </button>
+                                    <button
+                                      onClick={() => handleDisconnectWacalls(wacallsSid!)}
+                                      className="text-[11px] py-3 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-500 font-semibold rounded-2xl border border-red-500/20 hover:border-red-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
+                                      title="Desativar voz e desparear device de chamadas"
+                                    >
+                                      <LogOut size={14} /> Desativar Voz
+                                    </button>
+                                    <button
+                                      onClick={() => handleTestWacallsConnection(wacallsSid!, displayNameToUse)}
+                                      className="text-[11px] py-3 bg-violet-500/10 hover:bg-violet-500 hover:text-white text-violet-500 font-semibold rounded-2xl border border-violet-500/20 hover:border-violet-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
+                                      title="Testar conexões de ligações de voz e logar no Dev Logger"
+                                    >
+                                      <Activity size={14} /> Testar
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+
+                      {/* Atalho para outra tela (Gestão Completa) */}
+                      <div className="w-full border-t border-gray-250/20 dark:border-white/5 pt-4 mt-2 flex flex-col justify-center items-center gap-2 text-center">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">Deseja gerenciar chaves de API, apagar ou reiniciar a instância principal?</span>
+                        <button 
+                          onClick={() => {
+                            onClose(); // fecha o modal
+                            navigate('/instances'); // vai para /instances
+                          }}
+                          className="text-xs font-bold text-emerald-500 hover:text-emerald-600 transition-colors flex items-center gap-1 active:scale-95 mt-1 bg-emerald-500/5 px-4 py-2 rounded-full border border-emerald-500/10 hover:border-emerald-500/20"
+                        >
+                          Ir para Gestão de Instâncias <Smartphone size={12}/>
+                        </button>
+                      </div>
+
+                    </div>
+                  </div>
+                )}
+
                 {configTab === "grupos" && (
                   <div className="w-full mt-4 flex flex-col animate-in fade-in slide-in-from-right-4 duration-300 flex-1 h-full overflow-hidden">
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-4 h-full">
@@ -2218,119 +2332,6 @@ export default function EvolutionModal({
                 </div>
               )}
 
-              {configTab === "voip" && (
-                <div className="w-full mt-4 flex flex-col items-center animate-in fade-in slide-in-from-right-4 duration-300">
-                  <div className="w-full flex flex-col gap-4 border border-gray-250/20 dark:border-white/5 bg-black/5 dark:bg-black/20 p-5 rounded-3xl backdrop-blur-md">
-                    
-                    <div className="flex items-center justify-between">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-widest font-bold">Módulo de Chamadas (Voz)</span>
-                        <span className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Pareie um dispositivo de áudio virtual.</span>
-                      </div>
-                      {(() => {
-                        const wacallsSid = targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
-                        const sessionsList = wacallsSessions || [];
-                        const currentWacallSession = sessionsList.find(s => s && s.id === wacallsSid);
-                        return (
-                          <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                            currentWacallSession?.paired 
-                              ? "bg-emerald-100 dark:bg-emerald-950/40 text-[#00a884]"
-                              : currentWacallSession?.status === "connecting"
-                              ? "bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 animate-pulse"
-                              : "bg-gray-100 dark:bg-[#202c33] text-gray-500 dark:text-gray-400"
-                          }`}>
-                            {currentWacallSession?.paired ? "Ativo" : currentWacallSession?.status === "connecting" ? "Pareando" : "Inativo"}
-                          </span>
-                        );
-                      })()}
-                    </div>
-
-                    {(() => {
-                      const wacallsSid = targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
-                      const sessionsList = wacallsSessions || [];
-                      const qrCodesObj = wacallsQrCodes || {};
-                      const currentWacallSession = sessionsList.find(s => s && s.id === wacallsSid);
-                      const currentWacallsQrCode = qrCodesObj[wacallsSid || ''];
-
-                      return (
-                        <>
-                          {/* QR Code Inline */}
-                          {showWacallsQr === wacallsSid && currentWacallsQrCode && (
-                            <div className="flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-black/30 rounded-2xl border border-gray-100 dark:border-white/5 mt-2 animate-in zoom-in-95 duration-200 w-full">
-                              <p className="text-[10px] text-gray-400 mb-3 text-center">{"Escaneie o código com o WhatsApp > Aparelhos Conectados"}</p>
-                              <div className="w-40 h-40 bg-white p-3 rounded-xl flex items-center justify-center border border-gray-200 shadow-sm">
-                                <img 
-                                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(currentWacallsQrCode)}`} 
-                                  alt="QR Code" 
-                                  className="w-36 h-36 object-contain" 
-                                />
-                              </div>
-                              <button 
-                                onClick={() => handleCancelWacallsPair(wacallsSid!)} 
-                                className="mt-3 text-xs text-red-500 hover:text-red-600 font-bold transition-colors"
-                              >
-                                Cancelar Pareamento
-                              </button>
-                            </div>
-                          )}
-
-                          {showWacallsQr !== wacallsSid && (
-                            <div className="flex flex-col gap-2 mt-2 w-full">
-                              {!currentWacallSession?.paired ? (
-                                <button
-                                  onClick={() => handleStartWacallsPair(wacallsSid!)}
-                                  className="w-full text-xs py-3 bg-emerald-500/10 hover:bg-[#00a884] text-[#00a884] hover:text-white font-semibold rounded-2xl border border-emerald-500/20 hover:border-emerald-500 transition-all flex justify-center items-center gap-1.5 active:scale-95 shadow-sm"
-                                >
-                                  <QrCode size={14} /> Ativar Chamadas de Voz
-                                </button>
-                              ) : (
-                                <div className="grid grid-cols-3 gap-2">
-                                  <button
-                                    onClick={() => handleStartWacallsPair(wacallsSid!)}
-                                    className="text-[11px] py-3 bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-500 dark:text-blue-400 font-semibold rounded-2xl border border-blue-500/20 hover:border-blue-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
-                                    title="Gerar novo QR code para re-conectar"
-                                  >
-                                    <RefreshCcw size={14} /> Re-parear Voz
-                                  </button>
-                                  <button
-                                    onClick={() => handleDisconnectWacalls(wacallsSid!)}
-                                    className="text-[11px] py-3 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-500 font-semibold rounded-2xl border border-red-500/20 hover:border-red-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
-                                    title="Desativar voz e desparear device de chamadas"
-                                  >
-                                    <LogOut size={14} /> Desativar Voz
-                                  </button>
-                                  <button
-                                    onClick={() => handleTestWacallsConnection(wacallsSid!, displayNameToUse)}
-                                    className="text-[11px] py-3 bg-violet-500/10 hover:bg-violet-500 hover:text-white text-violet-500 font-semibold rounded-2xl border border-violet-500/20 hover:border-violet-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
-                                    title="Testar conexões de ligações de voz e logar no Dev Logger"
-                                  >
-                                    <Activity size={14} /> Testar
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
-
-                    {/* Atalho para outra tela (Gestão Completa) */}
-                    <div className="w-full border-t border-gray-250/20 dark:border-white/5 pt-4 mt-2 flex flex-col justify-center items-center gap-2 text-center">
-                      <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">Deseja gerenciar chaves de API, apagar ou reiniciar a instância principal?</span>
-                      <button 
-                        onClick={() => {
-                          onClose(); // fecha o modal
-                          navigate('/instances'); // vai para /instances
-                        }}
-                        className="text-xs font-bold text-emerald-500 hover:text-emerald-600 transition-colors flex items-center gap-1 active:scale-95 mt-1 bg-emerald-500/5 px-4 py-2 rounded-full border border-emerald-500/10 hover:border-emerald-500/20"
-                      >
-                        Ir para Gestão de Instâncias <Smartphone size={12}/>
-                      </button>
-                    </div>
-
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
