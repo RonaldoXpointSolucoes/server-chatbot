@@ -154,6 +154,44 @@ export default function EvolutionModal({
     fetchExistingInstances();
   }, []);
 
+  // Sincroniza a URL do navegador com a abertura do modal
+  useEffect(() => {
+    if (isOpen && targetInstanceName) {
+      const targetPath = `/instances/${targetInstanceName}/settings`;
+      if (window.location.pathname !== targetPath) {
+        const prevPath = window.location.pathname + window.location.search;
+        window.history.pushState({ prevPath }, '', targetPath);
+      }
+    }
+  }, [isOpen, targetInstanceName]);
+
+  // Fecha o modal caso o usuário utilize o botão Voltar do navegador
+  useEffect(() => {
+    if (!isOpen) return;
+    const handlePopState = () => {
+      onClose();
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [isOpen, onClose]);
+
+  // Restaura a URL anterior quando o modal for fechado/desmontado
+  useEffect(() => {
+    return () => {
+      const match = window.location.pathname.match(/\/instances\/[^/]+\/settings/);
+      if (match) {
+        const state = window.history.state;
+        if (state && state.prevPath) {
+          window.history.replaceState(null, '', state.prevPath);
+        } else {
+          window.history.replaceState(null, '', '/chat');
+        }
+      }
+    };
+  }, []);
+
   const fetchExistingInstances = async () => {
     try {
       const tenantId =
