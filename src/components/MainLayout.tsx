@@ -25,6 +25,7 @@ export function MainLayout() {
   return (
     <div className="flex h-[100dvh] w-full min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
       {isQRModalOpen && <EvolutionModal 
+          isOpen={isQRModalOpen}
           targetInstanceName={useChatStore.getState().qrModalTargetInstance}
           onClose={() => {
             useChatStore.getState().closeQRModal();

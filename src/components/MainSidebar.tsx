@@ -929,12 +929,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       {/* Context Menu das Caixas de Entrada */}
       {instanceContextMenu && (
         <div 
-          className="fixed inset-0 z-[100]" 
+          className="fixed inset-0 z-[9999]" 
           onClick={(e) => { e.stopPropagation(); setInstanceContextMenu(null); }}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setInstanceContextMenu(null); }}
         >
           <div 
-            className="absolute bg-[#202c33] border border-[#2a3942] rounded-lg shadow-xl py-1 min-w-[180px] animate-in fade-in zoom-in-95 duration-100"
+            className="absolute bg-[#202c33] border border-[#2a3942] rounded-lg shadow-xl py-1 min-w-[180px] z-[10000] animate-in fade-in zoom-in-95 duration-100"
             style={{ 
               top: Math.min(instanceContextMenu.y, window.innerHeight - 100), 
               left: Math.min(instanceContextMenu.x, window.innerWidth - 180)
@@ -962,12 +962,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       {/* Menu suspenso (Context Menu) para Minhas Conversas */}
       {myConversationsMenu && (
         <div 
-          className="fixed inset-0 z-[100]" 
+          className="fixed inset-0 z-[9999]" 
           onClick={(e) => { e.stopPropagation(); setMyConversationsMenu(null); }}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMyConversationsMenu(null); }}
         >
           <div 
-            className="absolute bg-[#202c33] border border-[#2a3942] rounded-lg shadow-xl py-1 min-w-[200px] animate-in fade-in zoom-in-95 duration-100"
+            className="absolute bg-[#202c33] border border-[#2a3942] rounded-lg shadow-xl py-1 min-w-[200px] z-[10000] animate-in fade-in zoom-in-95 duration-100"
             style={{ 
               top: Math.min(myConversationsMenu.y, window.innerHeight - 100), 
               left: Math.min(myConversationsMenu.x, window.innerWidth - 200)
