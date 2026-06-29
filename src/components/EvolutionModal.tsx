@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useChatStore } from "../store/chatStore";
+import { useWaCallsStore } from "../store/useWaCallsStore";
+import { useDevStore } from "../store/devStore";
+import QRCode from "react-qr-code";
 import {
   Smartphone,
   CheckCircle,
@@ -22,6 +26,7 @@ import {
   Settings,
   Users,
   Save,
+  Activity,
 } from "lucide-react";
 import {
   createInstance,
@@ -431,7 +436,188 @@ export default function EvolutionModal({
     ? targetInstObj.display_name
     : engineUser?.name || "Motor Ativado";
 
-  const [configTab, setConfigTab] = useState<"geral" | "grupos">("geral");
+  const navigate = useNavigate();
+  const { 
+    sessions: wacallsSessions, 
+    qrCodes: wacallsQrCodes,
+    createSession: createWacallsSession,
+    pairSession: pairWacallsSession,
+    logoutSession: logoutWacallsSession,
+    fetchSessions: fetchWacallsSessions
+  } = useWaCallsStore();
+  
+  const [showWacallsQr, setShowWacallsQr] = useState<string | null>(null);
+
+  const [configTab, setConfigTab] = useState<"geral" | "grupos" | "voip">("geral");
+
+  const handleStartWacallsPair = async (sid: string) => {
+    setShowWacallsQr(sid);
+    try {
+      const sess = wacallsSessions.find(s => s.id === sid);
+      if (sess) {
+        await pairWacallsSession(sid);
+      } else {
+        await createWacallsSession(sid);
+        await pairWacallsSession(sid);
+      }
+    } catch (err: any) {
+      alert(err.message || "Erro ao iniciar pareamento de chamadas de voz.");
+      setShowWacallsQr(null);
+    }
+  };
+
+  const handleCancelWacallsPair = (sid: string) => {
+    setShowWacallsQr(null);
+  };
+
+  const handleDisconnectWacalls = async (sid: string) => {
+    if (window.confirm("Desativar as chamadas de voz neste número? O dispositivo virtual de ligações pareado no WhatsApp será desconectado.")) {
+      try {
+        await logoutWacallsSession(sid);
+      } catch (err: any) {
+        alert(err.message || "Erro ao desativar chamadas de voz.");
+      }
+    }
+  };
+
+  const handleTestWacallsConnection = async (sid: string, instName: string) => {
+    const logger = useDevStore.getState();
+    if (!logger.isVisible) {
+      logger.toggleVisibility();
+    }
+    
+    logger.addLog({
+      type: 'info',
+      message: `==================================================`,
+      source: 'WaCalls Diagnostic'
+    });
+    logger.addLog({
+      type: 'info',
+      message: `INICIANDO DIAGNÓSTICO DE VOZ (WaCalls) PARA A INSTÂNCIA: "${instName}" (${sid})`,
+      source: 'WaCalls Diagnostic'
+    });
+
+    try {
+      logger.addLog({
+        type: 'info',
+        message: `Passo 1/5: Testando resposta do Backend Node.js local...`,
+        source: 'WaCalls Diagnostic'
+      });
+      
+      const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+      const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || localStorage.getItem('tenantId');
+      const nodeStatusStart = Date.now();
+      const nodeResponse = await fetch(`${ENGINE_URL}/api/v1/instances/${sid}/status`, {
+        headers: {
+          'x-tenant-id': tenantId || ''
+        }
+      }).catch(() => null);
+      
+      if (nodeResponse && nodeResponse.ok) {
+        logger.addLog({
+          type: 'success',
+          message: `✔ Backend Node.js respondendo na porta 9000! Latência: ${Date.now() - nodeStatusStart}ms`,
+          source: 'WaCalls Diagnostic'
+        });
+      } else {
+        logger.addLog({
+          type: 'error',
+          message: `✖ Falha ao conectar no Backend Node.js (${ENGINE_URL}). Verifique se a porta 9000 está ativa!`,
+          source: 'WaCalls Diagnostic'
+        });
+      }
+
+      logger.addLog({
+        type: 'info',
+        message: `Passo 2/5: Testando endpoint de sessões WaCalls no Backend...`,
+        source: 'WaCalls Diagnostic'
+      });
+      
+      const sessions = await fetchWacallsSessions().catch(() => null);
+      if (sessions) {
+        logger.addLog({
+          type: 'success',
+          message: `✔ Sucesso ao buscar sessões do WaCalls Go! Retornadas ${sessions.length} sessões ativas.`,
+          source: 'WaCalls Diagnostic'
+        });
+      } else {
+        logger.addLog({
+          type: 'error',
+          message: `✖ Falha de comunicação com o WaCalls Go (porta 8080) através do proxy do backend. Verifique se o servidor Go está ativo!`,
+          source: 'WaCalls Diagnostic'
+        });
+      }
+
+      logger.addLog({
+        type: 'info',
+        message: `Passo 3/5: Verificando se a instância atual tem sessão criada no WaCalls...`,
+        source: 'WaCalls Diagnostic'
+      });
+      const sess = (sessions || []).find(s => s.id === sid);
+      if (sess) {
+        logger.addLog({
+          type: 'success',
+          message: `✔ Sessão de VoIP encontrada no WaCalls! Estado: ${sess.state} | Pareado: ${sess.paired ? 'SIM' : 'NÃO'}`,
+          source: 'WaCalls Diagnostic',
+          details: sess
+        });
+      } else {
+        logger.addLog({
+          type: 'warn',
+          message: `⚠ Nenhuma sessão VoIP ativa encontrada para esta instância no WaCalls Go.`,
+          source: 'WaCalls Diagnostic'
+        });
+      }
+
+      logger.addLog({
+        type: 'info',
+        message: `Passo 4/5: Verificando a conexão do canal de eventos em tempo real (SSE)...`,
+        source: 'WaCalls Diagnostic'
+      });
+      
+      const isSseConnected = useWaCallsStore.getState().isConnectedSSE;
+      if (isSseConnected) {
+        logger.addLog({
+          type: 'success',
+          message: `✔ Canal SSE de voz está CONECTADO e pronto para receber eventos!`,
+          source: 'WaCalls Diagnostic'
+        });
+      } else {
+        logger.addLog({
+          type: 'error',
+          message: `✖ Canal SSE de voz está DESCONECTADO no frontend. Verifique os logs de background!`,
+          source: 'WaCalls Diagnostic'
+        });
+      }
+
+      logger.addLog({
+        type: 'info',
+        message: `Passo 5/5: Consolidando status final...`,
+        source: 'WaCalls Diagnostic'
+      });
+
+      if (nodeResponse?.ok && sessions && isSseConnected) {
+        logger.addLog({
+          type: 'success',
+          message: `🎉 DIAGNÓSTICO CONCLUÍDO COM SUCESSO! A infraestrutura local do WaCalls está 100% saudável.`,
+          source: 'WaCalls Diagnostic'
+        });
+      } else {
+        logger.addLog({
+          type: 'warn',
+          message: `⚠ Diagnóstico concluído com alguns alertas. Verifique os passos acima!`,
+          source: 'WaCalls Diagnostic'
+        });
+      }
+
+    } catch (e: any) {
+      logger.addLog({
+        type: 'error',
+        message: `✖ Exceção crítica durante o diagnóstico: ${e.message || e}`,
+        source: 'WaCalls Diagnostic'
+      });
+    }
+  };
 
   const [savingParticipants, setSavingParticipants] = useState(false);
 
@@ -616,6 +802,12 @@ export default function EvolutionModal({
                     className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all ${configTab === "grupos" ? "bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm" : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"}`}
                   >
                     Grupos & Ops
+                  </button>
+                  <button
+                    onClick={() => setConfigTab("voip")}
+                    className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all ${configTab === "voip" ? "bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm" : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"}`}
+                  >
+                    Ligações de Voz
                   </button>
                 </div>
 
@@ -1977,6 +2169,113 @@ export default function EvolutionModal({
                       </button>
                     </div>
                   )}
+                </div>
+              )}
+
+              {configTab === "voip" && (
+                <div className="w-full mt-4 flex flex-col items-center animate-in fade-in slide-in-from-right-4 duration-300">
+                  <div className="w-full flex flex-col gap-4 border border-gray-250/20 dark:border-white/5 bg-black/5 dark:bg-black/20 p-5 rounded-3xl backdrop-blur-md">
+                    
+                    <div className="flex items-center justify-between">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-widest font-bold">Módulo de Chamadas (Voz)</span>
+                        <span className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Pareie um dispositivo de áudio virtual.</span>
+                      </div>
+                      {(() => {
+                        const currentInstanceId = targetInstObj?.id || targetInstanceName || useChatStore.getState().connectedInstanceName;
+                        const currentWacallSession = wacallsSessions.find(s => s.id === currentInstanceId);
+                        return (
+                          <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                            currentWacallSession?.paired 
+                              ? "bg-emerald-100 dark:bg-emerald-950/40 text-[#00a884]"
+                              : currentWacallSession?.status === "connecting"
+                              ? "bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 animate-pulse"
+                              : "bg-gray-100 dark:bg-[#202c33] text-gray-500 dark:text-gray-400"
+                          }`}>
+                            {currentWacallSession?.paired ? "Ativo" : currentWacallSession?.status === "connecting" ? "Pareando" : "Inativo"}
+                          </span>
+                        );
+                      })()}
+                    </div>
+
+                    {(() => {
+                      const currentInstanceId = targetInstObj?.id || targetInstanceName || useChatStore.getState().connectedInstanceName;
+                      const currentWacallSession = wacallsSessions.find(s => s.id === currentInstanceId);
+                      const currentWacallsQrCode = wacallsQrCodes[currentInstanceId || ''];
+
+                      return (
+                        <>
+                          {/* QR Code Inline */}
+                          {showWacallsQr === currentInstanceId && currentWacallsQrCode && (
+                            <div className="flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-black/30 rounded-2xl border border-gray-100 dark:border-white/5 mt-2 animate-in zoom-in-95 duration-200 w-full">
+                              <p className="text-[10px] text-gray-400 mb-3 text-center">{"Escaneie o código com o WhatsApp > Aparelhos Conectados"}</p>
+                              <div className="w-40 h-40 bg-white p-3 rounded-xl flex items-center justify-center border border-gray-200 shadow-sm">
+                                <QRCode value={currentWacallsQrCode} size={136} style={{ height: "auto", maxWidth: "100%", width: "100%" }} />
+                              </div>
+                              <button 
+                                onClick={() => handleCancelWacallsPair(currentInstanceId!)} 
+                                className="mt-3 text-xs text-red-500 hover:text-red-600 font-bold transition-colors"
+                              >
+                                Cancelar Pareamento
+                              </button>
+                            </div>
+                          )}
+
+                          {showWacallsQr !== currentInstanceId && (
+                            <div className="flex flex-col gap-2 mt-2 w-full">
+                              {!currentWacallSession?.paired ? (
+                                <button
+                                  onClick={() => handleStartWacallsPair(currentInstanceId!)}
+                                  className="w-full text-xs py-3 bg-emerald-500/10 hover:bg-[#00a884] text-[#00a884] hover:text-white font-semibold rounded-2xl border border-emerald-500/20 hover:border-emerald-500 transition-all flex justify-center items-center gap-1.5 active:scale-95 shadow-sm"
+                                >
+                                  <QrCode size={14} /> Ativar Chamadas de Voz
+                                </button>
+                              ) : (
+                                <div className="grid grid-cols-3 gap-2">
+                                  <button
+                                    onClick={() => handleStartWacallsPair(currentInstanceId!)}
+                                    className="text-[11px] py-3 bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-500 dark:text-blue-400 font-semibold rounded-2xl border border-blue-500/20 hover:border-blue-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
+                                    title="Gerar novo QR code para re-conectar"
+                                  >
+                                    <RefreshCcw size={14} /> Re-parear Voz
+                                  </button>
+                                  <button
+                                    onClick={() => handleDisconnectWacalls(currentInstanceId!)}
+                                    className="text-[11px] py-3 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-500 font-semibold rounded-2xl border border-red-500/20 hover:border-red-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
+                                    title="Desativar voz e desparear device de chamadas"
+                                  >
+                                    <LogOut size={14} /> Desativar Voz
+                                  </button>
+                                  <button
+                                    onClick={() => handleTestWacallsConnection(currentInstanceId!, displayNameToUse)}
+                                    className="text-[11px] py-3 bg-violet-500/10 hover:bg-violet-500 hover:text-white text-violet-500 font-semibold rounded-2xl border border-violet-500/20 hover:border-violet-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
+                                    title="Testar conexões de ligações de voz e logar no Dev Logger"
+                                  >
+                                    <Activity size={14} /> Testar
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+
+                    {/* Atalho para outra tela (Gestão Completa) */}
+                    <div className="w-full border-t border-gray-250/20 dark:border-white/5 pt-4 mt-2 flex flex-col justify-center items-center gap-2 text-center">
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">Deseja gerenciar chaves de API, apagar ou reiniciar a instância principal?</span>
+                      <button 
+                        onClick={() => {
+                          onClose(); // fecha o modal
+                          navigate('/instances'); // vai para /instances
+                        }}
+                        className="text-xs font-bold text-emerald-500 hover:text-emerald-600 transition-colors flex items-center gap-1 active:scale-95 mt-1 bg-emerald-500/5 px-4 py-2 rounded-full border border-emerald-500/10 hover:border-emerald-500/20"
+                      >
+                        Ir para Gestão de Instâncias <Smartphone size={12}/>
+                      </button>
+                    </div>
+
+                  </div>
                 </div>
               )}
             </div>
