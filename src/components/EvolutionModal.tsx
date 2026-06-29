@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { useChatStore } from "../store/chatStore";
 import { useWaCallsStore } from "../store/useWaCallsStore";
 import { useDevStore } from "../store/devStore";
-import QRCode from "react-qr-code";
 import {
   Smartphone,
   CheckCircle,
@@ -476,8 +475,8 @@ export default function EvolutionModal({
 
   const navigate = useNavigate();
   const { 
-    sessions: wacallsSessions, 
-    qrCodes: wacallsQrCodes,
+    sessions: wacallsSessions = [], 
+    qrCodes: wacallsQrCodes = {},
     createSession: createWacallsSession,
     pairSession: pairWacallsSession,
     logoutSession: logoutWacallsSession,
@@ -2257,7 +2256,11 @@ export default function EvolutionModal({
                             <div className="flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-black/30 rounded-2xl border border-gray-100 dark:border-white/5 mt-2 animate-in zoom-in-95 duration-200 w-full">
                               <p className="text-[10px] text-gray-400 mb-3 text-center">{"Escaneie o código com o WhatsApp > Aparelhos Conectados"}</p>
                               <div className="w-40 h-40 bg-white p-3 rounded-xl flex items-center justify-center border border-gray-200 shadow-sm">
-                                <QRCode value={currentWacallsQrCode} size={136} style={{ height: "auto", maxWidth: "100%", width: "100%" }} />
+                                <img 
+                                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(currentWacallsQrCode)}`} 
+                                  alt="QR Code" 
+                                  className="w-36 h-36 object-contain" 
+                                />
                               </div>
                               <button 
                                 onClick={() => handleCancelWacallsPair(wacallsSid!)} 
