@@ -2095,6 +2095,9 @@ export default function ChatDashboard() {
   }, []);
 
   const activeChat = contacts.find(c => c.id === activeChatId);
+  const wacallSessions = useWaCallsStore((s) => s.sessions) || [];
+  const chatInstanceId = activeChat ? (getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName) : null;
+  const isCurrentBoxVoipReady = chatInstanceId ? wacallSessions.some(s => s.id === chatInstanceId && s.paired) : false;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -5755,7 +5758,7 @@ export default function ChatDashboard() {
             <div className="flex items-center gap-2 sm:gap-4">
               
               {/* Botão de Chamada de Voz WaCalls */}
-              {activeChat && activeChat.phone && (
+              {activeChat && activeChat.phone && isCurrentBoxVoipReady && (
                 <button
                   onClick={handleCallContact}
                   className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] dark:hover:text-[#00a884] transition-all duration-200 flex items-center justify-center"

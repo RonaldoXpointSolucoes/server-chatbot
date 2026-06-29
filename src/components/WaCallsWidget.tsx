@@ -19,19 +19,27 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 
 export default function WaCallsWidget() {
-  const activeInstanceId = useChatStore((s) => s.evolution_api_instance);
+  const activeChatId = useChatStore((s) => s.activeChatId);
+  const contacts = useChatStore((s) => s.contacts) || [];
+  const activeChannelFilter = useChatStore((s) => s.activeChannelFilter);
+  const connectedInstanceName = useChatStore((s) => s.connectedInstanceName);
+  const evolution_api_instance = useChatStore((s) => s.evolution_api_instance);
+  
   const {
     calls,
     incoming,
     ownConnections,
     micDeviceId,
     isConnectedSSE,
+    sessions,
     setMicDeviceId,
     startCall,
     acceptCall,
     rejectCall,
     endCall
   } = useWaCallsStore();
+
+  const activeInstanceId = evolution_api_instance || activeChannelFilter || connectedInstanceName;
 
   const [isOpen, setIsOpen] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -207,6 +215,18 @@ export default function WaCallsWidget() {
   const formatPeer = (peerJid: string) => {
     return peerJid.split("@")[0];
   };
+
+  const activeChat = contacts.find(c => c.id === activeChatId);
+  const chatInstanceId = activeChat 
+    ? (activeChat.instance_id || activeChannelFilter || evolution_api_instance || connectedInstanceName)
+    : (activeChannelFilter || evolution_api_instance || connectedInstanceName);
+  const isCurrentBoxVoipReady = chatInstanceId ? (sessions || []).some(s => s.id === chatInstanceId && s.paired) : false;
+
+  // Se não houver chamada ativa local, nem chamada recebida, e a inbox selecionada atualmente
+  // não tiver VoIP pareado/ativado, o botão flutuante de voz não deve aparecer.
+  if (!activeCall && !incoming && !isCurrentBoxVoipReady) {
+    return null;
+  }
 
   return (
     <>
