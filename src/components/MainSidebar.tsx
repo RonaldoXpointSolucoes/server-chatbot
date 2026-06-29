@@ -46,6 +46,7 @@ import {
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
 import { supabase } from '../services/supabase';
+import { createPortal } from 'react-dom';
 
 const SidebarContext = React.createContext<{ onClose?: () => void }>({});
 
@@ -927,14 +928,14 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       </div>
 
       {/* Context Menu das Caixas de Entrada */}
-      {instanceContextMenu && (
+      {instanceContextMenu && createPortal(
         <div 
-          className="fixed inset-0 z-[9999]" 
+          className="fixed inset-0 z-[99999]" 
           onClick={(e) => { e.stopPropagation(); setInstanceContextMenu(null); }}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setInstanceContextMenu(null); }}
         >
           <div 
-            className="absolute bg-[#202c33] border border-[#2a3942] rounded-lg shadow-xl py-1 min-w-[180px] z-[10000] animate-in fade-in zoom-in-95 duration-100"
+            className="absolute bg-[#202c33] border border-[#2a3942] rounded-lg shadow-xl py-1 min-w-[180px] z-[100000] animate-in fade-in zoom-in-95 duration-100"
             style={{ 
               top: Math.min(instanceContextMenu.y, window.innerHeight - 100), 
               left: Math.min(instanceContextMenu.x, window.innerWidth - 180)
@@ -956,18 +957,19 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               Gerenciar Conexão
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Menu suspenso (Context Menu) para Minhas Conversas */}
-      {myConversationsMenu && (
+      {myConversationsMenu && createPortal(
         <div 
-          className="fixed inset-0 z-[9999]" 
+          className="fixed inset-0 z-[99999]" 
           onClick={(e) => { e.stopPropagation(); setMyConversationsMenu(null); }}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMyConversationsMenu(null); }}
         >
           <div 
-            className="absolute bg-[#202c33] border border-[#2a3942] rounded-lg shadow-xl py-1 min-w-[200px] z-[10000] animate-in fade-in zoom-in-95 duration-100"
+            className="absolute bg-[#202c33] border border-[#2a3942] rounded-lg shadow-xl py-1 min-w-[200px] z-[100000] animate-in fade-in zoom-in-95 duration-100"
             style={{ 
               top: Math.min(myConversationsMenu.y, window.innerHeight - 100), 
               left: Math.min(myConversationsMenu.x, window.innerWidth - 200)
@@ -998,7 +1000,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               Fechar Todas as Conversas
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
 {/* 
