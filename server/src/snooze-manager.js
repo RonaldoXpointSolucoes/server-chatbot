@@ -36,12 +36,16 @@ class SnoozeManager {
         const isFetchError = selectError.message && (
           selectError.message.includes('fetch failed') ||
           selectError.message.includes('getaddrinfo') ||
-          selectError.message.includes('ENOTFOUND')
+          selectError.message.includes('ENOTFOUND') ||
+          selectError.message.includes('ETIMEDOUT') ||
+          selectError.message.includes('ECONNRESET') ||
+          selectError.message.includes('ECONNREFUSED') ||
+          selectError.message.includes('request to')
         );
 
         if (isFetchError) {
           if (!this.wasOffline) {
-            console.error('[SnoozeManager] Erro ao buscar conversas expiradas: Sem conexão com o Supabase (Internet offline ou oscilação de rede).');
+            console.warn('[SnoozeManager] Conexão com o Supabase indisponível temporariamente (Internet offline ou oscilação de rede). O loop do Snooze tentará novamente em 30s.');
             this.wasOffline = true;
           }
         } else {
