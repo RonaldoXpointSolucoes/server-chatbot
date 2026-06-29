@@ -499,7 +499,7 @@ export default function EvolutionModal({
   const handleStartWacallsPair = async (sid: string) => {
     setShowWacallsQr(sid);
     try {
-      const sess = wacallsSessions.find(s => s.id === sid);
+      const sess = (wacallsSessions || []).find(s => s && s.id === sid);
       if (sess) {
         await pairWacallsSession(sid);
       } else {
@@ -2229,7 +2229,8 @@ export default function EvolutionModal({
                       </div>
                       {(() => {
                         const wacallsSid = targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
-                        const currentWacallSession = wacallsSessions.find(s => s.id === wacallsSid);
+                        const sessionsList = wacallsSessions || [];
+                        const currentWacallSession = sessionsList.find(s => s && s.id === wacallsSid);
                         return (
                           <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                             currentWacallSession?.paired 
@@ -2246,8 +2247,10 @@ export default function EvolutionModal({
 
                     {(() => {
                       const wacallsSid = targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
-                      const currentWacallSession = wacallsSessions.find(s => s.id === wacallsSid);
-                      const currentWacallsQrCode = wacallsQrCodes[wacallsSid || ''];
+                      const sessionsList = wacallsSessions || [];
+                      const qrCodesObj = wacallsQrCodes || {};
+                      const currentWacallSession = sessionsList.find(s => s && s.id === wacallsSid);
+                      const currentWacallsQrCode = qrCodesObj[wacallsSid || ''];
 
                       return (
                         <>
