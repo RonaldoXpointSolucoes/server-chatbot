@@ -40,6 +40,22 @@ function interceptConsole() {
         return;
     }
 
+    // Desduplicação de erros repetitivos de comunicação com o WaCalls (reduz ruído e buffers no Supabase/Memory)
+    const isWaCallsConnectionError = text.includes('[WaCalls SSE Proxy Error]') || 
+                                     text.includes('[WaCalls Background Listener Error]') ||
+                                     text.includes('[WaCalls REST Proxy Error]');
+    if (isWaCallsConnectionError && (text.includes('fetch failed') || text.includes('ECONNREFUSED'))) {
+        const now = Date.now();
+        const globalObj = typeof global !== 'undefined' ? global : {};
+        const lastTime = globalObj._lastWaCallsErrorTime || 0;
+        if (now - lastTime < 60000) {
+            // Apenas repassa para o stdout original, sem poluir o buffer de logs e sem broadcast para o front
+            originalFn.apply(console, args);
+            return;
+        }
+        globalObj._lastWaCallsErrorTime = now;
+    }
+
     const logEntry = {
       type: 'log',
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
