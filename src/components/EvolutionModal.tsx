@@ -488,6 +488,15 @@ export default function EvolutionModal({
 
   const [configTab, setConfigTab] = useState<"geral" | "grupos" | "voip">("geral");
 
+  // Busca as sessões de voz do WaCalls ao carregar ou alternar para a aba VoIP
+  useEffect(() => {
+    if (isOpen && configTab === "voip") {
+      fetchWacallsSessions().catch((err) => {
+        console.error("Erro ao buscar sessões do WaCalls:", err);
+      });
+    }
+  }, [isOpen, configTab]);
+
   const handleStartWacallsPair = async (sid: string) => {
     setShowWacallsQr(sid);
     try {
@@ -2220,8 +2229,8 @@ export default function EvolutionModal({
                         <span className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Pareie um dispositivo de áudio virtual.</span>
                       </div>
                       {(() => {
-                        const currentInstanceId = targetInstObj?.id || targetInstanceName || useChatStore.getState().connectedInstanceName;
-                        const currentWacallSession = wacallsSessions.find(s => s.id === currentInstanceId);
+                        const wacallsSid = targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
+                        const currentWacallSession = wacallsSessions.find(s => s.id === wacallsSid);
                         return (
                           <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                             currentWacallSession?.paired 
@@ -2237,21 +2246,21 @@ export default function EvolutionModal({
                     </div>
 
                     {(() => {
-                      const currentInstanceId = targetInstObj?.id || targetInstanceName || useChatStore.getState().connectedInstanceName;
-                      const currentWacallSession = wacallsSessions.find(s => s.id === currentInstanceId);
-                      const currentWacallsQrCode = wacallsQrCodes[currentInstanceId || ''];
+                      const wacallsSid = targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
+                      const currentWacallSession = wacallsSessions.find(s => s.id === wacallsSid);
+                      const currentWacallsQrCode = wacallsQrCodes[wacallsSid || ''];
 
                       return (
                         <>
                           {/* QR Code Inline */}
-                          {showWacallsQr === currentInstanceId && currentWacallsQrCode && (
+                          {showWacallsQr === wacallsSid && currentWacallsQrCode && (
                             <div className="flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-black/30 rounded-2xl border border-gray-100 dark:border-white/5 mt-2 animate-in zoom-in-95 duration-200 w-full">
                               <p className="text-[10px] text-gray-400 mb-3 text-center">{"Escaneie o código com o WhatsApp > Aparelhos Conectados"}</p>
                               <div className="w-40 h-40 bg-white p-3 rounded-xl flex items-center justify-center border border-gray-200 shadow-sm">
                                 <QRCode value={currentWacallsQrCode} size={136} style={{ height: "auto", maxWidth: "100%", width: "100%" }} />
                               </div>
                               <button 
-                                onClick={() => handleCancelWacallsPair(currentInstanceId!)} 
+                                onClick={() => handleCancelWacallsPair(wacallsSid!)} 
                                 className="mt-3 text-xs text-red-500 hover:text-red-600 font-bold transition-colors"
                               >
                                 Cancelar Pareamento
@@ -2259,11 +2268,11 @@ export default function EvolutionModal({
                             </div>
                           )}
 
-                          {showWacallsQr !== currentInstanceId && (
+                          {showWacallsQr !== wacallsSid && (
                             <div className="flex flex-col gap-2 mt-2 w-full">
                               {!currentWacallSession?.paired ? (
                                 <button
-                                  onClick={() => handleStartWacallsPair(currentInstanceId!)}
+                                  onClick={() => handleStartWacallsPair(wacallsSid!)}
                                   className="w-full text-xs py-3 bg-emerald-500/10 hover:bg-[#00a884] text-[#00a884] hover:text-white font-semibold rounded-2xl border border-emerald-500/20 hover:border-emerald-500 transition-all flex justify-center items-center gap-1.5 active:scale-95 shadow-sm"
                                 >
                                   <QrCode size={14} /> Ativar Chamadas de Voz
@@ -2271,21 +2280,21 @@ export default function EvolutionModal({
                               ) : (
                                 <div className="grid grid-cols-3 gap-2">
                                   <button
-                                    onClick={() => handleStartWacallsPair(currentInstanceId!)}
+                                    onClick={() => handleStartWacallsPair(wacallsSid!)}
                                     className="text-[11px] py-3 bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-500 dark:text-blue-400 font-semibold rounded-2xl border border-blue-500/20 hover:border-blue-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
                                     title="Gerar novo QR code para re-conectar"
                                   >
                                     <RefreshCcw size={14} /> Re-parear Voz
                                   </button>
                                   <button
-                                    onClick={() => handleDisconnectWacalls(currentInstanceId!)}
+                                    onClick={() => handleDisconnectWacalls(wacallsSid!)}
                                     className="text-[11px] py-3 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-500 font-semibold rounded-2xl border border-red-500/20 hover:border-red-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
                                     title="Desativar voz e desparear device de chamadas"
                                   >
                                     <LogOut size={14} /> Desativar Voz
                                   </button>
                                   <button
-                                    onClick={() => handleTestWacallsConnection(currentInstanceId!, displayNameToUse)}
+                                    onClick={() => handleTestWacallsConnection(wacallsSid!, displayNameToUse)}
                                     className="text-[11px] py-3 bg-violet-500/10 hover:bg-violet-500 hover:text-white text-violet-500 font-semibold rounded-2xl border border-violet-500/20 hover:border-violet-500 transition-all flex flex-col justify-center items-center gap-1 active:scale-95"
                                     title="Testar conexões de ligações de voz e logar no Dev Logger"
                                   >
