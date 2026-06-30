@@ -13,7 +13,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'item_response_type') THEN
     CREATE TYPE item_response_type AS ENUM (
       'boolean', 'conformity', 'yes_no', 'numeric', 'temperature', 
-      'counter', 'text', 'photo', 'stars', 'single_select', 'multi_select', 'datetime'
+      'counter', 'text', 'photo', 'stars', 'single_select', 'multi_select', 'datetime', 'kg'
     );
   END IF;
 
