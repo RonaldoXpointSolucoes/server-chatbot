@@ -1961,9 +1961,26 @@ export default function ChatDashboard() {
     // 1. Salva a posição de scroll atual da lista lateral de chats
     const currentScrollTop = contactListRef.current ? contactListRef.current.scrollTop : 0;
     
+    // 1.2 Acha o próximo contato a ser selecionado ANTES de resolver a conversa
+    const currentIndex = filteredContacts.findIndex(c => c.id === contactId);
+    let nextContactId: string | null = null;
+    if (currentIndex !== -1) {
+      const nextContact = filteredContacts[currentIndex + 1] || filteredContacts[currentIndex - 1];
+      if (nextContact) {
+        nextContactId = nextContact.id;
+      }
+    }
+    
     try {
       // 2. Dispara a ação de resolução
       await resolveConversation(contactId, reactivateAi);
+      
+      // 2.2 Seleciona o próximo contato se houver, ou limpa caso a lista fique vazia
+      if (nextContactId) {
+        useChatStore.setState({ activeChatId: nextContactId });
+      } else {
+        useChatStore.setState({ activeChatId: null });
+      }
       
       // 3. Estabilização absoluta em cascata de tempo para anular saltos enquanto o Framer-motion anima a saída
       const restoreScroll = () => {
