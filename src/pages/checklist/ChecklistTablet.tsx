@@ -734,6 +734,106 @@ export default function ChecklistTablet() {
     }
   };
 
+  const getHelperMessage = (item: any, currentResponses: Record<string, ExecutionResponse>) => {
+    if (!item.title) return null;
+    const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+    const groupName = match ? match[1] : null;
+    const cleanTitle = (match ? match[2] : item.title).toLowerCase().trim();
+
+    // 1. Caso de Média de Peso (por exemplo, Bifes, Empanados, Retalhos)
+    if (groupName) {
+      const isWeightItem = cleanTitle.includes('peso');
+      const isQtyItem = cleanTitle.includes('quantidade') || cleanTitle.includes('quantas') || cleanTitle.includes('unidade') || cleanTitle.includes('bife') || cleanTitle.includes('pacote') || cleanTitle.includes('sobra') || cleanTitle.includes('pct');
+
+      if (isWeightItem || isQtyItem) {
+        // Busca o outro item do mesmo grupo
+        const otherItem = itemsToAnswer.find(i => {
+          if (i.id === item.id) return false;
+          const iMatch = i.title.match(/^\[(.*?)\]\s*(.*)$/);
+          const iGroupName = iMatch ? iMatch[1] : null;
+          if (iGroupName !== groupName) return false;
+          
+          const iCleanTitle = (iMatch ? iMatch[2] : i.title).toLowerCase().trim();
+          if (isWeightItem) {
+            return iCleanTitle.includes('quantidade') || iCleanTitle.includes('quantas') || iCleanTitle.includes('unidade') || iCleanTitle.includes('bife') || iCleanTitle.includes('pacote') || iCleanTitle.includes('sobra') || iCleanTitle.includes('pct');
+          } else {
+            return iCleanTitle.includes('peso');
+          }
+        });
+
+        if (otherItem) {
+          const weightItem = isWeightItem ? item : otherItem;
+          const qtyItem = isQtyItem ? item : otherItem;
+
+          const weightResp = currentResponses[weightItem.id];
+          const qtyResp = currentResponses[qtyItem.id];
+
+          const weightVal = parseFloat(weightResp?.value || '');
+          const qtyVal = parseFloat(qtyResp?.value || '');
+
+          if (!isNaN(weightVal) && !isNaN(qtyVal) && qtyVal > 0 && weightVal > 0) {
+            let media = weightVal / qtyVal;
+            let unitLabel = 'un';
+            if (weightItem.measurement_unit && weightItem.measurement_unit.toLowerCase() === 'kg') {
+              media = media * 1000;
+              unitLabel = 'g';
+            } else {
+              unitLabel = weightItem.measurement_unit || 'g';
+            }
+            
+            // Formatamos a média
+            const formattedMedia = media >= 1000 
+              ? `${(media / 1000).toFixed(3).replace('.', ',')} kg`
+              : `${Math.round(media)} g`;
+
+            return {
+              type: 'average',
+              text: `💡 Rendimento Médio: ${formattedMedia} / un`
+            };
+          }
+        }
+      }
+    }
+
+    // 2. Caso de Sugestão de Estoque Restante
+    const isRemainingStock = cleanTitle.includes('restou') || cleanTitle.includes('restante') || cleanTitle.includes('ficou');
+    if (isRemainingStock) {
+      // Busca itens de estoque inicial e retiradas
+      const initialItem = itemsToAnswer.find(i => {
+        const iMatch = i.title.match(/^\[(.*?)\]\s*(.*)$/);
+        const iCleanTitle = (iMatch ? iMatch[2] : i.title).toLowerCase().trim();
+        return iCleanTitle.includes('inicial') || iCleanTitle.includes('tinham') || iCleanTitle.includes('estoque (inicial)');
+      });
+
+      const withdrawnItem = itemsToAnswer.find(i => {
+        const iMatch = i.title.match(/^\[(.*?)\]\s*(.*)$/);
+        const iCleanTitle = (iMatch ? iMatch[2] : i.title).toLowerCase().trim();
+        return iCleanTitle.includes('retirada') || iCleanTitle.includes('retirou') || iCleanTitle.includes('tirei');
+      });
+
+      if (initialItem && withdrawnItem) {
+        const initialResp = currentResponses[initialItem.id];
+        const withdrawnResp = currentResponses[withdrawnItem.id];
+
+        const initialVal = parseFloat(initialResp?.value || '');
+        const withdrawnVal = parseFloat(withdrawnResp?.value || '');
+
+        if (!isNaN(initialVal) && !isNaN(withdrawnVal)) {
+          const suggestedVal = initialVal - withdrawnVal;
+          if (suggestedVal >= 0) {
+            return {
+              type: 'stock_suggestion',
+              text: `💡 Sugestão: Restam ${suggestedVal} peças no estoque`,
+              value: suggestedVal.toString()
+            };
+          }
+        }
+      }
+    }
+
+    return null;
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full bg-[#111b21] text-[#d1d7db] overflow-hidden select-none">
       
@@ -1261,6 +1361,26 @@ export default function ChecklistTablet() {
                                       {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Máx: ${item.max_meta}` : ''} {item.measurement_unit}
                                     </p>
                                   )}
+
+                                  {/* Dica operacional ou cálculo em tempo real */}
+                                  {(() => {
+                                    const helperMsg = getHelperMessage(item, responses);
+                                    if (!helperMsg) return null;
+                                    return (
+                                      <p className="text-[11px] text-indigo-400 pl-7 font-semibold mt-1 flex items-center gap-1.5 flex-wrap">
+                                        <span>{helperMsg.text}</span>
+                                        {helperMsg.type === 'stock_suggestion' && !resp.value && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleAnswerChange(item.id, item.response_type, helperMsg.value!, item.min_meta, item.max_meta)}
+                                            className="text-[9px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-2 py-0.5 rounded-lg transition-all active:scale-95 cursor-pointer ml-1 select-none"
+                                          >
+                                            Usar Sugestão
+                                          </button>
+                                        )}
+                                      </p>
+                                    );
+                                  })()}
                                 </>
                               );
                             })()}

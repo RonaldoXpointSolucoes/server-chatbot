@@ -279,7 +279,8 @@ router.delete('/v1/admin/economic-groups/:id', async (req, res) => {
 
 // Helper de orquestração na simulação
 async function orchestrateSimulate(eligibleBots, textMessage) {
-    const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '') : '';
     if (!apiKey) {
         throw new Error("Chave do Gemini (GEMINI_API_KEY) não configurada no servidor backend.");
     }

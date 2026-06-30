@@ -21,16 +21,16 @@ class GeminiService {
   getApiKey(): string {
     // 1. Check local override
     const localKey = typeof window !== 'undefined' ? localStorage.getItem('user_gemini_api_key') : null;
-    if (localKey && localKey.length > 5) return localKey;
+    if (localKey && localKey.length > 5) return localKey.replace(/^['"]|['"]$/g, '');
     
     // 2. Check store / database settings
     try {
       const storeKey = useChatStore.getState().tenantInfo?.settings?.gemini_api_key;
-      if (storeKey && storeKey.length > 5) return storeKey;
+      if (storeKey && storeKey.length > 5) return storeKey.replace(/^['"]|['"]$/g, '');
     } catch (e) {}
 
     // 3. Fallback to env variable
-    return fallbackApiKey;
+    return fallbackApiKey.replace(/^['"]|['"]$/g, '');
   }
 
   private getGenAI(): GoogleGenerativeAI {

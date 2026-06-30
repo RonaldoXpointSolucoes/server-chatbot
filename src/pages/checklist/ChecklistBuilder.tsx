@@ -347,6 +347,28 @@ const TEMPLATES_LIST = [
       { title: '[Limpeza] Detergente Neutro Concentrado (galão 5L)', description: 'Contar galões cheios.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 18, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
       { title: '[Limpeza] Cloro Sanitizante (galão 5L)', description: 'Contar galões cheios no abrigo de química.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 19, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' }
     ]
+  },
+  {
+    id: 'corte_proteinas',
+    title: 'Ficha de Produção - Corte de Proteínas',
+    description: 'Checklist para controle de estoque de peças de carne, descarte/percas e rendimento de bifes chapa, empanados e retalhos.',
+    category: 'Estoque',
+    tags: ['ESTOQUE', 'COZINHA'],
+    icon: 'layers',
+    items: [
+      { title: '[Estoque] Peças no Estoque (Inicial)', description: 'Quantidade total de peças inteiras no estoque antes de retirar para a produção.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 0, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Estoque] Peças Retiradas para Corte', description: 'Quantidade de peças inteiras retiradas para a produção atual.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 1, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Estoque] Peças Restantes no Estoque', description: 'Quantidade de peças inteiras que restaram no estoque (Ex: de 6 retirou 1, restam 5).', response_type: 'numeric', is_required: true, weight: 1, sort_order: 2, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Estoque] Peso Total da(s) Peça(s) Retirada(s)', description: 'Peso total em kg da(s) peça(s) retirada(s) do estoque para a produção.', response_type: 'numeric', is_required: true, weight: 1.5, sort_order: 3, is_critical: true, require_evidence: false, permit_observation: true, measurement_unit: 'kg' },
+      { title: '[Bife Chapa 160g] Quantidade de Bifes', description: 'Quantidade total de unidades de bife para chapa (meta de 160g) produzidas.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 4, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Bife Chapa 160g] Peso Total dos Bifes (kg)', description: 'Peso total em kg de todos os bifes de chapa de 160g produzidos.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 5, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'kg' },
+      { title: '[Bife Empanado 100g] Quantidade de Bifes Empanados', description: 'Quantidade total de unidades de bife empanado (meta de 100g) produzidas.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 6, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'un' },
+      { title: '[Bife Empanado 100g] Peso Total dos Bifes Empanados (kg)', description: 'Peso total em kg de todos os bifes empanados de 100g produzidos.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 7, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'kg' },
+      { title: '[Retalho 150g] Quantidade de Pacotes de Retalho', description: 'Quantidade total de pacotes de retalho (meta de 150g) produzidos.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 8, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'pct' },
+      { title: '[Retalho 150g] Peso Total dos Retalhos (kg)', description: 'Peso total em kg de todos os pacotes de retalho de 150g produzidos.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 9, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'kg' },
+      { title: '[Perca] Peso Total de Perca / Descarte (kg)', description: 'Peso total em kg de perdas e descarte não aproveitáveis.', response_type: 'numeric', is_required: true, weight: 1, sort_order: 10, is_critical: false, require_evidence: false, permit_observation: true, measurement_unit: 'kg' },
+      { title: '[Rendimento] Peso Total do Rendimento (kg)', description: 'Soma dos pesos dos Bifes Chapa + Bifes Empanados + Retalhos + Percas. Deve coincidir com o peso total retirado.', response_type: 'numeric', is_required: true, weight: 1.5, sort_order: 11, is_critical: true, require_evidence: false, permit_observation: true, measurement_unit: 'kg' }
+    ]
   }
 ];
 
@@ -480,6 +502,12 @@ export default function ChecklistBuilder() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [showTemplateSelector, setShowTemplateSelector] = useState(false);
 
+  // Estados para Tolerância baseada em Janela Operacional
+  const [toleranceMode, setToleranceMode] = useState<'minutes' | 'window'>('window');
+  const [refPrevTime, setRefPrevTime] = useState<string>('10:00');
+  const [refEndTime, setRefEndTime] = useState<string>('10:20');
+  const [refAlarmMinutes, setRefAlarmMinutes] = useState<number>(5);
+
   // Estados de Edição Inline de Item
   const [newItem, setNewItem] = useState<ChecklistItem>({
     title: '',
@@ -532,6 +560,63 @@ export default function ChecklistBuilder() {
       loadInitialData();
     }
   }, [tenantId]);
+
+  // Função para converter horários da Janela Operacional para minutos de tolerância
+  const updateMinutesFromWindow = (prevTime: string, endTime: string, alarmMin: number) => {
+    if (!editingChecklist) return;
+    const parseTimeToMin = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
+    };
+
+    const mRef = parseTimeToMin(prevTime);
+    const mEnd = parseTimeToMin(endTime);
+
+    // min_time_lead_minutes é o tempo de alarme antes
+    const lead = Math.max(0, alarmMin);
+
+    // max_time_lag_minutes é a diferença entre a hora fim e o horário previsto
+    let lag = mEnd - mRef;
+    if (lag < 0) lag += 1440; // Trata virada do dia
+
+    setEditingChecklist(p => p ? {
+      ...p,
+      min_time_lead_minutes: lead,
+      max_time_lag_minutes: lag
+    } : null);
+  };
+
+  // Efeito para sincronizar os inputs locais de horário a partir dos minutos de tolerância
+  useEffect(() => {
+    if (editingChecklist) {
+      // Tenta pegar o horário do primeiro agendamento como referência. Senão usa o refPrevTime atual.
+      const firstSchTime = schedules[0]?.start_time || refPrevTime || '10:00';
+      setRefPrevTime(firstSchTime);
+
+      const parseTimeToMin = (t: string) => {
+        const [h, m] = t.split(':').map(Number);
+        return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
+      };
+
+      const mRef = parseTimeToMin(firstSchTime);
+      const lead = editingChecklist.min_time_lead_minutes || 0;
+      const lag = editingChecklist.max_time_lag_minutes || 0;
+
+      // Sincroniza minutos de alarme
+      setRefAlarmMinutes(lead);
+
+      // Calcula Hora Fim = mRef + lag
+      const mEnd = (mRef + lag) % 1440;
+
+      const minToTimeString = (m: number) => {
+        const h = Math.floor(m / 60);
+        const min = m % 60;
+        return `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+      };
+
+      setRefEndTime(minToTimeString(mEnd));
+    }
+  }, [editingChecklist?.id, schedules.length]);
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -843,15 +928,15 @@ export default function ChecklistBuilder() {
   // ==========================================
   // MANIPULAÇÃO DE AGENDAMENTOS
   // ==========================================
-  const handleAddSchedule = () => {
+  const handleAddSchedule = (recurrency: 'daily' | 'weekly' | 'monthly' = 'daily') => {
     const newSch: Schedule = {
       checklist_id: editingChecklist?.id || '',
       unit_id: 'ALL',
       responsible_user_id: null,
       start_time: '08:00',
-      recurrency: 'daily',
-      days_of_week: null,
-      days_of_month: null,
+      recurrency,
+      days_of_week: recurrency === 'weekly' ? [1, 2, 3, 4, 5] : null, // Segunda a Sexta por padrão
+      days_of_month: recurrency === 'monthly' ? [1] : null, // Dia 1 por padrão
       shift: 'Manhã',
       start_date: new Date().toISOString().split('T')[0],
       is_active: true
@@ -2916,38 +3001,189 @@ export default function ChecklistBuilder() {
                 </div>
 
                 {/* Previsão Tolerância Global */}
-                <div className="bg-[#111b21] p-4 rounded-3xl border border-[#2a3942]/60 mb-6">
-                  <h4 className="text-xs font-semibold text-white mb-3">Tolerância de Execução (Previsão)</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-[#111b21] p-5 rounded-3xl border border-[#2a3942]/60 mb-6 space-y-4">
+                  <div className="flex justify-between items-center border-b border-[#2a3942]/30 pb-3 flex-wrap gap-2">
                     <div>
-                      <label className="block text-[10px] font-semibold text-[#8696a0] mb-1">Hora Início (Minutos antes permitidos)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={editingChecklist.min_time_lead_minutes || 0}
-                        onChange={e => setEditingChecklist(p => ({ ...p, min_time_lead_minutes: parseInt(e.target.value) || 0 }))}
-                        className="w-full bg-[#182229] border border-[#2a3942] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-                        placeholder="Ex: 60"
-                      />
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">Tolerância de Execução (Previsão)</h4>
+                      <p className="text-[10px] text-[#8696a0] mt-0.5">Defina a janela de horário ou minutos permitidos para a execução da rotina.</p>
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-[#8696a0] mb-1">Hora Fim / Previsão (Minutos após para concluir)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={editingChecklist.max_time_lag_minutes || 0}
-                        onChange={e => setEditingChecklist(p => ({ ...p, max_time_lag_minutes: parseInt(e.target.value) || 0 }))}
-                        className="w-full bg-[#182229] border border-[#2a3942] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-                        placeholder="Ex: 120"
-                      />
+                    {/* Toggle de Modo */}
+                    <div className="flex bg-black/20 p-1 rounded-xl border border-[#2a3942]/40 select-none">
+                      <button
+                        type="button"
+                        onClick={() => setToleranceMode('window')}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                          toleranceMode === 'window'
+                            ? 'bg-indigo-600 text-white shadow-md'
+                            : 'text-[#8696a0] hover:text-[#d1d7db]'
+                        }`}
+                      >
+                        Janela Operacional
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setToleranceMode('minutes')}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                          toleranceMode === 'minutes'
+                            ? 'bg-indigo-600 text-white shadow-md'
+                            : 'text-[#8696a0] hover:text-[#d1d7db]'
+                        }`}
+                      >
+                        Modo Minutos
+                      </button>
                     </div>
                   </div>
+
+                  {toleranceMode === 'window' ? (
+                    <div className="space-y-4 animate-in fade-in duration-200">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-[#8696a0] mb-1.5">1. Horário Previsto (Início Desejado)</label>
+                          <input
+                            type="time"
+                            value={refPrevTime}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setRefPrevTime(val);
+                              updateMinutesFromWindow(val, refEndTime, refAlarmMinutes);
+                            }}
+                            className="w-full bg-[#182229] border border-[#2a3942] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-[#8696a0] mb-1.5">2. Hora Fim (Conclusão Esperada)</label>
+                          <input
+                            type="time"
+                            value={refEndTime}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setRefEndTime(val);
+                              updateMinutesFromWindow(refPrevTime, val, refAlarmMinutes);
+                            }}
+                            className="w-full bg-[#182229] border border-[#2a3942] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-[#8696a0] mb-1.5">3. Alarme / Aviso (Minutos Antes)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={refAlarmMinutes}
+                            onChange={e => {
+                              const val = parseInt(e.target.value) || 0;
+                              setRefAlarmMinutes(val);
+                              updateMinutesFromWindow(refPrevTime, refEndTime, val);
+                            }}
+                            className="w-full bg-[#182229] border border-[#2a3942] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                            placeholder="Ex: 5"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Display Informativo do Tempo Total de Produção */}
+                      {(() => {
+                        const parseTimeToMin = (t: string) => {
+                          const [h, m] = t.split(':').map(Number);
+                          return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
+                        };
+                        const mRef = parseTimeToMin(refPrevTime);
+                        const mEnd = parseTimeToMin(refEndTime);
+                        
+                        let durationMin = mEnd - mRef;
+                        if (durationMin < 0) durationMin += 1440; // Virada de dia
+
+                        let mAlarm = mRef - refAlarmMinutes;
+                        if (mAlarm < 0) mAlarm += 1440; // Trata minutos de alarme negativos
+
+                        const minToTimeString = (m: number) => {
+                          const h = Math.floor(m / 60);
+                          const min = m % 60;
+                          return `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+                        };
+
+                        const formatDuration = (totalMin: number) => {
+                          const hrs = Math.floor(totalMin / 60);
+                          const mins = totalMin % 60;
+                          return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')} min`;
+                        };
+
+                        return (
+                          <div className="bg-indigo-500/5 border border-indigo-500/20 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+                            <div className="text-[11px] text-[#8696a0] leading-relaxed">
+                              💡 O sistema alarmará às <span className="text-white font-bold">{minToTimeString(mAlarm)}</span> ({refAlarmMinutes} min antes do início). A produção está prevista para ocorrer entre as <span className="text-white font-bold">{refPrevTime}</span> e <span className="text-white font-bold">{refEndTime}</span>.
+                            </div>
+                            <div className="shrink-0 bg-indigo-500/10 border border-indigo-500/20 px-3.5 py-2 rounded-xl text-center">
+                              <span className="text-[9px] text-[#8696a0] block uppercase font-bold tracking-wider">Tempo de Produção</span>
+                              <span className="text-sm font-black text-indigo-400 tracking-tight font-mono">{formatDuration(durationMin)}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-200">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-[#8696a0] mb-1.5">Hora Início (Minutos antes permitidos)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={editingChecklist.min_time_lead_minutes || 0}
+                          onChange={e => setEditingChecklist(p => ({ ...p, min_time_lead_minutes: parseInt(e.target.value) || 0 }))}
+                          className="w-full bg-[#182229] border border-[#2a3942] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                          placeholder="Ex: 60"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-[#8696a0] mb-1.5">Hora Fim / Previsão (Minutos após para concluir)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={editingChecklist.max_time_lag_minutes || 0}
+                          onChange={e => setEditingChecklist(p => ({ ...p, max_time_lag_minutes: parseInt(e.target.value) || 0 }))}
+                          className="w-full bg-[#182229] border border-[#2a3942] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                          placeholder="Ex: 120"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {schedules.length === 0 ? (
-                  <div className="p-12 text-center text-[#8696a0] border border-dashed border-[#2a3942]/60 rounded-3xl bg-[#111b21]/30 flex flex-col items-center gap-2">
-                    <CalendarDays size={32} className="text-[#2a3942]" />
-                    <p className="text-xs text-[#8696a0] italic">Este checklist não possui agendamento automático. Será gerado sob demanda.</p>
+                  <div className="p-8 text-center text-[#8696a0] border border-dashed border-[#2a3942]/60 rounded-[32px] bg-[#111b21]/30 flex flex-col items-center gap-4 animate-in fade-in duration-200">
+                    <div className="w-12 h-12 rounded-2xl bg-[#202c33] border border-[#2a3942]/50 flex items-center justify-center text-[#8696a0]">
+                      <CalendarDays size={22} />
+                    </div>
+                    <div>
+                      <p className="text-xs text-white font-bold">Sem Agendamento Automático</p>
+                      <p className="text-[11px] text-[#8696a0] mt-1 max-w-[280px] mx-auto leading-relaxed">
+                        Este checklist é gerado sob demanda. Se desejar que ele se repita automaticamente, crie um agendamento rápido abaixo:
+                      </p>
+                    </div>
+                    
+                    {/* Botões de Atalho Rápido para Agendamento */}
+                    <div className="flex flex-wrap gap-2.5 justify-center mt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleAddSchedule('daily')}
+                        className="bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 px-3.5 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer select-none"
+                      >
+                        <CalendarDays size={13} /> Diário
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddSchedule('weekly')}
+                        className="bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 px-3.5 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer select-none"
+                      >
+                        <CalendarDays size={13} /> Semanal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddSchedule('monthly')}
+                        className="bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 px-3.5 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer select-none"
+                      >
+                        <CalendarDays size={13} /> Mensal
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-4">

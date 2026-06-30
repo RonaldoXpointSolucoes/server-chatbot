@@ -21,7 +21,8 @@ class AutoRagTrainer {
     }
 
     init() {
-        const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '') : '';
         if (apiKey && !this.genAI) {
             this.genAI = new GoogleGenerativeAI(apiKey);
         }

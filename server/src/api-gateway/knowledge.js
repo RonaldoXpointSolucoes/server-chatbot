@@ -776,7 +776,8 @@ router.post('/corrections/helper', async (req, res) => {
             return res.status(400).json({ error: 'text is required' });
         }
 
-        const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '') : '';
         if (!apiKey) {
             return res.status(500).json({ error: 'Chave API Gemini não configurada no servidor.' });
         }
@@ -934,7 +935,8 @@ router.post('/train-multimodal/analyze', async (req, res) => {
         if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
         if (!botId) return res.status(400).json({ error: 'botId required' });
 
-        const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '') : '';
         if (!apiKey) {
             return res.status(500).json({ error: 'Chave API Gemini não configurada no servidor.' });
         }
