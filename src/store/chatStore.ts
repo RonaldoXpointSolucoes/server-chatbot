@@ -2974,12 +2974,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
                    return false;
                }
                
-               if (effectiveInstanceId && !isGlobalAdmin) {
+               // --- PROTEÇÃO RIGOROSA RONALDO-WEB ---
+               if (!isRonaldo) {
+                   if (effectiveInstanceId === '5c78d358-d449-41c4-b396-a04ab20a39e4') return false;
+               }
+
+               if (!isRonaldo) {
                    if (allowedStr) {
-                       if (allowedInstances.length === 0) return false; // Agente sem instâncias -> nada
-                       if (!allowedInstances.includes(effectiveInstanceId)) return false; // Bloqueado
+                       if (allowedInstances.length === 0) return false;
+                       if (effectiveInstanceId && !allowedInstances.includes(effectiveInstanceId)) return false;
                    } else {
-                       return false; // Bloqueado por falta de config
+                       return false;
                    }
                }
                return true;

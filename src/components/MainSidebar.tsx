@@ -210,9 +210,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
              .maybeSingle();
              
            if (userData) {
-              if (userRole === 'agent' || userRole === 'Agente') {
+              const isRonaldo = userEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+              if (!isRonaldo) {
                  storage.setItem('allowed_companies', JSON.stringify(userData.allowed_companies || []));
                  storage.setItem('allowed_instances', JSON.stringify(userData.allowed_instances || []));
+              } else {
+                 storage.removeItem('allowed_instances');
               }
               
               if (userData.full_name && userData.full_name !== storage.getItem('current_user_name')) {
@@ -240,17 +243,31 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           if (data) {
              let finalData = data;
              const storage = getActiveStorage();
+             const loggedEmail = storage ? storage.getItem('current_user_email') : null;
+             const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
              const allowedStr = storage ? storage.getItem('allowed_instances') : null;
-              if (allowedStr && (currentUserRole === 'agent' || currentUserRole === 'Agente')) {
-                 try {
-                     const allowedInstances = JSON.parse(allowedStr);
-                     if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                         finalData = data.filter(d => allowedInstances.includes(d.id));
-                     } else {
-                         finalData = [];
-                     }
-                 } catch(e) {}
-              }
+              
+             if (!isRonaldo) {
+                finalData = finalData.filter(d => d.id !== '5c78d358-d449-41c4-b396-a04ab20a39e4' && !d.display_name?.toLowerCase().includes('ronaldo'));
+             }
+              
+             if (!isRonaldo) {
+                if (allowedStr) {
+                    try {
+                        const allowedInstances = JSON.parse(allowedStr);
+                        if (Array.isArray(allowedInstances)) {
+                            finalData = finalData.filter(d => allowedInstances.includes(d.id));
+                        } else {
+                            finalData = [];
+                        }
+                    } catch(e) {
+                        finalData = [];
+                    }
+                } else {
+                    finalData = [];
+                }
+             }
+
              setInstances(finalData);
 
              // Inicializa o status de cada instância no store para reatividade

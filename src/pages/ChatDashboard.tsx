@@ -1316,39 +1316,42 @@ export default function ChatDashboard() {
     const sorted = contacts.filter(c => {
        // 1) RBAC ENFORCEMENT - A REGRA DE OURO (Nunca mostrar conversas que não tenho acesso)
        const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
-       const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
+       const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+       const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+       const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
        
-       if (!isGlobalAdmin) {
-           const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+       const instanceIdFromId = c.id.includes('_') ? c.id.split('_')[1] : null;
+       const effectiveInstId = instanceIdFromId || c.instance_id || connectedInstanceName;
+
+       // --- PROTEÇÃO RIGOROSA RONALDO-WEB ---
+       if (!isRonaldo) {
+           if (effectiveInstId === '5c78d358-d449-41c4-b396-a04ab20a39e4') return false;
+       }
+
+       if (!isRonaldo) {
            let allowedInstances: string[] = [];
            if (allowedStr) {
                try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
            }
            
-           // Agente sem array de permissões não vê nada.
            if (allowedStr) {
                if (allowedInstances.length === 0) return false; // Sem instâncias -> Sem acesso
-
-               const effectiveInstId = c.instance_id || connectedInstanceName; // fallback pra órfãos
                if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) {
                    return false; // BLOQUEADO!
                }
            } else {
-               return false; // BLOQUEADO! Agente logado precisa de permissão clara
+               return false; // BLOQUEADO!
            }
        }
 
        // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - MANTIDO DURANTE PESQUISA A PEDIDO DO USUÁRIO
        if (activeChannelFilter) {
-           const dbInstId = c.instance_id;
-           const effectiveId = connectedInstanceName;
-
-           if (!dbInstId) {
-               // Fallback conversas antigas órfãs
-               if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
+           const instanceIdFromId = c.id.includes('_') ? c.id.split('_')[1] : c.instance_id;
+           if (instanceIdFromId) {
+               if (instanceIdFromId !== activeChannelFilter && instanceIdFromId !== activeChannelName) return false;
            } else {
-               // Conversas nativas
-               if (dbInstId !== activeChannelFilter && dbInstId !== activeChannelName) return false;
+               const effectiveId = connectedInstanceName;
+               if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
            }
        }
 
