@@ -40,21 +40,15 @@ function interceptConsole() {
         return;
     }
 
-    // Desduplicação de erros repetitivos de comunicação com o WaCalls (reduz ruído e buffers no Supabase/Memory)
+    // Silencia completamente erros de comunicação com o WaCalls do buffer de erros e da UI (reduz ruído)
     const isWaCallsConnectionError = text.includes('[WaCalls SSE Proxy Error]') || 
                                      text.includes('[WaCalls Background Listener Error]') ||
                                      text.includes('[WaCalls Background Listener]') ||
                                      text.includes('[WaCalls REST Proxy Error]');
-    if (isWaCallsConnectionError && (text.includes('fetch failed') || text.includes('ECONNREFUSED'))) {
-        const now = Date.now();
-        const globalObj = typeof global !== 'undefined' ? global : {};
-        const lastTime = globalObj._lastWaCallsErrorTime || 0;
-        if (now - lastTime < 60000) {
-            // Apenas repassa para o stdout original, sem poluir o buffer de logs e sem broadcast para o front
-            originalFn.apply(console, args);
-            return;
-        }
-        globalObj._lastWaCallsErrorTime = now;
+    if (isWaCallsConnectionError && (text.includes('fetch failed') || text.includes('ECONNREFUSED') || text.includes('Connection refused'))) {
+        // Envia apenas para o stdout do servidor (console Node.js/Docker) sem poluir o painel administrativo da Web
+        originalFn.apply(console, args);
+        return;
     }
 
     const logEntry = {

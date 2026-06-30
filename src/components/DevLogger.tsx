@@ -337,6 +337,8 @@ export default function DevLogger() {
     console.error = (...args: any[]) => {
       // Evitar spam do vite-plugin-react
       if (typeof args[0] === 'string' && args[0].includes('vite-plugin-react')) return;
+      // Evitar spam do wacalls
+      if (typeof args[0] === 'string' && (args[0].includes('[useWaCallsStore') || args[0].includes('wacalls') || args[0].includes('WaCalls'))) return;
 
       const serializedArgs = args.map(arg => {
         if (arg instanceof Error) {
@@ -357,6 +359,8 @@ export default function DevLogger() {
     console.warn = (...args: any[]) => {
       // Evitar spam de warning de input controlado do react
       if (typeof args[0] === 'string' && args[0].includes('A component is changing an uncontrolled input')) return;
+      // Evitar spam do wacalls
+      if (typeof args[0] === 'string' && (args[0].includes('[useWaCallsStore') || args[0].includes('wacalls') || args[0].includes('WaCalls'))) return;
       
       addLog({
         type: 'warn',
@@ -411,7 +415,7 @@ export default function DevLogger() {
           const isLocalFrontend = url.includes(window.location.host) || (!url.startsWith('http://') && !url.startsWith('https://'));
           const isStatus404 = url.includes('/status') && response.status === 404;
           
-          if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/debug/recent-errors') && !url.includes('/realtime/') && !isExpectedOfflineError && !isAstsTest && !isLocalFrontend && !isStatus404) {
+          if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/debug/recent-errors') && !url.includes('/realtime/') && !url.includes('/wacalls/') && !isExpectedOfflineError && !isAstsTest && !isLocalFrontend && !isStatus404) {
              
              // Desduplicação de erros do Supabase
              if (url.includes('supabase.co')) {
@@ -455,7 +459,7 @@ export default function DevLogger() {
         const urlStr = typeof urlObj === 'string' ? urlObj : 'unknown';
         
         const isLocalFrontend = urlStr.includes(window.location.host) || (!urlStr.startsWith('http://') && !urlStr.startsWith('https://'));
-        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/debug/recent-errors') || urlStr.includes('/realtime/') || urlStr.includes('system_logs') || isLocalFrontend;
+        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/debug/recent-errors') || urlStr.includes('/realtime/') || urlStr.includes('system_logs') || urlStr.includes('/wacalls/') || isLocalFrontend;
         
         if (!isSpammyUrl && !isAstsTest) {
           const isAbort = err.name === 'AbortError';

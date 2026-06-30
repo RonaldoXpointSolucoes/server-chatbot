@@ -308,21 +308,21 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
     };
 
     eventSource.onerror = (e) => {
-      console.warn("[useWaCallsStore/SSE Connection Error] Falha de conexão detectada. Programando reconexão em 5s...", e);
+      console.log("[useWaCallsStore/SSE Connection Error] Servidor de chamadas offline. Programando reconexão em 30s...", e);
       set({ isConnectedSSE: false });
       if (eventSource) {
         eventSource.close();
         eventSource = null;
       }
       
-      // Auto-reconexão em 5 segundos
+      // Auto-reconexão em 30 segundos
       setTimeout(() => {
         const currentClientId = get().clientId;
         if (currentClientId) {
           console.log("[useWaCallsStore/SSE] Restabelecendo SSE...");
           get().initSSE();
         }
-      }, 5000);
+      }, 30000);
     };
 
     // Registrar ouvinte de visibilidade para reconectar o SSE instantaneamente ao focar a aba
