@@ -594,6 +594,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                     const unreadCount = contacts.filter(c => c.instance_id === inst.id && c.unread > 0 && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length;
                     const status = instancesStatus[inst.id] ?? inst.status ?? 'connected';
                     const isConnected = status === 'connected' || status === 'connected_local';
+                    const isConnecting = status === 'connecting';
                     return (
                       <div 
                         key={inst.id} 
@@ -609,15 +610,18 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                               {inst.color && (
                                 <div 
                                   className="w-1.5 h-1.5 rounded-full transition-colors" 
-                                  style={{ backgroundColor: isConnected ? inst.color : '#6b7280' }}
+                                  style={{ backgroundColor: isConnected ? inst.color : isConnecting ? '#eab308' : '#6b7280' }}
                                 />
                               )}
                               <Brands.WhatsApp 
                                 size={12} 
-                                className={isConnected ? "text-[#25D366]" : "text-gray-400 dark:text-gray-500"} 
+                                className={isConnected ? "text-[#25D366]" : isConnecting ? "text-yellow-500 animate-pulse" : "text-gray-400 dark:text-gray-500"} 
                               />
-                              {!isConnected && (
+                              {!isConnected && !isConnecting && (
                                 <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
+                              )}
+                              {isConnecting && (
+                                <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-yellow-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(234,179,8,0.8)]"></span>
                               )}
                             </div>
                           } 
@@ -625,19 +629,24 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                             <div className="flex items-center gap-1.5 min-w-0">
                               <span className={cn(
                                 "truncate transition-colors", 
-                                !isConnected ? "text-gray-400 dark:text-gray-500 line-through decoration-red-500/40" : ""
+                                !isConnected && !isConnecting ? "text-gray-400 dark:text-gray-500 line-through decoration-red-500/40" : isConnecting ? "text-yellow-600 dark:text-yellow-500/80" : ""
                               )}>
                                 {inst.display_name || 'Sem nome'}
                               </span>
-                              {!isConnected && (
+                              {!isConnected && !isConnecting && (
                                 <span className="text-[8px] font-bold text-red-500 bg-red-500/10 border border-red-500/20 px-1 py-0.5 rounded uppercase tracking-wider shrink-0 animate-pulse">
                                   Offline
+                                </span>
+                              )}
+                              {isConnecting && (
+                                <span className="text-[8px] font-bold text-yellow-600 dark:text-yellow-500 bg-yellow-500/10 border border-yellow-500/20 px-1 py-0.5 rounded uppercase tracking-wider shrink-0 animate-pulse">
+                                  Conectando
                                 </span>
                               )}
                             </div>
                           }
                           isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
-                          className={cn(!isConnected ? "opacity-60 hover:opacity-100 hover:bg-red-500/5" : "")}
+                          className={cn(!isConnected && !isConnecting ? "opacity-60 hover:opacity-100 hover:bg-red-500/5" : isConnecting ? "opacity-90 hover:opacity-100 hover:bg-yellow-500/5" : "")}
                           onClick={() => {
                             useChatStore.getState().setActiveChannelFilter(inst.id, inst.display_name);
                             useChatStore.getState().setFilterType('all');

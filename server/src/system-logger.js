@@ -43,6 +43,7 @@ function interceptConsole() {
     // Desduplicação de erros repetitivos de comunicação com o WaCalls (reduz ruído e buffers no Supabase/Memory)
     const isWaCallsConnectionError = text.includes('[WaCalls SSE Proxy Error]') || 
                                      text.includes('[WaCalls Background Listener Error]') ||
+                                     text.includes('[WaCalls Background Listener]') ||
                                      text.includes('[WaCalls REST Proxy Error]');
     if (isWaCallsConnectionError && (text.includes('fetch failed') || text.includes('ECONNREFUSED'))) {
         const now = Date.now();

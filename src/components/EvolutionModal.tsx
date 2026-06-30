@@ -217,7 +217,9 @@ export default function EvolutionModal({
     try {
       if (
         inst.connection_status === "connected" ||
-        inst.status === "connected"
+        inst.status === "connected" ||
+        inst.connection_status === "connected_local" ||
+        inst.status === "connected_local"
       ) {
         useChatStore.getState().updateTenantInstance(inst.id);
         setEvolutionConnection(true, inst.id);
@@ -390,7 +392,7 @@ export default function EvolutionModal({
           setLoading(false);
           setQrBase64(null);
           setActivePollingId(null);
-        } else if (st === "connected") {
+        } else if (st === "connected" || st === "connected_local") {
           handleSuccess();
         }
       })
@@ -404,14 +406,14 @@ export default function EvolutionModal({
               if(!currInst) return;
               
               const st = await fetchEngineStatus(tenantId, activePollingId, currInst.api_key || "");
-              if (st?.data?.status === "connected") {
+              if (st?.data?.status === "connected" || st?.data?.status === "connected_local") {
                 handleSuccess();
                 clearInterval(pollInterval);
               }
             } catch (e) {
               // ignora erro silencioso no polling
             }
-          }, 2500);
+          }, 1000);
         }
       });
 
@@ -439,11 +441,11 @@ export default function EvolutionModal({
         )
           .then((st) => {
             if (
-              st?.data?.status === "connected" &&
+              (st?.data?.status === "connected" || st?.data?.status === "connected_local") &&
               st?.data?.whatsapp_instance_runtime?.user_profile
             ) {
               setEngineUser(st.data.whatsapp_instance_runtime.user_profile);
-            } else if (st?.data?.status !== "connected") {
+            } else if (st?.data?.status !== "connected" && st?.data?.status !== "connected_local") {
               setEvolutionConnection(false, null);
             }
           })
@@ -466,7 +468,9 @@ export default function EvolutionModal({
 
   const isTargetConnected = targetInstObj
     ? targetInstObj.status === "connected" ||
-      targetInstObj.connection_status === "connected"
+      targetInstObj.connection_status === "connected" ||
+      targetInstObj.status === "connected_local" ||
+      targetInstObj.connection_status === "connected_local"
     : evolutionConnected;
 
   const displayNameToUse = targetInstObj
@@ -2066,6 +2070,21 @@ export default function EvolutionModal({
                     Comunicando...
                   </span>
                 </div>
+              ) : successMsg ? (
+                <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center justify-center w-full py-8 text-center">
+                  <div className="w-20 h-20 bg-emerald-500/10 rounded-full border-2 border-emerald-500/30 flex items-center justify-center mb-6 shadow-inner animate-bounce">
+                    <CheckCircle
+                      size={44}
+                      className="text-emerald-500 drop-shadow-md"
+                    />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">
+                    Conexão Estabelecida!
+                  </h3>
+                  <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400 max-w-xs leading-relaxed px-4">
+                    {successMsg}
+                  </p>
+                </div>
               ) : qrBase64 ? (
                 <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center w-full pb-4">
                   <div className="p-3 bg-white/90 backdrop-blur-md rounded-3xl shadow-xl border border-white/50">
@@ -2214,7 +2233,9 @@ export default function EvolutionModal({
 
                             if (
                               match.connection_status === "connected" ||
-                              match.status === "connected"
+                              match.status === "connected" ||
+                              match.connection_status === "connected_local" ||
+                              match.status === "connected_local"
                             ) {
                               useChatStore
                                 .getState()

@@ -54,9 +54,9 @@ export function startWaCallsListener() {
                 console.warn('[WaCalls Background Listener] Conexão pendente com WaCalls (reconectando...):', err.message);
             }
             
-            // Aguarda 10 segundos antes de tentar reconectar se o WaCalls estiver offline
+            // Aguarda 30 segundos antes de tentar reconectar se o WaCalls estiver offline
             if (active) {
-                await new Promise(resolve => setTimeout(resolve, 10000));
+                await new Promise(resolve => setTimeout(resolve, 30000));
             }
         }
     }

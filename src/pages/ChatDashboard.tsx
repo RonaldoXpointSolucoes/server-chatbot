@@ -2609,7 +2609,11 @@ export default function ChatDashboard() {
     
     // Se a instância estiver offline, alerta e não envia (apenas para chats do WhatsApp)
     if (chatMode !== 'internal_note' && instancesStatus[properTargetInstance] && instancesStatus[properTargetInstance] !== 'connected' && instancesStatus[properTargetInstance] !== 'connected_local') {
-       alert('Instância offline. Conecte-a para enviar mensagens.');
+       if (instancesStatus[properTargetInstance] === 'connecting') {
+         alert('A conexão está sendo restabelecida automaticamente. Aguarde alguns instantes antes de enviar.');
+       } else {
+         alert('Instância offline. Conecte-a para enviar mensagens.');
+       }
        return;
     }
 
@@ -4646,7 +4650,26 @@ export default function ChatDashboard() {
         </div>
 
         {/* Alerta de Desconexão (Offline Banner) - Sidebar */}
-        {(activeChannelFilter && instancesStatus[activeChannelFilter] !== 'connected' && instancesStatus[activeChannelFilter] !== 'connected_local') && (
+        {activeChannelFilter && instancesStatus[activeChannelFilter] === 'connecting' && (
+          <div className="bg-yellow-50 dark:bg-yellow-950/20 border-y border-yellow-200/50 dark:border-yellow-900/30 p-3 flex flex-col gap-1 z-20 shadow-sm animate-in fade-in zoom-in-95 duration-300">
+             <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-500 font-bold text-sm">
+                <span className="w-2 h-2 rounded-full bg-yellow-500 animate-ping absolute"></span>
+                <span className="w-2 h-2 rounded-full bg-yellow-500 relative"></span>
+                Atenção: Restabelecendo Conexão
+             </div>
+             <p className="text-xs text-yellow-700/80 dark:text-yellow-400/80 leading-tight">
+                A conexão com o WhatsApp oscilou e o sistema está reconectando automaticamente em segundo plano. Por favor, aguarde alguns instantes.
+             </p>
+             <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="mt-1 text-xs bg-yellow-100 dark:bg-yellow-900/40 hover:bg-yellow-200 dark:hover:bg-yellow-800/40 text-yellow-700 dark:text-yellow-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
+                Resolver Agora (Manual)
+             </button>
+          </div>
+        )}
+
+        {activeChannelFilter && 
+          instancesStatus[activeChannelFilter] !== 'connected' && 
+          instancesStatus[activeChannelFilter] !== 'connected_local' && 
+          instancesStatus[activeChannelFilter] !== 'connecting' && (
           <div className="bg-orange-50 dark:bg-orange-950/40 border-y border-orange-200 dark:border-orange-900/50 p-3 flex flex-col gap-1 z-20 shadow-sm animate-in fade-in zoom-in-95 duration-300">
              <div className="flex items-center gap-2 text-orange-600 dark:text-orange-400 font-bold text-sm">
                 <span className="w-2 h-2 rounded-full bg-orange-500 animate-ping absolute"></span>
@@ -6487,23 +6510,44 @@ export default function ChatDashboard() {
                 )}
                 
                 {/* Offline Banner Above Input */}
-                {activeChat && activeChat.instance_id && instancesStatus[activeChat.instance_id] && instancesStatus[activeChat.instance_id] !== 'connected' && instancesStatus[activeChat.instance_id] !== 'connected_local' && (
-                  <div className="bg-red-50/90 dark:bg-[#2a1314]/90 backdrop-blur-md border-t border-red-200 dark:border-red-900/50 p-2.5 flex items-center justify-between z-20 shadow-inner">
-                    <div className="flex items-center gap-2.5 text-red-600 dark:text-[#f48686]">
-                      <div className="bg-red-500/10 p-1.5 rounded-lg border border-red-500/20">
-                        <ShieldAlert size={16} className="animate-pulse" />
+                {activeChat && activeChat.instance_id && instancesStatus[activeChat.instance_id] && 
+                 instancesStatus[activeChat.instance_id] !== 'connected' && 
+                 instancesStatus[activeChat.instance_id] !== 'connected_local' && (
+                  instancesStatus[activeChat.instance_id] === 'connecting' ? (
+                    <div className="bg-yellow-50/90 dark:bg-[#251f11]/90 backdrop-blur-md border-t border-yellow-200 dark:border-yellow-900/50 p-2.5 flex items-center justify-between z-20 shadow-inner">
+                      <div className="flex items-center gap-2.5 text-yellow-600 dark:text-[#f3cd82] mr-2">
+                        <div className="bg-yellow-500/10 p-1.5 rounded-lg border border-yellow-500/20">
+                          <Loader2 size={16} className="animate-spin text-yellow-500" />
+                        </div>
+                        <span className="text-[12px] font-medium tracking-wide">A conexão está sendo restabelecida automaticamente em segundo plano.</span>
                       </div>
-                      <span className="text-[12px] font-medium tracking-wide">Instância offline. Conecte-a para enviar mensagens.</span>
+                      <button 
+                        type="button"
+                        onClick={() => useChatStore.getState().openQRModal(activeChat.instance_id)}
+                        className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-1.5 rounded-lg text-[11px] font-bold uppercase shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 shrink-0"
+                      >
+                        <Power size={14} />
+                        Reconectar
+                      </button>
                     </div>
-                    <button 
-                      type="button"
-                      onClick={() => useChatStore.getState().openQRModal(activeChat.instance_id)}
-                      className="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-[11px] font-bold uppercase shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5"
-                    >
-                      <Power size={14} />
-                      Reconectar
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="bg-red-50/90 dark:bg-[#2a1314]/90 backdrop-blur-md border-t border-red-200 dark:border-red-900/50 p-2.5 flex items-center justify-between z-20 shadow-inner">
+                      <div className="flex items-center gap-2.5 text-red-600 dark:text-[#f48686]">
+                        <div className="bg-red-500/10 p-1.5 rounded-lg border border-red-500/20">
+                          <ShieldAlert size={16} className="animate-pulse" />
+                        </div>
+                        <span className="text-[12px] font-medium tracking-wide">Instância offline. Conecte-a para enviar mensagens.</span>
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={() => useChatStore.getState().openQRModal(activeChat.instance_id)}
+                        className="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-[11px] font-bold uppercase shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5"
+                      >
+                        <Power size={14} />
+                        Reconectar
+                      </button>
+                    </div>
+                  )
                 )}
                 
                 {/* Alternador de Modo de Chat Premium (WhatsApp vs Anotação Interna) */}
