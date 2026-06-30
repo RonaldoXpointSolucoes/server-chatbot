@@ -190,7 +190,7 @@ export default function InboxesList() {
                         </div>
                         <div className="flex flex-col">
                            <span className="text-lg font-bold text-white">{inst.display_name}</span>
-                           <span className="text-sm font-medium text-emerald-500/80 mt-1 flex items-center gap-1"><Smartphone size={14}/> WhatsApp Baileys • {inst.status === 'connected' ? 'Conectado' : inst.status === 'connecting' ? 'Gerando QR Code' : 'Offline'}</span>
+                           <span className="text-sm font-medium text-emerald-500/80 mt-1 flex items-center gap-1"><Smartphone size={14}/> WhatsApp Baileys • {(inst.status === 'connected' || inst.status === 'connected_local') ? 'Conectado' : inst.status === 'connecting' ? 'Gerando QR Code' : 'Offline'}</span>
                         </div>
                      </div>
                      <div className="flex items-center gap-3">

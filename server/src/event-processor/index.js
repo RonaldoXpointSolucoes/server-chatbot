@@ -1532,12 +1532,14 @@ class EventProcessor {
             }
 
             if (connection === 'open') {
+                const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
+                const statusVal = isLocalDev ? 'connected_local' : 'connected';
                 await supabase.from('whatsapp_instances')
-                    .update({ status: 'connected', last_error: null })
+                    .update({ status: statusVal, last_error: null })
                     .eq('id', instanceId)
                     .eq('assigned_node_id', NODE_ID);
                 await supabase.from('whatsapp_instance_runtime').upsert({ instance_id: instanceId, tenant_id: tenantId, qr_code: null }, { onConflict: 'instance_id' });
-                payload.status = 'connected';
+                payload.status = statusVal;
             }
 
             if (Object.keys(payload).length > 0) {

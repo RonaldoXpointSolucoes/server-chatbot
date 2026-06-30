@@ -1204,7 +1204,7 @@ export default function ChatDashboard() {
       };
     }
 
-    const connectedCount = tenantInstances.filter(inst => instancesStatus[inst.id] === 'connected').length;
+    const connectedCount = tenantInstances.filter(inst => instancesStatus[inst.id] === 'connected' || instancesStatus[inst.id] === 'connected_local').length;
     const percentage = Math.round((connectedCount / total) * 100);
 
     let health: 'green' | 'yellow' | 'red' = 'red';
@@ -2608,7 +2608,7 @@ export default function ChatDashboard() {
     }
     
     // Se a instância estiver offline, alerta e não envia (apenas para chats do WhatsApp)
-    if (chatMode !== 'internal_note' && instancesStatus[properTargetInstance] && instancesStatus[properTargetInstance] !== 'connected') {
+    if (chatMode !== 'internal_note' && instancesStatus[properTargetInstance] && instancesStatus[properTargetInstance] !== 'connected' && instancesStatus[properTargetInstance] !== 'connected_local') {
        alert('Instância offline. Conecte-a para enviar mensagens.');
        return;
     }
@@ -4646,7 +4646,7 @@ export default function ChatDashboard() {
         </div>
 
         {/* Alerta de Desconexão (Offline Banner) - Sidebar */}
-        {(activeChannelFilter && instancesStatus[activeChannelFilter] !== 'connected') && (
+        {(activeChannelFilter && instancesStatus[activeChannelFilter] !== 'connected' && instancesStatus[activeChannelFilter] !== 'connected_local') && (
           <div className="bg-orange-50 dark:bg-orange-950/40 border-y border-orange-200 dark:border-orange-900/50 p-3 flex flex-col gap-1 z-20 shadow-sm animate-in fade-in zoom-in-95 duration-300">
              <div className="flex items-center gap-2 text-orange-600 dark:text-orange-400 font-bold text-sm">
                 <span className="w-2 h-2 rounded-full bg-orange-500 animate-ping absolute"></span>
@@ -6487,7 +6487,7 @@ export default function ChatDashboard() {
                 )}
                 
                 {/* Offline Banner Above Input */}
-                {activeChat && activeChat.instance_id && instancesStatus[activeChat.instance_id] && instancesStatus[activeChat.instance_id] !== 'connected' && (
+                {activeChat && activeChat.instance_id && instancesStatus[activeChat.instance_id] && instancesStatus[activeChat.instance_id] !== 'connected' && instancesStatus[activeChat.instance_id] !== 'connected_local' && (
                   <div className="bg-red-50/90 dark:bg-[#2a1314]/90 backdrop-blur-md border-t border-red-200 dark:border-red-900/50 p-2.5 flex items-center justify-between z-20 shadow-inner">
                     <div className="flex items-center gap-2.5 text-red-600 dark:text-[#f48686]">
                       <div className="bg-red-500/10 p-1.5 rounded-lg border border-red-500/20">

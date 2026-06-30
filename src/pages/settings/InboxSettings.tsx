@@ -250,12 +250,12 @@ export default function InboxSettings() {
         const respJson = await res.json();
         const data = respJson.data;
 
-        if (data && data.status === 'connected') {
+        if (data && (data.status === 'connected' || data.status === 'connected_local')) {
           clearInterval(interval);
           setQrLoading(false);
           setSuccessConnectId(instId);
-          setEngineStatus('connected');
-          setInstance(prev => prev ? { ...prev, status: 'connected' } : prev);
+          setEngineStatus(data.status);
+          setInstance(prev => prev ? { ...prev, status: data.status } : prev);
           
           setTimeout(() => {
             setSuccessConnectId(null);
@@ -496,11 +496,11 @@ export default function InboxSettings() {
                          <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 text-sm text-gray-300 font-medium">
                                <MessageSquare size={16} /> {instance.display_name} <strong className="text-white ml-1">{instance.phone_number ? `+${instance.phone_number}` : ''}</strong>  
-                               <div className={`w-2.5 h-2.5 rounded-full ml-2 ${engineStatus === 'connected' || instance.status === 'connected' ? 'bg-emerald-500 animate-pulse' : engineStatus === 'connecting' || instance.status === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-red-500'}`}></div>
+                               <div className={`w-2.5 h-2.5 rounded-full ml-2 ${engineStatus === 'connected' || engineStatus === 'connected_local' || instance.status === 'connected' || instance.status === 'connected_local' ? 'bg-emerald-500 animate-pulse' : engineStatus === 'connecting' || instance.status === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-red-500'}`}></div>
                             </div>
 
                             {/* BOTOES DE AÇÃO */}
-                            {engineStatus === 'connected' || instance.status === 'connected' ? (
+                            {engineStatus === 'connected' || engineStatus === 'connected_local' || instance.status === 'connected' || instance.status === 'connected_local' ? (
                                 <button onClick={handleDisconnect} className="bg-red-500/10 hover:bg-red-500/20 text-red-500 text-sm font-bold py-2.5 px-6 rounded-xl transition-all border border-red-500/20 hover:border-red-500 flex items-center gap-2 w-max">
                                     <LogOut size={16} /> Desconectar
                                 </button>

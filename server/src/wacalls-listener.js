@@ -51,7 +51,7 @@ export function startWaCallsListener() {
                     }
                 }
             } catch (err) {
-                console.error('[WaCalls Background Listener Error] Erro ou desconexão:', err.message);
+                console.warn('[WaCalls Background Listener] Conexão pendente com WaCalls (reconectando...):', err.message);
             }
             
             // Aguarda 10 segundos antes de tentar reconectar se o WaCalls estiver offline

@@ -311,7 +311,7 @@ export default function InstancesDashboard() {
               });
               if (res.ok) {
                  const statusData = await res.json();
-                 if (statusData.data?.status === 'connected' || statusData.data?.status === 'open') {
+                 if (statusData.data?.status === 'connected' || statusData.data?.status === 'connected_local' || statusData.data?.status === 'open') {
                       return { ...inst, status: 'connected' };
                  } else if (statusData.data?.status === 'connecting') {
                       return { ...inst, status: 'connecting' };
@@ -322,7 +322,7 @@ export default function InstancesDashboard() {
                  return inst; // Se engine não responder 200, confia no Supabase
               }
           } catch(e) {
-              return { ...inst, status: inst.status === 'connected' ? 'server_offline' : inst.status }; // Fallback
+              return { ...inst, status: (inst.status === 'connected' || inst.status === 'connected_local') ? 'server_offline' : inst.status }; // Fallback
           }
       }));
 
@@ -514,7 +514,7 @@ export default function InstancesDashboard() {
         const respJson = await res.json();
         const data = respJson.data;
         
-        if (data && data.status === 'connected') {
+        if (data && (data.status === 'connected' || data.status === 'connected_local')) {
           setQrLoading(false);
           setShowQrModal(null);
           setSuccessConnectId(id);
@@ -578,7 +578,7 @@ export default function InstancesDashboard() {
   };
 
   const getStatusBadge = (status: string) => {
-    if (status === 'connected' || status === 'open') return <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"><Signal size={12} className="animate-pulse" /> Conectado</span>;
+    if (status === 'connected' || status === 'connected_local' || status === 'open') return <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"><Signal size={12} className="animate-pulse" /> Conectado</span>;
     if (status === 'connecting') return <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-orange-500/10 text-orange-600 border border-orange-500/20"><RefreshCcw size={12} className="animate-spin" /> Conectando</span>;
     if (status === 'server_offline') return <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-red-500/10 text-red-600 border border-red-500/20"><AlertCircle size={12} /> Servidor Offline</span>;
     return <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-gray-500/10 text-gray-600 border border-gray-500/20"><AlertCircle size={12} /> Desconectado</span>;

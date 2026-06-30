@@ -265,21 +265,25 @@ class SessionManager {
                         }, 5000);
                         this.reconnectingTimers.set(instanceId, timer);
                     } else if (isConflict) {
+                        const isLocal = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
                         const cAttempts = (this.conflictAttempts.get(instanceId) || 0) + 1;
                         this.conflictAttempts.set(instanceId, cAttempts);
                         this.reconnectAttempts.delete(instanceId);
 
-                        if (cAttempts >= 3) {
-                            console.error(`[SessionManager] Limite de conflitos atingido na instância ${instanceId}. Interrompendo reconexão automática para evitar banimento.`);
-                            await retryWithBackoff(() =>
-                                supabase.from('whatsapp_instances')
-                                    .update({ 
-                                        status: 'offline', 
-                                        last_error: 'Desconectado por conflito. Outro dispositivo se conectou a esta conta de WhatsApp. O sistema interrompeu as reconexões automáticas para evitar banimento. Reconecte manualmente no painel.' 
-                                    })
-                                    .eq('id', instanceId)
-                                    .eq('assigned_node_id', NODE_ID)
-                            );
+                        if (cAttempts >= 3 || isLocal) {
+                            console.error(`[SessionManager] ${isLocal ? 'Ambiente local detectado. Cancelando reconexão de conflito imediatamente para não derrubar a produção.' : `Limite de conflitos atingido na instância ${instanceId}. Interrompendo reconexão automática para evitar banimento.`}`);
+                            
+                            if (!isLocal) {
+                                await retryWithBackoff(() =>
+                                    supabase.from('whatsapp_instances')
+                                        .update({ 
+                                            status: 'offline', 
+                                            last_error: 'Desconectado por conflito. Outro dispositivo se conectou a esta conta de WhatsApp. O sistema interrompeu as reconexões automáticas para evitar banimento. Reconecte manualmente no painel.' 
+                                        })
+                                        .eq('id', instanceId)
+                                        .eq('assigned_node_id', NODE_ID)
+                                );
+                            }
                             
                             // Publica evento de status offline para o frontend
                             await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
@@ -494,7 +498,7 @@ class SessionManager {
 
         // Fallback para acordar a instância (Lazy Load) se o Node foi reiniciado
         const { data } = await retryWithBackoff(() => supabase.from('whatsapp_instances').select('status').eq('id', instanceId).single());
-        if (data && ['connected', 'connecting', 'qr_ready'].includes(data.status)) {
+        if (data && ['connected', 'connecting', 'qr_ready', 'connected_local'].includes(data.status)) {
             console.log(`[SessionManager] Lazy loading instance ${instanceId} (DB status: ${data.status})...`);
             return await this.createSession(tenantId, instanceId);
         }

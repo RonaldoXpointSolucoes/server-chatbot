@@ -10,6 +10,7 @@ import {
   Plus, 
   Trash2, 
   Edit2, 
+  Zap,
   Check, 
   X, 
   AlertTriangle, 
@@ -495,6 +496,18 @@ export default function ChecklistBuilder() {
     measurement_unit: '',
     options: null
   });
+
+  const [tempItemCategory, setTempItemCategory] = useState('');
+  const [tempItemName, setTempItemName] = useState('');
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+
+  // Estados de Edição Rápida Inline na lista
+  const [quickEditingIndex, setQuickEditingIndex] = useState<number | null>(null);
+  const [quickCategory, setQuickCategory] = useState('');
+  const [quickType, setQuickType] = useState('');
+  const [quickProvider, setQuickProvider] = useState('');
+  const [quickMin, setQuickMin] = useState<number | null>(null);
+  const [quickMax, setQuickMax] = useState<number | null>(null);
 
   // Estados do Modal do Assistente de I.A (Gemini)
   const [showAiModal, setShowAiModal] = useState(false);
@@ -1227,22 +1240,31 @@ export default function ChecklistBuilder() {
 
   // Funções Controladoras do Drawer Lateral de Tarefas (Adição & Edição Inline)
   const handleSaveTaskDrawer = () => {
-    if (!newItem.title.trim()) {
-      showToast('error', 'A tarefa precisa de um título.');
+    if (!tempItemName.trim()) {
+      showToast('error', 'A tarefa precisa de um nome.');
       return;
     }
+
+    const finalTitle = tempItemCategory.trim()
+      ? `[${tempItemCategory.trim()}] ${tempItemName.trim()}`
+      : tempItemName.trim();
+
+    const updatedItem = {
+      ...newItem,
+      title: finalTitle
+    };
 
     setChecklistItems(prev => {
       const items = [...prev];
       if (editingTaskIndex !== null) {
         items[editingTaskIndex] = {
-          ...newItem,
+          ...updatedItem,
           sort_order: editingTaskIndex
         };
-        showToast('success', 'Tarefa atualizada com sucesso!');
+        showToast('success', 'Tarefa updated com sucesso!');
       } else {
         items.push({
-          ...newItem,
+          ...updatedItem,
           sort_order: items.length
         });
         showToast('success', 'Tarefa adicionada com sucesso!');
@@ -1265,6 +1287,9 @@ export default function ChecklistBuilder() {
       measurement_unit: '',
       options: null
     });
+    setTempItemCategory('');
+    setTempItemName('');
+    setShowCategoryDropdown(false);
     setEditingTaskIndex(null);
     setShowTaskDrawer(false);
   };
@@ -1272,6 +1297,17 @@ export default function ChecklistBuilder() {
   const handleOpenEditTask = (index: number) => {
     const task = checklistItems[index];
     setNewItem({ ...task });
+    
+    const match = task.title.match(/^\[(.*?)\]\s*(.*)$/);
+    if (match) {
+      setTempItemCategory(match[1]);
+      setTempItemName(match[2]);
+    } else {
+      setTempItemCategory('');
+      setTempItemName(task.title);
+    }
+
+    setShowCategoryDropdown(false);
     setEditingTaskIndex(index);
     setShowResponseTypeGuide(false);
     setShowTaskDrawer(true);
@@ -1293,9 +1329,78 @@ export default function ChecklistBuilder() {
       measurement_unit: '',
       options: null
     });
+    setTempItemCategory('');
+    setTempItemName('');
+    setShowCategoryDropdown(false);
     setEditingTaskIndex(null);
     setShowResponseTypeGuide(false);
     setShowTaskDrawer(true);
+  };
+
+  // Funções de Edição Rápida Inline na Lista
+  const handleStartQuickEdit = (index: number) => {
+    const item = checklistItems[index];
+    
+    const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+    setQuickCategory(match ? match[1] : '');
+    
+    setQuickType(item.response_type);
+    
+    const provMatch = item.description ? item.description.match(/Fornecedor:\s*([^|]+)/) : null;
+    setQuickProvider(provMatch ? provMatch[1].trim() : '');
+    
+    setQuickMin(item.min_meta);
+    setQuickMax(item.max_meta);
+    
+    setQuickEditingIndex(index);
+  };
+
+  const handleCancelQuickEdit = () => {
+    setQuickEditingIndex(null);
+    setQuickCategory('');
+    setQuickType('');
+    setQuickProvider('');
+    setQuickMin(null);
+    setQuickMax(null);
+  };
+
+  const handleSaveQuickEdit = (index: number) => {
+    const item = checklistItems[index];
+    
+    const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+    const cleanTitle = match ? match[2] : item.title;
+    const finalTitle = quickCategory.trim() 
+      ? `[${quickCategory.trim()}] ${cleanTitle}`
+      : cleanTitle;
+
+    const providerStr = quickProvider.trim() ? `Fornecedor: ${quickProvider.trim()}` : '';
+    let finalDesc = item.description || '';
+    if (finalDesc.includes('Fornecedor:')) {
+      finalDesc = finalDesc.replace(/Fornecedor:\s*[^|]+/, providerStr)
+        .split(' | ')
+        .filter(part => part.trim().length > 0)
+        .join(' | ');
+    } else {
+      const parts = finalDesc.split(' | ').filter(Boolean);
+      if (providerStr) parts.push(providerStr);
+      finalDesc = parts.join(' | ');
+    }
+
+    setChecklistItems(prev => {
+      const newItems = [...prev];
+      newItems[index] = {
+        ...item,
+        title: finalTitle,
+        response_type: quickType,
+        description: finalDesc,
+        min_meta: (quickType === 'numeric' || quickType === 'temperature') ? quickMin : null,
+        max_meta: (quickType === 'numeric' || quickType === 'temperature') ? quickMax : null
+      };
+      return newItems;
+    });
+
+    showToast('success', 'Tarefa atualizada com sucesso!');
+    handleCancelQuickEdit();
   };
 
   // Funções Auxiliares de Gerenciamento de Sub-tarefas
@@ -2529,137 +2634,266 @@ export default function ChecklistBuilder() {
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {checklistItems.map((item, idx) => (
-                      <div 
-                        key={idx}
-                        className={`p-4 rounded-2xl border bg-[#111b21]/50 flex flex-col gap-3 hover:border-indigo-500/20 transition-all ${item.is_critical ? 'border-amber-500/40 shadow-sm shadow-amber-500/5' : 'border-[#2a3942]/60'}`}
-                      >
-                        {/* Linha 1: Conteúdo Principal e Ações */}
-                        <div className="flex justify-between items-center gap-4">
-                          <div className="min-w-0 flex-1">
-                            {(() => {
-                              const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
-                              const groupName = match ? match[1] : null;
-                              const cleanTitle = match ? match[2] : item.title;
-                              const cleanDescription = item.description ? item.description.replace(/Fornecedor:\s*/g, '').replace(/Custo:\s*/g, '').split(' | ').join(' • ') : null;
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {checklistItems.map((item, idx) => {
+                      if (quickEditingIndex === idx) {
+                        return (
+                          <div 
+                            key={idx}
+                            className="p-4 rounded-2xl border border-indigo-500/40 bg-[#1f1b2e]/60 shadow-lg shadow-indigo-500/5 flex flex-col gap-3.5 transition-all"
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
+                                {idx + 1}
+                              </span>
+                              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Edição Rápida Inline</span>
+                            </div>
 
-                              return (
-                                <>
-                                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                                    <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
-                                      {idx + 1}
-                                    </span>
-                                    {groupName && (
-                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#2a3942] text-[#8696a0] font-bold tracking-wider uppercase shrink-0">
-                                        {groupName}
+                            {/* Grid de Inputs Rápidos */}
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                              {/* 1. Grupo (Categoria) */}
+                              <div className="col-span-1">
+                                <label className="block text-[9px] font-bold text-[#8696a0] mb-1 uppercase tracking-wider">Grupo (Categoria)</label>
+                                <input
+                                  type="text"
+                                  list="quick-categories"
+                                  value={quickCategory}
+                                  onChange={e => setQuickCategory(e.target.value.toUpperCase())}
+                                  className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                  placeholder="Sem Grupo"
+                                />
+                                <datalist id="quick-categories">
+                                  {Array.from(new Set(checklistItems.map(item => {
+                                    const m = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                                    return m ? m[1] : null;
+                                  }).filter(Boolean))).map(cat => (
+                                    <option key={cat} value={cat} />
+                                  ))}
+                                </datalist>
+                              </div>
+
+                              {/* 2. Tipo */}
+                              <div className="col-span-1">
+                                <label className="block text-[9px] font-bold text-[#8696a0] mb-1 uppercase tracking-wider">Tipo</label>
+                                <select
+                                  value={quickType}
+                                  onChange={e => setQuickType(e.target.value)}
+                                  className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-2.5 py-2 text-xs text-[#d1d7db] focus:outline-none focus:border-indigo-500 cursor-pointer"
+                                >
+                                  <option value="boolean">Feito/Não Feito</option>
+                                  <option value="conformity">Conformidade</option>
+                                  <option value="yes_no">Sim/Não</option>
+                                  <option value="numeric">Numérico Geral</option>
+                                  <option value="temperature">Temperatura °C</option>
+                                  <option value="counter">Contagem física</option>
+                                  <option value="text">Texto livre</option>
+                                  <option value="photo">Foto obrigatória</option>
+                                  <option value="stars">Estrelas (1-5)</option>
+                                </select>
+                              </div>
+
+                              {/* 3. Fornecedor */}
+                              <div className="col-span-1">
+                                <label className="block text-[9px] font-bold text-[#8696a0] mb-1 uppercase tracking-wider">Fornecedor</label>
+                                <input
+                                  type="text"
+                                  value={quickProvider}
+                                  onChange={e => setQuickProvider(e.target.value)}
+                                  className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                  placeholder="Fornecedor"
+                                />
+                              </div>
+
+                              {/* 4. Min */}
+                              <div className="col-span-1">
+                                <label className="block text-[9px] font-bold text-[#8696a0] mb-1 uppercase tracking-wider">Mín Meta</label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={quickMin ?? ''}
+                                  onChange={e => setQuickMin(e.target.value !== '' ? parseFloat(e.target.value) : null)}
+                                  disabled={quickType !== 'numeric' && quickType !== 'temperature'}
+                                  className="w-full bg-[#111b21] disabled:opacity-40 border border-[#2a3942] rounded-xl px-2.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
+                                  placeholder="-"
+                                />
+                              </div>
+
+                              {/* 5. Max */}
+                              <div className="col-span-1">
+                                <label className="block text-[9px] font-bold text-[#8696a0] mb-1 uppercase tracking-wider">Máx Meta</label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={quickMax ?? ''}
+                                  onChange={e => setQuickMax(e.target.value !== '' ? parseFloat(e.target.value) : null)}
+                                  disabled={quickType !== 'numeric' && quickType !== 'temperature'}
+                                  className="w-full bg-[#111b21] disabled:opacity-40 border border-[#2a3942] rounded-xl px-2.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
+                                  placeholder="-"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Ações da Edição Rápida */}
+                            <div className="flex justify-end gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={handleCancelQuickEdit}
+                                className="bg-[#182229] hover:bg-[#111b21] text-[#d1d7db] text-[10px] font-bold px-3 py-1.5 rounded-lg border border-[#2a3942] transition-colors"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSaveQuickEdit(idx)}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold px-4 py-1.5 rounded-lg transition-colors shadow-sm"
+                              >
+                                Salvar
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div 
+                          key={idx}
+                          className={`p-4 rounded-2xl border bg-[#111b21]/50 flex flex-col gap-3 hover:border-indigo-500/20 transition-all ${item.is_critical ? 'border-amber-500/40 shadow-sm shadow-amber-500/5' : 'border-[#2a3942]/60'}`}
+                        >
+                          {/* Linha 1: Conteúdo Principal e Ações */}
+                          <div className="flex justify-between items-center gap-4">
+                            <div className="min-w-0 flex-1">
+                              {(() => {
+                                const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                                const groupName = match ? match[1] : null;
+                                const cleanTitle = match ? match[2] : item.title;
+                                const cleanDescription = item.description ? item.description.replace(/Fornecedor:\s*/g, '').replace(/Custo:\s*/g, '').split(' | ').join(' • ') : null;
+
+                                return (
+                                  <>
+                                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                                      <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
+                                        {idx + 1}
                                       </span>
-                                    )}
-                                    <h4 className="font-semibold text-white text-sm truncate">{cleanTitle}</h4>
-                                    <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-slate-500/15 text-[#8696a0] font-bold shrink-0 uppercase tracking-wider">
-                                      {item.response_type === 'boolean' ? 'Feito/Não Feito' : 
-                                       item.response_type === 'conformity' ? 'Conformidade' : 
-                                       item.response_type === 'yes_no' ? 'Sim/Não' : item.response_type}
-                                    </span>
-                                    {item.is_critical && (
-                                      <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold shrink-0">
-                                        Crítico
+                                      {groupName && (
+                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#2a3942] text-[#8696a0] font-bold tracking-wider uppercase shrink-0">
+                                          {groupName}
+                                        </span>
+                                      )}
+                                      <h4 className="font-semibold text-white text-sm truncate">{cleanTitle}</h4>
+                                      <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-slate-500/15 text-[#8696a0] font-bold shrink-0 uppercase tracking-wider">
+                                        {item.response_type === 'boolean' ? 'Feito/Não Feito' : 
+                                         item.response_type === 'conformity' ? 'Conformidade' : 
+                                         item.response_type === 'yes_no' ? 'Sim/Não' : item.response_type}
                                       </span>
+                                      {item.is_critical && (
+                                        <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold shrink-0">
+                                          Crítico
+                                        </span>
+                                      )}
+                                      {item.options && item.options.length > 0 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleExpandTask(idx)}
+                                          className="text-[8px] px-1.5 py-0.5 rounded-full bg-indigo-500/25 hover:bg-indigo-500/35 text-indigo-400 font-bold shrink-0 flex items-center gap-1.5 transition-all"
+                                          title={expandedTaskIndexes.includes(idx) ? 'Ocultar Passos' : 'Visualizar Passos'}
+                                        >
+                                          <span>📋 {item.options.length} sub-tarefas</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                    
+                                    {cleanDescription && (
+                                      <p className="text-[10px] text-[#8696a0] mt-0.5 pl-7 line-clamp-1">{cleanDescription}</p>
                                     )}
-                                    {item.options && item.options.length > 0 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleExpandTask(idx)}
-                                        className="text-[8px] px-1.5 py-0.5 rounded-full bg-indigo-500/25 hover:bg-indigo-500/35 text-indigo-400 font-bold shrink-0 flex items-center gap-1.5 transition-all"
-                                        title={expandedTaskIndexes.includes(idx) ? 'Ocultar Passos' : 'Visualizar Passos'}
-                                      >
-                                        <span>📋 {item.options.length} sub-tarefas</span>
-                                      </button>
+                                    
+                                    {/* Metas */}
+                                    {(item.response_type === 'numeric' || item.response_type === 'temperature') && (item.min_meta !== null || item.max_meta !== null) && (
+                                      <p className="text-[10px] text-teal-400 mt-1 pl-7 font-mono font-bold">
+                                        {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Meta Máx: ${item.max_meta}` : ''} {item.measurement_unit}
+                                      </p>
                                     )}
+                                  </>
+                                );
+                              })()}
+                            </div>
+
+                            {/* Ações de Reordenação e Edição */}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {/* Setas de Reordenação */}
+                              <div className="flex flex-col gap-0.5 mr-1 bg-black/15 p-1 rounded-xl border border-[#2a3942]/30">
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveItemUp(idx)}
+                                  disabled={idx === 0}
+                                  className="p-1 hover:bg-white/5 disabled:opacity-20 text-[#8696a0] hover:text-white rounded-lg transition-all"
+                                  title="Mover para Cima"
+                                >
+                                  <ChevronUp size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveItemDown(idx)}
+                                  disabled={idx === checklistItems.length - 1}
+                                  className="p-1 hover:bg-white/5 disabled:opacity-20 text-[#8696a0] hover:text-white rounded-lg transition-all"
+                                  title="Mover para Baixo"
+                                >
+                                  <ChevronDown size={13} />
+                                </button>
+                              </div>
+
+                              {/* Edição Rápida */}
+                              <button
+                                type="button"
+                                onClick={() => handleStartQuickEdit(idx)}
+                                className="p-2 hover:bg-amber-500/15 text-[#8696a0] hover:text-amber-400 rounded-xl transition-all border border-transparent hover:border-amber-500/20"
+                                title="Edição Rápida Inline"
+                              >
+                                <Zap size={13} />
+                              </button>
+
+                              {/* Editar */}
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditTask(idx)}
+                                className="p-2 hover:bg-indigo-500/15 text-[#8696a0] hover:text-indigo-400 rounded-xl transition-all border border-transparent hover:border-indigo-500/20"
+                                title="Editar Tarefa Completa"
+                              >
+                                <Edit2 size={13} />
+                              </button>
+
+                              {/* Excluir */}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(idx)}
+                                className="p-2 hover:bg-rose-500/15 text-[#8696a0] hover:text-rose-400 rounded-xl transition-all border border-transparent hover:border-rose-500/20"
+                                title="Remover Item"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Linha 2: Visualização de Sub-tarefas Expansíveis */}
+                          {item.options && item.options.length > 0 && expandedTaskIndexes.includes(idx) && (
+                            <div className="mt-1 pl-7 border-t border-[#2a3942]/30 pt-3 space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                              <span className="text-[9px] font-black text-indigo-400/80 block uppercase tracking-widest">Lista de Verificação (Sub-tarefas)</span>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                {item.options.map((sub, sIdx) => (
+                                  <div key={sIdx} className="flex items-center gap-2 p-2 bg-black/15 border border-[#2a3942]/30 rounded-xl select-none">
+                                    <input
+                                      type="checkbox"
+                                      disabled
+                                      className="rounded border-[#2a3942] text-indigo-600 bg-transparent opacity-65 cursor-not-allowed w-3.5 h-3.5"
+                                    />
+                                    <span className="text-xs text-slate-300 truncate">{sub}</span>
                                   </div>
-                                  
-                                  {cleanDescription && (
-                                    <p className="text-[10px] text-[#8696a0] mt-0.5 pl-7 line-clamp-1">{cleanDescription}</p>
-                                  )}
-                                  
-                                  {/* Metas */}
-                                  {(item.response_type === 'numeric' || item.response_type === 'temperature') && (item.min_meta !== null || item.max_meta !== null) && (
-                                    <p className="text-[10px] text-teal-400 mt-1 pl-7 font-mono font-bold">
-                                      {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Meta Máx: ${item.max_meta}` : ''} {item.measurement_unit}
-                                    </p>
-                                  )}
-                                </>
-                              );
-                            })()}
-                          </div>
-
-                          {/* Ações de Reordenação e Edição */}
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {/* Setas de Reordenação */}
-                            <div className="flex flex-col gap-0.5 mr-1 bg-black/15 p-1 rounded-xl border border-[#2a3942]/30">
-                              <button
-                                type="button"
-                                onClick={() => handleMoveItemUp(idx)}
-                                disabled={idx === 0}
-                                className="p-1 hover:bg-white/5 disabled:opacity-20 text-[#8696a0] hover:text-white rounded-lg transition-all"
-                                title="Mover para Cima"
-                              >
-                                <ChevronUp size={13} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleMoveItemDown(idx)}
-                                disabled={idx === checklistItems.length - 1}
-                                className="p-1 hover:bg-white/5 disabled:opacity-20 text-[#8696a0] hover:text-white rounded-lg transition-all"
-                                title="Mover para Baixo"
-                              >
-                                <ChevronDown size={13} />
-                              </button>
+                                ))}
+                              </div>
                             </div>
-
-                            {/* Editar */}
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditTask(idx)}
-                              className="p-2 hover:bg-indigo-500/15 text-[#8696a0] hover:text-indigo-400 rounded-xl transition-all border border-transparent hover:border-indigo-500/20"
-                              title="Editar Tarefa"
-                            >
-                              <Edit2 size={13} />
-                            </button>
-
-                            {/* Excluir */}
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveItem(idx)}
-                              className="p-2 hover:bg-rose-500/15 text-[#8696a0] hover:text-rose-400 rounded-xl transition-all border border-transparent hover:border-rose-500/20"
-                              title="Remover Item"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
+                          )}
                         </div>
-
-                        {/* Linha 2: Visualização de Sub-tarefas Expansíveis */}
-                        {item.options && item.options.length > 0 && expandedTaskIndexes.includes(idx) && (
-                          <div className="mt-1 pl-7 border-t border-[#2a3942]/30 pt-3 space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                            <span className="text-[9px] font-black text-indigo-400/80 block uppercase tracking-widest">Lista de Verificação (Sub-tarefas)</span>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                              {item.options.map((sub, sIdx) => (
-                                <div key={sIdx} className="flex items-center gap-2 p-2 bg-black/15 border border-[#2a3942]/30 rounded-xl select-none">
-                                  <input
-                                    type="checkbox"
-                                    disabled
-                                    className="rounded border-[#2a3942] text-indigo-600 bg-transparent opacity-65 cursor-not-allowed w-3.5 h-3.5"
-                                  />
-                                  <span className="text-xs text-slate-300 truncate">{sub}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2923,16 +3157,86 @@ export default function ChecklistBuilder() {
               {/* Corpo do Drawer (Rolagem Interna) */}
               <div className="flex-1 overflow-y-auto p-5 space-y-4 styled-scrollbar bg-[#202c33]">
                 
-                {/* Nome do Item */}
-                <div>
-                  <label className="block text-[10px] font-semibold text-[#8696a0] mb-1.5 uppercase tracking-wider">Nome da Tarefa *</label>
-                  <input
-                    type="text"
-                    value={newItem.title}
-                    onChange={e => setNewItem(p => ({ ...p, title: e.target.value }))}
-                    placeholder="Ex: Verificar vedação da câmara fria"
-                    className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 placeholder-[#8696a0]/40"
-                  />
+                {/* Nome do Item e Categoria Separados */}
+                <div className="space-y-3.5">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="col-span-1 relative">
+                      <label className="block text-[10px] font-semibold text-[#8696a0] mb-1.5 uppercase tracking-wider">Categoria</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={tempItemCategory}
+                          onChange={e => {
+                            setTempItemCategory(e.target.value.toUpperCase());
+                            setShowCategoryDropdown(true);
+                          }}
+                          onFocus={() => setShowCategoryDropdown(true)}
+                          placeholder="Ex: CAFÉ"
+                          className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl pl-3.5 pr-8 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 placeholder-[#8696a0]/40"
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowCategoryDropdown(!showCategoryDropdown);
+                          }}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8696a0] hover:text-white transition-colors"
+                        >
+                          <ChevronDown size={14} className={`transition-transform duration-200 ${showCategoryDropdown ? 'rotate-180' : ''}`} />
+                        </button>
+                      </div>
+
+                      {showCategoryDropdown && (
+                        <>
+                          <div 
+                            className="fixed inset-0 z-40" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowCategoryDropdown(false);
+                            }}
+                          />
+                          <div className="absolute left-0 right-0 mt-1.5 max-h-40 overflow-y-auto bg-[#202c33] border border-[#2a3942] rounded-xl p-1 z-50 shadow-2xl styled-scrollbar">
+                            {(() => {
+                              const cats = Array.from(new Set(checklistItems.map(item => {
+                                const m = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                                return m ? m[1] : null;
+                              }).filter(Boolean)));
+                              
+                              if (cats.length === 0) {
+                                return (
+                                  <span className="text-[10px] text-[#8696a0] block p-2 text-center">Nenhuma categoria</span>
+                                );
+                              }
+
+                              return cats.map(cat => (
+                                <button
+                                  key={cat}
+                                  type="button"
+                                  onClick={() => {
+                                    setTempItemCategory(cat);
+                                    setShowCategoryDropdown(false);
+                                  }}
+                                  className="w-full text-left text-xs text-[#d1d7db] hover:bg-[#111b21] hover:text-white px-3 py-2 rounded-lg transition-colors truncate"
+                                >
+                                  {cat}
+                                </button>
+                              ));
+                            })()}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[10px] font-semibold text-[#8696a0] mb-1.5 uppercase tracking-wider">Nome do Produto / Tarefa *</label>
+                      <input
+                        type="text"
+                        value={tempItemName}
+                        onChange={e => setTempItemName(e.target.value)}
+                        placeholder="Ex: ACHOCOLATADO ESPECIAL CREMOSO"
+                        className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 placeholder-[#8696a0]/40"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Tipo de Resposta */}

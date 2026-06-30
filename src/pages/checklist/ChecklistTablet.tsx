@@ -12,6 +12,7 @@ import {
   LogOut, 
   Compass, 
   ChevronRight, 
+  ChevronDown,
   Smile, 
   Lock,
   ArrowRight,
@@ -98,6 +99,8 @@ export default function ChecklistTablet() {
   // Filtros locais e ordenação
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [activeCategoryEditItemId, setActiveCategoryEditItemId] = useState<string | null>(null);
+  const [newInlineCategoryName, setNewInlineCategoryName] = useState('');
 
   // Toast e Modais de Sucesso
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error', msg: string } | null>(null);
@@ -517,6 +520,39 @@ export default function ChecklistTablet() {
         }
       };
     });
+  };
+  
+  const handleUpdateItemCategory = async (itemId: string, currentFullTitle: string, newCategory: string) => {
+    const match = currentFullTitle.match(/^\[(.*?)\]\s*(.*)$/);
+    const cleanTitle = match ? match[2] : currentFullTitle;
+
+    const finalNewTitle = newCategory.trim()
+      ? `[${newCategory.trim()}] ${cleanTitle}`
+      : cleanTitle;
+
+    try {
+      const { error } = await supabase
+        .from('checklist_items')
+        .update({ title: finalNewTitle })
+        .eq('id', itemId);
+
+      if (error) throw error;
+
+      setItemsToAnswer(prev => prev.map(item => {
+        if (item.id === itemId) {
+          return { ...item, title: finalNewTitle };
+        }
+        return item;
+      }));
+
+      showToast('success', 'Categoria atualizada com sucesso!');
+      
+    } catch (e: any) {
+      console.error(e);
+      showToast('error', `Falha ao alterar categoria: ${e.message}`);
+    } finally {
+      setActiveCategoryEditItemId(null);
+    }
   };
 
   // ==========================================
@@ -1115,11 +1151,97 @@ export default function ChecklistTablet() {
                                     <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
                                       {idx + 1}
                                     </span>
-                                    {groupName && (
-                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#2a3942] text-[#8696a0] font-bold tracking-wider uppercase shrink-0">
-                                        {groupName}
-                                      </span>
-                                    )}
+                                    <div className="relative shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setActiveCategoryEditItemId(activeCategoryEditItemId === item.id ? null : item.id);
+                                          setNewInlineCategoryName('');
+                                        }}
+                                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold tracking-wider uppercase flex items-center gap-1 transition-all select-none cursor-pointer ${
+                                          groupName 
+                                            ? 'bg-[#2a3942] hover:bg-[#344654] text-[#8696a0] hover:text-[#d1d7db]' 
+                                            : 'bg-slate-500/15 hover:bg-slate-500/25 text-[#8696a0] hover:text-white border border-[#2a3942]/60'
+                                        }`}
+                                        title="Trocar categoria do produto"
+                                      >
+                                        <span>{groupName || '+ Cat'}</span>
+                                        <ChevronDown size={10} className="opacity-60" />
+                                      </button>
+
+                                      {activeCategoryEditItemId === item.id && (
+                                        <>
+                                          <div 
+                                            className="fixed inset-0 z-40" 
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setActiveCategoryEditItemId(null);
+                                            }}
+                                          />
+                                          <div 
+                                            className="absolute left-0 mt-1.5 w-48 bg-[#202c33] border border-[#2a3942] rounded-2xl p-2.5 z-50 shadow-2xl animate-in fade-in slide-in-from-top-1 text-left"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <span className="text-[8px] font-black text-[#8696a0] block uppercase tracking-wider mb-1.5 px-1.5">Mudar Categoria</span>
+                                            
+                                            <div className="max-h-32 overflow-y-auto space-y-0.5 mb-2 styled-scrollbar px-0.5">
+                                              <button
+                                                type="button"
+                                                onClick={() => handleUpdateItemCategory(item.id, item.title, '')}
+                                                className="w-full text-left text-[11px] text-[#d1d7db] hover:bg-[#111b21] hover:text-white px-2 py-1.5 rounded-lg transition-colors flex items-center justify-between"
+                                              >
+                                                <span>(Sem Categoria)</span>
+                                                {!groupName && <span className="text-[10px] text-indigo-400">✓</span>}
+                                              </button>
+                                              
+                                              {Array.from(new Set(itemsToAnswer.map(i => {
+                                                const m = i.title.match(/^\[(.*?)\]\s*(.*)$/);
+                                                return m ? m[1] : null;
+                                              }).filter(Boolean))).map(cat => (
+                                                <button
+                                                  key={cat as string}
+                                                  type="button"
+                                                  onClick={() => handleUpdateItemCategory(item.id, item.title, cat as string)}
+                                                  className="w-full text-left text-[11px] text-[#d1d7db] hover:bg-[#111b21] hover:text-white px-2 py-1.5 rounded-lg transition-colors flex items-center justify-between"
+                                                >
+                                                  <span className="truncate">{cat}</span>
+                                                  {groupName === cat && <span className="text-[10px] text-indigo-400">✓</span>}
+                                                </button>
+                                              ))}
+                                            </div>
+
+                                            <div className="pt-2 border-t border-[#2a3942]/60 px-1">
+                                              <div className="flex gap-1.5">
+                                                <input
+                                                  type="text"
+                                                  value={newInlineCategoryName}
+                                                  onChange={e => setNewInlineCategoryName(e.target.value.toUpperCase())}
+                                                  placeholder="NOVA CATEGORIA"
+                                                  className="flex-1 bg-[#111b21] border border-[#2a3942] rounded-lg px-2 py-1 text-[9px] text-white focus:outline-none focus:border-indigo-500 placeholder-[#8696a0]/30"
+                                                  onKeyDown={e => {
+                                                    if (e.key === 'Enter') {
+                                                      e.preventDefault();
+                                                      if (newInlineCategoryName.trim()) {
+                                                        handleUpdateItemCategory(item.id, item.title, newInlineCategoryName.trim());
+                                                      }
+                                                    }
+                                                  }}
+                                                />
+                                                <button
+                                                  type="button"
+                                                  disabled={!newInlineCategoryName.trim()}
+                                                  onClick={() => handleUpdateItemCategory(item.id, item.title, newInlineCategoryName.trim())}
+                                                  className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-[9px] px-2 py-1 rounded-lg transition-all"
+                                                >
+                                                  OK
+                                                </button>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </>
+                                      )}
+                                    </div>
                                     <h4 className="font-semibold text-white text-sm leading-snug">{cleanTitle}</h4>
                                     {item.is_required && (
                                       <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest shrink-0">* Obrigatório</span>

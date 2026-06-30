@@ -1338,7 +1338,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       
       // Verifica a conexão da instância específica da conversa
-      if (resolvedInstanceId && state.instancesStatus[resolvedInstanceId] && state.instancesStatus[resolvedInstanceId] !== 'connected') {
+      if (resolvedInstanceId && state.instancesStatus[resolvedInstanceId] && state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local') {
          set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar mensagens.' });
          throw new Error('whatsapp_offline');
       }
@@ -1407,7 +1407,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
      const state = get();
      const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', instanceName);
      
-     if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
+     if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
         set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para editar mensagens.' });
         return;
      }
@@ -1466,7 +1466,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const state = get();
     const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', instanceName);
 
-    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
+    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
        set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para apagar mensagens.' });
        return;
     }
@@ -1584,7 +1584,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
        console.warn(`[Security Guard - Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
     }
 
-    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
+    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
         set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar arquivos.' });
         return;
     }
@@ -1824,7 +1824,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
          console.warn(`[Security Guard - Canned Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
       }
 
-      if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
+      if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
           set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar mídias.' });
           throw new Error('whatsapp_offline');
       }
@@ -1907,7 +1907,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!state.tenantInfo) return;
     const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, instanceName);
 
-    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || state.instancesStatus[resolvedInstanceId] !== 'connected') {
+    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
        return; // Previne requisições 400 previsiveis caso o socket esteja offline
     }
     
