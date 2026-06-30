@@ -2071,15 +2071,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // RBAC: Se for agente, só carrega contatos de instâncias permitidas
     const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
     const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-    if (contact.instance_id && allowedStr) {
-        try { 
-            const allowedInstances = JSON.parse(allowedStr); 
-            if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                if (!allowedInstances.includes(contact.instance_id)) return;
-            } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                return; // Agents with no allowed instances get nothing
+    // --- PROTEÇÃO RIGOROSA RONALDO-WEB ---
+    const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+    const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+    if (!isRonaldo && contact.instance_id === '5c78d358-d449-41c4-b396-a04ab20a39e4') {
+        return; // Bloqueia contato do Ronaldo-Web para outros operadores
+    }
+
+    if (!isRonaldo && contact.instance_id) {
+        if (allowedStr) {
+            try { 
+                const allowedInstances = JSON.parse(allowedStr); 
+                if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+                    if (!allowedInstances.includes(contact.instance_id)) return;
+                } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                    return;
+                }
+            } catch(e) {
+                if (roleStr === 'agent' || roleStr === 'Agente') return;
             }
-        } catch(e) {}
+        } else if (roleStr === 'agent' || roleStr === 'Agente') {
+            return;
+        }
     }
 
     // VALIDAÇÃO INTELIGENTE APPWEB (Realtime Barreira)
@@ -4100,22 +4113,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const effectiveInstanceId = convInstanceId || cData.instance_id;
         cData.instance_id = effectiveInstanceId;
 
-        // RBAC: Verifica se o contato que recebeu a msg é de uma instância que o Agente tem acesso
+        // RBAC RIGOROSO: Verifica se o contato que recebeu a msg é de uma instância permitida
         const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
         const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-        const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
-        if (!isGlobalAdmin) {
+        const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+        const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+
+        // --- PROTEÇÃO RIGOROSA RONALDO-WEB ---
+        if (!isRonaldo && effectiveInstanceId === '5c78d358-d449-41c4-b396-a04ab20a39e4') {
+            return; // Bloqueado! Outros operadores nunca processam mensagens do Ronaldo-Web
+        }
+
+        if (!isRonaldo) {
             if (allowedStr) {
-                try { 
-                    const allowedInstances = JSON.parse(allowedStr); 
+                try {
+                    const allowedInstances = JSON.parse(allowedStr);
                     if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                        if (!effectiveInstanceId || !allowedInstances.includes(effectiveInstanceId)) return;
-                    } else {
-                        return; // Agents with no allowed instances get nothing
+                        if (effectiveInstanceId && !allowedInstances.includes(effectiveInstanceId)) return;
+                    } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                        return;
                     }
-                } catch(e) {}
-            } else {
-                return; // Bloqueado por falta de config
+                } catch(e) {
+                    if (roleStr === 'agent' || roleStr === 'Agente') return;
+                }
+            } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                return;
             }
         }
 
