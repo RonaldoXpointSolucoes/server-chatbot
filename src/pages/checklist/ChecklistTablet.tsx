@@ -499,7 +499,7 @@ export default function ChecklistTablet() {
       }
 
       // 2. Validação de Metas Numéricas / Temperatura
-      if ((itemType === 'numeric' || itemType === 'temperature') && val !== '') {
+      if ((itemType === 'numeric' || itemType === 'temperature' || itemType === 'kg') && val !== '') {
         const numVal = parseFloat(val);
         if (!isNaN(numVal)) {
           if (minMeta !== null && numVal < minMeta) isMetaOk = false;
@@ -1356,7 +1356,7 @@ export default function ChecklistTablet() {
                                   )}
 
                                   {/* Metas Numéricas / Temperatura */}
-                                  {(item.response_type === 'numeric' || item.response_type === 'temperature') && (item.min_meta !== null || item.max_meta !== null) && (
+                                  {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'kg') && (item.min_meta !== null || item.max_meta !== null) && (
                                     <p className="text-[11px] text-teal-400 pl-7 font-mono font-bold mt-0.5">
                                       {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Máx: ${item.max_meta}` : ''} {item.measurement_unit}
                                     </p>
@@ -1507,14 +1507,16 @@ export default function ChecklistTablet() {
                               </div>
                             )}
 
-                            {/* NUMERIC / TEMPERATURE / COUNTER */}
-                            {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'counter') && (
+                            {/* NUMERIC / TEMPERATURE / COUNTER / KG */}
+                            {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'counter' || item.response_type === 'kg') && (
                               <div className="flex items-center gap-1 bg-[#111b21] p-1.5 rounded-[20px] border border-[#2a3942]/80 shadow-inner">
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    const step = item.response_type === 'kg' ? 0.1 : 1;
                                     const current = parseFloat(resp.value || '0');
-                                    handleAnswerChange(item.id, item.response_type, (current - 1).toString(), item.min_meta, item.max_meta);
+                                    const result = (current - step).toFixed(item.response_type === 'kg' ? 3 : 0);
+                                    handleAnswerChange(item.id, item.response_type, parseFloat(result).toString(), item.min_meta, item.max_meta);
                                   }}
                                   className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-[#202c33] hover:bg-[#2a3942] rounded-2xl text-[#8696a0] hover:text-white text-3xl font-light transition-all active:scale-95"
                                 >
@@ -1539,7 +1541,7 @@ export default function ChecklistTablet() {
                                   type="button"
                                   onClick={() => {
                                     const current = parseFloat(resp.value || '0');
-                                    handleAnswerChange(item.id, item.response_type, (current + 1).toString(), item.min_meta, item.max_meta);
+                                    const step = item.response_type === 'kg' ? 0.1 : 1; const result = (current + step).toFixed(item.response_type === 'kg' ? 3 : 0); handleAnswerChange(item.id, item.response_type, parseFloat(result).toString(), item.min_meta, item.max_meta);
                                   }}
                                   className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-2xl text-3xl font-light transition-all active:scale-95 border border-emerald-500/30"
                                 >

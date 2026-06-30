@@ -420,6 +420,15 @@ const getResponseTypeGuideline = (type: string) => {
         borderColor: 'border-rose-500/30 bg-rose-500/5',
         textColor: 'text-rose-400'
       };
+    case 'kg':
+      return {
+        title: 'Controle de Peso (Kilograma - kg)',
+        description: 'Permite digitar valores decimais com até 3 casas (ex: 2,820 kg) para controle de peso e rendimento. Suporta limites Mínimo e Máximo.',
+        useCase: 'Pesagem de proteínas retiradas do estoque, controle de rendimento de bifes e fichas técnicas de produção.',
+        preview: '[ 2,820 ] kg (Casas decimais ativas)',
+        borderColor: 'border-cyan-500/30 bg-cyan-500/5',
+        textColor: 'text-cyan-400'
+      };
     case 'counter':
       return {
         title: 'Contador Físico (+ / -)',
@@ -1530,7 +1539,7 @@ export default function ChecklistBuilder() {
   // ==========================================
   // IMPORTAÇÃO DE PLANILHA EXCEL
   // ==========================================
-  const VALID_RESPONSE_TYPES = ['boolean', 'conformity', 'yes_no', 'numeric', 'temperature', 'counter', 'text', 'photo', 'stars', 'single_select', 'multi_select', 'datetime'];
+  const VALID_RESPONSE_TYPES = ['boolean', 'conformity', 'yes_no', 'numeric', 'temperature', 'counter', 'text', 'photo', 'stars', 'single_select', 'multi_select', 'datetime', 'kg'];
 
   const normalizeHeader = (header: string): string => {
     const h = header.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -1662,6 +1671,9 @@ export default function ChecklistBuilder() {
           if (!title || title.toLowerCase() === 'total') continue;
 
           let responseType = typeIdx >= 0 ? String(row[typeIdx] || '').trim().toLowerCase() : 'numeric';
+          if (responseType === 'kilo' || responseType === 'kilograma' || responseType === 'kg' || responseType === 'quilo') {
+            responseType = 'kg';
+          }
           if (!VALID_RESPONSE_TYPES.includes(responseType)) responseType = 'numeric';
 
           const isCritical = critIdx >= 0 ? ['sim', 'yes', 'true', '1', 'x', 'critico'].includes(String(row[critIdx] || '').trim().toLowerCase()) : false;
@@ -2770,6 +2782,7 @@ export default function ChecklistBuilder() {
                                   <option value="conformity">Conformidade</option>
                                   <option value="yes_no">Sim/Não</option>
                                   <option value="numeric">Numérico Geral</option>
+                                  <option value="kg">Quilograma (kg)</option>
                                   <option value="temperature">Temperatura °C</option>
                                   <option value="counter">Contagem física</option>
                                   <option value="text">Texto livre</option>
@@ -2798,7 +2811,7 @@ export default function ChecklistBuilder() {
                                   step="any"
                                   value={quickMin ?? ''}
                                   onChange={e => setQuickMin(e.target.value !== '' ? parseFloat(e.target.value) : null)}
-                                  disabled={quickType !== 'numeric' && quickType !== 'temperature'}
+                                  disabled={quickType !== 'numeric' && quickType !== 'temperature' && quickType !== 'kg'}
                                   className="w-full bg-[#111b21] disabled:opacity-40 border border-[#2a3942] rounded-xl px-2.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
                                   placeholder="-"
                                 />
@@ -2812,7 +2825,7 @@ export default function ChecklistBuilder() {
                                   step="any"
                                   value={quickMax ?? ''}
                                   onChange={e => setQuickMax(e.target.value !== '' ? parseFloat(e.target.value) : null)}
-                                  disabled={quickType !== 'numeric' && quickType !== 'temperature'}
+                                  disabled={quickType !== 'numeric' && quickType !== 'temperature' && quickType !== 'kg'}
                                   className="w-full bg-[#111b21] disabled:opacity-40 border border-[#2a3942] rounded-xl px-2.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
                                   placeholder="-"
                                 />
@@ -2893,7 +2906,7 @@ export default function ChecklistBuilder() {
                                     )}
                                     
                                     {/* Metas */}
-                                    {(item.response_type === 'numeric' || item.response_type === 'temperature') && (item.min_meta !== null || item.max_meta !== null) && (
+                                    {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'kg') && (item.min_meta !== null || item.max_meta !== null) && (
                                       <p className="text-[10px] text-teal-400 mt-1 pl-7 font-mono font-bold">
                                         {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Meta Máx: ${item.max_meta}` : ''} {item.measurement_unit}
                                       </p>
@@ -3488,6 +3501,7 @@ export default function ChecklistBuilder() {
                     <option value="conformity">Conforme / Não Conforme</option>
                     <option value="yes_no">Sim / Não</option>
                     <option value="numeric">Campo Numérico geral</option>
+                    <option value="kg">Quilograma (kg)</option>
                     <option value="temperature">Temperatura em °C</option>
                     <option value="counter">Contagem física</option>
                     <option value="text">Resposta em texto livre</option>
@@ -3551,7 +3565,7 @@ export default function ChecklistBuilder() {
                 </div>
 
                 {/* Limites de conformidade (Se aplicável) */}
-                {(newItem.response_type === 'numeric' || newItem.response_type === 'temperature') && (
+                {(newItem.response_type === 'numeric' || newItem.response_type === 'temperature' || newItem.response_type === 'kg') && (
                   <div className="bg-[#111b21]/50 p-4 rounded-2xl border border-[#2a3942]/60 space-y-3.5 animate-in fade-in duration-200">
                     <span className="text-[9px] font-black text-indigo-400 block uppercase tracking-widest">Metas e Limites</span>
                     <div className="grid grid-cols-2 gap-3">
@@ -3972,6 +3986,7 @@ export default function ChecklistBuilder() {
                                       className="bg-[#111b21] border border-indigo-500/40 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 w-full"
                                     >
                                       <option value="numeric">Numérico</option>
+                                      <option value="kg">Quilograma (kg)</option>
                                       <option value="boolean">Feito/Não Feito</option>
                                       <option value="conformity">Conformidade</option>
                                       <option value="yes_no">Sim/Não</option>
@@ -3984,6 +3999,7 @@ export default function ChecklistBuilder() {
                                   ) : (
                                     <span className="px-2 py-0.5 rounded-full bg-slate-500/15 text-[#8696a0] font-bold text-[9px] uppercase">
                                       {item.response_type === 'numeric' ? 'Numérico' :
+                                       item.response_type === 'kg' ? 'Quilo (kg)' :
                                        item.response_type === 'boolean' ? 'Feito/Não' :
                                        item.response_type === 'conformity' ? 'Conform.' :
                                        item.response_type === 'yes_no' ? 'Sim/Não' :
