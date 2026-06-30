@@ -86,6 +86,12 @@ export default function InboxSettings() {
 
         if (error) throw error;
         if (data) {
+          const userEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email') || '';
+          const isRonaldo = userEmail.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+          if (!isRonaldo && (data.id === '5c78d358-d449-41c4-b396-a04ab20a39e4' || data.display_name?.toLowerCase().includes('ronaldo'))) {
+              navigate('/settings/inboxes');
+              return;
+          }
           setInstance(data);
           setDisplayName(data.display_name);
           setEngineUrl(data.settings?.engine_url || import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || '');

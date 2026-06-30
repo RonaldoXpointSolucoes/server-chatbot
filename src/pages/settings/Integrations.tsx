@@ -154,9 +154,15 @@ export default function Integrations() {
         .order('created_at', { ascending: false });
 
       if (!instError && waInstances) {
-        setInstances(waInstances);
-        if (waInstances.length > 0 && !selectedInstanceId) {
-          setSelectedInstanceId(waInstances[0].id);
+        let finalInstances = waInstances;
+        const userEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email') || '';
+        const isRonaldo = userEmail.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+        if (!isRonaldo) {
+          finalInstances = waInstances.filter(d => d.id !== '5c78d358-d449-41c4-b396-a04ab20a39e4' && !d.display_name?.toLowerCase().includes('ronaldo'));
+        }
+        setInstances(finalInstances);
+        if (finalInstances.length > 0 && !selectedInstanceId) {
+          setSelectedInstanceId(finalInstances[0].id);
         }
       }
 

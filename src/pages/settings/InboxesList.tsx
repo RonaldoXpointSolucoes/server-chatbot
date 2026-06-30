@@ -36,7 +36,15 @@ export default function InboxesList() {
           .order('created_at', { ascending: false });
           
         if (error) throw error;
-        if (data) setInstances(data);
+        if (data) {
+          let finalData = data;
+          const userEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email') || '';
+          const isRonaldo = userEmail.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+          if (!isRonaldo) {
+            finalData = data.filter(d => d.id !== '5c78d358-d449-41c4-b396-a04ab20a39e4' && !d.display_name?.toLowerCase().includes('ronaldo'));
+          }
+          setInstances(finalData);
+        }
       } catch (err) {
         console.error('Erro ao buscar caixas:', err);
       } finally {
