@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useDevStore } from '../../store/devStore';
+import { useChatStore } from '../../store/chatStore';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { geminiService } from '../../services/geminiService';
 import * as XLSX from 'xlsx';
