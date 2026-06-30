@@ -2943,6 +2943,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
            let allowedInstances: string[] = [];
            const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
            const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+           const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+           const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
            if (allowedStr) {
                try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
            }
