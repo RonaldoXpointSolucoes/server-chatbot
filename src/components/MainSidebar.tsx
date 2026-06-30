@@ -255,15 +255,15 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                 if (allowedStr) {
                     try {
                         const allowedInstances = JSON.parse(allowedStr);
-                        if (Array.isArray(allowedInstances)) {
+                        if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
                             finalData = finalData.filter(d => allowedInstances.includes(d.id));
-                        } else {
+                        } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
                             finalData = [];
                         }
                     } catch(e) {
-                        finalData = [];
+                        if (currentUserRole === 'agent' || currentUserRole === 'Agente') finalData = [];
                     }
-                } else {
+                } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
                     finalData = [];
                 }
              }

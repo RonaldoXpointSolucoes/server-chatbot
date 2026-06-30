@@ -2981,9 +2981,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                if (!isRonaldo) {
                    if (allowedStr) {
-                       if (allowedInstances.length === 0) return false;
-                       if (effectiveInstanceId && !allowedInstances.includes(effectiveInstanceId)) return false;
-                   } else {
+                       try {
+                           const allowed = JSON.parse(allowedStr);
+                           if (Array.isArray(allowed) && allowed.length > 0) {
+                               if (effectiveInstanceId && !allowed.includes(effectiveInstanceId)) return false;
+                           } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                               return false;
+                           }
+                       } catch(e) {
+                           if (roleStr === 'agent' || roleStr === 'Agente') return false;
+                       }
+                   } else if (roleStr === 'agent' || roleStr === 'Agente') {
                        return false;
                    }
                }

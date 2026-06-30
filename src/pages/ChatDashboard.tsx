@@ -1329,18 +1329,19 @@ export default function ChatDashboard() {
        }
 
        if (!isRonaldo) {
-           let allowedInstances: string[] = [];
            if (allowedStr) {
-               try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
-           }
-           
-           if (allowedStr) {
-               if (allowedInstances.length === 0) return false; // Sem instâncias -> Sem acesso
-               if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) {
-                   return false; // BLOQUEADO!
+               try {
+                   const allowedInstances = JSON.parse(allowedStr);
+                   if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+                       if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) return false;
+                   } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                       return false;
+                   }
+               } catch(e) {
+                   if (roleStr === 'agent' || roleStr === 'Agente') return false;
                }
-           } else {
-               return false; // BLOQUEADO!
+           } else if (roleStr === 'agent' || roleStr === 'Agente') {
+               return false;
            }
        }
 

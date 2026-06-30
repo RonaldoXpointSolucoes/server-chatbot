@@ -159,6 +159,23 @@ export default function Integrations() {
         const isRonaldo = userEmail.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
         if (!isRonaldo) {
           finalInstances = waInstances.filter(d => d.id !== '5c78d358-d449-41c4-b396-a04ab20a39e4' && !d.display_name?.toLowerCase().includes('ronaldo'));
+          
+          const allowedStr = sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances') || null;
+          const currentUserRole = sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role') || null;
+          if (allowedStr) {
+            try {
+              const allowed = JSON.parse(allowedStr);
+              if (Array.isArray(allowed) && allowed.length > 0) {
+                finalInstances = finalInstances.filter(d => allowed.includes(d.id));
+              } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
+                finalInstances = [];
+              }
+            } catch(e) {
+              if (currentUserRole === 'agent' || currentUserRole === 'Agente') finalInstances = [];
+            }
+          } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
+            finalInstances = [];
+          }
         }
         setInstances(finalInstances);
         if (finalInstances.length > 0 && !selectedInstanceId) {
