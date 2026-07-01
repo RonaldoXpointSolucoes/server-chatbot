@@ -49,6 +49,7 @@ class SessionManager {
         this.sessions = new Map();
         this.connectingState = new Map();
         this.reconnectAttempts = new Map();
+        this.reconnectTimeouts = new Map();
         this.conflictAttempts = new Map();
         this.conflictTimeouts = new Map();
         this.reconnectingTimers = new Map();
@@ -224,7 +225,17 @@ class SessionManager {
                 const { connection, lastDisconnect } = update;
                 if (connection === 'open') {
                     this.startWatchdog(tenantId, instanceId, sock);
-                    this.reconnectAttempts.delete(instanceId);
+                    
+                    // Defer clearing reconnectAttempts until connection is stable for 3 minutes
+                    if (this.reconnectTimeouts.has(instanceId)) {
+                        clearTimeout(this.reconnectTimeouts.get(instanceId));
+                    }
+                    const recTimeout = setTimeout(() => {
+                        this.reconnectAttempts.delete(instanceId);
+                        this.reconnectTimeouts.delete(instanceId);
+                        console.log(`[SessionManager] Conexão estável de rede estabelecida na instância ${instanceId}. Histórico de reconexões limpo.`);
+                    }, 180000); // 3 minutos
+                    this.reconnectTimeouts.set(instanceId, recTimeout);
                     
                     // Defer clearing conflictAttempts until connection is stable for 5 minutes
                     if (this.conflictTimeouts.has(instanceId)) {
@@ -240,11 +251,17 @@ class SessionManager {
 
                 if (connection === 'close') {
                     this.clearWatchdog(instanceId);
-                    // Clear stable connection timeout if it disconnected early
+                    
+                    // Clear stable connection timeouts if it disconnected early
                     if (this.conflictTimeouts.has(instanceId)) {
                         clearTimeout(this.conflictTimeouts.get(instanceId));
                         this.conflictTimeouts.delete(instanceId);
                     }
+                    if (this.reconnectTimeouts.has(instanceId)) {
+                        clearTimeout(this.reconnectTimeouts.get(instanceId));
+                        this.reconnectTimeouts.delete(instanceId);
+                    }
+                }
 
                     const status = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.message || '';
@@ -305,30 +322,48 @@ class SessionManager {
                         const nextAttempt = attempts + 1;
                         this.reconnectAttempts.set(instanceId, nextAttempt);
 
-                        // Rastrear se é erro 503 da Meta (temporariamente indisponível ou rate limit)
-                        const is503 = status === 503 || reason.includes('503') || JSON.stringify(lastDisconnect?.error).includes('503');
-
-                        const baseDelay = is503 ? 15000 : 5000;
-                        const maxDelay = is503 ? 120000 : 60000;
-                        const delay = Math.min(baseDelay * Math.pow(2, attempts), maxDelay);
-
-                        console.log(`[SessionManager] Instância ${instanceId} fechou. Motivo: ${status} (Erro 503: ${is503}). Tentativa ${nextAttempt}. Reconectando em ${delay / 1000}s...`);
-
-                        if (is503) {
+                        if (nextAttempt >= 10) {
+                            console.error(`[SessionManager] Limite de 10 tentativas de reconexão consecutivas atingido para a instância ${instanceId}. Interrompendo reconexões para evitar banimento.`);
+                            this.reconnectAttempts.delete(instanceId);
+                            
                             await retryWithBackoff(() =>
                                 supabase.from('whatsapp_instances')
                                     .update({ 
-                                        last_error: `WhatsApp temporariamente indisponível (Erro 503). Próxima tentativa de reconexão em ${delay / 1000}s (Tentativa ${nextAttempt}).`
+                                        status: 'offline', 
+                                        last_error: 'Falha persistente de conexão (10 tentativas consecutivas falhas). O sistema interrompeu as reconexões automáticas para evitar o banimento do seu chip. Por favor, verifique se o celular está conectado à internet ou reconecte manualmente no painel.' 
                                     })
                                     .eq('id', instanceId)
                             );
-                        }
+                            
+                            // Publica evento de status offline para o frontend
+                            await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
+                                connection: 'close', 
+                                lastDisconnect: { error: { output: { statusCode: 503 } } } 
+                            });
+                        } else {
+                            // Rastrear se é erro 503 da Meta (temporariamente indisponível ou rate limit)
+                            const is503 = status === 503 || reason.includes('503') || JSON.stringify(lastDisconnect?.error).includes('503');
 
-                        const timer = setTimeout(() => {
-                            this.reconnectingTimers.delete(instanceId);
-                            this.createSession(tenantId, instanceId);
-                        }, delay);
-                        this.reconnectingTimers.set(instanceId, timer);
+                            const baseDelay = is503 ? 15000 : 5000;
+                            const maxDelay = is503 ? 120000 : 60000;
+                            const delay = Math.min(baseDelay * Math.pow(2, attempts), maxDelay);
+
+                            console.log(`[SessionManager] Instância ${instanceId} fechou. Motivo: ${status} (Erro 503: ${is503}). Tentativa ${nextAttempt}/10. Reconectando em ${delay / 1000}s...`);
+
+                            await retryWithBackoff(() =>
+                                supabase.from('whatsapp_instances')
+                                    .update({ 
+                                        last_error: `Conexão instável (Erro ${status || 'N/A'}). Tentando reconectar em ${delay / 1000}s (Tentativa ${nextAttempt}/10).`
+                                    })
+                                    .eq('id', instanceId)
+                            );
+
+                            const timer = setTimeout(() => {
+                                this.reconnectingTimers.delete(instanceId);
+                                this.createSession(tenantId, instanceId);
+                            }, delay);
+                            this.reconnectingTimers.set(instanceId, timer);
+                        }
                     }
                 }
             });
@@ -510,6 +545,22 @@ class SessionManager {
 
     async closeSession(instanceId) {
         this.clearWatchdog(instanceId);
+        
+        // Cancela qualquer timer de reconexão pendente
+        if (this.reconnectingTimers.has(instanceId)) {
+            clearTimeout(this.reconnectingTimers.get(instanceId));
+            this.reconnectingTimers.delete(instanceId);
+        }
+        if (this.reconnectTimeouts.has(instanceId)) {
+            clearTimeout(this.reconnectTimeouts.get(instanceId));
+            this.reconnectTimeouts.delete(instanceId);
+        }
+        if (this.conflictTimeouts.has(instanceId)) {
+            clearTimeout(this.conflictTimeouts.get(instanceId));
+            this.conflictTimeouts.delete(instanceId);
+        }
+        this.reconnectAttempts.delete(instanceId);
+        this.conflictAttempts.delete(instanceId);
         
         // Sincroniza qualquer chave pendente na fila de batch antes de fechar a sessão
         try {
