@@ -1362,13 +1362,15 @@ export default function ChecklistTablet() {
                                   </div>
                                   
                                   {cleanDescription && (
-                                    <p className="text-xs text-[#8696a0] pl-7 leading-relaxed">{cleanDescription}</p>
+                                    <p className="text-[13px] md:text-sm text-[#e9edef] bg-[#111b21]/40 border-l-2 border-indigo-500/80 pl-3 py-1.5 rounded-r-lg mt-1.5 leading-relaxed ml-7">
+                                      {cleanDescription}
+                                    </p>
                                   )}
 
                                   {/* Metas Numéricas / Temperatura */}
                                   {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'kg') && (item.min_meta !== null || item.max_meta !== null) && (
                                     <p className="text-[11px] text-teal-400 pl-7 font-mono font-bold mt-0.5">
-                                      {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Máx: ${item.max_meta}` : ''} {item.measurement_unit}
+                                      {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Máx: ${item.max_meta}` : ''} {item.measurement_unit || (item.response_type === 'kg' ? 'kg' : '')}
                                     </p>
                                   )}
 
@@ -1526,7 +1528,13 @@ export default function ChecklistTablet() {
                                     const step = item.response_type === 'kg' ? 0.1 : 1;
                                     const current = parseFloat(resp.value || '0');
                                     const result = (current - step).toFixed(item.response_type === 'kg' ? 3 : 0);
-                                    handleAnswerChange(item.id, item.response_type, parseFloat(result).toString(), item.min_meta, item.max_meta);
+                                    handleAnswerChange(
+                                      item.id, 
+                                      item.response_type, 
+                                      item.response_type === 'kg' ? parseFloat(result).toFixed(3) : parseFloat(result).toString(), 
+                                      item.min_meta, 
+                                      item.max_meta
+                                    );
                                   }}
                                   className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-[#202c33] hover:bg-[#2a3942] rounded-2xl text-[#8696a0] hover:text-white text-3xl font-light transition-all active:scale-95"
                                 >
@@ -1534,24 +1542,61 @@ export default function ChecklistTablet() {
                                 </button>
                                 
                                 <div className="flex items-baseline px-2">
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    value={resp.value || ''}
-                                    onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
-                                    placeholder="0"
-                                    className="bg-transparent border-none focus:outline-none focus:ring-0 text-3xl md:text-4xl font-black w-20 md:w-24 text-center text-white p-0 m-0"
-                                  />
-                                  {item.measurement_unit && (
-                                    <span className="text-xs font-bold text-[#8696a0] shrink-0 ml-1">{item.measurement_unit}</span>
+                                  {item.response_type === 'kg' ? (
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={resp.value ? resp.value.replace('.', ',') : ''}
+                                      onChange={(e) => {
+                                        const rawVal = e.target.value;
+                                        if (rawVal === '') {
+                                          handleAnswerChange(item.id, item.response_type, '', item.min_meta, item.max_meta);
+                                          return;
+                                        }
+                                        let processed = '';
+                                        if (rawVal.includes('.') || rawVal.includes(',')) {
+                                          processed = rawVal.replace(/[^\d.,]/g, '').replace(',', '.');
+                                        } else {
+                                          const digits = rawVal.replace(/\D/g, '');
+                                          if (digits) {
+                                            processed = (parseInt(digits, 10) / 1000).toFixed(3);
+                                          }
+                                        }
+                                        handleAnswerChange(item.id, item.response_type, processed, item.min_meta, item.max_meta);
+                                      }}
+                                      placeholder="0,000"
+                                      className="bg-transparent border-none focus:outline-none focus:ring-0 text-3xl md:text-4xl font-black w-24 md:w-32 text-center text-white p-0 m-0 font-mono tracking-wide"
+                                    />
+                                  ) : (
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      value={resp.value || ''}
+                                      onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
+                                      placeholder="0"
+                                      className="bg-transparent border-none focus:outline-none focus:ring-0 text-3xl md:text-4xl font-black w-20 md:w-24 text-center text-white p-0 m-0"
+                                    />
+                                  )}
+                                  {(item.measurement_unit || item.response_type === 'kg') && (
+                                    <span className="text-[11px] font-black text-indigo-400 shrink-0 ml-1.5 uppercase font-mono bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-lg select-none">
+                                      {item.measurement_unit || 'kg'}
+                                    </span>
                                   )}
                                 </div>
 
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    const step = item.response_type === 'kg' ? 0.1 : 1;
                                     const current = parseFloat(resp.value || '0');
-                                    const step = item.response_type === 'kg' ? 0.1 : 1; const result = (current + step).toFixed(item.response_type === 'kg' ? 3 : 0); handleAnswerChange(item.id, item.response_type, parseFloat(result).toString(), item.min_meta, item.max_meta);
+                                    const result = (current + step).toFixed(item.response_type === 'kg' ? 3 : 0);
+                                    handleAnswerChange(
+                                      item.id, 
+                                      item.response_type, 
+                                      item.response_type === 'kg' ? parseFloat(result).toFixed(3) : parseFloat(result).toString(), 
+                                      item.min_meta, 
+                                      item.max_meta
+                                    );
                                   }}
                                   className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-2xl text-3xl font-light transition-all active:scale-95 border border-emerald-500/30"
                                 >
