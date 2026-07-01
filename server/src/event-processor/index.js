@@ -1533,6 +1533,13 @@ class EventProcessor {
                     if(loggedOut) payload.loggedOut = true;
                 }
             }
+            if (connection === 'connecting') {
+                await supabase.from('whatsapp_instances')
+                    .update({ status: 'connecting', last_error: null })
+                    .eq('id', instanceId)
+                    .eq('assigned_node_id', NODE_ID);
+                payload.status = 'connecting';
+            }
 
             if (connection === 'open') {
                 const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true';

@@ -118,6 +118,7 @@ export default function EvolutionModal({
   const [customApiKey, setCustomApiKey] = useState<string>("");
   const [customColor, setCustomColor] = useState<string>("#10b981");
   const [customSound, setCustomSound] = useState<string>("default");
+  const [connectionStatusMessage, setConnectionStatusMessage] = useState<string | null>(null);
   const [activePollingId, setActivePollingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [engineGroups, setEngineGroups] = useState<any[] | null>(null);
@@ -214,6 +215,7 @@ export default function EvolutionModal({
     setError(null);
     setSuccessMsg(null);
     setQrBase64(null);
+    setConnectionStatusMessage(null);
     try {
       if (
         inst.connection_status === "connected" ||
@@ -279,6 +281,7 @@ export default function EvolutionModal({
     setError(null);
     setSuccessMsg(null);
     setQrBase64(null);
+    setConnectionStatusMessage(null);
 
     const nameStr = customName.trim();
 
@@ -349,15 +352,16 @@ export default function EvolutionModal({
 
     // Timeout de segurança contra loop infinito
     const timeoutId = setTimeout(() => {
-      if (loading) {
+      if (loading || activePollingId) {
         setError(
-          "Erro: Timeout de Conexão. O Motor não respondeu em 20 segundos. Verifique as chaves ou se a engine está online.",
+          "Erro: Timeout de Conexão. O Motor demorou muito para responder. Verifique se o seu celular tem acesso à internet ou reinicie a conexão.",
         );
         setLoading(false);
         setQrBase64(null);
         setActivePollingId(null);
+        setConnectionStatusMessage(null);
       }
-    }, 20000); // 20s timeout
+    }, 180000); // 3 minutos timeout
 
     let pollInterval: any;
 
@@ -366,6 +370,7 @@ export default function EvolutionModal({
       setLoading(false);
       setQrBase64(null);
       setActivePollingId(null);
+      setConnectionStatusMessage(null);
       setEvolutionConnection(true, activePollingId);
       useChatStore.getState().syncEvolutionContacts(activePollingId);
       setTimeout(() => {
@@ -379,6 +384,7 @@ export default function EvolutionModal({
         if (payload.payload?.qr_code) {
           setQrBase64(payload.payload.qr_code);
           setLoading(false);
+          setConnectionStatusMessage("QR Code pronto! Aguardando leitura no seu celular...");
         }
       })
       .on("broadcast", { event: "instance.status" }, (payload: any) => {
@@ -392,6 +398,9 @@ export default function EvolutionModal({
           setLoading(false);
           setQrBase64(null);
           setActivePollingId(null);
+          setConnectionStatusMessage(null);
+        } else if (st === "connecting") {
+          setConnectionStatusMessage("QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)...");
         } else if (st === "connected" || st === "connected_local") {
           handleSuccess();
         }
@@ -409,6 +418,8 @@ export default function EvolutionModal({
               if (st?.data?.status === "connected" || st?.data?.status === "connected_local") {
                 handleSuccess();
                 clearInterval(pollInterval);
+              } else if (st?.data?.status === "connecting") {
+                setConnectionStatusMessage("QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)...");
               }
             } catch (e) {
               // ignora erro silencioso no polling
@@ -421,6 +432,7 @@ export default function EvolutionModal({
       clearTimeout(timeoutId);
       if (pollInterval) clearInterval(pollInterval);
       supabase.removeChannel(channel);
+      setConnectionStatusMessage(null);
     };
   }, [activePollingId, loading, existingInstances]);
 
@@ -2094,9 +2106,14 @@ export default function EvolutionModal({
                       className="w-[200px] h-[200px] rounded-2xl"
                     />
                   </div>
-                  <p className="text-center text-xs mt-6 mb-2 text-gray-500 dark:text-gray-400 font-medium">
-                    Escaneie o QR Code no seu WhatsApp.
-                  </p>
+                  <div className="flex flex-col items-center mt-6 mb-2">
+                    {connectionStatusMessage && connectionStatusMessage.includes("lido") && (
+                      <Loader2 className="animate-spin text-emerald-500 mb-2" size={20} />
+                    )}
+                    <p className={`text-center text-xs font-semibold px-4 transition-all duration-300 ${connectionStatusMessage && connectionStatusMessage.includes("lido") ? "text-emerald-500 animate-pulse font-bold" : "text-gray-500 dark:text-gray-400"}`}>
+                      {connectionStatusMessage || "Escaneie o QR Code no seu WhatsApp."}
+                    </p>
+                  </div>
                   <button
                     onClick={() => {
                       setQrBase64(null);
