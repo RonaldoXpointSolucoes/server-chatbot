@@ -1157,7 +1157,10 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				})
 			])
 		} finally {
-			await sendMessageAck(node).catch(ackErr => logger.error({ ackErr }, 'failed to ack notification'))
+			await sendMessageAck(node).catch(ackErr => {
+				logger.error({ ackErr }, 'failed to ack notification')
+				ws.close()
+			})
 		}
 	}
 
