@@ -271,6 +271,17 @@ class EventProcessor {
                 if (ownerJid) {
                      ownerPhone = ownerJid.split('@')[0].split(':')[0];
                 }
+
+                // --- BARREIRA DE TELEFONE DO RONALDO ---
+                // Se a sessão ativa pertencer ao número do Ronaldo, as mensagens SÓ devem ser processadas
+                // na instância dedicada do Ronaldo-Web (5c78d358-d449-41c4-b396-a04ab20a39e4).
+                // Isso evita que a instância comercial X-Point (ou qualquer outra) conectada ao mesmo telefone
+                // intercepte e duplique mensagens na caixa errada.
+                if (ownerPhone === '5511975960999' && instanceId !== '5c78d358-d449-41c4-b396-a04ab20a39e4') {
+                     console.log(`[Barreira Ronaldo-Web] Ignorando mensagem na instância ${instanceId} porque pertence ao número do Ronaldo (5511975960999)`);
+                     continue;
+                }
+
                 const phone = jid.split('@')[0].split(':')[0];
                 const cleanJid = phone + '@' + jid.split('@')[1];
                 jid = cleanJid; // Sobrescreve jid com o JID limpo sem o sufixo de device

@@ -2980,6 +2980,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                
                const effectiveInstanceId = conv.instance_id || dbC.instance_id;
                
+               // --- FILTRO DE SEGURANÇA CONTRA CONVERSAS CRUZADAS ---
+                // Se o contato pertence ao Ronaldo-Web, impedimos que conversas associadas a outras instâncias
+                // (ex: Comercial) sejam listadas para outras caixas de entrada.
+                if (dbC.instance_id === '5c78d358-d449-41c4-b396-a04ab20a39e4' && conv.instance_id !== '5c78d358-d449-41c4-b396-a04ab20a39e4') {
+                    return false;
+                }
+               
                // --- FILTRO DE CONVERSAS FANTASMAS ---
                 // Ignorar conversas vazias (sem mensagens) no carregamento inicial para evitar poluição no painel.
                 const isEmpty = !conv.last_message_preview && (conv.unread_count === 0 || !conv.unread_count);
@@ -4105,6 +4112,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
              if (cData.conv_id === undefined || cData.conv_id === null) {
                  cData.conv_id = m.conversation_id;
              }
+        }
+
+        // --- BARREIRA DE SEGURANÇA CONTRA MENSAGENS CRUZADAS ---
+        // Se o contato pertence originalmente ao Ronaldo-Web, ignoramos injeções em tempo real
+        // em qualquer outra conversa que não seja do próprio Ronaldo-Web.
+        const isRonaldoContact = cData.instance_id === '5c78d358-d449-41c4-b396-a04ab20a39e4';
+        if (isRonaldoContact && convInstanceId !== '5c78d358-d449-41c4-b396-a04ab20a39e4') {
+             console.log(`[Realtime Barreira] Ignorando msg INSERT da conversa ${m.conversation_id} porque o contato pertence ao Ronaldo-Web`);
+             return;
         }
 
         // CRITICAL FIX: O contato local deve assumir a instância da conversa ativa para não sumir da caixa correta
