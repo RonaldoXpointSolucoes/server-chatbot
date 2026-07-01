@@ -614,8 +614,9 @@ export default function ChecklistTablet() {
     // Valida se todos os obrigatórios foram respondidos
     const missingRequired = itemsToAnswer.some(item => {
       const resp = responses[item.id];
-      const isPhotoRequired = item.require_evidence && !resp?.evidenceUrl;
-      return item.is_required && (!resp?.isDone || isPhotoRequired);
+      const hasValue = resp?.value && resp.value.trim() !== '';
+      const isPhotoRequired = item.require_evidence && !resp?.evidenceUrl && (item.is_required || hasValue);
+      return (item.is_required && (!resp?.isDone || !resp?.value)) || isPhotoRequired;
     });
 
     if (missingRequired) {
