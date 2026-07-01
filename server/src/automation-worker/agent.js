@@ -911,7 +911,12 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 return eligibleBots[0];
             }
         } catch (err) {
-            console.error('[BotRouter] Erro ao rotear mensagem inteligente:', err);
+            const errMsg = err?.message || String(err);
+            if (errMsg.includes('PROHIBITED_CONTENT')) {
+                console.warn(`[BotRouter] Roteamento inteligente bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}". Usando fallback do primeiro bot.`);
+            } else {
+                console.error('[BotRouter] Erro ao rotear mensagem inteligente:', err);
+            }
             return eligibleBots[0];
         }
     }
@@ -2794,15 +2799,19 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                     const errStatus = loopError?.status || loopError?.response?.status || 'N/A';
                     const errName = loopError?.name || loopError?.constructor?.name || 'UnknownError';
                     
-                    const errorDetail = `[AutomationWorker] Erro crítico no loop de função (Iteração ${loopCount}) para conversa ${conversationId}:\n` +
-                        `Mensagem de gatilho do cliente: "${textMessage}"\n` +
-                        `Erro: ${errName} - ${errMsg} (Status: ${errStatus})\n` +
-                        `Histórico de chamadas de tools executadas até a falha:\n` +
-                        JSON.stringify(toolExecutionHistory, null, 2);
+                    if (errMsg.includes('PROHIBITED_CONTENT')) {
+                        console.warn(`[AutomationWorker] O processamento da conversa ${conversationId} foi bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}"`);
+                        finalResponseText = "Desculpe, não posso responder a essa pergunta devido às diretrizes de segurança de conteúdo do sistema.";
+                    } else {
+                        const errorDetail = `[AutomationWorker] Erro crítico no loop de função (Iteração ${loopCount}) para conversa ${conversationId}:\n` +
+                            `Mensagem de gatilho do cliente: "${textMessage}"\n` +
+                            `Erro: ${errName} - ${errMsg} (Status: ${errStatus})\n` +
+                            `Histórico de chamadas de tools executadas até a falha:\n` +
+                            JSON.stringify(toolExecutionHistory, null, 2);
 
-                    console.error(errorDetail);
-                    
-                    finalResponseText = "Desculpe, ocorreu um pequeno erro interno ao processar sua requisição. Pode tentar novamente?";
+                        console.error(errorDetail);
+                        finalResponseText = "Desculpe, ocorreu um pequeno erro interno ao processar sua requisição. Pode tentar novamente?";
+                    }
                     keepLooping = false;
                 }
             }

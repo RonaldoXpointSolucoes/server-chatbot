@@ -72,6 +72,8 @@ class SessionManager {
                         'SessionError',
                         'Invalid PreKey ID',
                         'No session record',
+                        'Incompatible version',
+                        'Incompatible version number on WhisperMessage',
                         'conflict',
                         'replaced',
                         'Stream Errored (conflict)'

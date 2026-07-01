@@ -159,9 +159,10 @@ export function makeLibSignalRepository(
 						errMsg.includes('Invalid PreKey ID') ||
 						errMsg.includes('PreKeyError') ||
 						errMsg.includes('SessionError') ||
-						errMsg.includes('Failed to decrypt')
+						errMsg.includes('Failed to decrypt') ||
+						errMsg.includes('Incompatible version')
 					) {
-						logger.warn({ jid, error: errMsg }, 'Critical decryption error detected (e.g. Bad MAC). Resetting Signal session key to force re-negotiation.')
+						logger.warn({ jid, error: errMsg }, 'Critical decryption error detected (e.g. Bad MAC or Incompatible version). Resetting Signal session key to force re-negotiation.')
 						const wireJid = await resolveLIDSignalAddress(addr.toString())
 						await parsedKeys.set({
 							session: { [wireJid]: null }
