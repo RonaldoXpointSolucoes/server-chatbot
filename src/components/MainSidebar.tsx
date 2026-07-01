@@ -746,12 +746,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               isActive={window.location.pathname === '/checklist/builder'}
             />
             <NavItem 
-              icon={<Smartphone size={16} className="text-indigo-400" />} 
-              title="Totem Cozinha (PWA)" 
-              isSub
-              onClick={() => navigate('/checklist/tablet')}
-              isActive={window.location.pathname === '/checklist/tablet'}
-            />
+               icon={<Smartphone size={16} className="text-indigo-400" />} 
+               title="Totem Cozinha (PWA)" 
+               isSub
+               onClick={() => window.open('/checklist/tablet', '_blank')}
+               isActive={false}
+             />
             <NavItem 
               icon={<Settings size={16} className="text-indigo-400" />} 
               title="Configurações" 

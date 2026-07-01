@@ -906,7 +906,7 @@ export default function ChecklistTablet() {
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {operators.map((op) => (
                       <button
                         key={op.id}
@@ -1075,7 +1075,7 @@ export default function ChecklistTablet() {
           <div className="flex-1 flex overflow-hidden">
             
             {/* LISTAGEM DE CHECKLISTS DISPONÍVEIS (SEÇÃO ESQUERDA) */}
-            <div className="w-[340px] shrink-0 border-r border-[#2a3942]/60 bg-[#182229]/60 flex flex-col overflow-y-auto p-4 styled-scrollbar gap-3">
+            <div className={`w-full md:w-[340px] ${activeChecklist ? 'hidden md:flex' : 'flex'} shrink-0 border-r border-[#2a3942]/60 bg-[#182229]/60 flex-col overflow-y-auto p-4 styled-scrollbar gap-3`}>
               <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider px-2">Rotinas do seu Turno</h3>
               
               {loadingChecklists ? (
@@ -1112,16 +1112,26 @@ export default function ChecklistTablet() {
             </div>
 
             {/* ÁREA DE PREENCHIMENTO DO CHECKLIST ATIVO (SEÇÃO DIREITA) */}
-            <div className="flex-1 flex flex-col overflow-hidden bg-[#182229]/20">
+            <div className={`flex-1 ${!activeChecklist ? 'hidden md:flex' : 'flex'} flex-col overflow-hidden bg-[#182229]/20`}>
               {activeChecklist ? (
                 <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-200">
                   
                   {/* Cabeçalho do Roteiro */}
                   <div className="p-6 bg-[#202c33]/50 border-b border-[#2a3942]/60 shrink-0">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div>
-                        <h2 className="text-lg font-black text-white">{activeChecklist.title}</h2>
-                        <p className="text-xs text-[#8696a0] mt-0.5">{activeChecklist.description || 'Siga as orientações abaixo para preencher.'}</p>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setActiveChecklist(null)}
+                          className="md:hidden p-2 -ml-2 rounded-full hover:bg-[#2a3942] text-[#8696a0] hover:text-white transition-all shrink-0"
+                          title="Voltar para as rotinas"
+                        >
+                          <ChevronRight className="rotate-180" size={20} />
+                        </button>
+                        <div>
+                          <h2 className="text-lg font-black text-white">{activeChecklist.title}</h2>
+                          <p className="text-xs text-[#8696a0] mt-0.5">{activeChecklist.description || 'Siga as orientações abaixo para preencher.'}</p>
+                        </div>
                       </div>
                       
                       {/* Geolocalização e Status do GPS */}
