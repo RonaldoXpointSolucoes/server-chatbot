@@ -330,6 +330,15 @@ export default function ChecklistSettings() {
       return;
     }
 
+    // Validar se o PIN tem exatamente 5 dígitos se estiver preenchido
+    const cleanedPin = editingUser.pin ? editingUser.pin.trim() : '';
+    if (cleanedPin && cleanedPin.length !== 5) {
+      showToast('error', 'O PIN de acesso rápido deve ter exatamente 5 dígitos numéricos.');
+      return;
+    }
+
+    const finalPin = cleanedPin !== '' ? cleanedPin : null;
+
     setSaving(true);
     try {
       // Como o auth do Supabase é protegido, para o MVP criaremos perfis diretamente na tabela.
@@ -342,7 +351,7 @@ export default function ChecklistSettings() {
         name: editingUser.name,
         email: editingUser.email,
         phone: editingUser.phone || '',
-        pin: editingUser.pin || '',
+        pin: finalPin,
         role: editingUser.role,
         is_active: editingUser.is_active ?? true,
       };
@@ -357,7 +366,7 @@ export default function ChecklistSettings() {
             name: editingUser.name,
             email: editingUser.email,
             phone: editingUser.phone || '',
-            pin: editingUser.pin || '',
+            pin: finalPin,
             role: editingUser.role,
             is_active: editingUser.is_active ?? true
           }, { onConflict: 'id' });
