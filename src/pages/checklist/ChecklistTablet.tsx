@@ -114,6 +114,52 @@ export default function ChecklistTablet() {
     }
   }, [tenantId]);
 
+  useEffect(() => {
+    // Injeta canvas-confetti via CDN de forma segura
+    if (!(window as any).confetti) {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';
+      script.async = true;
+      document.body.appendChild(script);
+    }
+  }, []);
+
+  const triggerConfetti = (isFull: boolean = false) => {
+    const confettiFunc = (window as any).confetti;
+    if (confettiFunc) {
+      if (isFull) {
+        const duration = 3 * 1000;
+        const animationEnd = Date.now() + duration;
+        const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999 };
+        const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
+        const interval = setInterval(function() {
+          const timeLeft = animationEnd - Date.now();
+          if (timeLeft <= 0) return clearInterval(interval);
+          const particleCount = 50 * (timeLeft / duration);
+          confettiFunc(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } }));
+          confettiFunc(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } }));
+        }, 250);
+      } else {
+        confettiFunc({
+          particleCount: 45,
+          spread: 60,
+          origin: { y: 0.85 },
+          zIndex: 9999
+        });
+      }
+    }
+  };
+
+  const getGamifiedIncentive = (percent: number, completed: number, total: number, userName?: string) => {
+    const name = userName ? userName.split(' ')[0] : 'Operador';
+    if (percent === 0) return `Olá, ${name}! Vamos começar as tarefas do turno de hoje? 🚀`;
+    if (percent < 30) return `Excelente início, ${name}! Mais um passo e logo terminamos! 💪`;
+    if (percent < 60) return `Bom ritmo, ${name}! Metade do caminho já foi. Continue focado! 🔥`;
+    if (percent < 90) return `Você é fera! Falta muito pouco para finalizar tudo. Reta final! 🏆`;
+    if (percent < 100) return `Só mais uma ou duas tarefas! Falta o último gás, ${name}! 🚀`;
+    return `Parabéns, ${name}! Todas as tarefas foram concluídas perfeitamente! 🌟✨`;
+  };
+
   const loadOperators = async () => {
     try {
       // 1. Carrega todos os operadores ativos do tenant
@@ -479,7 +525,62 @@ export default function ChecklistTablet() {
   // RESPOSTAS INDIVIDUAIS
   // ==========================================
   const handleAnswerChange = (itemId: string, itemType: string, val: string, minMeta: number | null, maxMeta: number | null) => {
+    let becameDone = false;
+
     setResponses(prev => {
+      const current = prev[itemId] || { itemId, value: '', isConforming: true, isMetaOk: true, isDone: false };
+      
+      let isConforming = true;
+      let isMetaOk = true;
+      let isDone = val.trim().length > 0;
+
+      // 1. Validação de Conformidade Padrão
+      if (itemType === 'conformity' && val === 'Não Conforme') {
+        isConforming = false;
+      }
+      if (itemType === 'yes_no' && val === 'Não') {
+        isConforming = false;
+      }
+      if (itemType === 'boolean' && val === 'Não Feito') {
+        isDone = false;
+        isConforming = false;
+      }
+
+      // 2. Validação de Metas Numéricas / Temperatura
+      if ((itemType === 'numeric' || itemType === 'temperature' || itemType === 'kg') && val !== '') {
+        const numVal = parseFloat(val);
+        if (!isNaN(numVal)) {
+          if (minMeta !== null && numVal < minMeta) isMetaOk = false;
+          if (maxMeta !== null && numVal > maxMeta) isMetaOk = false;
+        }
+      }
+
+      if (isDone && !current.isDone) {
+        becameDone = true;
+      }
+
+      return {
+        ...prev,
+        [itemId]: {
+          ...current,
+          value: val,
+          isConforming,
+          isMetaOk,
+          isDone,
+          answeredAt: isDone ? new Date().toISOString() : undefined,
+          answeredBy: isDone && loggedInUser ? loggedInUser.name : undefined
+        }
+      };
+    });
+
+    if (becameDone) {
+      setTimeout(() => triggerConfetti(false), 50);
+    }
+  };
+
+  // Mantemos o esqueleto da antiga apenas para evitar referências quebradas se houver
+  /*
+const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, minMeta: number | null, maxMeta: number | null) => {
       const current = prev[itemId] || { itemId, value: '', isConforming: true, isMetaOk: true, isDone: false };
       
       let isConforming = true;
@@ -521,6 +622,7 @@ export default function ChecklistTablet() {
       };
     });
   };
+*/
   
   const handleUpdateItemCategory = async (itemId: string, currentFullTitle: string, newCategory: string) => {
     const match = currentFullTitle.match(/^\[(.*?)\]\s*(.*)$/);
@@ -724,6 +826,7 @@ export default function ChecklistTablet() {
 
       setSuccessScore(finalExec?.score || 100);
       setShowSuccessModal(true);
+      setTimeout(() => triggerConfetti(true), 150);
       
       // Auto-desloga após 5 segundos para o próximo colega usar
       setTimeout(() => {
@@ -1161,6 +1264,63 @@ export default function ChecklistTablet() {
                         </div>
                       )}
                     </div>
+
+                    {/* Progresso Dinâmico e Gamificação */}
+                    {(() => {
+                      const total = itemsToAnswer.length;
+                      const completed = itemsToAnswer.filter(item => responses[item.id]?.isDone).length;
+                      const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+                      return (
+                        <div className="flex items-center gap-4 bg-[#111b21]/50 p-4 rounded-3xl border border-[#2a3942]/60 mt-4 animate-in fade-in duration-300">
+                          {/* Gráfico circular SVG */}
+                          <div className="relative w-12 h-12 shrink-0 flex items-center justify-center">
+                            <svg className="w-full h-full transform -rotate-90">
+                              <circle
+                                cx="24"
+                                cy="24"
+                                r="20"
+                                className="text-[#202c33]"
+                                strokeWidth="3.5"
+                                stroke="currentColor"
+                                fill="transparent"
+                              />
+                              <circle
+                                cx="24"
+                                cy="24"
+                                r="20"
+                                className="text-emerald-500 transition-all duration-500 ease-out"
+                                strokeWidth="3.5"
+                                strokeDasharray={2 * Math.PI * 20}
+                                strokeDashoffset={2 * Math.PI * 20 * (1 - percent / 100)}
+                                strokeLinecap="round"
+                                stroke="currentColor"
+                                fill="transparent"
+                              />
+                            </svg>
+                            <span className="absolute text-[10px] font-black text-white font-mono">{percent}%</span>
+                          </div>
+
+                          {/* Progresso Textual e Mensagem de Incentivo */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between text-[11px] mb-1">
+                              <span className="font-bold text-[#d1d7db]">Progresso da Rotina</span>
+                              <span className="font-mono text-emerald-400 font-bold">{completed} de {total} tarefas concluídas</span>
+                            </div>
+                            {/* Barra de Progresso Horizontal */}
+                            <div className="w-full bg-[#202c33] h-2.5 rounded-full overflow-hidden border border-[#2a3942]/40">
+                              <div 
+                                className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 h-full rounded-full transition-all duration-500 ease-out" 
+                                style={{ width: `${percent}%` }}
+                              />
+                            </div>
+                            {/* Mensagem Gamificada de Incentivo */}
+                            <p className="text-[10px] text-[#8696a0] mt-1.5 italic font-medium truncate">
+                              {getGamifiedIncentive(percent, completed, total, loggedInUser?.name)}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Formulário de Perguntas/Itens */}
@@ -1245,8 +1405,12 @@ export default function ChecklistTablet() {
                         <Reorder.Item 
                           key={item.id}
                           value={item}
-                          className={`p-5 rounded-[28px] border flex flex-col gap-4 transition-all ${
-                            item.is_required && !resp.isDone ? 'border-[#2a3942]/60 bg-[#202c33]/50' : 'border-emerald-500/30 shadow-sm shadow-emerald-500/5 bg-[#202c33]/80'
+                          className={`p-5 rounded-[28px] border flex flex-col gap-4 transition-all duration-300 ${
+                            resp.isDone 
+                              ? 'border-emerald-500/40 bg-[#1e2e28]/70 shadow-sm shadow-emerald-950/20' 
+                              : item.is_required 
+                                ? 'border-[#2a3942]/60 bg-[#202c33]/50' 
+                                : 'border-[#2a3942]/30 bg-[#202c33]/30'
                           }`}
                         >
                           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1264,9 +1428,15 @@ export default function ChecklistTablet() {
                                     <div className="cursor-grab hover:text-indigo-400 text-[#8696a0] transition-colors shrink-0 mr-1 active:cursor-grabbing">
                                       <GripVertical size={16} />
                                     </div>
-                                    <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
-                                      {idx + 1}
-                                    </span>
+                                    {resp.isDone ? (
+                                      <span className="w-5 h-5 flex items-center justify-center rounded-full shrink-0 bg-emerald-500 text-black font-black text-[10px] flex items-center justify-center">
+                                        ✓
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
+                                        {idx + 1}
+                                      </span>
+                                    )}
                                     <div className="relative shrink-0">
                                       <button
                                         type="button"
@@ -1358,11 +1528,14 @@ export default function ChecklistTablet() {
                                         </>
                                       )}
                                     </div>
-                                    <h4 className="font-semibold text-white text-sm leading-snug">{cleanTitle}</h4>
-                                    {item.is_required && (
+                                    <h4 className={`font-semibold text-sm leading-snug transition-all ${resp.isDone ? 'text-emerald-300 line-through opacity-80' : 'text-white'}`}>{cleanTitle}</h4>
+                                    {resp.isDone && (
+                                      <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full shrink-0">Concluído ✅</span>
+                                    )}
+                                    {item.is_required && !resp.isDone && (
                                       <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest shrink-0">* Obrigatório</span>
                                     )}
-                                    {item.is_critical && (
+                                    {item.is_critical && !resp.isDone && (
                                       <span className="text-[9px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full shrink-0">Crítico</span>
                                     )}
                                   </div>
