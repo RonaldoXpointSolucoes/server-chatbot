@@ -1013,6 +1013,9 @@ export default function ChecklistBuilder() {
         await useChatStore.getState().logOperation('INSERT', 'checklists', finalChecklistId, null, newChk);
       }
 
+      // Ler itens anteriores para permitir rollback em caso de falhas catastróficas
+      const { data: previousItems } = await supabase.from('checklist_items').select('*').eq('checklist_id', finalChecklistId);
+
       // 2. Salvar Itens (Exclui os antigos e insere todos para garantir sincronia e sort_order)
       await supabase.from('checklist_items').delete().eq('checklist_id', finalChecklistId);
       if (checklistItems.length > 0) {
@@ -1033,7 +1036,17 @@ export default function ChecklistBuilder() {
           options: item.options || null
         }));
         const { error: itemsErr } = await supabase.from('checklist_items').insert(itemsPayload);
-        if (itemsErr) throw itemsErr;
+        if (itemsErr) {
+          // ROLLBACK MANUAL: Restaura os itens antigos no banco se a inserção falhar
+          if (previousItems && previousItems.length > 0) {
+            const rollbackPayloads = previousItems.map(pi => {
+              const { id, created_at, ...cleanItem } = pi;
+              return cleanItem;
+            });
+            await supabase.from('checklist_items').insert(rollbackPayloads);
+          }
+          throw itemsErr;
+        }
       }
 
       // 3. Vincular Checklist a Unidade ativa (checklist_units)
