@@ -226,6 +226,48 @@ class SessionManager {
                 if (connection === 'open') {
                     this.startWatchdog(tenantId, instanceId, sock);
                     
+                    // Proteção contra duplicação de chip (mesmo número em múltiplas instâncias)
+                    const ownerJid = sock.user?.id;
+                    if (ownerJid) {
+                        const ownerPhone = ownerJid.split('@')[0].split(':')[0];
+                        console.log(`[SessionManager] Instância ${instanceId} conectada com sucesso. Telefone: ${ownerPhone}`);
+                        
+                        // Varre o cache em memória buscando outras sessões com o mesmo telefone
+                        for (const [otherInstanceId, otherSession] of this.sessions.entries()) {
+                            if (otherInstanceId !== instanceId) {
+                                const otherSock = otherSession.sock;
+                                const otherOwnerJid = otherSock?.user?.id;
+                                if (otherOwnerJid) {
+                                    const otherOwnerPhone = otherOwnerJid.split('@')[0].split(':')[0];
+                                    if (otherOwnerPhone === ownerPhone) {
+                                        console.warn(`[SessionManager] ⚠️ Detetado conflito de número de telefone! A instância ${otherInstanceId} está usando o mesmo telefone ${ownerPhone} da instância ${instanceId}. Desconectando a instância ${otherInstanceId} para evitar colisões.`);
+                                        
+                                        try {
+                                            if (otherSock.ws) {
+                                                otherSock.ws.close();
+                                            }
+                                        } catch (wsErr) {
+                                            console.error(`[SessionManager] Erro ao fechar WebSocket da instância concorrente ${otherInstanceId}:`, wsErr.message);
+                                        }
+                                        
+                                        this.sessions.delete(otherInstanceId);
+                                        
+                                        // Atualiza no banco para offline para que o runtime não tente subir ela novamente automaticamente
+                                        supabase.from('whatsapp_instances')
+                                            .update({ 
+                                                status: 'offline', 
+                                                last_error: `Desconectado automaticamente porque o mesmo número de WhatsApp (${ownerPhone}) foi conectado na instância ${instanceId}. O sistema não permite conexões simultâneas no mesmo chip.` 
+                                            })
+                                            .eq('id', otherInstanceId)
+                                            .then(({ error }) => {
+                                                if (error) console.error(`[SessionManager] Erro ao atualizar status offline da outra instância ${otherInstanceId}:`, error.message);
+                                            });
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Defer clearing reconnectAttempts until connection is stable for 3 minutes
                     if (this.reconnectTimeouts.has(instanceId)) {
                         clearTimeout(this.reconnectTimeouts.get(instanceId));

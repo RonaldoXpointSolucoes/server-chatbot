@@ -122,8 +122,8 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     if (EventProcessor && eventProcessorInst) {
                         // Protege contra duplicação de human messages cache
                         if (EventProcessor.humanMessagesCache) {
-                            EventProcessor.humanMessagesCache.set(result.key.id, true);
-                            setTimeout(() => EventProcessor.humanMessagesCache.delete(result.key.id), 60000);
+                            EventProcessor.humanMessagesCache.set(`${instanceId}_${result.key.id}`, true);
+                            setTimeout(() => EventProcessor.humanMessagesCache.delete(`${instanceId}_${result.key.id}`), 60000);
                         }
 
                         // Emula um evento messages.upsert para garantir a persistência imediata

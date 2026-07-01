@@ -329,8 +329,8 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
             if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
-                EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
-                setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
+                EventProcessor.automationMessagesCache.set(`${id}_${msgResult.key.id}`, true);
+                setTimeout(() => EventProcessor.automationMessagesCache.delete(`${id}_${msgResult.key.id}`), 60000);
             }
         } catch(e) {}
 
@@ -473,8 +473,8 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
                 setTimeout(() => EventProcessor.pendingMediaCache.delete(msgResult.key.id), 60000);
             }
             if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
-                EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
-                setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
+                EventProcessor.automationMessagesCache.set(`${id}_${msgResult.key.id}`, true);
+                setTimeout(() => EventProcessor.automationMessagesCache.delete(`${id}_${msgResult.key.id}`), 60000);
             }
         } catch(e) {}
 
@@ -543,8 +543,8 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
             if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
-                EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
-                setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
+                EventProcessor.automationMessagesCache.set(`${id}_${msgResult.key.id}`, true);
+                setTimeout(() => EventProcessor.automationMessagesCache.delete(`${id}_${msgResult.key.id}`), 60000);
             }
         } catch(e) {}
 
@@ -610,8 +610,8 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
             if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
-                EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
-                setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
+                EventProcessor.automationMessagesCache.set(`${id}_${msgResult.key.id}`, true);
+                setTimeout(() => EventProcessor.automationMessagesCache.delete(`${id}_${msgResult.key.id}`), 60000);
             }
         } catch(e) {}
 
@@ -679,8 +679,8 @@ router.post('/message/sendReaction', requireApiKey, async (req, res) => {
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
             if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
-                EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
-                setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
+                EventProcessor.automationMessagesCache.set(`${id}_${msgResult.key.id}`, true);
+                setTimeout(() => EventProcessor.automationMessagesCache.delete(`${id}_${msgResult.key.id}`), 60000);
             }
         } catch(e) {}
 

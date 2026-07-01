@@ -53,12 +53,12 @@ router.post('/messages/send', requireTenant, async (req, res) => {
             if (EventProcessor && msgResult?.key?.id) {
                 if (isAuto) {
                     if (!EventProcessor.automationMessagesCache) EventProcessor.automationMessagesCache = new Map();
-                    EventProcessor.automationMessagesCache.set(msgResult.key.id, true);
-                    setTimeout(() => EventProcessor.automationMessagesCache.delete(msgResult.key.id), 60000);
+                    EventProcessor.automationMessagesCache.set(`${instanceId}_${msgResult.key.id}`, true);
+                    setTimeout(() => EventProcessor.automationMessagesCache.delete(`${instanceId}_${msgResult.key.id}`), 60000);
                 } else {
                     if (!EventProcessor.humanMessagesCache) EventProcessor.humanMessagesCache = new Map();
-                    EventProcessor.humanMessagesCache.set(msgResult.key.id, true);
-                    setTimeout(() => EventProcessor.humanMessagesCache.delete(msgResult.key.id), 60000);
+                    EventProcessor.humanMessagesCache.set(`${instanceId}_${msgResult.key.id}`, true);
+                    setTimeout(() => EventProcessor.humanMessagesCache.delete(`${instanceId}_${msgResult.key.id}`), 60000);
                 }
             }
         } catch(e) {}

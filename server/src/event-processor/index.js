@@ -282,8 +282,8 @@ class EventProcessor {
                 // para que a interface (CRM) possa mostrar conversas de 'self-chat' (testes do próprio usuário).
                 const isSelfChat = (ownerPhone && phone === ownerPhone);
 
-                const isHuman = EventProcessor.humanMessagesCache && EventProcessor.humanMessagesCache.has(msg.key.id);
-                const isAutomation = EventProcessor.automationMessagesCache && EventProcessor.automationMessagesCache.has(msg.key.id);
+                const isHuman = EventProcessor.humanMessagesCache && EventProcessor.humanMessagesCache.has(`${instanceId}_${msg.key.id}`);
+                const isAutomation = EventProcessor.automationMessagesCache && EventProcessor.automationMessagesCache.has(`${instanceId}_${msg.key.id}`);
                 // Se for isSelfChat (enviado para si mesmo), apenas processe o evento "fromMe: true" para evitar duplicar a mensagem recebida e enviada
                 if (isSelfChat && !msg.key.fromMe) {
                      console.info(`[Message Tracker] ℹ️ Ignorando evento fromMe:false em self-chat (evita duplicidade). JID: ${jid}`);
