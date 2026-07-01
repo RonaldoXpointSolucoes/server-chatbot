@@ -261,7 +261,6 @@ class SessionManager {
                         clearTimeout(this.reconnectTimeouts.get(instanceId));
                         this.reconnectTimeouts.delete(instanceId);
                     }
-                }
 
                     const status = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.message || '';
