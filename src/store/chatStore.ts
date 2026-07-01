@@ -2981,13 +2981,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                const effectiveInstanceId = conv.instance_id || dbC.instance_id;
                
                // --- FILTRO DE CONVERSAS FANTASMAS ---
-               // Ignorar conversas vazias (sem mensagens) caso não sejam a instância principal do contato,
-               // evitando poluição no painel quando clicam num contato por engano.
-               const isPrimary = conv.instance_id === dbC.instance_id;
-               const isEmpty = !conv.last_message_preview && conv.unread_count === 0;
-               if (isEmpty && !isPrimary) {
-                   return false;
-               }
+                // Ignorar conversas vazias (sem mensagens) no carregamento inicial para evitar poluição no painel.
+                const isEmpty = !conv.last_message_preview && (conv.unread_count === 0 || !conv.unread_count);
+                if (isEmpty) {
+                    return false;
+                }
                
                // --- PROTEÇÃO RIGOROSA RONALDO-WEB ---
                if (!isRonaldo) {
