@@ -666,12 +666,17 @@ export default function ChecklistTablet() {
       // 2. Inserir todas as Respostas
       const responsesPayloads = itemsToAnswer.map(item => {
         const resp = responses[item.id];
+        let valToSave = resp.value || 'Feito';
+        if (item.response_type === 'kg') {
+          const num = parseFloat(resp.value || '0');
+          valToSave = !isNaN(num) ? num.toFixed(3) : '0.000';
+        }
         return {
           tenant_id: tenantId,
           execution_id: execData.id,
           item_id: item.id,
           user_id: loggedInUser.id,
-          response_value: resp.value || 'Feito',
+          response_value: valToSave,
           is_conforming: resp.isConforming,
           is_meta_ok: resp.isMetaOk,
           is_done: resp.isDone,
@@ -1553,16 +1558,15 @@ export default function ChecklistTablet() {
                                           handleAnswerChange(item.id, item.response_type, '', item.min_meta, item.max_meta);
                                           return;
                                         }
-                                        let processed = '';
-                                        if (rawVal.includes('.') || rawVal.includes(',')) {
-                                          processed = rawVal.replace(/[^\d.,]/g, '').replace(',', '.');
+                                        // Máscara pura de balança comercial (de trás para frente)
+                                        const digits = rawVal.replace(/\D/g, '');
+                                        if (digits) {
+                                          const parsed = parseInt(digits, 10);
+                                          const processed = (parsed / 1000).toFixed(3);
+                                          handleAnswerChange(item.id, item.response_type, processed, item.min_meta, item.max_meta);
                                         } else {
-                                          const digits = rawVal.replace(/\D/g, '');
-                                          if (digits) {
-                                            processed = (parseInt(digits, 10) / 1000).toFixed(3);
-                                          }
+                                          handleAnswerChange(item.id, item.response_type, '0.000', item.min_meta, item.max_meta);
                                         }
-                                        handleAnswerChange(item.id, item.response_type, processed, item.min_meta, item.max_meta);
                                       }}
                                       placeholder="0,000"
                                       className="bg-transparent border-none focus:outline-none focus:ring-0 text-3xl md:text-4xl font-black w-24 md:w-32 text-center text-white p-0 m-0 font-mono tracking-wide"
