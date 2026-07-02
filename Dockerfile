@@ -1,5 +1,7 @@
 FROM node:20-slim
-RUN apt-get update && apt-get install -y git libgomp1 procps && rm -rf /var/lib/apt/lists/*
+RUN apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 -o Acquire::http::Timeout="15" update && \
+    apt-get install -y git libgomp1 procps && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
