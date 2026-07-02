@@ -12,12 +12,34 @@ const getWaCallsUrl = () => {
 };
 const WACALLS_URL = getWaCallsUrl();
 
+async function hasActiveInstances() {
+    try {
+        const { count, error } = await supabase
+            .from('whatsapp_instances')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'connected');
+        
+        if (error) return false;
+        return (count || 0) > 0;
+    } catch (err) {
+        return false;
+    }
+}
+
 export function startWaCallsListener() {
     let active = true;
 
     async function listen() {
         while (active) {
             try {
+                // Só ativa a escuta se houver de fato instâncias ativas em uso
+                const hasActive = await hasActiveInstances();
+                if (!hasActive) {
+                    // Sem instâncias conectadas. Aguarda 1 minuto e verifica novamente.
+                    await new Promise(resolve => setTimeout(resolve, 60000));
+                    continue;
+                }
+
                 console.log(`[WaCalls Background Listener] Conectando ao SSE em: ${WACALLS_URL}/api/events`);
                 const response = await fetch(`${WACALLS_URL}/api/events`);
                 if (!response.body) {
