@@ -76,6 +76,67 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
     }
 });
 
+router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, res) => {
+    try {
+        const { instanceId } = req.params;
+        const { phoneNumber } = req.body;
+        const tenantId = req.tenantId;
+
+        if (!phoneNumber) return res.status(400).json({ error: 'Número de telefone obrigatório' });
+        const cleanPhone = phoneNumber.replace(/\D/g, '');
+
+        if (sessionManager.sessions.has(instanceId)) {
+            console.log(`[API] /pairing-code chamado, mas a sessão ${instanceId} já estava em memória. Forçando fechamento prévio.`);
+            await sessionManager.closeSession(instanceId);
+            if (sessionManager.connectingState.has(instanceId)) {
+                 sessionManager.connectingState.delete(instanceId);
+            }
+        }
+
+        console.log(`[API] Limpando credenciais antigas para Pairing Code na instância ${instanceId}...`);
+        const { sessionCaches } = await import('../session-manager/auth.js');
+        if (sessionCaches && sessionCaches.has(instanceId)) {
+            sessionCaches.delete(instanceId);
+        }
+        await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
+        await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
+        await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
+
+        await supabase.from('whatsapp_instances')
+            .update({ status: 'connecting', last_error: null })
+            .eq('id', instanceId)
+            .eq('tenant_id', tenantId);
+
+        console.log(`[API] Criando sessão Baileys para Pairing Code...`);
+        sessionManager.createSession(tenantId, instanceId).catch(console.error);
+
+        // Aguarda a inicialização do soquete para solicitar o Pairing Code
+        let attempts = 0;
+        let activeSock = null;
+        
+        while (attempts < 10) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            activeSock = sessionManager.getSocket(instanceId);
+            if (activeSock && activeSock.ws && activeSock.ws.isOpen) {
+                break;
+            }
+            attempts++;
+        }
+
+        if (!activeSock) {
+            return res.status(500).json({ error: 'Não foi possível inicializar a conexão do WhatsApp para gerar o código.' });
+        }
+
+        console.log(`[API] Solicitando Pairing Code para o número ${cleanPhone}...`);
+        const code = await activeSock.requestPairingCode(cleanPhone);
+        
+        res.json({ ok: true, code, instanceId });
+    } catch (e) {
+        console.error('[API/pairing-code] Erro ao gerar pairing code:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 router.post('/instances/:instanceId/disconnect', requireTenant, async (req, res) => {
     try {
         const { instanceId } = req.params;

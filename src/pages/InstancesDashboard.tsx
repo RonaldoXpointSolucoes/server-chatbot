@@ -32,6 +32,10 @@ export default function InstancesDashboard() {
   const [showQrModal, setShowQrModal] = useState<string | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
+  const [connectMode, setConnectMode] = useState<'qr' | 'pairing'>('qr');
+  const [pairingPhone, setPairingPhone] = useState('');
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingLoading, setPairingLoading] = useState(false);
   
   // UI states
   const [deletingInstance, setDeletingInstance] = useState<WhatsAppInstance | null>(null);
@@ -558,6 +562,73 @@ export default function InstancesDashboard() {
     setTimeout(() => { clearInterval(interval); }, 180000); // Timeout max de 3 mins
   };
 
+  const handleRequestPairingCode = async (id: string, apiKey?: string) => {
+    if (!pairingPhone) {
+      alert("Por favor, digite o número do telefone com código do país (ex: 5511991649959).");
+      return;
+    }
+    
+    setPairingLoading(true);
+    setPairingCode(null);
+    
+    try {
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/pairing-code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': tenantId!,
+          'apikey': apiKey || ''
+        },
+        body: JSON.stringify({ phoneNumber: pairingPhone })
+      });
+      
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setPairingCode(data.code);
+        pollPairingStatus(id, apiKey);
+      } else {
+        alert(data.error || "Erro ao solicitar código de pareamento.");
+      }
+    } catch (err) {
+      alert("Erro de comunicação com o servidor ao gerar o código.");
+    } finally {
+      setPairingLoading(false);
+    }
+  };
+
+  const pollPairingStatus = (id: string, apiKey?: string) => {
+    const interval = setInterval(async () => {
+      try {
+        const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+        const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/status`, {
+            headers: { 
+              'x-tenant-id': tenantId!,
+              'apikey': apiKey || ''
+            }
+        });
+        const respJson = await res.json();
+        const data = respJson.data;
+        
+        if (data && (data.status === 'connected' || data.status === 'connected_local')) {
+          setShowQrModal(null);
+          setPairingCode(null);
+          setPairingPhone('');
+          setSuccessConnectId(id);
+          setTimeout(() => setSuccessConnectId(null), 2000);
+          clearInterval(interval);
+          fetchInstances();
+        } else if (data && data.status === 'offline') {
+           clearInterval(interval);
+        }
+      } catch (e) {
+        clearInterval(interval);
+      }
+    }, 2000);
+
+    setTimeout(() => { clearInterval(interval); }, 180000); // 3 mins
+  };
+
   const toggleSetting = async (id: string, currentSettings: any, key: string) => {
     const newSettings = { ...(currentSettings || {}), [key]: !currentSettings?.[key] };
     
@@ -958,23 +1029,120 @@ export default function InstancesDashboard() {
                  {/* Área de Pareamento Inline (Substitui Modal) */}
                  {showQrModal === inst.id && (
                     <div className="mt-6 w-full flex flex-col items-center justify-center p-6 bg-gray-50/50 dark:bg-black/30 border border-gray-200/50 dark:border-white/5 rounded-3xl animate-in fade-in zoom-in-95">
-                       <h4 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2 mb-2">
-                         <QrCode className="text-emerald-500" /> Pareamento Web
+                       <h4 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2 mb-4">
+                         <QrCode className="text-emerald-500" /> Vincular WhatsApp
                        </h4>
-                       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 text-center max-w-sm">Abra "Aparelhos Conectados" no seu WhatsApp e aponte a câmera para o QR.</p>
-                       <div className="w-56 h-56 bg-white rounded-2xl shadow-inner border border-gray-200 dark:border-gray-800 flex items-center justify-center overflow-hidden mb-4 relative">
-                          {qrLoading ? (
-                            <div className="flex flex-col items-center gap-2">
-                              <Loader2 className="animate-spin text-emerald-500" size={28} />
-                              <span className="text-[10px] font-bold text-gray-400">GERANDO...</span>
-                            </div>
-                          ) : qrCode ? (
-                            <img src={qrCode} alt="QR Code Inline" className="w-full h-full object-cover animate-in fade-in" />
-                          ) : (
-                            <span className="text-xs font-semibold text-red-400">QR Code falhou.</span>
-                          )}
+
+                       {/* Seletor de Abas */}
+                       <div className="flex gap-2 mb-6 bg-gray-200/50 dark:bg-white/5 p-1 rounded-2xl w-full max-w-sm">
+                         <button
+                           onClick={() => {
+                             setConnectMode('qr');
+                             handleConnect(inst.id, inst.api_key);
+                           }}
+                           className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${connectMode === 'qr' ? 'bg-[#00a884] text-white shadow-sm' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-300/30'}`}
+                         >
+                           <QrCode size={14} /> Escanear QR Code
+                         </button>
+                         <button
+                           onClick={() => {
+                             setConnectMode('pairing');
+                             setQrCode(null);
+                           }}
+                           className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${connectMode === 'pairing' ? 'bg-[#00a884] text-white shadow-sm' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-300/30'}`}
+                         >
+                           <Phone size={14} /> Código de 8 Dígitos
+                         </button>
                        </div>
-                       <button onClick={() => setShowQrModal(null)} className="w-full py-3 bg-gray-200 dark:bg-white/10 hover:bg-gray-300 hover:dark:bg-white/20 text-gray-700 dark:text-white rounded-[14px] font-bold transition-all text-sm">
+
+                       {connectMode === 'qr' && (
+                         <>
+                           <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 text-center max-w-sm">Abra "Aparelhos Conectados" no seu WhatsApp e aponte a câmera para o QR.</p>
+                           <div className="w-56 h-56 bg-white rounded-2xl shadow-inner border border-gray-200 dark:border-gray-800 flex items-center justify-center overflow-hidden mb-5 relative">
+                              {qrLoading ? (
+                                <div className="flex flex-col items-center gap-2">
+                                  <Loader2 className="animate-spin text-emerald-500" size={28} />
+                                  <span className="text-[10px] font-bold text-gray-400">GERANDO...</span>
+                                </div>
+                              ) : qrCode ? (
+                                <img src={qrCode} alt="QR Code Inline" className="w-full h-full object-cover animate-in fade-in" />
+                              ) : (
+                                <span className="text-xs font-semibold text-red-400">QR Code falhou.</span>
+                              )}
+                           </div>
+                         </>
+                       )}
+
+                       {connectMode === 'pairing' && (
+                         <div className="w-full max-w-sm flex flex-col items-center">
+                           {!pairingCode ? (
+                             <>
+                               <p className="text-xs text-gray-500 dark:text-gray-400 mb-5 text-center">Digite o número completo do WhatsApp no formato internacional para gerar o código de pareamento.</p>
+                               <div className="w-full mb-4 text-left">
+                                 <label className="block text-[10px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider mb-1">Número do WhatsApp (com DDI e DDD)</label>
+                                 <input
+                                   type="text"
+                                   placeholder="Ex: 5511991649959"
+                                   value={pairingPhone}
+                                   onChange={(e) => setPairingPhone(e.target.value)}
+                                   className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-xl px-4 py-3 text-sm font-semibold text-gray-800 dark:text-white focus:outline-none focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all"
+                                 />
+                               </div>
+                               <button
+                                 onClick={() => handleRequestPairingCode(inst.id, inst.api_key)}
+                                 disabled={pairingLoading}
+                                 className="w-full py-3.5 bg-[#00a884] hover:bg-[#008f6f] disabled:bg-[#00a884]/50 text-white rounded-xl font-bold transition-all text-sm flex items-center justify-center gap-2 mb-4 cursor-pointer"
+                               >
+                                 {pairingLoading ? (
+                                   <>
+                                     <Loader2 className="animate-spin" size={16} /> Gerando Código...
+                                   </>
+                                 ) : (
+                                   'Gerar Código de Pareamento'
+                                 )}
+                               </button>
+                             </>
+                           ) : (
+                             <div className="w-full flex flex-col items-center animate-in fade-in duration-200">
+                               <p className="text-xs text-gray-500 dark:text-[#8696a0] mb-2 text-center font-semibold">Seu código de pareamento do WhatsApp:</p>
+                               <div className="px-6 py-4 bg-gray-100 dark:bg-black/40 rounded-2xl border border-gray-200 dark:border-white/5 mb-5 font-mono text-2xl font-bold text-[#00a884] tracking-widest uppercase flex items-center gap-3">
+                                 {pairingCode}
+                                 <button
+                                   onClick={() => {
+                                     navigator.clipboard.writeText(pairingCode);
+                                     alert("Código copiado!");
+                                   }}
+                                   className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-lg text-gray-500 dark:text-[#8696a0] transition-colors cursor-pointer"
+                                   title="Copiar código"
+                                 >
+                                   <Copy size={16} />
+                                 </button>
+                               </div>
+                               <div className="w-full bg-gray-100 dark:bg-[#202c33]/40 p-4 rounded-2xl border border-gray-200 dark:border-white/5 text-left mb-5 space-y-2.5">
+                                 <h6 className="text-[10px] font-bold text-gray-800 dark:text-white uppercase tracking-wide">Instruções no Celular:</h6>
+                                 <ol className="list-decimal list-inside text-xs text-gray-500 dark:text-[#8696a0] space-y-1.5 leading-relaxed">
+                                   <li>Abra o **WhatsApp** no seu celular.</li>
+                                   <li>Vá em **Dispositivos Conectados > Conectar um dispositivo**.</li>
+                                   <li>Escolha **"Conectar com número de telefone em vez disso"** (na parte inferior).</li>
+                                   <li>Digite o código **{pairingCode}** acima.</li>
+                                 </ol>
+                               </div>
+                               <div className="flex items-center gap-2 text-xs text-[#00a884] font-bold mb-4 animate-pulse">
+                                 <Loader2 className="animate-spin" size={14} /> Aguardando pareamento no celular...
+                               </div>
+                             </div>
+                           )}
+                         </div>
+                       )}
+
+                       <button 
+                         onClick={() => {
+                           setShowQrModal(null);
+                           setPairingCode(null);
+                           setPairingPhone('');
+                         }} 
+                         className="w-full py-3 bg-gray-200 dark:bg-white/10 hover:bg-gray-300 hover:dark:bg-white/20 text-gray-700 dark:text-white rounded-[14px] font-bold transition-all text-sm cursor-pointer"
+                       >
                          Cancelar
                        </button>
                     </div>
