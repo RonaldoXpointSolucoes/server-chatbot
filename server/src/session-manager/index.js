@@ -203,7 +203,7 @@ class SessionManager {
                 logger: this.logger,
                 printQRInTerminal: false,
                 auth: state,
-                browser: ['Mac OS', 'Chrome', '131.0.0.0'],
+                browser: Browsers.macOS('Chrome'),
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: false,
                 markOnlineOnConnect: true,

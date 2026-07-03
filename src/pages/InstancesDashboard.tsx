@@ -1183,11 +1183,13 @@ export default function InstancesDashboard() {
                              <div className="w-full flex flex-col items-center animate-in fade-in duration-200">
                                <p className="text-xs text-gray-500 dark:text-[#8696a0] mb-2 text-center font-semibold">Seu código de pareamento do WhatsApp:</p>
                                <div className="px-6 py-4 bg-gray-100 dark:bg-black/40 rounded-2xl border border-gray-200 dark:border-white/5 mb-5 font-mono text-2xl font-bold text-[#00a884] tracking-widest uppercase flex items-center gap-3">
-                                 {pairingCode}
+                                 {pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}
                                  <button
                                    onClick={() => {
-                                     navigator.clipboard.writeText(pairingCode);
-                                     alert("Código copiado!");
+                                     if (pairingCode) {
+                                       navigator.clipboard.writeText(pairingCode.replace(/[^a-zA-Z0-9]/g, ''));
+                                       alert("Código copiado!");
+                                     }
                                    }}
                                    className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-lg text-gray-500 dark:text-[#8696a0] transition-colors cursor-pointer"
                                    title="Copiar código"
@@ -1201,7 +1203,7 @@ export default function InstancesDashboard() {
                                    <li>Abra o **WhatsApp** no seu celular.</li>
                                    <li>Vá em **Dispositivos Conectados &gt; Conectar um dispositivo**.</li>
                                    <li>Escolha **"Conectar com número de telefone em vez disso"** (na parte inferior).</li>
-                                   <li>Digite o código **{pairingCode}** acima.</li>
+                                   <li>Digite o código **{pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}** no seu celular.</li>
                                  </ol>
                                </div>
                                <div className="flex items-center gap-2 text-xs text-[#00a884] font-bold mb-4 animate-pulse">

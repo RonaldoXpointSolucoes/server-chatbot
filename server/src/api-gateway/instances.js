@@ -108,23 +108,26 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
             .eq('tenant_id', tenantId);
 
         console.log(`[API] Criando sessão Baileys para Pairing Code...`);
-        sessionManager.createSession(tenantId, instanceId).catch(console.error);
-
-        // Aguarda a inicialização do soquete para solicitar o Pairing Code
-        let attempts = 0;
-        let activeSock = null;
-        
-        while (attempts < 10) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            activeSock = sessionManager.getSocket(instanceId);
-            if (activeSock && activeSock.ws && activeSock.ws.isOpen) {
-                break;
-            }
-            attempts++;
-        }
+        const activeSock = await sessionManager.createSession(tenantId, instanceId);
 
         if (!activeSock) {
             return res.status(500).json({ error: 'Não foi possível inicializar a conexão do WhatsApp para gerar o código.' });
+        }
+
+        // Aguarda a inicialização do soquete (Websocket estar pronto)
+        let attempts = 0;
+        let isReady = false;
+        while (attempts < 15) {
+            if (activeSock.ws && (activeSock.ws.isOpen || activeSock.ws.readyState === 1)) {
+                isReady = true;
+                break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            attempts++;
+        }
+
+        if (!isReady) {
+            return res.status(500).json({ error: 'A conexão com o WhatsApp foi criada, mas demorou a responder. Tente novamente.' });
         }
 
         console.log(`[API] Solicitando Pairing Code para o número ${cleanPhone}...`);
