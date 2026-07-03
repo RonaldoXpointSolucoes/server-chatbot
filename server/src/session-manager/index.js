@@ -55,6 +55,7 @@ class SessionManager {
         this.reconnectingTimers = new Map();
         this.queues = new Map();
         this.watchdogs = new Map();
+        this.authenticatedSessions = new Set();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -181,6 +182,7 @@ class SessionManager {
             );
 
             const { state, saveCreds } = await useSupabaseAuthState(tenantId, instanceId);
+            const wasAuthenticatedOnBoot = !!(state?.creds?.me?.id);
             const { version, isLatest } = await fetchLatestBaileysVersion();
             
             console.log(`[SessionManager] Usando WA v${version.join('.')}, isLatest: ${isLatest}`);
@@ -224,6 +226,7 @@ class SessionManager {
 
                 const { connection, lastDisconnect } = update;
                 if (connection === 'open') {
+                    this.authenticatedSessions.add(instanceId);
                     this.startWatchdog(tenantId, instanceId, sock);
                     
                     // Proteção contra duplicação de chip (mesmo número em múltiplas instâncias)
@@ -311,9 +314,10 @@ class SessionManager {
 
                     this.sessions.delete(instanceId);
 
-                    const hasOwner = !!(sock?.user?.id || state?.creds?.me?.id);
-                    if ((loggedOut || status === 401 || status === 403 || status === 400) && hasOwner) {
-                        console.log(`[SessionManager] Instância ${instanceId} desconectada ou erro crítico (status: ${status}) com dono ativo. Limpando credenciais.`);
+                    const isInitiallyAuthenticated = wasAuthenticatedOnBoot || this.authenticatedSessions.has(instanceId) || !!sock?.user?.id;
+                    if ((loggedOut || status === 401 || status === 403 || status === 400) && isInitiallyAuthenticated) {
+                        console.log(`[SessionManager] Instância ${instanceId} desconectada ou erro crítico (status: ${status}) com sessão autenticada ativa. Limpando credenciais.`);
+                        this.authenticatedSessions.delete(instanceId);
                         await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId));
@@ -326,7 +330,7 @@ class SessionManager {
                         }, 5000);
                         this.reconnectingTimers.set(instanceId, timer);
                     } else if (loggedOut || status === 401 || status === 403 || status === 400) {
-                        console.log(`[SessionManager] Instância ${instanceId} desconectada (status: ${status}) sem dono configurado (provável pareamento em andamento). Mantendo credenciais.`);
+                        console.log(`[SessionManager] Instância ${instanceId} desconectada (status: ${status}) sem sessão autenticada estabelecida (pareamento em andamento). Mantendo credenciais.`);
                         this.reconnectAttempts.delete(instanceId);
                         // Tentar reconectar usando as credenciais que estão sendo pareadas/preparadas
                         const timer = setTimeout(() => {
@@ -621,6 +625,7 @@ class SessionManager {
         }
 
         const data = this.sessions.get(instanceId);
+        this.authenticatedSessions.delete(instanceId);
         if (data && data.sock) {
             try { data.sock.ws.close(); } catch(e){}
             this.sessions.delete(instanceId);
