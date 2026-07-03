@@ -24,8 +24,14 @@ function enqueueWrite(instanceId, writeFn) {
 }
 
 export async function flushPendingWrites(instanceId) {
-    // No-op: chaves agora são salvas de forma síncrona/imediata no keys.set
-    return;
+    if (writeQueues.has(instanceId)) {
+        console.log(`[SessionManager] Aguardando conclusão da fila de escrita para a instância ${instanceId}...`);
+        try {
+            await writeQueues.get(instanceId);
+        } catch (e) {
+            console.error(`[SessionManager] Erro durante o flush da fila de escrita para ${instanceId}:`, e.message);
+        }
+    }
 }
 
 export async function flushAllPendingWrites() {

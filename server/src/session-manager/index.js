@@ -158,6 +158,9 @@ class SessionManager {
 
     async _createSessionInner(tenantId, instanceId) {
         try {
+            // Aguarda que qualquer escrita pendente da sessão anterior no Supabase seja finalizada
+            await flushPendingWrites(instanceId);
+
             // Verifica se a instância ainda existe no banco de dados para evitar violação de chave estrangeira
             const { data: instance, error: findError } = await retryWithBackoff(() =>
                 supabase
@@ -314,8 +317,33 @@ class SessionManager {
 
                     this.sessions.delete(instanceId);
 
-                    const isInitiallyAuthenticated = wasAuthenticatedOnBoot || this.authenticatedSessions.has(instanceId) || !!sock?.user?.id;
-                    if ((loggedOut || status === 401 || status === 403 || status === 400) && isInitiallyAuthenticated) {
+                    const meId = sock?.user?.id || state?.creds?.me?.id;
+                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || (meId && String(meId).includes(':'));
+
+                    if ((loggedOut || status === 401 || status === 403 || status === 400 || status === 428) && !isFullyAuthenticated) {
+                        console.log(`[SessionManager] Pareamento pendente falhou/rejeitado na instância ${instanceId} (status: ${status}). Limpando credenciais temporárias.`);
+                        this.authenticatedSessions.delete(instanceId);
+                        await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));
+                        await retryWithBackoff(() => supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId));
+                        await retryWithBackoff(() => supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId));
+                        
+                        this.reconnectAttempts.delete(instanceId);
+                        
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .update({ 
+                                    status: 'offline', 
+                                    last_error: 'O pareamento por código falhou ou foi cancelado no celular. Por favor, tente gerar um novo código e digite-o novamente.' 
+                                })
+                                .eq('id', instanceId)
+                        );
+                        
+                        // Publica evento de status offline para o frontend
+                        await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
+                            connection: 'close', 
+                            lastDisconnect: { error: { output: { statusCode: status || 400 } } } 
+                        });
+                    } else if ((loggedOut || status === 401 || status === 403 || status === 400) && isFullyAuthenticated) {
                         console.log(`[SessionManager] Instância ${instanceId} desconectada ou erro crítico (status: ${status}) com sessão autenticada ativa. Limpando credenciais.`);
                         this.authenticatedSessions.delete(instanceId);
                         await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));
@@ -324,15 +352,6 @@ class SessionManager {
                         
                         this.reconnectAttempts.delete(instanceId);
                         // Tentar reconectar limpo após 5s
-                        const timer = setTimeout(() => {
-                            this.reconnectingTimers.delete(instanceId);
-                            this.createSession(tenantId, instanceId);
-                        }, 5000);
-                        this.reconnectingTimers.set(instanceId, timer);
-                    } else if (loggedOut || status === 401 || status === 403 || status === 400) {
-                        console.log(`[SessionManager] Instância ${instanceId} desconectada (status: ${status}) sem sessão autenticada estabelecida (pareamento em andamento). Mantendo credenciais.`);
-                        this.reconnectAttempts.delete(instanceId);
-                        // Tentar reconectar usando as credenciais que estão sendo pareadas/preparadas
                         const timer = setTimeout(() => {
                             this.reconnectingTimers.delete(instanceId);
                             this.createSession(tenantId, instanceId);
