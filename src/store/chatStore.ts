@@ -551,7 +551,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   realtimeStatus: 'disconnected',
   hasRealtimeConnectedOnce: false,
   setInstanceStatus: (id, status) => {
-    if (status === 'connected') {
+    if (status === 'connected' || status === 'connected_local') {
       if (instanceStatusTimeouts[id]) {
         clearTimeout(instanceStatusTimeouts[id]);
         delete instanceStatusTimeouts[id];
@@ -563,7 +563,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
     } else {
       const currentState = get().instancesStatus[id];
-      if (currentState === 'connected' || !currentState) {
+      if (currentState === 'connected' || currentState === 'connected_local' || !currentState) {
          if ((window as any)[`_offline_checks_${id}`] || instanceStatusTimeouts[id]) {
             return;
          }
@@ -578,7 +578,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', id).maybeSingle();
                const dbStatus = data?.status || 'offline';
                
-               if (dbStatus === 'connected') {
+               if (dbStatus === 'connected' || dbStatus === 'connected_local') {
+                  set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: dbStatus } }));
                   clearInterval(intervalId);
                   delete (window as any)[`_offline_checks_${id}`];
                   return;
