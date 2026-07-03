@@ -361,6 +361,24 @@ export default function EvolutionModal({
     }
   };
 
+  // AÇÃO DE SUCESSO COMPARTILHADA
+  const handleSuccess = (instanceIdToUse?: string | null) => {
+    const finalId = instanceIdToUse || activePollingId || targetInstanceName || useChatStore.getState().connectedInstanceName;
+    setSuccessMsg("Conectado com sucesso! Preparando ambiente...");
+    setLoading(false);
+    setQrBase64(null);
+    setActivePollingId(null);
+    setConnectionStatusMessage(null);
+    if (finalId) {
+      setEvolutionConnection(true, finalId);
+      useChatStore.getState().syncEvolutionContacts(finalId);
+    }
+    setTimeout(() => {
+      setSuccessMsg(null);
+      onClose();
+    }, 2500);
+  };
+
   // SUBSCRIPTION DO REALTIME DE CONEXÃO
   useEffect(() => {
     if (!activePollingId) return;
@@ -370,7 +388,7 @@ export default function EvolutionModal({
       sessionStorage.getItem("current_tenant_id");
     const channelName = `tenant:${tenantId}:instance:${activePollingId}`;
 
-    console.log(`[Realtime] Inscrito no canal: ${channelName}`);
+    console.log(`[Realtime] Inscrito no canal: ${channelName} | Modo: ${connectMode}`);
     const channel = supabase.channel(channelName);
 
     // Timeout de segurança contra loop infinito
@@ -388,22 +406,12 @@ export default function EvolutionModal({
 
     let pollInterval: any;
 
-    const handleSuccess = () => {
-      setSuccessMsg("Conectado com sucesso! Preparando ambiente...");
-      setLoading(false);
-      setQrBase64(null);
-      setActivePollingId(null);
-      setConnectionStatusMessage(null);
-      setEvolutionConnection(true, activePollingId);
-      useChatStore.getState().syncEvolutionContacts(activePollingId);
-      setTimeout(() => {
-        setSuccessMsg(null);
-        onClose();
-      }, 2500);
-    };
-
     channel
       .on("broadcast", { event: "instance.qr_updated" }, (payload: any) => {
+        if (connectMode === 'pairing') {
+          console.log("[Realtime] Ignorando evento de QR Code recebido durante modo pareamento.");
+          return;
+        }
         if (payload.payload?.qr_code) {
           setQrBase64(payload.payload.qr_code);
           setLoading(false);
@@ -413,6 +421,10 @@ export default function EvolutionModal({
       .on("broadcast", { event: "instance.status" }, (payload: any) => {
         const st = payload.payload?.status;
         if (st === "offline") {
+          if (connectMode === 'pairing') {
+            console.log("[Realtime] Ignorando status offline na conexão via Pairing Code (transição esperada)");
+            return;
+          }
           setError(
             payload.payload?.reason
               ? `Falha com código: ${payload.payload.reason}`
@@ -423,7 +435,11 @@ export default function EvolutionModal({
           setActivePollingId(null);
           setConnectionStatusMessage(null);
         } else if (st === "connecting") {
-          setConnectionStatusMessage("QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)...");
+          setConnectionStatusMessage(
+            connectMode === 'pairing'
+              ? "Código digitado no celular! Conectando aparelho..."
+              : "QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)..."
+          );
         } else if (st === "connected" || st === "connected_local") {
           handleSuccess();
         }
@@ -442,12 +458,16 @@ export default function EvolutionModal({
                 handleSuccess();
                 clearInterval(pollInterval);
               } else if (st?.data?.status === "connecting") {
-                setConnectionStatusMessage("QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)...");
+                setConnectionStatusMessage(
+                  connectMode === 'pairing'
+                    ? "Código digitado no celular! Conectando aparelho..."
+                    : "QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)..."
+                );
               }
             } catch (e) {
               // ignora erro silencioso no polling
             }
-          }, 1000);
+          }, 1500);
         }
       });
 
@@ -457,7 +477,7 @@ export default function EvolutionModal({
       supabase.removeChannel(channel);
       setConnectionStatusMessage(null);
     };
-  }, [activePollingId, loading, existingInstances]);
+  }, [activePollingId, loading, existingInstances, connectMode]);
 
   const handleRequestPairingCode = async (id: string, apiKey?: string) => {
     if (!pairingPhone) {
