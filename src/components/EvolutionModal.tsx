@@ -143,7 +143,26 @@ export default function EvolutionModal({
     isOpen: boolean;
   } | null>(null);
   const [modalInput1, setModalInput1] = useState("");
-  const [modalInput2, setModalInput2] = useState("");
+  // Pré-preenche o número de telefone de pareamento
+  useEffect(() => {
+    if (activePollingId) {
+      const currentInst = existingInstances.find((i) => i.id === activePollingId);
+      if (currentInst?.phone_number) {
+        setPairingPhone(currentInst.phone_number);
+      } else {
+        setPairingPhone("");
+      }
+    } else if (targetInstanceName) {
+      const currentInst = existingInstances.find((i) => i.id === targetInstanceName);
+      if (currentInst?.phone_number) {
+        setPairingPhone(currentInst.phone_number);
+      } else {
+        setPairingPhone("");
+      }
+    } else {
+      setPairingPhone("");
+    }
+  }, [activePollingId, existingInstances, targetInstanceName]);
 
   const INSTANCE_COLORS = [
     { value: "#10b981", label: "Esmeralda" },
@@ -496,6 +515,10 @@ export default function EvolutionModal({
           details: data
         });
         setPairingCode(data.code);
+        // Salva o número associado no banco
+        const cleanPhone = pairingPhone.replace(/\D/g, '');
+        await supabase.from('whatsapp_instances').update({ phone_number: cleanPhone }).eq('id', id);
+        fetchExistingInstances();
         pollPairingStatus(id, apiKey);
       } else {
         const errMsg = data.error || "Erro ao solicitar código de pareamento.";
@@ -2321,7 +2344,21 @@ export default function EvolutionModal({
                         <div className="w-full flex flex-col items-center animate-in fade-in duration-200">
                           <p className="text-xs text-gray-500 dark:text-[#8696a0] mb-2 text-center font-semibold">Seu código de pareamento do WhatsApp:</p>
                           <div className="px-6 py-4 bg-gray-100 dark:bg-black/40 rounded-2xl border border-gray-200 dark:border-white/5 mb-5 font-mono text-2xl font-bold text-[#00a884] tracking-widest uppercase flex items-center gap-3">
-                            {pairingCode}
+                            {pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}
+                            <button
+                              onClick={() => {
+                                if (pairingCode) {
+                                  navigator.clipboard.writeText(pairingCode.replace(/[^a-zA-Z0-9]/g, ''));
+                                  alert("Código copiado!");
+                                }
+                              }}
+                              className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-lg text-gray-500 dark:text-[#8696a0] transition-colors cursor-pointer"
+                              title="Copiar código"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                              </svg>
+                            </button>
                           </div>
                           <div className="w-full bg-gray-100 dark:bg-[#202c33]/40 p-4 rounded-2xl border border-gray-200 dark:border-white/5 text-left mb-5 space-y-2.5">
                             <h6 className="text-[10px] font-bold text-gray-800 dark:text-white uppercase tracking-wide">Instruções no Celular:</h6>
@@ -2329,7 +2366,7 @@ export default function EvolutionModal({
                               <li>Abra o **WhatsApp** no seu celular.</li>
                               <li>Vá em **Dispositivos Conectados &gt; Conectar um dispositivo**.</li>
                               <li>Escolha **"Conectar com número de telefone em vez disso"** (na parte inferior).</li>
-                              <li>Digite o código **{pairingCode}** acima.</li>
+                              <li>Digite o código **{pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}** no seu celular.</li>
                             </ol>
                           </div>
                           <div className="flex items-center gap-2 text-xs text-[#00a884] font-bold mb-4 animate-pulse">
