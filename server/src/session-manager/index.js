@@ -224,8 +224,9 @@ class SessionManager {
 
             sock.ev.on('creds.update', async () => {
                 await saveCreds();
-                // Só dispara a atualização de pareamento se a sessão ainda NÃO estiver autenticada/conectada em memória
-                if (!this.authenticatedSessions.has(instanceId)) {
+                // Só dispara a atualização de pareamento se a sessão NÃO estava autenticada no boot
+                // e ainda não está autenticada/conectada em memória
+                if (!wasAuthenticatedOnBoot && !this.authenticatedSessions.has(instanceId)) {
                     const meId = sock.user?.id || state?.creds?.me?.id;
                     if (meId) {
                         const phone = meId.split('@')[0].split(':')[0];
@@ -245,11 +246,14 @@ class SessionManager {
             });
 
             sock.ev.on('connection.update', async (update) => {
+                if (update.connection === 'open') {
+                    this.authenticatedSessions.add(instanceId);
+                }
+
                 await eventProcessor.handleConnectionUpdate(tenantId, instanceId, update);
 
                 const { connection, lastDisconnect } = update;
                 if (connection === 'open') {
-                    this.authenticatedSessions.add(instanceId);
                     this.startWatchdog(tenantId, instanceId, sock);
                     
                     // Proteção contra duplicação de chip (mesmo número em múltiplas instâncias)
