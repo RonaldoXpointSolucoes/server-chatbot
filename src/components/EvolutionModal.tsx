@@ -106,6 +106,10 @@ export default function EvolutionModal({
   const [loading, setLoading] = useState(false);
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [connectMode, setConnectMode] = useState<'qr' | 'pairing'>('qr');
+  const [pairingPhone, setPairingPhone] = useState('');
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingLoading, setPairingLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [engineUser, setEngineUser] = useState<any>(null);
 
@@ -435,6 +439,72 @@ export default function EvolutionModal({
       setConnectionStatusMessage(null);
     };
   }, [activePollingId, loading, existingInstances]);
+
+  const handleRequestPairingCode = async (id: string, apiKey?: string) => {
+    if (!pairingPhone) {
+      alert("Por favor, digite o número do telefone com código do país (ex: 5511991649959).");
+      return;
+    }
+    
+    setPairingLoading(true);
+    setPairingCode(null);
+    setError(null);
+    
+    try {
+      const tenantId = localStorage.getItem("current_tenant_id") || sessionStorage.getItem("current_tenant_id");
+      const engineUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || "http://localhost:9000";
+      
+      const res = await fetch(`${engineUrl}/api/v1/instances/${id}/pairing-code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': tenantId!,
+          'apikey': apiKey || ''
+        },
+        body: JSON.stringify({ phoneNumber: pairingPhone })
+      });
+      
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setPairingCode(data.code);
+        pollPairingStatus(id, apiKey);
+      } else {
+        setError(data.error || "Erro ao solicitar código de pareamento.");
+      }
+    } catch (err) {
+      setError("Erro de comunicação com o servidor ao gerar o código.");
+    } finally {
+      setPairingLoading(false);
+    }
+  };
+
+  const pollPairingStatus = (id: string, apiKey?: string) => {
+    const tenantId = localStorage.getItem("current_tenant_id") || sessionStorage.getItem("current_tenant_id");
+    const engineUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || "http://localhost:9000";
+    
+    const interval = setInterval(async () => {
+      try {
+        if(!tenantId || !activePollingId) return;
+        const res = await fetch(`${engineUrl}/api/v1/instances/${id}/status`, {
+            headers: { 
+              'x-tenant-id': tenantId!,
+              'apikey': apiKey || ''
+            }
+        });
+        const respJson = await res.json();
+        const data = respJson.data;
+        
+        if (data && (data.status === 'connected' || data.status === 'connected_local')) {
+          handleSuccess();
+          clearInterval(interval);
+        }
+      } catch (e) {
+        clearInterval(interval);
+      }
+    }, 2000);
+
+    setTimeout(() => { clearInterval(interval); }, 180000);
+  };
 
   useEffect(() => {
     // If modal opens and we are marked as connected, let's load user from v2 status
@@ -2097,30 +2167,117 @@ export default function EvolutionModal({
                     {successMsg}
                   </p>
                 </div>
-              ) : qrBase64 ? (
+              ) : activePollingId ? (
                 <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center w-full pb-4">
-                  <div className="p-3 bg-white/90 backdrop-blur-md rounded-3xl shadow-xl border border-white/50">
-                    <img
-                      src={qrBase64}
-                      alt="QR Code"
-                      className="w-[200px] h-[200px] rounded-2xl"
-                    />
+                  {/* Seletor de Abas */}
+                  <div className="flex gap-2 mb-6 bg-gray-200/50 dark:bg-white/5 p-1 rounded-2xl w-full max-w-sm">
+                    <button
+                      onClick={() => {
+                        setConnectMode('qr');
+                        handleConnectExisting(existingInstances.find(i => i.id === activePollingId));
+                      }}
+                      className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${connectMode === 'qr' ? 'bg-[#00a884] text-white shadow-sm' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-300/30'}`}
+                    >
+                      <QrCode size={14} /> Escanear QR Code
+                    </button>
+                    <button
+                      onClick={() => {
+                        setConnectMode('pairing');
+                        setQrBase64(null);
+                      }}
+                      className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${connectMode === 'pairing' ? 'bg-[#00a884] text-white shadow-sm' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-300/30'}`}
+                    >
+                      <Smartphone size={14} /> Código de 8 Dígitos
+                    </button>
                   </div>
-                  <div className="flex flex-col items-center mt-6 mb-2">
-                    {connectionStatusMessage && connectionStatusMessage.includes("lido") && (
-                      <Loader2 className="animate-spin text-emerald-500 mb-2" size={20} />
-                    )}
-                    <p className={`text-center text-xs font-semibold px-4 transition-all duration-300 ${connectionStatusMessage && connectionStatusMessage.includes("lido") ? "text-emerald-500 animate-pulse font-bold" : "text-gray-500 dark:text-gray-400"}`}>
-                      {connectionStatusMessage || "Escaneie o QR Code no seu WhatsApp."}
-                    </p>
-                  </div>
+
+                  {connectMode === 'qr' && (
+                    <div className="flex flex-col items-center w-full">
+                      {qrBase64 ? (
+                        <div className="p-3 bg-white/90 backdrop-blur-md rounded-3xl shadow-xl border border-white/50 mb-4">
+                          <img
+                            src={qrBase64}
+                            alt="QR Code"
+                            className="w-[200px] h-[200px] rounded-2xl"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-[200px] h-[200px] rounded-2xl bg-gray-100 dark:bg-black/30 border border-gray-200 dark:border-white/5 flex items-center justify-center mb-4">
+                          <Loader2 className="animate-spin text-emerald-500" size={24} />
+                        </div>
+                      )}
+                      <div className="flex flex-col items-center mt-2 mb-2">
+                        {connectionStatusMessage && connectionStatusMessage.includes("lido") && (
+                          <Loader2 className="animate-spin text-emerald-500 mb-2" size={20} />
+                        )}
+                        <p className={`text-center text-xs font-semibold px-4 transition-all duration-300 ${connectionStatusMessage && connectionStatusMessage.includes("lido") ? "text-emerald-500 animate-pulse font-bold" : "text-gray-500 dark:text-gray-400"}`}>
+                          {connectionStatusMessage || "Escaneie o QR Code no seu WhatsApp."}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {connectMode === 'pairing' && (
+                    <div className="w-full max-w-sm flex flex-col items-center px-2">
+                      {!pairingCode ? (
+                        <>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-5 text-center">Digite o número completo do WhatsApp no formato internacional para gerar o código de pareamento.</p>
+                          <div className="w-full mb-4 text-left">
+                            <label className="block text-[10px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider mb-1">Número do WhatsApp (com DDI e DDD)</label>
+                            <input
+                              type="text"
+                              placeholder="Ex: 5511991649959"
+                              value={pairingPhone}
+                              onChange={(e) => setPairingPhone(e.target.value)}
+                              className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-xl px-4 py-3 text-sm font-semibold text-gray-800 dark:text-white focus:outline-none focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all"
+                            />
+                          </div>
+                          <button
+                            onClick={() => handleRequestPairingCode(activePollingId, existingInstances.find(i => i.id === activePollingId)?.api_key)}
+                            disabled={pairingLoading}
+                            className="w-full py-3.5 bg-[#00a884] hover:bg-[#008f6f] disabled:bg-[#00a884]/50 text-white rounded-xl font-bold transition-all text-sm flex items-center justify-center gap-2 mb-4 cursor-pointer"
+                          >
+                            {pairingLoading ? (
+                              <>
+                                <Loader2 className="animate-spin" size={16} /> Gerando Código...
+                              </>
+                            ) : (
+                              'Gerar Código de Pareamento'
+                            )}
+                          </button>
+                        </>
+                      ) : (
+                        <div className="w-full flex flex-col items-center animate-in fade-in duration-200">
+                          <p className="text-xs text-gray-500 dark:text-[#8696a0] mb-2 text-center font-semibold">Seu código de pareamento do WhatsApp:</p>
+                          <div className="px-6 py-4 bg-gray-100 dark:bg-black/40 rounded-2xl border border-gray-200 dark:border-white/5 mb-5 font-mono text-2xl font-bold text-[#00a884] tracking-widest uppercase flex items-center gap-3">
+                            {pairingCode}
+                          </div>
+                          <div className="w-full bg-gray-100 dark:bg-[#202c33]/40 p-4 rounded-2xl border border-gray-200 dark:border-white/5 text-left mb-5 space-y-2.5">
+                            <h6 className="text-[10px] font-bold text-gray-800 dark:text-white uppercase tracking-wide">Instruções no Celular:</h6>
+                            <ol className="list-decimal list-inside text-xs text-gray-500 dark:text-[#8696a0] space-y-1.5 leading-relaxed">
+                              <li>Abra o **WhatsApp** no seu celular.</li>
+                              <li>Vá em **Dispositivos Conectados &gt; Conectar um dispositivo**.</li>
+                              <li>Escolha **"Conectar com número de telefone em vez disso"** (na parte inferior).</li>
+                              <li>Digite o código **{pairingCode}** acima.</li>
+                            </ol>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-[#00a884] font-bold mb-4 animate-pulse">
+                            <Loader2 className="animate-spin" size={14} /> Aguardando pareamento no celular...
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <button
                     onClick={() => {
                       setQrBase64(null);
                       setLoading(false);
                       setActivePollingId(null);
+                      setPairingCode(null);
+                      setPairingPhone('');
                     }}
-                    className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 uppercase mt-2 bg-emerald-500/10 px-4 py-2 rounded-full hover:bg-emerald-500/20 transition-colors"
+                    className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 uppercase mt-4 bg-emerald-500/10 px-6 py-2.5 rounded-full hover:bg-emerald-500/20 transition-colors cursor-pointer"
                   >
                     Cancelar
                   </button>
