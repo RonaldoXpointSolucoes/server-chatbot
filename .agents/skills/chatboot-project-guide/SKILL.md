@@ -97,7 +97,20 @@ Os módulos operam sobre as seguintes tabelas críticas:
 - `whatsapp_instances`: Registro e status dos conectores de chips do WhatsApp.
 - `contacts` e `conversations`: Dados de clientes e status da thread de conversa (`status`, `ai_paused`).
 - `messages`: Mensagens enviadas e recebidas com suporte a templates, CRM e metadados.
-- `wa_auth_credentials` e `wa_auth_keys`: Tokens de autenticação segura do WhatsApp Baileys.
-- `knowledge_documents` e `knowledge_chunks`: Documentos de RAG com vetores gerados por embedder e buscados por similaridade do cosseno.
-- `cardapio_grupos`, `cardapio_produtos`, `cardapio_passos`, `cardapio_opcoes`: Tabelas nativas para sincronização direta do catálogo de Delivery.
 - `webhook_triggers`: Cadastro de webhooks que disparam ações externas em eventos como `ai_paused` e `ticket_resolved`.
+- `wa_auth_credentials` e `wa_auth_keys`: Tokens de autenticação segura do WhatsApp Baileys.
+
+---
+
+## 5. Prevenção de Condições de Corrida e Regras de Pareamento (Código/QR)
+
+Para evitar quebras de sincronismo e instâncias travadas em estado de conexão (`connecting`), siga as seguintes regras arquiteturais:
+
+### A. Restrição de Eventos de Pareamento no Boot
+O listener do evento `creds.update` em instâncias Baileys **nunca** deve atualizar o status do banco de dados para `"connecting"` ou emitir eventos de `pairingSuccess` se a sessão já estava previamente autenticada no momento do boot do contêiner/worker (`wasAuthenticatedOnBoot === true`). Isso impede que a re-inicialização automática ou oscilações de rede normais em sessões estáveis forcitem a interface de volta para `"connecting"`.
+
+### B. Registro Síncrono de Sessão Ativa
+Ao mudar o estado da conexão para `'open'`, a sessão correspondente deve ser inserida na lista de sessões autenticadas na memória (`this.authenticatedSessions.add(instanceId)`) de forma **síncrona e imediata** no início do listener de `connection.update`, antes de qualquer operação assíncrona (`await`). Isso elimina a janela de tempo (race condition) onde eventos simultâneos de `creds.update` leriam o estado em memória como falso e corromperiam o status no banco de dados.
+
+### C. Atualização Ativa no Debounce do Store (Frontend)
+O método `setInstanceStatus` no [chatStore.ts](file:///c:/Users/NOTE-(FORM)02JUL26/Documents/Projetos/Antigravity/ChatBoot/src/store/chatStore.ts) gerencia uma verificação assíncrona contra oscilações (`_offline_checks_${id}`). Caso essa rotina detecte que a instância retornou para o status `"connected"` ou `"connected_local"` no Supabase, ela deve **obrigatoriamente gravar o estado atualizado no store** imediatamente, em vez de apenas limpar o intervalo, garantindo o desaparecimento imediato dos banners de alerta ("Restabelecendo Conexão") no painel do usuário.
