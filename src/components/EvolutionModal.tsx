@@ -450,6 +450,7 @@ export default function EvolutionModal({
     if (!logger.isVisible) {
       logger.toggleVisibility();
     }
+    logger.setShowServerLogs(true);
     
     logger.addLog({
       type: 'info',

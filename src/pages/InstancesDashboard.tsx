@@ -568,11 +568,35 @@ export default function InstancesDashboard() {
       return;
     }
     
+    const logger = useDevStore.getState();
+    if (!logger.isVisible) {
+      logger.toggleVisibility();
+    }
+    logger.setShowServerLogs(true);
+    
+    logger.addLog({
+      type: 'info',
+      message: `==================================================`,
+      source: 'WhatsApp Pairing (Dashboard)'
+    });
+    logger.addLog({
+      type: 'info',
+      message: `INICIANDO SOLICITAÇÃO DE PAIRING CODE PARA O NÚMERO: ${pairingPhone}`,
+      source: 'WhatsApp Pairing (Dashboard)'
+    });
+    
     setPairingLoading(true);
     setPairingCode(null);
     
     try {
       const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      
+      logger.addLog({
+        type: 'info',
+        message: `Passo 1/3: Comunicando com API do gateway: ${ENGINE_URL}/api/v1/instances/${id}/pairing-code`,
+        source: 'WhatsApp Pairing (Dashboard)'
+      });
+      
       const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/pairing-code`, {
         method: 'POST',
         headers: {
@@ -585,12 +609,30 @@ export default function InstancesDashboard() {
       
       const data = await res.json();
       if (res.ok && data.ok) {
+        logger.addLog({
+          type: 'success',
+          message: `Passo 2/3: Código gerado com sucesso: "${data.code}"! Por favor, insira este código no celular.`,
+          source: 'WhatsApp Pairing (Dashboard)',
+          details: data
+        });
         setPairingCode(data.code);
         pollPairingStatus(id, apiKey);
       } else {
-        alert(data.error || "Erro ao solicitar código de pareamento.");
+        const errMsg = data.error || "Erro ao solicitar código de pareamento.";
+        logger.addLog({
+          type: 'error',
+          message: `Falha na resposta da API ao gerar código: ${errMsg}`,
+          source: 'WhatsApp Pairing (Dashboard)',
+          details: data
+        });
+        alert(errMsg);
       }
-    } catch (err) {
+    } catch (err: any) {
+      logger.addLog({
+        type: 'error',
+        message: `Falha de rede/comunicação com a Engine: ${err.message || err}`,
+        source: 'WhatsApp Pairing (Dashboard)'
+      });
       alert("Erro de comunicação com o servidor ao gerar o código.");
     } finally {
       setPairingLoading(false);
@@ -598,6 +640,13 @@ export default function InstancesDashboard() {
   };
 
   const pollPairingStatus = (id: string, apiKey?: string) => {
+    const logger = useDevStore.getState();
+    logger.addLog({
+      type: 'info',
+      message: `Passo 3/3: Iniciando polling de status da instância no servidor de produção para detectar vinculação...`,
+      source: 'WhatsApp Pairing (Dashboard)'
+    });
+    
     const interval = setInterval(async () => {
       try {
         const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
@@ -610,7 +659,19 @@ export default function InstancesDashboard() {
         const respJson = await res.json();
         const data = respJson.data;
         
+        logger.addLog({
+          type: 'info',
+          message: `[Poll Status] Estado da Engine: "${data?.status || 'desconhecido'}" | Erro registrado no nó: "${data?.last_error || 'nenhum'}"`,
+          source: 'WhatsApp Pairing (Dashboard)',
+          details: data
+        });
+        
         if (data && (data.status === 'connected' || data.status === 'connected_local')) {
+          logger.addLog({
+            type: 'success',
+            message: `SUCESSO: Conexão com o WhatsApp estabelecida! O celular confirmou o pareamento.`,
+            source: 'WhatsApp Pairing (Dashboard)'
+          });
           setShowQrModal(null);
           setPairingCode(null);
           setPairingPhone('');
@@ -619,14 +680,30 @@ export default function InstancesDashboard() {
           clearInterval(interval);
           fetchInstances();
         } else if (data && data.status === 'offline') {
+           logger.addLog({
+             type: 'error',
+             message: `CONEXÃO FECHADA: A conexão foi encerrada pela Engine ou WhatsApp.`,
+             source: 'WhatsApp Pairing (Dashboard)'
+           });
            clearInterval(interval);
         }
-      } catch (e) {
-        clearInterval(interval);
+      } catch (e: any) {
+        logger.addLog({
+          type: 'warn',
+          message: `Aviso no polling: falha temporária ao obter status da Engine (${e.message || e})`,
+          source: 'WhatsApp Pairing (Dashboard)'
+        });
       }
-    }, 2000);
+    }, 3000);
 
-    setTimeout(() => { clearInterval(interval); }, 180000); // 3 mins
+    setTimeout(() => { 
+      clearInterval(interval);
+      logger.addLog({
+        type: 'error',
+        message: `TIMEOUT: Limite de tempo esgotado esperando a confirmação do pareamento no celular (180s). Tente novamente.`,
+        source: 'WhatsApp Pairing (Dashboard)'
+      });
+    }, 180000); // 3 mins
   };
 
   const toggleSetting = async (id: string, currentSettings: any, key: string) => {

@@ -6,14 +6,13 @@ import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
 
 export default function DevLogger() {
-  const { logs, isVisible, isEnabled, toggleVisibility, addLog, clearLogs } = useDevStore();
+  const { logs, isVisible, isEnabled, toggleVisibility, addLog, clearLogs, showServerLogs, setShowServerLogs } = useDevStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   
   const [engineStatus, setEngineStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   const [lastPing, setLastPing] = useState<Date | null>(null);
   const [serverMeta, setServerMeta] = useState<any>(null);
   const [showChangelog, setShowChangelog] = useState(false);
-  const [showServerLogs, setShowServerLogs] = useState(false);
   const [showEndpoints, setShowEndpoints] = useState(false);
   const [telemetry, setTelemetry] = useState<{ cpu: number, memory: number, uptime: number } | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);

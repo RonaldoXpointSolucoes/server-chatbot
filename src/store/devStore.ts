@@ -16,10 +16,12 @@ interface DevStore {
   logs: LogEntry[];
   isVisible: boolean;
   isEnabled: boolean;
+  showServerLogs: boolean;
   addLog: (log: Omit<LogEntry, 'id' | 'timestamp'>) => void;
   clearLogs: () => void;
   toggleVisibility: () => void;
   toggleEnabled: () => void;
+  setShowServerLogs: (val: boolean) => void;
 }
 
 export const useDevStore = create<DevStore>()(
@@ -65,9 +67,11 @@ export const useDevStore = create<DevStore>()(
         
         set((state) => ({ logs: [newLog, ...state.logs].slice(0, 100) }));
       },
+      showServerLogs: false,
       clearLogs: () => set({ logs: [] }),
       toggleVisibility: () => set((state) => ({ isVisible: !state.isVisible })),
-      toggleEnabled: () => set((state) => ({ isEnabled: !state.isEnabled }))
+      toggleEnabled: () => set((state) => ({ isEnabled: !state.isEnabled })),
+      setShowServerLogs: (val) => set({ showServerLogs: val })
     }),
     {
       name: 'dev-logger-config',
