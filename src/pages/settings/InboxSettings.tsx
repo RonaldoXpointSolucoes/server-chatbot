@@ -38,6 +38,7 @@ export default function InboxSettings() {
 
   // Form states (Configurações)
   const [displayName, setDisplayName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [engineUrl, setEngineUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [readReceipts, setReadReceipts] = useState(false);
@@ -94,6 +95,7 @@ export default function InboxSettings() {
           }
           setInstance(data);
           setDisplayName(data.display_name);
+          setPhoneNumber(data.phone_number || '');
           setEngineUrl(data.settings?.engine_url || import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || '');
           setApiKey(data.api_key || '');
           setReadReceipts(data.settings?.read_messages || false);
@@ -118,13 +120,12 @@ export default function InboxSettings() {
 
   const handleSaveSettings = async () => {
     if (!instance) return;
-    setSaving(true);
-
-    const oldSettings = {
+    setSaving(true);     const oldSettings = {
       display_name: instance.display_name,
       api_key: instance.api_key,
       color: instance.color,
       notification_sound: instance.notification_sound,
+      phone_number: instance.phone_number,
       settings: { ...(instance.settings || {}) }
     };
     setPreviousSettings(oldSettings);
@@ -143,23 +144,25 @@ export default function InboxSettings() {
       };
 
       const instBefore = { ...instance };
+      const cleanPhone = phoneNumber.replace(/\D/g, '') || null;
       const { error } = await supabase.from('whatsapp_instances')
         .update({ 
            display_name: displayName,
            api_key: apiKey,
            color: instanceColor,
            notification_sound: notificationSound,
+           phone_number: cleanPhone,
            settings: updatedSettings
         })
         .eq('id', instance.id);
       if (!error) {
-         const instAfter = { ...instance, display_name: displayName, api_key: apiKey, color: instanceColor, notification_sound: notificationSound, settings: updatedSettings };
+         const instAfter = { ...instance, display_name: displayName, api_key: apiKey, color: instanceColor, notification_sound: notificationSound, phone_number: cleanPhone, settings: updatedSettings };
          await useChatStore.getState().logOperation('UPDATE', 'whatsapp_instances', instance.id, instBefore, instAfter);
       }
 
       if (error) throw error;
       
-      setInstance({ ...instance, display_name: displayName, api_key: apiKey, color: instanceColor, notification_sound: notificationSound, settings: updatedSettings });
+      setInstance({ ...instance, display_name: displayName, api_key: apiKey, color: instanceColor, notification_sound: notificationSound, phone_number: cleanPhone, settings: updatedSettings });
       showToast('Configurações salvas com sucesso!', true);
     } catch (e) {
       console.error(e);
@@ -179,6 +182,7 @@ export default function InboxSettings() {
            api_key: previousSettings.api_key,
            color: previousSettings.color,
            notification_sound: previousSettings.notification_sound,
+           phone_number: previousSettings.phone_number,
            settings: previousSettings.settings
          })
         .eq('id', instance.id);
@@ -186,6 +190,7 @@ export default function InboxSettings() {
       if (error) throw error;
       
       setDisplayName(previousSettings.display_name);
+      setPhoneNumber(previousSettings.phone_number || '');
       setApiKey(previousSettings.api_key || '');
       setInstanceColor(previousSettings.color || '#10b981');
       setNotificationSound(previousSettings.notification_sound || 'default');
@@ -204,6 +209,7 @@ export default function InboxSettings() {
         api_key: previousSettings.api_key, 
         color: previousSettings.color, 
         notification_sound: previousSettings.notification_sound, 
+        phone_number: previousSettings.phone_number,
         settings: previousSettings.settings 
       });
       
@@ -371,6 +377,18 @@ export default function InboxSettings() {
                        <div className="flex flex-col gap-2">
                          <label className="text-sm font-bold text-gray-300">Nome da Caixa de Entrada</label>
                          <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} className="w-full bg-[#182229] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-medium" />
+                       </div>
+
+                       <div className="flex flex-col gap-2">
+                         <label className="text-sm font-bold text-gray-300">Número de WhatsApp Associado</label>
+                         <input
+                           type="text"
+                           placeholder="Ex: 5511991649959"
+                           value={phoneNumber}
+                           onChange={e => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
+                           className="w-full bg-[#182229] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-medium"
+                         />
+                         <p className="text-xs text-gray-500">Este número de telefone será associado à instância e pré-preenchido nos fluxos de pareamento por código.</p>
                        </div>
 
                        <div className="flex flex-col gap-2">
