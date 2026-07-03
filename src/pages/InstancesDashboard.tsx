@@ -484,6 +484,13 @@ export default function InstancesDashboard() {
     setQrCode(null);
     setQrLoading(true);
 
+    const currentInst = instances.find(i => i.id === id);
+    if (currentInst && currentInst.phone_number) {
+      setPairingPhone(currentInst.phone_number);
+    } else {
+      setPairingPhone('');
+    }
+
     try {
       const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
       await fetch(`${ENGINE_URL}/api/v1/instances/${id}/connect`, { 
@@ -616,6 +623,10 @@ export default function InstancesDashboard() {
           details: data
         });
         setPairingCode(data.code);
+        // Salva o número associado no banco
+        const cleanPhone = pairingPhone.replace(/\D/g, '');
+        await supabase.from('whatsapp_instances').update({ phone_number: cleanPhone }).eq('id', id);
+        fetchInstances();
         pollPairingStatus(id, apiKey);
       } else {
         const errMsg = data.error || "Erro ao solicitar código de pareamento.";
@@ -1072,7 +1083,32 @@ export default function InstancesDashboard() {
                              </button>
                            </div>
                         ))}
-                     </div>
+
+                         <div className="border-t border-gray-100 dark:border-white/5 pt-4 mt-4">
+                           <label className="block text-xs font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider mb-2">Número de WhatsApp Associado</label>
+                           <div className="flex gap-2">
+                             <input
+                               type="text"
+                               placeholder="Ex: 5511991649959"
+                               defaultValue={inst.phone_number || ''}
+                               onBlur={async (e) => {
+                                 const val = e.target.value.replace(/\D/g, '');
+                                 if (val !== (inst.phone_number || '')) {
+                                   const { error } = await supabase.from('whatsapp_instances').update({ phone_number: val || null }).eq('id', inst.id);
+                                   if (error) {
+                                     alert("Erro ao associar número: " + error.message);
+                                   } else {
+                                     fetchInstances();
+                                     alert("Número associado com sucesso!");
+                                   }
+                                 }
+                               }}
+                               className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-xl px-3 py-2 text-sm text-gray-800 dark:text-white focus:outline-none focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all"
+                             />
+                           </div>
+                           <p className="text-[10px] text-gray-400 mt-1">Este número será pré-preenchido automaticamente na tela de pareamento por código de 8 dígitos.</p>
+                         </div>
+                      </div>
                    </div>
                 )}
 
@@ -1125,6 +1161,7 @@ export default function InstancesDashboard() {
                            onClick={() => {
                              setConnectMode('pairing');
                              setQrCode(null);
+                             setPairingPhone(inst.phone_number || '');
                            }}
                            className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${connectMode === 'pairing' ? 'bg-[#00a884] text-white shadow-sm' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-300/30'}`}
                          >
