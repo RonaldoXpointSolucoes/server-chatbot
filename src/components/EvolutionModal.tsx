@@ -2345,6 +2345,9 @@ export default function EvolutionModal({
                               onChange={(e) => setPairingPhone(e.target.value)}
                               className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-xl px-4 py-3 text-sm font-semibold text-gray-800 dark:text-white focus:outline-none focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all"
                             />
+                            <p className="text-[10px] text-amber-500 dark:text-amber-400 mt-1.5 leading-relaxed">
+                              ⚠️ <strong>Dica Brasil (DDI 55):</strong> Se o celular exibir "Não foi possível conectar o dispositivo", tente gerar o código novamente <strong>removendo o primeiro 9</strong> após o DDD (ex: 551191649959). Contas antigas costumam requerer o formato de 8 dígitos.
+                            </p>
                           </div>
                           <button
                             onClick={() => handleRequestPairingCode(activePollingId, existingInstances.find(i => i.id === activePollingId)?.api_key)}
