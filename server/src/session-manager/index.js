@@ -224,20 +224,23 @@ class SessionManager {
 
             sock.ev.on('creds.update', async () => {
                 await saveCreds();
-                const meId = sock.user?.id || state?.creds?.me?.id;
-                if (meId) {
-                    const phone = meId.split('@')[0].split(':')[0];
-                    console.log(`[SessionManager] Credenciais atualizadas com telefone: ${phone}. Sincronizando com o banco e o frontend.`);
-                    await retryWithBackoff(() => 
-                        supabase.from('whatsapp_instances')
-                            .update({ phone_number: phone })
-                            .eq('id', instanceId)
-                    );
-                    await eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
-                        connection: 'connecting',
-                        pairingSuccess: true,
-                        phone
-                    });
+                // Só dispara a atualização de pareamento se a sessão ainda NÃO estiver autenticada/conectada em memória
+                if (!this.authenticatedSessions.has(instanceId)) {
+                    const meId = sock.user?.id || state?.creds?.me?.id;
+                    if (meId) {
+                        const phone = meId.split('@')[0].split(':')[0];
+                        console.log(`[SessionManager] Credenciais de pareamento atualizadas com telefone: ${phone}. Sincronizando com o banco e o frontend.`);
+                        await retryWithBackoff(() => 
+                            supabase.from('whatsapp_instances')
+                                .update({ phone_number: phone })
+                                .eq('id', instanceId)
+                        );
+                        await eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
+                            connection: 'connecting',
+                            pairingSuccess: true,
+                            phone
+                        });
+                    }
                 }
             });
 
