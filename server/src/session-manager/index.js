@@ -311,14 +311,24 @@ class SessionManager {
 
                     this.sessions.delete(instanceId);
 
-                    if (loggedOut || status === 401 || status === 403 || status === 400) {
-                        console.log(`[SessionManager] Instância ${instanceId} desconectada ou erro crítico (status: ${status}). Limpando credenciais.`);
+                    const hasOwner = !!(sock?.user?.id || state?.creds?.me?.id);
+                    if ((loggedOut || status === 401 || status === 403 || status === 400) && hasOwner) {
+                        console.log(`[SessionManager] Instância ${instanceId} desconectada ou erro crítico (status: ${status}) com dono ativo. Limpando credenciais.`);
                         await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId));
                         
                         this.reconnectAttempts.delete(instanceId);
                         // Tentar reconectar limpo após 5s
+                        const timer = setTimeout(() => {
+                            this.reconnectingTimers.delete(instanceId);
+                            this.createSession(tenantId, instanceId);
+                        }, 5000);
+                        this.reconnectingTimers.set(instanceId, timer);
+                    } else if (loggedOut || status === 401 || status === 403 || status === 400) {
+                        console.log(`[SessionManager] Instância ${instanceId} desconectada (status: ${status}) sem dono configurado (provável pareamento em andamento). Mantendo credenciais.`);
+                        this.reconnectAttempts.delete(instanceId);
+                        // Tentar reconectar usando as credenciais que estão sendo pareadas/preparadas
                         const timer = setTimeout(() => {
                             this.reconnectingTimers.delete(instanceId);
                             this.createSession(tenantId, instanceId);
