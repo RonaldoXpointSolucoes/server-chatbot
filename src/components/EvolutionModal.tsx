@@ -435,11 +435,15 @@ export default function EvolutionModal({
           setActivePollingId(null);
           setConnectionStatusMessage(null);
         } else if (st === "connecting") {
-          setConnectionStatusMessage(
-            connectMode === 'pairing'
-              ? "Código digitado no celular! Conectando aparelho..."
-              : "QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)..."
-          );
+          if (payload.payload?.pairingSuccess) {
+            setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
+          } else {
+            setConnectionStatusMessage(
+              connectMode === 'pairing'
+                ? "Aguardando pareamento no celular..."
+                : "QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)..."
+            );
+          }
         } else if (st === "connected" || st === "connected_local") {
           handleSuccess();
         }
@@ -458,11 +462,15 @@ export default function EvolutionModal({
                 handleSuccess();
                 clearInterval(pollInterval);
               } else if (st?.data?.status === "connecting") {
-                setConnectionStatusMessage(
-                  connectMode === 'pairing'
-                    ? "Código digitado no celular! Conectando aparelho..."
-                    : "QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)..."
-                );
+                if (connectMode === 'pairing') {
+                  if (st?.data?.phone_number) {
+                    setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
+                  } else {
+                    setConnectionStatusMessage("Aguardando pareamento no celular...");
+                  }
+                } else {
+                  setConnectionStatusMessage("QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)...");
+                }
               }
             } catch (e) {
               // ignora erro silencioso no polling

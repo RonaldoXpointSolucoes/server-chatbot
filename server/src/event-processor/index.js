@@ -1539,6 +1539,10 @@ class EventProcessor {
                     .eq('id', instanceId)
                     .eq('assigned_node_id', NODE_ID);
                 payload.status = 'connecting';
+                if (update.pairingSuccess) {
+                    payload.pairingSuccess = true;
+                    payload.phone = update.phone;
+                }
             }
 
             if (connection === 'open') {
