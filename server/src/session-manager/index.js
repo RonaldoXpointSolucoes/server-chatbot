@@ -236,6 +236,11 @@ class SessionManager {
                                 .update({ phone_number: phone })
                                 .eq('id', instanceId)
                         );
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instance_runtime')
+                                .update({ pairing_code: 'CONNECTED_PENDING_SYNC' })
+                                .eq('instance_id', instanceId)
+                        );
                         await eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
                             connection: 'connecting',
                             pairingSuccess: true,
@@ -344,7 +349,7 @@ class SessionManager {
                     const meId = sock?.user?.id || state?.creds?.me?.id;
                     const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || (meId && String(meId).includes(':'));
 
-                    if ((loggedOut || status === 401 || status === 403 || status === 400 || status === 428) && !isFullyAuthenticated) {
+                    if ((loggedOut || status === 401 || status === 403 || status === 400) && !isFullyAuthenticated) {
                         console.log(`[SessionManager] Pareamento pendente falhou/rejeitado na instância ${instanceId} (status: ${status}). Limpando credenciais temporárias.`);
                         this.authenticatedSessions.delete(instanceId);
                         await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));

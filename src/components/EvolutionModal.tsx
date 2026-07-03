@@ -463,7 +463,7 @@ export default function EvolutionModal({
                 clearInterval(pollInterval);
               } else if (st?.data?.status === "connecting") {
                 if (connectMode === 'pairing') {
-                  if (st?.data?.phone_number) {
+                  if (st?.data?.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC') {
                     setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
                   } else {
                     setConnectionStatusMessage("Aguardando pareamento no celular...");
@@ -608,6 +608,12 @@ export default function EvolutionModal({
           });
           handleSuccess();
           clearInterval(interval);
+        } else if (data && data.status === 'connecting') {
+          if (data.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC') {
+            setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
+          } else {
+            setConnectionStatusMessage("Aguardando pareamento no celular...");
+          }
         }
       } catch (e: any) {
         logger.addLog({
