@@ -1122,7 +1122,7 @@ export default function InstancesDashboard() {
                                  <h6 className="text-[10px] font-bold text-gray-800 dark:text-white uppercase tracking-wide">Instruções no Celular:</h6>
                                  <ol className="list-decimal list-inside text-xs text-gray-500 dark:text-[#8696a0] space-y-1.5 leading-relaxed">
                                    <li>Abra o **WhatsApp** no seu celular.</li>
-                                   <li>Vá em **Dispositivos Conectados > Conectar um dispositivo**.</li>
+                                   <li>Vá em **Dispositivos Conectados &gt; Conectar um dispositivo**.</li>
                                    <li>Escolha **"Conectar com número de telefone em vez disso"** (na parte inferior).</li>
                                    <li>Digite o código **{pairingCode}** acima.</li>
                                  </ol>
