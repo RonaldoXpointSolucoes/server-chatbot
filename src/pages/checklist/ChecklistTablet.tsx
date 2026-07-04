@@ -83,6 +83,14 @@ export default function ChecklistTablet() {
   const [checklists, setChecklists] = useState<ChecklistToExecute[]>([]);
   const [loadingChecklists, setLoadingChecklists] = useState(false);
   const [activeChecklist, setActiveChecklist] = useState<ChecklistToExecute | null>(null);
+
+  // Estados para Histórico de Concluídos
+  const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
+  const [completedExecutions, setCompletedExecutions] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [activeExecution, setActiveExecution] = useState<any | null>(null);
+  const [executionResponses, setExecutionResponses] = useState<any[]>([]);
+  const [loadingExecutionDetails, setLoadingExecutionDetails] = useState(false);
   
   // Geoposicionamento do Aparelho
   const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number; precision: number } | null>(null);
@@ -302,7 +310,14 @@ export default function ChecklistTablet() {
       setLoggedInUser(selectedOperator);
       setSelectedOperator(null);
       setPinCode('');
+      
+      // Reseta abas e estados
+      setActiveTab('active');
+      setActiveExecution(null);
+      setActiveChecklist(null);
+
       loadOperatorChecklists(selectedOperator.id, selectedOperator.role, selectedOperator.name);
+      loadCompletedExecutions(selectedOperator.id);
       showToast('success', `Bem-vindo à cozinha, ${selectedOperator.name}!`);
     } else {
       setPinCode('');
@@ -313,7 +328,76 @@ export default function ChecklistTablet() {
   const handleLogout = () => {
     setLoggedInUser(null);
     setActiveChecklist(null);
+    setActiveExecution(null);
     setChecklists([]);
+    setCompletedExecutions([]);
+    setActiveTab('active');
+  };
+
+  const loadCompletedExecutions = async (userId: string) => {
+    setLoadingHistory(true);
+    try {
+      const { data, error } = await supabase
+        .from('checklist_executions')
+        .select(`
+          id,
+          started_at,
+          completed_at,
+          score,
+          status,
+          duration_seconds,
+          checklists(id, title, category, description)
+        `)
+        .eq('user_id', userId)
+        .eq('tenant_id', tenantId)
+        .order('completed_at', { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+      setCompletedExecutions(data || []);
+    } catch (e) {
+      console.error('Erro ao carregar histórico de execuções:', e);
+      showToast('error', 'Falha ao carregar histórico de rotinas.');
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const loadExecutionDetails = async (executionId: string) => {
+    setLoadingExecutionDetails(true);
+    try {
+      const { data, error } = await supabase
+        .from('checklist_item_responses')
+        .select(`
+          id,
+          response_value,
+          is_conforming,
+          is_meta_ok,
+          is_done,
+          observation,
+          checklist_items(title, description, response_type, require_evidence),
+          checklist_evidences(url)
+        `)
+        .eq('execution_id', executionId);
+
+      if (error) throw error;
+      
+      // Mapeia para agrupar as fotos de forma resiliente
+      const mapped = (data || []).map((resp: any) => {
+        const evs = resp.checklist_evidences || [];
+        return {
+          ...resp,
+          checklist_evidences: Array.isArray(evs) ? evs : [evs].filter(Boolean)
+        };
+      });
+
+      setExecutionResponses(mapped);
+    } catch (e) {
+      console.error('Erro ao carregar detalhes da execução:', e);
+      showToast('error', 'Falha ao carregar detalhes da rotina concluída.');
+    } finally {
+      setLoadingExecutionDetails(false);
+    }
   };
 
   // ==========================================
@@ -825,6 +909,12 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
         .single();
 
       setSuccessScore(finalExec?.score || 100);
+      
+      // Recarrega histórico local de imediato
+      if (loggedInUser) {
+        loadCompletedExecutions(loggedInUser.id);
+      }
+
       setShowSuccessModal(true);
       setTimeout(() => triggerConfetti(true), 150);
       
@@ -1184,45 +1274,267 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
           <div className="flex-1 flex overflow-hidden">
             
             {/* LISTAGEM DE CHECKLISTS DISPONÍVEIS (SEÇÃO ESQUERDA) */}
-            <div className={`w-full md:w-[340px] ${activeChecklist ? 'hidden md:flex' : 'flex'} shrink-0 border-r border-[#2a3942]/60 bg-[#182229]/60 flex-col overflow-y-auto p-4 styled-scrollbar gap-3`}>
-              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider px-2">Rotinas do seu Turno</h3>
+            <div className={`w-full md:w-[340px] ${(activeChecklist || activeExecution) ? 'hidden md:flex' : 'flex'} shrink-0 border-r border-[#2a3942]/60 bg-[#182229]/60 flex-col overflow-y-auto p-4 styled-scrollbar gap-3`}>
               
-              {loadingChecklists ? (
-                <div className="p-8 text-center text-[#8696a0] animate-pulse">Carregando rotinas...</div>
-              ) : checklists.length === 0 ? (
-                <div className="p-8 text-center text-[#8696a0] italic text-xs">Nenhum checklist disponível no momento.</div>
-              ) : (
-                checklists.map((chk) => (
-                  <button
-                    key={chk.id}
-                    onClick={() => handleStartChecklist(chk)}
-                    disabled={submitting}
-                    className={`p-4 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[110px] ${activeChecklist?.id === chk.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-[#2a3942]/60 bg-[#202c33]/50 hover:bg-[#202c33]/80'}`}
-                  >
-                    <div>
-                      <div className="flex justify-between items-start gap-1">
-                        <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-indigo-500/20 text-indigo-400 shrink-0">
-                          {chk.category || 'Geral'}
-                        </span>
-                        <span className="text-[9px] text-[#8696a0] truncate">{chk.unit_name}</span>
-                      </div>
-                      <h4 className="font-bold text-white text-sm mt-2.5 leading-snug line-clamp-1">{chk.title}</h4>
-                    </div>
+              {/* Abas Premium de Navegação */}
+              <div className="flex gap-2 p-1 bg-[#111b21] rounded-2xl border border-[#2a3942]/40 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('active');
+                    setActiveExecution(null);
+                  }}
+                  className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${activeTab === 'active' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[#8696a0] hover:text-[#d1d7db] bg-transparent'}`}
+                >
+                  Pendentes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('history');
+                    setActiveChecklist(null);
+                    if (loggedInUser) loadCompletedExecutions(loggedInUser.id);
+                  }}
+                  className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${activeTab === 'history' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[#8696a0] hover:text-[#d1d7db] bg-transparent'}`}
+                >
+                  Concluídos
+                </button>
+              </div>
 
-                    <div className="flex items-center justify-between mt-3 text-[10px] text-[#8696a0] pt-2.5 border-t border-[#2a3942]/40 w-full">
-                      <span className="flex items-center gap-1">
-                        <Compass size={11} /> {chk.sector_name}
-                      </span>
-                      <ChevronRight size={14} className="text-slate-400 group-hover:translate-x-1 transition-all" />
-                    </div>
-                  </button>
-                ))
+              {activeTab === 'active' ? (
+                <>
+                  <h3 className="text-[10px] font-black text-[#8696a0] uppercase tracking-widest px-2 mt-2">Rotinas do seu Turno</h3>
+                  
+                  {loadingChecklists ? (
+                    <div className="p-8 text-center text-[#8696a0] animate-pulse">Carregando rotinas...</div>
+                  ) : checklists.length === 0 ? (
+                    <div className="p-8 text-center text-[#8696a0] italic text-xs">Nenhum checklist disponível no momento.</div>
+                  ) : (
+                    checklists.map((chk) => (
+                      <button
+                        key={chk.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveChecklist(chk);
+                          setActiveExecution(null);
+                        }}
+                        disabled={submitting}
+                        className={`p-4 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[110px] ${activeChecklist?.id === chk.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-[#2a3942]/60 bg-[#202c33]/50 hover:bg-[#202c33]/80'}`}
+                      >
+                        <div>
+                          <div className="flex justify-between items-start gap-1">
+                            <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-indigo-500/20 text-indigo-400 shrink-0">
+                              {chk.category || 'Geral'}
+                            </span>
+                            <span className="text-[9px] text-[#8696a0] truncate">{chk.unit_name}</span>
+                          </div>
+                          <h4 className="font-bold text-white text-sm mt-2.5 leading-snug line-clamp-1">{chk.title}</h4>
+                        </div>
+
+                        <div className="flex items-center justify-between mt-3 text-[10px] text-[#8696a0] pt-2.5 border-t border-[#2a3942]/40 w-full font-mono">
+                          <span className="flex items-center gap-1 font-sans">
+                            <Compass size={11} className="shrink-0" /> {chk.sector_name}
+                          </span>
+                          <ChevronRight size={14} className="text-slate-400" />
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </>
+              ) : (
+                <>
+                  <h3 className="text-[10px] font-black text-[#8696a0] uppercase tracking-widest px-2 mt-2">Histórico Recente</h3>
+                  
+                  {loadingHistory ? (
+                    <div className="p-8 text-center text-[#8696a0] animate-pulse">Buscando histórico...</div>
+                  ) : completedExecutions.length === 0 ? (
+                    <div className="p-8 text-center text-[#8696a0] italic text-xs">Nenhuma rotina finalizada por você recentemente.</div>
+                  ) : (
+                    completedExecutions.map((exec) => {
+                      const chkInfo = exec.checklists || { title: 'Rotina Excluída', category: 'Geral' };
+                      const formattedDate = new Date(exec.completed_at).toLocaleDateString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      });
+                      
+                      const scoreColor = exec.score >= 90 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' :
+                                         exec.score >= 70 ? 'text-amber-400 border-amber-500/30 bg-amber-500/10' :
+                                         'text-rose-400 border-rose-500/30 bg-rose-500/10';
+
+                      return (
+                        <button
+                          key={exec.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveExecution(exec);
+                            setActiveChecklist(null);
+                            loadExecutionDetails(exec.id);
+                          }}
+                          className={`p-4 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[110px] ${activeExecution?.id === exec.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-[#2a3942]/60 bg-[#202c33]/50 hover:bg-[#202c33]/80'}`}
+                        >
+                          <div>
+                            <div className="flex justify-between items-start gap-1 flex-wrap">
+                              <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-slate-500/20 text-[#8696a0] shrink-0">
+                                {chkInfo.category || 'Geral'}
+                              </span>
+                              <span className={`text-[9px] px-1.5 py-0.5 border rounded-full font-bold font-mono ${scoreColor} shrink-0`}>
+                                {exec.score}% conformidade
+                              </span>
+                            </div>
+                            <h4 className="font-bold text-white text-sm mt-2.5 leading-snug line-clamp-1">{chkInfo.title}</h4>
+                          </div>
+
+                          <div className="flex items-center justify-between mt-3 text-[10px] text-[#8696a0] pt-2.5 border-t border-[#2a3942]/40 w-full font-mono">
+                            <span>{formattedDate}</span>
+                            <ChevronRight size={14} className="text-slate-400" />
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </>
               )}
             </div>
 
-            {/* ÁREA DE PREENCHIMENTO DO CHECKLIST ATIVO (SEÇÃO DIREITA) */}
-            <div className={`flex-1 ${!activeChecklist ? 'hidden md:flex' : 'flex'} flex-col overflow-hidden bg-[#182229]/20`}>
-              {activeChecklist ? (
+            {/* ÁREA DE PREENCHIMENTO OU DETALHES (SEÇÃO DIREITA) */}
+            <div className={`flex-1 ${(!activeChecklist && !activeExecution) ? 'hidden md:flex' : 'flex'} flex-col overflow-hidden bg-[#182229]/20`}>
+              {activeExecution ? (
+                <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-200">
+                  {/* Cabeçalho da Execução Concluída */}
+                  <div className="p-6 bg-[#202c33]/50 border-b border-[#2a3942]/60 shrink-0">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setActiveExecution(null)}
+                          className="md:hidden p-2 -ml-2 rounded-full hover:bg-[#2a3942] text-[#8696a0] hover:text-white transition-all shrink-0"
+                          title="Voltar para a lista"
+                        >
+                          <ChevronRight className="rotate-180" size={20} />
+                        </button>
+                        <div>
+                          <span className="text-[9px] uppercase tracking-wider font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20 font-bold">Rotina Concluída</span>
+                          <h2 className="text-lg font-black text-white mt-1.5">{activeExecution.checklists?.title || 'Rotina Finalizada'}</h2>
+                          <p className="text-xs text-[#8696a0] mt-0.5">Visualizando respostas registradas do histórico.</p>
+                        </div>
+                      </div>
+                      
+                      {/* Score e Duração da Execução */}
+                      <div className="flex items-center gap-3 shrink-0">
+                        <div className="px-4 py-2 rounded-2xl border border-[#2a3942] bg-[#111b21]/40 text-left font-mono">
+                          <span className="text-[9px] block text-[#8696a0] uppercase tracking-wider font-bold">Duração</span>
+                          <span className="text-[12px] text-white font-bold">
+                            {(() => {
+                              const sec = activeExecution.duration_seconds || 0;
+                              const min = Math.floor(sec / 60);
+                              return min > 0 ? `${min}m ${sec % 60}s` : `${sec}s`;
+                            })()}
+                          </span>
+                        </div>
+                        <div className={`px-4 py-2 rounded-2xl border flex flex-col justify-center text-left font-mono ${
+                          activeExecution.score >= 90 ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' :
+                          activeExecution.score >= 70 ? 'border-amber-500/20 bg-amber-500/5 text-amber-400' :
+                          'border-rose-500/20 bg-rose-500/5 text-rose-400'
+                        }`}>
+                          <span className="text-[9px] uppercase tracking-wider font-bold opacity-80">Conformidade</span>
+                          <span className="text-[12px] font-bold">{activeExecution.score}%</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Detalhes das Respostas */}
+                  <div className="flex-1 overflow-y-auto styled-scrollbar p-6 space-y-4">
+                    {loadingExecutionDetails ? (
+                      <div className="p-16 text-center text-[#8696a0] animate-pulse">Carregando respostas detalhadas...</div>
+                    ) : executionResponses.length === 0 ? (
+                      <div className="p-16 text-center text-[#8696a0] italic text-xs">Nenhuma resposta registrada para esta rotina.</div>
+                    ) : (
+                      <div className="space-y-4">
+                        {executionResponses.map((resp, idx) => {
+                          const item = resp.checklist_items || { title: 'Tarefa Excluída', description: '', response_type: 'boolean' };
+                          const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                          const groupName = match ? match[1] : null;
+                          const cleanTitle = match ? match[2] : item.title;
+                          
+                          const borderClass = resp.is_done 
+                            ? resp.is_conforming && resp.is_meta_ok 
+                              ? 'border-emerald-500/20 bg-[#1e2e28]/30 shadow-sm shadow-emerald-950/5' 
+                              : 'border-rose-500/30 bg-[#2d1c1e]/30 shadow-sm shadow-rose-950/10'
+                            : 'border-[#2a3942]/30 bg-[#202c33]/20';
+
+                          return (
+                            <div 
+                              key={resp.id} 
+                              className={`p-5 rounded-[28px] border flex flex-col gap-3 transition-all ${borderClass}`}
+                            >
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
+                                      {idx + 1}
+                                    </span>
+                                    {groupName && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded font-bold tracking-wider uppercase bg-[#2a3942] text-[#8696a0]">
+                                        {groupName}
+                                      </span>
+                                    )}
+                                    <h4 className="font-bold text-white text-sm leading-snug">{cleanTitle}</h4>
+                                  </div>
+                                  {item.description && (
+                                    <p className="text-xs text-[#8696a0] mt-1 ml-7">{item.description}</p>
+                                  )}
+                                </div>
+
+                                <div className="shrink-0 flex items-center gap-2 ml-7 sm:ml-0">
+                                  <span className={`text-xs px-3 py-1.5 rounded-xl font-mono font-black ${
+                                    resp.is_conforming && resp.is_meta_ok
+                                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                      : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                  }`}>
+                                    {resp.response_value}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {resp.observation && (
+                                <div className="ml-7 bg-[#111b21]/50 border-l-2 border-amber-500/80 p-3 rounded-r-xl mt-1 text-xs text-[#d1d7db] leading-relaxed">
+                                  <span className="font-bold block text-amber-400 text-[10px] uppercase mb-0.5 font-mono">Observação registrada:</span>
+                                  {resp.observation}
+                                </div>
+                              )}
+
+                              {resp.checklist_evidences && resp.checklist_evidences.length > 0 && (
+                                <div className="ml-7 mt-1.5">
+                                  <span className="text-[9px] font-bold text-indigo-400/80 block uppercase tracking-wider mb-2 font-mono">Evidência Fotográfica:</span>
+                                  <div className="flex gap-2.5 overflow-x-auto py-1">
+                                    {resp.checklist_evidences.map((ev: any, evIdx: number) => (
+                                      <a 
+                                        key={evIdx}
+                                        href={ev.url} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="relative group w-24 h-24 rounded-2xl overflow-hidden border border-[#2a3942] bg-[#111b21] hover:scale-95 transition-all flex items-center justify-center cursor-pointer shrink-0"
+                                      >
+                                        <img src={ev.url} alt="Evidência" className="w-full h-full object-cover" />
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center">
+                                          <Eye size={16} className="text-white" />
+                                        </div>
+                                      </a>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : activeChecklist ? (
                 <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-200">
                   
                   {/* Cabeçalho do Roteiro */}
@@ -1853,11 +2165,11 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-3">
-                  <Smile size={48} className="text-[#2a3942] animate-bounce" />
+                  <Smile size={48} className="text-[#2a3942] animate-pulse" />
                   <div>
                     <h3 className="font-bold text-white text-md">Cozinha Organizada!</h3>
                     <p className="text-xs text-[#8696a0] mt-1 max-w-[280px] mx-auto leading-relaxed">
-                      Selecione uma das rotinas ativas no painel esquerdo para iniciar o checklist.
+                      Selecione uma das rotinas ativas ou consulte o histórico de concluídos no painel esquerdo.
                     </p>
                   </div>
                 </div>
