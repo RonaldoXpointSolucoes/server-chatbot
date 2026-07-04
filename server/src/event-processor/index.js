@@ -1503,8 +1503,19 @@ class EventProcessor {
                     const qrBase64 = await qrcode.toDataURL(qr);
                     payload.qr_code = qrBase64;
                     eventName = 'instance.qr_updated';
-                    await supabase.from('whatsapp_instance_runtime')
-                        .upsert({ instance_id: instanceId, tenant_id: tenantId, qr_code: qrBase64 }, { onConflict: 'instance_id' });
+                    const { data: existing } = await supabase.from('whatsapp_instance_runtime')
+                        .select('instance_id')
+                        .eq('instance_id', instanceId)
+                        .maybeSingle();
+                        
+                    if (existing) {
+                        await supabase.from('whatsapp_instance_runtime')
+                            .update({ qr_code: qrBase64 })
+                            .eq('instance_id', instanceId);
+                    } else {
+                        await supabase.from('whatsapp_instance_runtime')
+                            .insert({ instance_id: instanceId, tenant_id: tenantId, qr_code: qrBase64 });
+                    }
                 } catch(e) {}
             }
 
@@ -1552,7 +1563,19 @@ class EventProcessor {
                     .update({ status: statusVal, last_error: null })
                     .eq('id', instanceId)
                     .eq('assigned_node_id', NODE_ID);
-                await supabase.from('whatsapp_instance_runtime').upsert({ instance_id: instanceId, tenant_id: tenantId, qr_code: null }, { onConflict: 'instance_id' });
+                const { data: existing } = await supabase.from('whatsapp_instance_runtime')
+                    .select('instance_id')
+                    .eq('instance_id', instanceId)
+                    .maybeSingle();
+                    
+                if (existing) {
+                    await supabase.from('whatsapp_instance_runtime')
+                        .update({ qr_code: null, pairing_code: null })
+                        .eq('instance_id', instanceId);
+                } else {
+                    await supabase.from('whatsapp_instance_runtime')
+                        .insert({ instance_id: instanceId, tenant_id: tenantId, qr_code: null, pairing_code: null });
+                }
                 payload.status = statusVal;
             }
 

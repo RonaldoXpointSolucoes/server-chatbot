@@ -56,6 +56,7 @@ class SessionManager {
         this.queues = new Map();
         this.watchdogs = new Map();
         this.authenticatedSessions = new Set();
+        this.pairingPendingSync = new Map();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -236,6 +237,7 @@ class SessionManager {
                                 .update({ phone_number: phone })
                                 .eq('id', instanceId)
                         );
+                        this.pairingPendingSync.set(instanceId, true);
                         await retryWithBackoff(() =>
                             supabase.from('whatsapp_instance_runtime')
                                 .update({ pairing_code: 'CONNECTED_PENDING_SYNC' })
@@ -253,6 +255,7 @@ class SessionManager {
             sock.ev.on('connection.update', async (update) => {
                 if (update.connection === 'open') {
                     this.authenticatedSessions.add(instanceId);
+                    this.pairingPendingSync.delete(instanceId);
                 }
 
                 await eventProcessor.handleConnectionUpdate(tenantId, instanceId, update);
@@ -348,8 +351,9 @@ class SessionManager {
 
                     const meId = sock?.user?.id || state?.creds?.me?.id;
                     const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || (meId && String(meId).includes(':'));
+                    const isPairingPendingSync = this.pairingPendingSync.get(instanceId);
 
-                    if ((loggedOut || status === 401 || status === 403 || status === 400) && !isFullyAuthenticated) {
+                    if ((loggedOut || status === 401 || status === 403 || status === 400) && !isFullyAuthenticated && !isPairingPendingSync) {
                         console.log(`[SessionManager] Pareamento pendente falhou/rejeitado na instância ${instanceId} (status: ${status}). Limpando credenciais temporárias.`);
                         this.authenticatedSessions.delete(instanceId);
                         await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));
