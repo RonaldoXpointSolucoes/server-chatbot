@@ -561,9 +561,10 @@ class SessionManager {
                                         await waitForSocketOpen(activeSock);
                                     }
 
-                                    // Se mesmo assim o socket ativo não estiver saudável, lança erro para forçar retentativa ou falhar
-                                    if (!activeSock || !activeSock.ws || !activeSock.ws.isOpen) {
-                                        throw new Error('Connection Closed (WebSocket not open or unhealthy)');
+                                    // Se mesmo assim o socket ativo não estiver saudável ou autenticado, lança erro para forçar retentativa ou falhar
+                                    const meJid = activeSock?.user?.id;
+                                    if (!activeSock || !activeSock.ws || !activeSock.ws.isOpen || !meJid) {
+                                        throw new Error('Connection Closed (WebSocket not open, unhealthy or not authenticated)');
                                     }
                                     
                                     if (attempts > 0) {
