@@ -22,7 +22,8 @@ import {
   ClipboardList,
   Star,
   Search,
-  GripVertical
+  GripVertical,
+  Eye
 } from 'lucide-react';
 import { Reorder } from 'framer-motion';
 
