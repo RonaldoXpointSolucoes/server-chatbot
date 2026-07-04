@@ -975,6 +975,13 @@ export default function EvolutionModal({
 
   const isExpanded = isTargetConnected && configTab === 'grupos';
 
+  const isCodeEntered = !!(
+    connectionStatusMessage &&
+    (connectionStatusMessage.includes("digitado") ||
+     connectionStatusMessage.includes("Cód") ||
+     connectionStatusMessage.includes("Cdigo"))
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-300">
       <div className={`bg-white/70 dark:bg-[#111b21]/70 backdrop-blur-2xl rounded-3xl shadow-2xl w-full flex flex-col border border-white/50 dark:border-white/10 relative transition-all duration-500 overflow-hidden ${isExpanded ? 'max-w-6xl h-[95vh]' : 'max-w-sm max-h-[90vh]'}`}>
@@ -2379,36 +2386,60 @@ export default function EvolutionModal({
                         </>
                       ) : (
                         <div className="w-full flex flex-col items-center animate-in fade-in duration-200">
-                          <p className="text-xs text-gray-500 dark:text-[#8696a0] mb-2 text-center font-semibold">Seu código de pareamento do WhatsApp:</p>
-                          <div className="px-6 py-4 bg-gray-100 dark:bg-black/40 rounded-2xl border border-gray-200 dark:border-white/5 mb-5 font-mono text-2xl font-bold text-[#00a884] tracking-widest uppercase flex items-center gap-3">
-                            {pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}
-                            <button
-                              onClick={() => {
-                                if (pairingCode) {
-                                  navigator.clipboard.writeText(pairingCode.replace(/[^a-zA-Z0-9]/g, ''));
-                                  alert("Código copiado!");
-                                }
-                              }}
-                              className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-lg text-gray-500 dark:text-[#8696a0] transition-colors cursor-pointer"
-                              title="Copiar código"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                              </svg>
-                            </button>
-                          </div>
-                          <div className="w-full bg-gray-100 dark:bg-[#202c33]/40 p-4 rounded-2xl border border-gray-200 dark:border-white/5 text-left mb-5 space-y-2.5">
-                            <h6 className="text-[10px] font-bold text-gray-800 dark:text-white uppercase tracking-wide">Instruções no Celular:</h6>
-                            <ol className="list-decimal list-inside text-xs text-gray-500 dark:text-[#8696a0] space-y-1.5 leading-relaxed">
-                              <li>Abra o **WhatsApp** no seu celular.</li>
-                              <li>Vá em **Dispositivos Conectados &gt; Conectar um dispositivo**.</li>
-                              <li>Escolha **"Conectar com número de telefone em vez disso"** (na parte inferior).</li>
-                              <li>Digite o código **{pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}** no seu celular.</li>
-                            </ol>
-                          </div>
-                          <div className="flex items-center gap-2 text-xs text-[#00a884] font-bold mb-4 animate-pulse">
-                            <Loader2 className="animate-spin" size={14} /> Aguardando pareamento no celular...
-                          </div>
+                          {isCodeEntered ? (
+                            <div className="w-full flex flex-col items-center py-4 px-2 animate-in fade-in zoom-in-95 duration-300">
+                              <div className="w-16 h-16 bg-[#00a884]/10 rounded-full border-2 border-[#00a884]/30 flex items-center justify-center mb-4 shadow-inner">
+                                <CheckCircle size={32} className="text-[#00a884] animate-bounce" />
+                              </div>
+                              <h4 className="text-sm font-bold text-gray-800 dark:text-white text-center mb-1">
+                                Código Digitado no Celular!
+                              </h4>
+                              <p className="text-xs text-gray-500 dark:text-[#8696a0] text-center mb-6 px-4 leading-relaxed">
+                                O celular confirmou o pareamento. Clique no botão abaixo para liberar a conexão no painel.
+                              </p>
+                              <button
+                                onClick={() => {
+                                  handleSuccess();
+                                }}
+                                className="w-full py-3 bg-[#00a884] hover:bg-[#008f6f] text-white rounded-xl font-bold transition-all text-sm flex items-center justify-center gap-2 shadow-md cursor-pointer animate-pulse"
+                              >
+                                Confirmar e Liberar Conexão
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-xs text-gray-500 dark:text-[#8696a0] mb-2 text-center font-semibold">Seu código de pareamento do WhatsApp:</p>
+                              <div className="px-6 py-4 bg-gray-100 dark:bg-black/40 rounded-2xl border border-gray-200 dark:border-white/5 mb-5 font-mono text-2xl font-bold text-[#00a884] tracking-widest uppercase flex items-center gap-3">
+                                {pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}
+                                <button
+                                  onClick={() => {
+                                    if (pairingCode) {
+                                      navigator.clipboard.writeText(pairingCode.replace(/[^a-zA-Z0-9]/g, ''));
+                                      alert("Código copiado!");
+                                    }
+                                  }}
+                                  className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-lg text-gray-500 dark:text-[#8696a0] transition-colors cursor-pointer"
+                                  title="Copiar código"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                                  </svg>
+                                </button>
+                              </div>
+                              <div className="w-full bg-gray-100 dark:bg-[#202c33]/40 p-4 rounded-2xl border border-gray-200 dark:border-white/5 text-left mb-5 space-y-2.5">
+                                <h6 className="text-[10px] font-bold text-gray-800 dark:text-white uppercase tracking-wide">Instruções no Celular:</h6>
+                                <ol className="list-decimal list-inside text-xs text-gray-500 dark:text-[#8696a0] space-y-1.5 leading-relaxed">
+                                  <li>Abra o **WhatsApp** no seu celular.</li>
+                                  <li>Vá em **Dispositivos Conectados &gt; Conectar um dispositivo**.</li>
+                                  <li>Escolha **"Conectar com número de telefone em vez disso"** (na parte inferior).</li>
+                                  <li>Digite o código **{pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}** no seu celular.</li>
+                                </ol>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs text-[#00a884] font-bold mb-4 animate-pulse">
+                                <Loader2 className="animate-spin" size={14} /> Aguardando pareamento no celular...
+                              </div>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>
