@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useChatStore } from "../store/chatStore";
 import { useWaCallsStore } from "../store/useWaCallsStore";
@@ -143,6 +143,22 @@ export default function EvolutionModal({
     isOpen: boolean;
   } | null>(null);
   const [modalInput1, setModalInput1] = useState("");
+
+  const existingInstancesRef = useRef(existingInstances);
+  const activePollingIdRef = useRef(activePollingId);
+  const loadingRef = useRef(loading);
+
+  useEffect(() => {
+    existingInstancesRef.current = existingInstances;
+  }, [existingInstances]);
+
+  useEffect(() => {
+    activePollingIdRef.current = activePollingId;
+  }, [activePollingId]);
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
   // Pré-preenche o número de telefone de pareamento
   useEffect(() => {
     if (activePollingId) {
@@ -393,7 +409,7 @@ export default function EvolutionModal({
 
     // Timeout de segurança contra loop infinito
     const timeoutId = setTimeout(() => {
-      if (loading || activePollingId) {
+      if (loadingRef.current || activePollingIdRef.current) {
         setError(
           "Erro: Timeout de Conexão. O Motor demorou muito para responder. Verifique se o seu celular tem acesso à internet ou reinicie a conexão.",
         );
@@ -453,11 +469,11 @@ export default function EvolutionModal({
         if (status === 'SUBSCRIBED') {
           pollInterval = setInterval(async () => {
             try {
-              if(!tenantId || !activePollingId) return;
-              const currInst = existingInstances.find((i) => i.id === activePollingId);
+              if(!tenantId || !activePollingIdRef.current) return;
+              const currInst = existingInstancesRef.current.find((i) => i.id === activePollingIdRef.current);
               if(!currInst) return;
               
-              const st = await fetchEngineStatus(tenantId, activePollingId, currInst.api_key || "");
+              const st = await fetchEngineStatus(tenantId, activePollingIdRef.current, currInst.api_key || "");
               if (st?.data?.status === "connected" || st?.data?.status === "connected_local") {
                 handleSuccess();
                 clearInterval(pollInterval);
@@ -483,9 +499,12 @@ export default function EvolutionModal({
       clearTimeout(timeoutId);
       if (pollInterval) clearInterval(pollInterval);
       supabase.removeChannel(channel);
-      setConnectionStatusMessage(null);
+      // Evita oscilação de tela: apenas limpa se mudou de fato de polling ID (modal cancelado/fechado)
+      if (!activePollingIdRef.current) {
+        setConnectionStatusMessage(null);
+      }
     };
-  }, [activePollingId, loading, existingInstances, connectMode]);
+  }, [activePollingId, connectMode]);
 
   const handleRequestPairingCode = async (id: string, apiKey?: string) => {
     if (!pairingPhone) {
@@ -2452,6 +2471,7 @@ export default function EvolutionModal({
                       setActivePollingId(null);
                       setPairingCode(null);
                       setPairingPhone('');
+                      setConnectionStatusMessage(null);
                     }}
                     className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 uppercase mt-4 bg-emerald-500/10 px-6 py-2.5 rounded-full hover:bg-emerald-500/20 transition-colors cursor-pointer"
                   >
