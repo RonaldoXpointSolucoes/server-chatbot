@@ -15,3 +15,14 @@ Sempre que o usuário digitar `deploy!`, ou solicitar um deploy, o agente **OBRI
 2. **COMUNICAÇÃO EXCLUSIVA COM PRODUÇÃO**: A aplicação front-end (tanto em execução de desenvolvimento local `npm run dev` na raiz, quanto em produção online) deve **obrigatoriamente** se comunicar apenas com o backend de produção online publicado na nuvem (Coolify). O arquivo `.env` do front-end local deve sempre manter `VITE_WHATSAPP_ENGINE_URL` apontado para o endereço de produção.
 3. **DEPLOY DE BACKEND ANTES DE TESTAR**: Quando houver necessidade de testar qualquer alteração feita no código do servidor de backend, a IA deve **obrigatoriamente** primeiro realizar o deploy das alterações do servidor na produção em nuvem (Coolify/GitHub) para que a alteração reflita no ambiente real, e somente depois orientar o usuário a testar.
 4. **SILENCIAMENTO DE LOGS LOCAIS DE MICRO-SERVIÇOS**: Evitar e suprimir logs e alertas desnecessários de micro-serviços locais (como o `WaCalls` na porta 8080) caso o serviço de chamadas não esteja ativo localmente, garantindo tratamento profissional de todos os erros legítimos enviados pelo usuário.
+
+## Regras de Atualização do Servidor (Node.js) vs. Frontend
+
+1. **ALTERAÇÃO ESTREITAMENTE VISUAL / FRONTEND**: Se a mudança for de visual, comportamento de tela, estilo (CSS/Tailwind) ou ajustes em componentes de React na raiz/src (fora do diretório `/server`), o servidor Node.js **NÃO** deve ser atualizado, versionado ou reiniciado. Evite modificar arquivos dentro do diretório `/server` para que o Coolify não ative builds redundantes do motor.
+2. **QUANDO ATUALIZAR O SERVIDOR NODE**: O backend só deve ser alterado e sofrer deploy se houver mudanças reais de lógica no diretório `/server/`, tais como:
+   * Modificações no `SessionManager`, `EventProcessor`, `FlowEngine` ou biblioteca `baileys-core`.
+   * Criação de tabelas, triggers Postgres, scripts de banco de dados ou arquivos SQL de migração.
+   * Mudanças nas APIs de roteamento Express ou integrações externas (Gemini AI, Gastrofood API, etc.).
+   * Atualizações de dependências no arquivo `/server/package.json`.
+3. **INDICAÇÃO DE DEPLOY**: Ao efetuar commits puramente visuais, faça o commit com mensagens que deixem claro que a mudança é exclusiva do frontend (ex: `feat(ui): ...` ou `fix(ui): ...`) e apenas efetue o deploy do frontend (Vercel).
+
