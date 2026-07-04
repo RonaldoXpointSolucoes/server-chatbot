@@ -180,6 +180,7 @@ class SessionManager {
             // Assume o lease e trava a posse do worker antes de iniciar
             await retryWithBackoff(() =>
                 supabase.from('whatsapp_instances').update({
+                    status: 'connecting',
                     assigned_node_id: NODE_ID,
                     lease_until: new Date(Date.now() + 60000).toISOString()
                 }).eq('id', instanceId)
@@ -207,7 +208,7 @@ class SessionManager {
                 logger: this.logger,
                 printQRInTerminal: false,
                 auth: state,
-                browser: Browsers.ubuntu('Chrome'),
+                browser: Browsers.macOS('Chrome'),
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: false,
                 markOnlineOnConnect: true,
@@ -356,6 +357,7 @@ class SessionManager {
                     if ((loggedOut || status === 401 || status === 403 || status === 400) && !isFullyAuthenticated && !isPairingPendingSync) {
                         console.log(`[SessionManager] Pareamento pendente falhou/rejeitado na instância ${instanceId} (status: ${status}). Limpando credenciais temporárias.`);
                         this.authenticatedSessions.delete(instanceId);
+                        this.pairingPendingSync.delete(instanceId);
                         await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId));
@@ -432,6 +434,7 @@ class SessionManager {
                         if (nextAttempt >= 10) {
                             console.error(`[SessionManager] Limite de 10 tentativas de reconexão consecutivas atingido para a instância ${instanceId}. Interrompendo reconexões para evitar banimento.`);
                             this.reconnectAttempts.delete(instanceId);
+                            this.pairingPendingSync.delete(instanceId);
                             
                             await retryWithBackoff(() =>
                                 supabase.from('whatsapp_instances')

@@ -1522,7 +1522,15 @@ class EventProcessor {
             if (connection === 'close') {
                 const reason = lastDisconnect?.error?.output?.statusCode;
                 const loggedOut = reason === 401;
-                const isTransient = [102, 408, 428, 440, 503, 515, 1006].includes(reason) || !reason;
+
+                // Verifica se há pareamento pendente de sincronização para tratar o close como transiente
+                const { data: runtime } = await supabase.from('whatsapp_instance_runtime')
+                    .select('pairing_code')
+                    .eq('instance_id', instanceId)
+                    .maybeSingle();
+                const isPairingPendingSync = runtime?.pairing_code === 'CONNECTED_PENDING_SYNC';
+
+                const isTransient = [102, 408, 428, 440, 503, 515, 1006].includes(reason) || !reason || isPairingPendingSync;
 
                 if (isTransient) {
                     await supabase.from('whatsapp_instances')
