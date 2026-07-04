@@ -109,6 +109,7 @@ export default function EvolutionModal({
   const [connectMode, setConnectMode] = useState<'qr' | 'pairing'>('qr');
   const [pairingPhone, setPairingPhone] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [codeEntered, setCodeEntered] = useState(false);
   const [pairingLoading, setPairingLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [engineUser, setEngineUser] = useState<any>(null);
@@ -255,6 +256,7 @@ export default function EvolutionModal({
     setSuccessMsg(null);
     setQrBase64(null);
     setConnectionStatusMessage(null);
+    setCodeEntered(false);
     try {
       if (
         inst.connection_status === "connected" ||
@@ -385,6 +387,7 @@ export default function EvolutionModal({
     setQrBase64(null);
     setActivePollingId(null);
     setConnectionStatusMessage(null);
+    setCodeEntered(false);
     if (finalId) {
       setEvolutionConnection(true, finalId);
       useChatStore.getState().syncEvolutionContacts(finalId);
@@ -531,6 +534,7 @@ export default function EvolutionModal({
     
     setPairingLoading(true);
     setPairingCode(null);
+    setCodeEntered(false);
     setError(null);
     
     try {
@@ -994,12 +998,16 @@ export default function EvolutionModal({
 
   const isExpanded = isTargetConnected && configTab === 'grupos';
 
-  const isCodeEntered = !!(
-    connectionStatusMessage &&
-    (connectionStatusMessage.includes("digitado") ||
-     connectionStatusMessage.includes("Cód") ||
-     connectionStatusMessage.includes("Cdigo"))
-  );
+  useEffect(() => {
+    if (
+      connectionStatusMessage &&
+      (connectionStatusMessage.includes("digitado") ||
+       connectionStatusMessage.includes("Cód") ||
+       connectionStatusMessage.includes("Cdigo"))
+    ) {
+      setCodeEntered(true);
+    }
+  }, [connectionStatusMessage]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-300">
@@ -2405,7 +2413,7 @@ export default function EvolutionModal({
                         </>
                       ) : (
                         <div className="w-full flex flex-col items-center animate-in fade-in duration-200">
-                          {isCodeEntered ? (
+                          {codeEntered ? (
                             <div className="w-full flex flex-col items-center py-4 px-2 animate-in fade-in zoom-in-95 duration-300">
                               <div className="w-16 h-16 bg-[#00a884]/10 rounded-full border-2 border-[#00a884]/30 flex items-center justify-center mb-4 shadow-inner">
                                 <CheckCircle size={32} className="text-[#00a884] animate-bounce" />
@@ -2472,6 +2480,7 @@ export default function EvolutionModal({
                       setPairingCode(null);
                       setPairingPhone('');
                       setConnectionStatusMessage(null);
+                      setCodeEntered(false);
                     }}
                     className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 uppercase mt-4 bg-emerald-500/10 px-6 py-2.5 rounded-full hover:bg-emerald-500/20 transition-colors cursor-pointer"
                   >
