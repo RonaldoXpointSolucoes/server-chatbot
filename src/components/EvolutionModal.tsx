@@ -1000,6 +1000,7 @@ export default function EvolutionModal({
 
   useEffect(() => {
     if (
+      pairingCode &&
       connectionStatusMessage &&
       (connectionStatusMessage.includes("digitado") ||
        connectionStatusMessage.includes("Cód") ||
@@ -1007,7 +1008,7 @@ export default function EvolutionModal({
     ) {
       setCodeEntered(true);
     }
-  }, [connectionStatusMessage]);
+  }, [connectionStatusMessage, pairingCode]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-300">
