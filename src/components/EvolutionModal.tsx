@@ -148,6 +148,8 @@ export default function EvolutionModal({
   const existingInstancesRef = useRef(existingInstances);
   const activePollingIdRef = useRef(activePollingId);
   const loadingRef = useRef(loading);
+  const pairingCodeRef = useRef(pairingCode);
+  const pairingLoadingRef = useRef(pairingLoading);
 
   useEffect(() => {
     existingInstancesRef.current = existingInstances;
@@ -160,6 +162,14 @@ export default function EvolutionModal({
   useEffect(() => {
     loadingRef.current = loading;
   }, [loading]);
+
+  useEffect(() => {
+    pairingCodeRef.current = pairingCode;
+  }, [pairingCode]);
+
+  useEffect(() => {
+    pairingLoadingRef.current = pairingLoading;
+  }, [pairingLoading]);
   // Pré-preenche o número de telefone de pareamento
   useEffect(() => {
     if (activePollingId) {
@@ -454,14 +464,16 @@ export default function EvolutionModal({
           setActivePollingId(null);
           setConnectionStatusMessage(null);
         } else if (st === "connecting") {
-          if (payload.payload?.pairingSuccess) {
-            setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
+          if (connectMode === 'pairing') {
+            if (pairingCodeRef.current && !pairingLoadingRef.current) {
+              if (payload.payload?.pairingSuccess) {
+                setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
+              } else {
+                setConnectionStatusMessage("Aguardando pareamento no celular...");
+              }
+            }
           } else {
-            setConnectionStatusMessage(
-              connectMode === 'pairing'
-                ? "Aguardando pareamento no celular..."
-                : "QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)..."
-            );
+            setConnectionStatusMessage("QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)...");
           }
         } else if (st === "connected" || st === "connected_local") {
           handleSuccess();
@@ -482,10 +494,12 @@ export default function EvolutionModal({
                 clearInterval(pollInterval);
               } else if (st?.data?.status === "connecting") {
                 if (connectMode === 'pairing') {
-                  if (st?.data?.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC') {
-                    setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
-                  } else {
-                    setConnectionStatusMessage("Aguardando pareamento no celular...");
+                  if (pairingCodeRef.current && !pairingLoadingRef.current) {
+                    if (st?.data?.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC') {
+                      setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
+                    } else {
+                      setConnectionStatusMessage("Aguardando pareamento no celular...");
+                    }
                   }
                 } else {
                   setConnectionStatusMessage("QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)...");
@@ -535,6 +549,7 @@ export default function EvolutionModal({
     setPairingLoading(true);
     setPairingCode(null);
     setCodeEntered(false);
+    setConnectionStatusMessage(null);
     setError(null);
     
     try {
@@ -632,10 +647,12 @@ export default function EvolutionModal({
           handleSuccess();
           clearInterval(interval);
         } else if (data && data.status === 'connecting') {
-          if (data.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC') {
-            setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
-          } else {
-            setConnectionStatusMessage("Aguardando pareamento no celular...");
+          if (pairingCodeRef.current && !pairingLoadingRef.current) {
+            if (data.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC') {
+              setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
+            } else {
+              setConnectionStatusMessage("Aguardando pareamento no celular...");
+            }
           }
         }
       } catch (e: any) {
