@@ -110,7 +110,7 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
         console.log(`[SessionManager] Carregadas ${memCache.size} chaves em RAM para a instância ${instanceId}`);
     }
 
-    return {
+    const authState = {
         state: {
             creds,
             keys: {
@@ -223,7 +223,7 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                      const { error } = await supabase.from('wa_auth_credentials').upsert({
                          instance_id: instanceId,
                          tenant_id: tenantId,
-                         creds_data: JSON.parse(JSON.stringify(creds, BufferJSON.replacer))
+                         creds_data: JSON.parse(JSON.stringify(authState.state.creds, BufferJSON.replacer))
                      });
                      if (error) throw new Error(error.message);
                  });
@@ -231,5 +231,7 @@ export async function useSupabaseAuthState(tenantId, instanceId) {
                  console.error(`[${instanceId}] Erro fatal ao salvar credenciais após retentativas:`, error.message);
              });
         }
-    }
+    };
+
+    return authState;
 }
