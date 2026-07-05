@@ -110,6 +110,7 @@ export default function EvolutionModal({
   const [pairingPhone, setPairingPhone] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [codeEntered, setCodeEntered] = useState(false);
+  const [hasSeenAwaitingState, setHasSeenAwaitingState] = useState(false);
   const [pairingLoading, setPairingLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [engineUser, setEngineUser] = useState<any>(null);
@@ -549,6 +550,7 @@ export default function EvolutionModal({
     setPairingLoading(true);
     setPairingCode(null);
     setCodeEntered(false);
+    setHasSeenAwaitingState(false);
     setConnectionStatusMessage(null);
     setError(null);
     
@@ -1016,8 +1018,15 @@ export default function EvolutionModal({
   const isExpanded = isTargetConnected && configTab === 'grupos';
 
   useEffect(() => {
+    if (connectionStatusMessage === "Aguardando pareamento no celular...") {
+      setHasSeenAwaitingState(true);
+    }
+  }, [connectionStatusMessage]);
+
+  useEffect(() => {
     if (
       pairingCode &&
+      hasSeenAwaitingState &&
       connectionStatusMessage &&
       (connectionStatusMessage.includes("digitado") ||
        connectionStatusMessage.includes("Cód") ||
@@ -1025,7 +1034,7 @@ export default function EvolutionModal({
     ) {
       setCodeEntered(true);
     }
-  }, [connectionStatusMessage, pairingCode]);
+  }, [connectionStatusMessage, pairingCode, hasSeenAwaitingState]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-300">
@@ -2499,6 +2508,7 @@ export default function EvolutionModal({
                       setPairingPhone('');
                       setConnectionStatusMessage(null);
                       setCodeEntered(false);
+                      setHasSeenAwaitingState(false);
                     }}
                     className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 uppercase mt-4 bg-emerald-500/10 px-6 py-2.5 rounded-full hover:bg-emerald-500/20 transition-colors cursor-pointer"
                   >
