@@ -1,5 +1,5 @@
 # Stage 1: Build WaCalls Go binary
-FROM golang:1.22-alpine AS go-builder
+FROM golang:alpine AS go-builder
 RUN apk add --no-cache git
 WORKDIR /build
 # Copy wacalls-go source
