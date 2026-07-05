@@ -441,7 +441,7 @@ export default function EvolutionModal({
         if (payload.payload?.qr_code) {
           setQrBase64(payload.payload.qr_code);
           setLoading(false);
-          if (connectMode === 'pairing') {
+          if (pairingCodeRef.current) {
             setConnectionStatusMessage("Chave de acesso requerida! Escaneie o QR Code no celular...");
           } else {
             setConnectionStatusMessage("QR Code pronto! Aguardando leitura no seu celular...");
@@ -451,7 +451,7 @@ export default function EvolutionModal({
       .on("broadcast", { event: "instance.status" }, (payload: any) => {
         const st = payload.payload?.status;
         if (st === "offline") {
-          if (connectMode === 'pairing') {
+          if (pairingCodeRef.current) {
             console.log("[Realtime] Ignorando status offline na conexão via Pairing Code (transição esperada)");
             return;
           }
@@ -465,7 +465,7 @@ export default function EvolutionModal({
           setActivePollingId(null);
           setConnectionStatusMessage(null);
         } else if (st === "connecting") {
-          if (connectMode === 'pairing') {
+          if (pairingCodeRef.current) {
             if (pairingCodeRef.current && !pairingLoadingRef.current) {
               if (payload.payload?.pairingSuccess) {
                 setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
@@ -494,7 +494,7 @@ export default function EvolutionModal({
                 handleSuccess();
                 clearInterval(pollInterval);
               } else if (st?.data?.status === "connecting") {
-                if (connectMode === 'pairing') {
+                if (pairingCodeRef.current) {
                   if (pairingCodeRef.current && !pairingLoadingRef.current) {
                     const runtimeQr = st?.data?.whatsapp_instance_runtime?.qr_code;
                     if (runtimeQr) {
@@ -1043,7 +1043,6 @@ export default function EvolutionModal({
   useEffect(() => {
     if (
       pairingCode &&
-      hasSeenAwaitingState &&
       connectionStatusMessage &&
       (connectionStatusMessage.includes("digitado") ||
        connectionStatusMessage.includes("Cód") ||
@@ -1051,7 +1050,7 @@ export default function EvolutionModal({
     ) {
       setCodeEntered(true);
     }
-  }, [connectionStatusMessage, pairingCode, hasSeenAwaitingState]);
+  }, [connectionStatusMessage, pairingCode]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-300">
