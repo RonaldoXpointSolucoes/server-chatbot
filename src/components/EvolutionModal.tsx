@@ -26,6 +26,8 @@ import {
   Users,
   Save,
   Activity,
+  X,
+  Volume2,
 } from "lucide-react";
 import {
   createInstance,
@@ -1094,25 +1096,27 @@ export default function EvolutionModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-300">
-      <div className={`bg-white/70 dark:bg-[#111b21]/70 backdrop-blur-2xl rounded-3xl shadow-2xl w-full flex flex-col border border-white/50 dark:border-white/10 relative transition-all duration-500 overflow-hidden ${isExpanded ? 'max-w-6xl h-[95vh]' : 'max-w-sm max-h-[90vh]'}`}>
-        <button onClick={onClose} className="absolute top-5 right-5 z-20 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors bg-white/50 dark:bg-black/20 rounded-full w-8 h-8 flex items-center justify-center">X</button>
-        <div className={`w-full overflow-y-auto styled-scrollbar p-8 flex flex-col ${isExpanded ? 'items-stretch' : 'items-center'} h-full relative`}>
+      <div className={`bg-white/80 dark:bg-[#0b141a]/90 backdrop-blur-2xl rounded-[2.5rem] shadow-2xl w-full flex flex-col border border-slate-200/50 dark:border-white/10 relative transition-all duration-500 overflow-hidden ${isExpanded ? 'max-w-6xl h-[95vh]' : 'max-w-sm max-h-[90vh]'}`}>
+        <button onClick={onClose} className="absolute top-5 right-5 z-20 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all bg-slate-100 dark:bg-zinc-800/40 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-full w-8 h-8 flex items-center justify-center border border-slate-200/50 dark:border-white/5 shadow-sm active:scale-90 hover:rotate-90 duration-200">
+          <X size={16} />
+        </button>
+        <div className={`w-full overflow-y-auto styled-scrollbar p-6 flex flex-col ${isExpanded ? 'items-stretch' : 'items-center'} h-full relative`}>
         
         {!isExpanded && !activePollingId && (
-           <h2 className="text-2xl font-black tracking-tight text-gray-800 dark:text-white mb-1 flex items-center gap-2 self-center">
-             <Smartphone className="text-emerald-500"/> {targetInstObj ? targetInstObj.display_name : 'App Connect'}
+           <h2 className="text-xl font-black tracking-tight text-slate-800 dark:text-white mb-1 flex items-center gap-2 self-center font-sans">
+             <Smartphone className="text-emerald-500 w-5 h-5"/> {targetInstObj ? targetInstObj.display_name : 'App Connect'}
            </h2>
         )}
 
           {!activePollingId && (
             modalReason ? (
-              <p className="text-sm font-medium text-center text-orange-600 bg-orange-500/10 p-3 rounded-2xl my-3 border border-orange-500/20">
+              <p className="text-xs font-semibold text-center text-amber-600 dark:text-amber-400 bg-amber-500/10 p-2.5 rounded-xl my-2 border border-amber-500/20 max-w-full">
                 {modalReason}
               </p>
             ) : (
-              <p className="text-xs text-center text-gray-500 dark:text-gray-400 mb-6 mt-1 font-medium bg-black/5 dark:bg-white/5 py-1 px-3 rounded-full">
+              <span className="text-[10px] text-center text-slate-500 dark:text-slate-400 mb-5 mt-1 font-bold uppercase tracking-wider bg-slate-100 dark:bg-zinc-800/40 py-1 px-3.5 rounded-full border border-slate-200/40 dark:border-white/5">
                 Motor Inteligente
-              </p>
+              </span>
             )
           )}
 
@@ -1132,113 +1136,117 @@ export default function EvolutionModal({
 
           {isTargetConnected && !successMsg ? (
             <div className="flex flex-col w-full animate-in zoom-in slide-in-from-bottom-4 duration-500 delay-150">
-              <div className="flex flex-col items-center bg-emerald-500/10 p-6 rounded-3xl border border-emerald-500/20 mb-2 relative overflow-hidden backdrop-blur-md">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
+              <div className="flex flex-col items-center bg-gradient-to-b from-emerald-500/10 to-transparent p-6 rounded-3xl border border-emerald-500/10 mb-2 relative overflow-hidden backdrop-blur-md w-full">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
 
                 {engineUser && !targetInstObj ? (
-                  <div className="w-20 h-20 rounded-full bg-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.3)] border-2 border-emerald-500/50 flex items-center justify-center mb-4 overflow-hidden">
+                  <div className="w-16 h-16 rounded-full bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)] border border-emerald-500/30 flex items-center justify-center mb-3 overflow-hidden">
                     <UserCircle2
-                      size={40}
-                      className="text-emerald-500 drop-shadow-md"
+                      size={32}
+                      className="text-emerald-500 drop-shadow"
                     />
                   </div>
                 ) : (
-                  <div className="w-20 h-20 rounded-full bg-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.3)] border-2 border-emerald-500/50 flex items-center justify-center mb-4">
+                  <div className="w-16 h-16 rounded-full bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)] border border-emerald-500/30 flex items-center justify-center mb-3">
                     <CheckCircle
-                      size={40}
-                      className="text-emerald-500 drop-shadow-md"
+                      size={32}
+                      className="text-emerald-500 drop-shadow"
                     />
                   </div>
                 )}
 
-                <h3 className="font-bold text-lg text-emerald-700 dark:text-emerald-400">
+                <h3 className="font-extrabold text-base text-slate-800 dark:text-emerald-400 tracking-tight">
                   {displayNameToUse}
                 </h3>
 
                 {engineUser?.id && (
-                  <p className="text-[10px] bg-white/50 dark:bg-black/40 px-2 py-0.5 rounded text-gray-500 mt-1 font-mono">
+                  <p className="text-[10px] bg-white/50 dark:bg-black/40 px-2 py-0.5 rounded text-slate-500 mt-1 font-mono border border-slate-200/50 dark:border-white/5">
                     +{engineUser.id.split(":")[0]}
                   </p>
                 )}
 
-                <div className="flex justify-center items-center gap-2 mt-4 text-xs font-medium text-gray-600 dark:text-gray-300">
-                  <span className="flex items-center gap-1 text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
-                    <Signal size={14} className="animate-pulse" /> NATIVO
-                    BAILLEYS CORE
+                <div className="flex justify-center items-center gap-2 mt-3 text-xs font-semibold">
+                  <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/25 shadow-sm">
+                    <Signal size={12} className="animate-pulse" /> NATIVO BAILEYS CORE
                   </span>
                 </div>
+              </div>
 
-                {/* Abas de Configuração */}
-                <div className="flex w-full bg-black/5 dark:bg-white/5 rounded-2xl p-1 mt-6 mb-2">
-                  <button
-                    onClick={() => setConfigTab("geral")}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all ${configTab === "geral" ? "bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm" : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"}`}
-                  >
-                    Geral
-                  </button>
-                  <button
-                    onClick={() => setConfigTab("grupos")}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all ${configTab === "grupos" ? "bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm" : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"}`}
-                  >
-                    Grupos & Ops
-                  </button>
-                  <button
-                    onClick={() => setConfigTab("voip")}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all ${configTab === "voip" ? "bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm" : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"}`}
-                  >
-                    Ligações de Voz
-                  </button>
-                </div>
+              {/* Abas de Configuração */}
+              <div className="flex w-full bg-slate-100 dark:bg-zinc-800/40 border border-slate-200/50 dark:border-white/5 rounded-2xl p-1 mt-4 mb-2">
+                <button
+                  onClick={() => setConfigTab("geral")}
+                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${configTab === "geral" ? "bg-white dark:bg-zinc-700 text-emerald-600 dark:text-emerald-400 shadow-sm" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
+                >
+                  Geral
+                </button>
+                <button
+                  onClick={() => setConfigTab("grupos")}
+                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${configTab === "grupos" ? "bg-white dark:bg-zinc-700 text-emerald-600 dark:text-emerald-400 shadow-sm" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
+                >
+                  Grupos & Ops
+                </button>
+                <button
+                  onClick={() => setConfigTab("voip")}
+                  className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${configTab === "voip" ? "bg-white dark:bg-zinc-700 text-emerald-600 dark:text-emerald-400 shadow-sm" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
+                >
+                  Ligações de Voz
+                </button>
+              </div>
 
-                {configTab === "geral" && (
-                  <div className="w-full animate-in fade-in slide-in-from-left-4 duration-300">
-                    <div className="w-full mt-4 flex flex-col items-center">
-                      <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-tight">
-                        Cor da Instância
-                      </p>
-                      <div className="flex gap-2">
-                        {INSTANCE_COLORS.map((color) => (
-                          <button
-                            key={color.value}
-                            onClick={async () => {
-                              const cId =
-                                localStorage.getItem("current_tenant_id") ||
-                                sessionStorage.getItem("current_tenant_id");
-                              if (!cId) return;
-                              const tInstanceId = targetInstObj
-                                ? targetInstObj.id
-                                : useChatStore.getState().connectedInstanceName;
-                              if (!tInstanceId) return;
+              {configTab === "geral" && (
+                <div className="w-full animate-in fade-in slide-in-from-left-4 duration-300">
+                  <div className="w-full mt-4 flex flex-col items-center bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-white/5 p-4 rounded-2xl">
+                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mb-3 uppercase tracking-wider">
+                      Cor da Instância
+                    </p>
+                    <div className="flex gap-2">
+                      {INSTANCE_COLORS.map((color) => (
+                        <button
+                          key={color.value}
+                          onClick={async () => {
+                            const cId =
+                              localStorage.getItem("current_tenant_id") ||
+                              sessionStorage.getItem("current_tenant_id");
+                            if (!cId) return;
+                            const tInstanceId = targetInstObj
+                              ? targetInstObj.id
+                              : useChatStore.getState().connectedInstanceName;
+                            if (!tInstanceId) return;
 
-                              const { error } = await supabase
-                                .from("whatsapp_instances")
-                                .update({ color: color.value })
-                                .eq("id", tInstanceId)
-                                .eq("tenant_id", cId);
+                            const { error } = await supabase
+                              .from("whatsapp_instances")
+                              .update({ color: color.value })
+                              .eq("id", tInstanceId)
+                              .eq("tenant_id", cId);
 
-                              if (!error) {
-                                fetchExistingInstances();
-                              }
-                            }}
-                            className={`w-8 h-8 rounded-full transition-all flex items-center justify-center ${targetInstObj?.color === color.value ? "ring-2 ring-offset-2 ring-emerald-500 scale-110" : "hover:scale-105 border border-white/20"}`}
-                            style={{ backgroundColor: color.value }}
-                            title={color.label}
-                          >
-                            {targetInstObj?.color === color.value && (
-                              <CheckCircle
-                                size={14}
-                                className="text-white drop-shadow"
-                              />
-                            )}
-                          </button>
-                        ))}
-                      </div>
+                            if (!error) {
+                              fetchExistingInstances();
+                            }
+                          }}
+                          className={`w-7 h-7 rounded-full transition-all flex items-center justify-center ${targetInstObj?.color === color.value ? "ring-2 ring-offset-2 ring-emerald-500 scale-110 dark:ring-offset-zinc-950" : "hover:scale-110 border border-black/10 dark:border-white/10"}`}
+                          style={{ backgroundColor: color.value }}
+                          title={color.label}
+                        >
+                          {targetInstObj?.color === color.value && (
+                            <CheckCircle
+                              size={14}
+                              className="text-white drop-shadow-md"
+                            />
+                          )}
+                        </button>
+                      ))}
                     </div>
+                  </div>
 
-                    <div className="w-full mt-4 flex flex-col items-center">
-                      <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-tight">
-                        Som de Notificação
-                      </p>
+                  <div className="w-full mt-3 flex flex-col items-center bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-white/5 p-4 rounded-2xl">
+                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mb-2.5 uppercase tracking-wider">
+                      Som de Notificação
+                    </p>
+                    <div className="relative flex items-center w-full max-w-[200px]">
+                      <span className="absolute left-3 pointer-events-none text-slate-400 dark:text-slate-500">
+                        <Volume2 size={14} />
+                      </span>
                       <select
                         value={targetInstObj?.notification_sound || "default"}
                         onChange={async (e) => {
@@ -1263,7 +1271,7 @@ export default function EvolutionModal({
                             fetchExistingInstances();
                           }
                         }}
-                        className="w-full max-w-[200px] bg-white/50 dark:bg-black/40 border border-gray-200 dark:border-white/10 rounded-xl p-2 text-xs text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-all shadow-sm text-center"
+                        className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-xl py-2 pl-9 pr-4 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all shadow-sm cursor-pointer appearance-none text-center font-medium"
                       >
                         {NOTIFICATION_SOUNDS.map((s) => (
                           <option key={s.id} value={s.id}>
@@ -1271,173 +1279,175 @@ export default function EvolutionModal({
                           </option>
                         ))}
                       </select>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 w-full mt-6">
-                      <button
-                        onClick={async () => {
-                          const cId =
-                            localStorage.getItem("current_tenant_id") ||
-                            sessionStorage.getItem("current_tenant_id");
-                          if (
-                            !confirm(
-                              `Tem certeza que deseja deslogar seu aparelho da engine ${targetInstObj?.display_name || ""}?`,
-                            )
-                          )
-                            return;
-                          if (!cId) return;
-                          setLoading(true);
-                          const tInstanceId = targetInstObj
-                            ? targetInstObj.id
-                            : useChatStore.getState().connectedInstanceName;
-                          const currInst = existingInstances.find(
-                            (i) => i.id === tInstanceId,
-                          );
-                          await logoutEngine(
-                            cId,
-                            tInstanceId!,
-                            currInst?.api_key || "",
-                          );
-                          setEvolutionConnection(false, null);
-                          setLoading(false);
-                          setQrBase64(null);
-                          setEngineUser(null);
-                        }}
-                        className="flex col-span-1 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-red-500/10 hover:text-red-500 border border-transparent hover:border-red-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
-                      >
-                        <LogOut
-                          size={18}
-                          className="group-hover:text-red-500 text-gray-400 transition-colors"
-                        />
-                        Deslogar Aparelho
-                      </button>
-
-                      <button
-                        onClick={async () => {
-                          const cId =
-                            localStorage.getItem("current_tenant_id") ||
-                            sessionStorage.getItem("current_tenant_id");
-                          if (!cId) return;
-                          setLoading(true);
-                          const currInst = existingInstances.find(
-                            (i) =>
-                              i.id ===
-                              useChatStore.getState().connectedInstanceName,
-                          );
-                          await reconnectEngine(
-                            cId,
-                            useChatStore.getState().connectedInstanceName!,
-                            currInst?.api_key || "",
-                          );
-                          setTimeout(() => {
-                            setLoading(false);
-                            alert("Protocolo WS reiniciado pela Engine.");
-                          }, 2000);
-                        }}
-                        className="flex col-span-1 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-emerald-500/10 hover:text-emerald-500 border border-transparent hover:border-emerald-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
-                      >
-                        <RefreshCcw
-                          size={18}
-                          className="group-hover:text-emerald-500 text-gray-400 animate-in spin-in transition-colors"
-                        />
-                        Warm Boot (Restart)
-                      </button>
-
-                      <button
-                        onClick={async () => {
-                          const cId =
-                            localStorage.getItem("current_tenant_id") ||
-                            sessionStorage.getItem("current_tenant_id");
-                          if (!cId) return;
-                          setLoading(true);
-                          const currInst = existingInstances.find(
-                            (i) =>
-                              i.id ===
-                              useChatStore.getState().connectedInstanceName,
-                          );
-                          const r = await syncEngineContacts(
-                            cId,
-                            useChatStore.getState().connectedInstanceName!,
-                            currInst?.api_key || "",
-                          );
-                          setLoading(false);
-                          alert(r.message || "OK");
-                        }}
-                        className="flex col-span-1 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-emerald-500/10 hover:text-emerald-500 border border-transparent hover:border-emerald-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
-                      >
-                        <UserCircle2
-                          size={18}
-                          className="group-hover:text-emerald-500 text-gray-400 transition-colors"
-                        />
-                        Sincronizar Contatos
-                      </button>
-
-                      <button
-                        onClick={async () => {
-                          const cId =
-                            localStorage.getItem("current_tenant_id") ||
-                            sessionStorage.getItem("current_tenant_id");
-                          if (!cId) return;
-                          setLoading(true);
-                          const currInst = existingInstances.find(
-                            (i) =>
-                              i.id ===
-                              useChatStore.getState().connectedInstanceName,
-                          );
-                          const r = await forceEnginePresence(
-                            cId,
-                            useChatStore.getState().connectedInstanceName!,
-                            currInst?.api_key || "",
-                          );
-                          setLoading(false);
-                          alert(r.message || "OK");
-                        }}
-                        className="flex col-span-1 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-emerald-500/10 hover:text-emerald-500 border border-transparent hover:border-emerald-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
-                      >
-                        <Signal
-                          size={18}
-                          className="group-hover:text-emerald-500 text-gray-400 transition-colors"
-                        />
-                        Forçar Online
-                      </button>
-
-                      <button
-                        onClick={async () => {
-                          const cId =
-                            localStorage.getItem("current_tenant_id") ||
-                            sessionStorage.getItem("current_tenant_id");
-                          if (
-                            !confirm(
-                              "Isso apagará o cache de mensagens em RAM. Deseja prosseguir?",
-                            )
-                          )
-                            return;
-                          if (!cId) return;
-                          setLoading(true);
-                          const currInst = existingInstances.find(
-                            (i) =>
-                              i.id ===
-                              useChatStore.getState().connectedInstanceName,
-                          );
-                          const r = await clearEngineStore(
-                            cId,
-                            useChatStore.getState().connectedInstanceName!,
-                            currInst?.api_key || "",
-                          );
-                          setLoading(false);
-                          alert(r.message || "OK");
-                        }}
-                        className="flex col-span-2 flex-col items-center justify-center gap-1.5 p-3 rounded-2xl bg-white/50 dark:bg-black/30 hover:bg-orange-500/10 hover:text-orange-500 border border-transparent hover:border-orange-500/30 transition-all text-xs font-semibold text-gray-600 dark:text-gray-400 group"
-                      >
-                        <AlertCircle
-                          size={18}
-                          className="group-hover:text-orange-500 text-gray-400 transition-colors"
-                        />
-                        Limpar RAM (Memory Leak Prevention)
-                      </button>
+                      <span className="absolute right-3 pointer-events-none text-slate-400 dark:text-slate-500 text-[10px]">▼</span>
                     </div>
                   </div>
-                )}
+
+                  <div className="grid grid-cols-2 gap-2 w-full mt-4">
+                    <button
+                      onClick={async () => {
+                        const cId =
+                          localStorage.getItem("current_tenant_id") ||
+                          sessionStorage.getItem("current_tenant_id");
+                        if (
+                          !confirm(
+                            `Tem certeza que deseja deslogar seu aparelho da engine ${targetInstObj?.display_name || ""}?`,
+                          )
+                        )
+                          return;
+                        if (!cId) return;
+                        setLoading(true);
+                        const tInstanceId = targetInstObj
+                          ? targetInstObj.id
+                          : useChatStore.getState().connectedInstanceName;
+                        const currInst = existingInstances.find(
+                          (i) => i.id === tInstanceId,
+                        );
+                        await logoutEngine(
+                          cId,
+                          tInstanceId!,
+                          currInst?.api_key || "",
+                        );
+                        setEvolutionConnection(false, null);
+                        setLoading(false);
+                        setQrBase64(null);
+                        setEngineUser(null);
+                      }}
+                      className="flex col-span-1 flex-col items-center justify-center gap-2 p-4 rounded-2xl bg-red-500/5 hover:bg-red-500/10 text-red-500 border border-red-500/10 hover:border-red-500/30 transition-all text-[11px] font-bold active:scale-95 group shadow-sm"
+                    >
+                      <LogOut
+                        size={18}
+                        className="text-red-500/80 group-hover:scale-110 transition-transform"
+                      />
+                      Deslogar Aparelho
+                    </button>
+
+                    <button
+                      onClick={async () => {
+                        const cId =
+                          localStorage.getItem("current_tenant_id") ||
+                          sessionStorage.getItem("current_tenant_id");
+                        if (!cId) return;
+                        setLoading(true);
+                        const currInst = existingInstances.find(
+                          (i) =>
+                            i.id ===
+                            useChatStore.getState().connectedInstanceName,
+                        );
+                        await reconnectEngine(
+                          cId,
+                          useChatStore.getState().connectedInstanceName!,
+                          currInst?.api_key || "",
+                        );
+                        setTimeout(() => {
+                          setLoading(false);
+                          alert("Protocolo WS reiniciado pela Engine.");
+                        }, 2000);
+                      }}
+                      className="flex col-span-1 flex-col items-center justify-center gap-2 p-4 rounded-2xl bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/10 hover:border-emerald-500/30 transition-all text-[11px] font-bold active:scale-95 group shadow-sm"
+                    >
+                      <RefreshCcw
+                        size={18}
+                        className="text-emerald-500/80 group-hover:rotate-45 transition-transform"
+                      />
+                      Warm Boot (Restart)
+                    </button>
+
+                    <button
+                      onClick={async () => {
+                        const cId =
+                          localStorage.getItem("current_tenant_id") ||
+                          sessionStorage.getItem("current_tenant_id");
+                        if (!cId) return;
+                        setLoading(true);
+                        const currInst = existingInstances.find(
+                          (i) =>
+                            i.id ===
+                            useChatStore.getState().connectedInstanceName,
+                        );
+                        const r = await syncEngineContacts(
+                          cId,
+                          useChatStore.getState().connectedInstanceName!,
+                          currInst?.api_key || "",
+                        );
+                        setLoading(false);
+                        alert(r.message || "OK");
+                      }}
+                      className="flex col-span-1 flex-col items-center justify-center gap-2 p-4 rounded-2xl bg-blue-500/5 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/10 hover:border-blue-500/30 transition-all text-[11px] font-bold active:scale-95 group shadow-sm"
+                    >
+                      <UserCircle2
+                        size={18}
+                        className="text-blue-500/80 group-hover:scale-110 transition-transform"
+                      />
+                      Sincronizar Contatos
+                    </button>
+
+                    <button
+                      onClick={async () => {
+                        const cId =
+                          localStorage.getItem("current_tenant_id") ||
+                          sessionStorage.getItem("current_tenant_id");
+                        if (!cId) return;
+                        setLoading(true);
+                        const currInst = existingInstances.find(
+                          (i) =>
+                            i.id ===
+                            useChatStore.getState().connectedInstanceName,
+                        );
+                        const r = await forceEnginePresence(
+                          cId,
+                          useChatStore.getState().connectedInstanceName!,
+                          currInst?.api_key || "",
+                        );
+                        setLoading(false);
+                        alert(r.message || "OK");
+                      }}
+                      className="flex col-span-1 flex-col items-center justify-center gap-2 p-4 rounded-2xl bg-violet-500/5 hover:bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/10 hover:border-violet-500/30 transition-all text-[11px] font-bold active:scale-95 group shadow-sm"
+                    >
+                      <Signal
+                        size={18}
+                        className="text-violet-500/80 group-hover:scale-110 transition-transform"
+                      />
+                      Forçar Online
+                    </button>
+
+                    <button
+                      onClick={async () => {
+                        const cId =
+                          localStorage.getItem("current_tenant_id") ||
+                          sessionStorage.getItem("current_tenant_id");
+                        if (
+                          !confirm(
+                            "Isso apagará o cache de mensagens em RAM. Deseja prosseguir?",
+                          )
+                        )
+                          return;
+                        if (!cId) return;
+                        setLoading(true);
+                        const currInst = existingInstances.find(
+                          (i) =>
+                            i.id ===
+                            useChatStore.getState().connectedInstanceName,
+                        );
+                        const r = await clearEngineStore(
+                          cId,
+                          useChatStore.getState().connectedInstanceName!,
+                          currInst?.api_key || "",
+                        );
+                        setLoading(false);
+                        alert(r.message || "OK");
+                      }}
+                      className="flex col-span-2 flex-col items-center justify-center gap-2 p-4 rounded-2xl bg-amber-500/5 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/10 hover:border-amber-500/30 transition-all text-[11px] font-bold active:scale-95 group shadow-sm"
+                    >
+                      <AlertCircle
+                        size={18}
+                        className="text-amber-500/80 group-hover:scale-105 transition-transform"
+                      />
+                      Limpar RAM (Memory Leak Prevention)
+                    </button>
+                  </div>
+                </div>
+              )}
 
                 {configTab === "voip" && (
                   <div className="w-full mt-4 flex flex-col items-center animate-in fade-in slide-in-from-right-4 duration-300">
