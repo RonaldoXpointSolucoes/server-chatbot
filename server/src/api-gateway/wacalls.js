@@ -6,21 +6,13 @@ const getWaCallsUrl = () => {
     const envUrl = process.env.WACALLS_URL?.trim();
     if (envUrl) return envUrl;
     
-    // Fallback inteligente para Docker Host no ambiente VPS Linux de produção
-    if (process.env.NODE_ENV === 'production' || process.platform === 'linux') {
-        return 'http://172.17.0.1:8080';
-    }
-    return 'http://localhost:8080';
+    // Como rodamos localmente no mesmo container, usamos localhost:8080 por padrão
+    return 'http://127.0.0.1:8080';
 };
 const WACALLS_URL = getWaCallsUrl();
 
 // Proxy para Server-Sent Events (SSE) do WaCalls
 router.get('/wacalls/events', async (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-
     const controller = new AbortController();
     
     // Se o cliente desconectar, interrompe a requisição ao servidor Go
@@ -34,9 +26,18 @@ router.get('/wacalls/events', async (req, res) => {
             signal: controller.signal
         });
 
-        if (!response.body) {
-            throw new Error('Nenhum corpo de resposta retornado pelo servidor WaCalls');
+        if (!response.ok) {
+            return res.status(response.status).json({ error: `WaCalls server returned status ${response.status}` });
         }
+
+        if (!response.body) {
+            return res.status(500).json({ error: 'Nenhum corpo de resposta retornado pelo servidor WaCalls' });
+        }
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('Access-Control-Allow-Origin', '*');
 
         // Repassa os chunks recebidos em tempo real para o cliente
         for await (const chunk of response.body) {
@@ -45,6 +46,9 @@ router.get('/wacalls/events', async (req, res) => {
     } catch (e) {
         if (e.name !== 'AbortError') {
             console.error('[WaCalls SSE Proxy Error]:', e.message);
+            if (!res.headersSent) {
+                return res.status(502).json({ error: 'Erro de comunicação com o servidor de chamadas.' });
+            }
         }
     } finally {
         res.end();

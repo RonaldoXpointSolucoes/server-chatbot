@@ -4,11 +4,8 @@ const getWaCallsUrl = () => {
     const envUrl = process.env.WACALLS_URL?.trim();
     if (envUrl) return envUrl;
     
-    // Fallback inteligente para Docker Host no ambiente VPS Linux de produção
-    if (process.env.NODE_ENV === 'production' || process.platform === 'linux') {
-        return 'http://172.17.0.1:8080';
-    }
-    return 'http://localhost:8080';
+    // Como rodamos localmente no mesmo container, usamos localhost:8080 por padrão
+    return 'http://127.0.0.1:8080';
 };
 const WACALLS_URL = getWaCallsUrl();
 
@@ -42,8 +39,11 @@ export function startWaCallsListener() {
 
                 console.log(`[WaCalls Background Listener] Conectando ao SSE em: ${WACALLS_URL}/api/events`);
                 const response = await fetch(`${WACALLS_URL}/api/events`);
+                if (!response.ok) {
+                    throw new Error(`fetch failed: HTTP status ${response.status}`);
+                }
                 if (!response.body) {
-                    throw new Error('Nenhum corpo de resposta retornado pelo servidor WaCalls');
+                    throw new Error('fetch failed: Nenhum corpo de resposta retornado pelo servidor WaCalls');
                 }
 
                 let buffer = '';
