@@ -111,7 +111,8 @@ async function handleWaCallsEvent(ev) {
         }
         
         const historyData = await historyRes.json();
-        const callRecord = historyData.find(c => c.callId === callId);
+        const rows = Array.isArray(historyData) ? historyData : (historyData.rows || []);
+        const callRecord = rows.find(c => c.callId === callId);
         
         if (!callRecord) {
             console.warn(`[WaCalls Listener] Registro da chamada ${callId} não encontrado no histórico do WaCalls.`);
