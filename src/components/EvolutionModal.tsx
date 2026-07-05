@@ -438,14 +438,14 @@ export default function EvolutionModal({
 
     channel
       .on("broadcast", { event: "instance.qr_updated" }, (payload: any) => {
-        if (connectMode === 'pairing') {
-          console.log("[Realtime] Ignorando evento de QR Code recebido durante modo pareamento.");
-          return;
-        }
         if (payload.payload?.qr_code) {
           setQrBase64(payload.payload.qr_code);
           setLoading(false);
-          setConnectionStatusMessage("QR Code pronto! Aguardando leitura no seu celular...");
+          if (connectMode === 'pairing') {
+            setConnectionStatusMessage("Chave de acesso requerida! Escaneie o QR Code no celular...");
+          } else {
+            setConnectionStatusMessage("QR Code pronto! Aguardando leitura no seu celular...");
+          }
         }
       })
       .on("broadcast", { event: "instance.status" }, (payload: any) => {
@@ -496,6 +496,10 @@ export default function EvolutionModal({
               } else if (st?.data?.status === "connecting") {
                 if (connectMode === 'pairing') {
                   if (pairingCodeRef.current && !pairingLoadingRef.current) {
+                    const runtimeQr = st?.data?.whatsapp_instance_runtime?.qr_code;
+                    if (runtimeQr) {
+                      setQrBase64(runtimeQr);
+                    }
                     if (st?.data?.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC') {
                       setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
                     } else {
@@ -2462,36 +2466,62 @@ export default function EvolutionModal({
                             </div>
                           ) : (
                             <>
-                              <p className="text-xs text-gray-500 dark:text-[#8696a0] mb-2 text-center font-semibold">Seu código de pareamento do WhatsApp:</p>
-                              <div className="px-6 py-4 bg-gray-100 dark:bg-black/40 rounded-2xl border border-gray-200 dark:border-white/5 mb-5 font-mono text-2xl font-bold text-[#00a884] tracking-widest uppercase flex items-center gap-3">
-                                {pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}
-                                <button
-                                  onClick={() => {
-                                    if (pairingCode) {
-                                      navigator.clipboard.writeText(pairingCode.replace(/[^a-zA-Z0-9]/g, ''));
-                                      alert("Código copiado!");
-                                    }
-                                  }}
-                                  className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-lg text-gray-500 dark:text-[#8696a0] transition-colors cursor-pointer"
-                                  title="Copiar código"
-                                >
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                                  </svg>
-                                </button>
-                              </div>
-                              <div className="w-full bg-gray-100 dark:bg-[#202c33]/40 p-4 rounded-2xl border border-gray-200 dark:border-white/5 text-left mb-5 space-y-2.5">
-                                <h6 className="text-[10px] font-bold text-gray-800 dark:text-white uppercase tracking-wide">Instruções no Celular:</h6>
-                                <ol className="list-decimal list-inside text-xs text-gray-500 dark:text-[#8696a0] space-y-1.5 leading-relaxed">
-                                  <li>Abra o **WhatsApp** no seu celular.</li>
-                                  <li>Vá em **Dispositivos Conectados &gt; Conectar um dispositivo**.</li>
-                                  <li>Escolha **"Conectar com número de telefone em vez disso"** (na parte inferior).</li>
-                                  <li>Digite o código **{pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}** no seu celular.</li>
-                                </ol>
-                              </div>
-                              <div className="flex items-center gap-2 text-xs text-[#00a884] font-bold mb-4 animate-pulse">
-                                <Loader2 className="animate-spin" size={14} /> Aguardando pareamento no celular...
-                              </div>
+                              {qrBase64 ? (
+                                <div className="w-full flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
+                                  <div className="w-12 h-12 bg-amber-500/10 rounded-full border border-amber-500/20 flex items-center justify-center mb-3">
+                                    <QrCode className="text-amber-500" size={24} />
+                                  </div>
+                                  <h4 className="text-xs font-bold text-gray-800 dark:text-white text-center mb-1 uppercase tracking-wide">
+                                    Validação da Chave de Acesso
+                                  </h4>
+                                  <p className="text-[10px] text-gray-500 dark:text-[#8696a0] text-center mb-4 px-2 leading-relaxed">
+                                    O WhatsApp exige a leitura deste QR Code especial para autorizar a chave de acesso (Passkey). <strong>Abra a câmera do WhatsApp e escaneie o código abaixo:</strong>
+                                  </p>
+                                  <div className="p-3 bg-white rounded-2xl shadow-sm border border-gray-200 dark:border-white/5 mb-4">
+                                    <img 
+                                      src={qrBase64} 
+                                      alt="Validação de Passkey" 
+                                      className="w-44 h-44 object-contain rounded-xl"
+                                    />
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs text-[#00a884] font-bold mb-2 animate-pulse">
+                                    <Loader2 className="animate-spin" size={14} /> Aguardando leitura do QR Code...
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <p className="text-xs text-gray-500 dark:text-[#8696a0] mb-2 text-center font-semibold">Seu código de pareamento do WhatsApp:</p>
+                                  <div className="px-6 py-4 bg-gray-100 dark:bg-black/40 rounded-2xl border border-gray-200 dark:border-white/5 mb-5 font-mono text-2xl font-bold text-[#00a884] tracking-widest uppercase flex items-center gap-3">
+                                    {pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}
+                                    <button
+                                      onClick={() => {
+                                        if (pairingCode) {
+                                          navigator.clipboard.writeText(pairingCode.replace(/[^a-zA-Z0-9]/g, ''));
+                                          alert("Código copiado!");
+                                        }
+                                      }}
+                                      className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-lg text-gray-500 dark:text-[#8696a0] transition-colors cursor-pointer"
+                                      title="Copiar código"
+                                    >
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                  <div className="w-full bg-gray-100 dark:bg-[#202c33]/40 p-4 rounded-2xl border border-gray-200 dark:border-white/5 text-left mb-5 space-y-2.5">
+                                    <h6 className="text-[10px] font-bold text-gray-800 dark:text-white uppercase tracking-wide">Instruções no Celular:</h6>
+                                    <ol className="list-decimal list-inside text-xs text-gray-500 dark:text-[#8696a0] space-y-1.5 leading-relaxed">
+                                      <li>Abra o **WhatsApp** no seu celular.</li>
+                                      <li>Vá em **Dispositivos Conectados &gt; Conectar um dispositivo**.</li>
+                                      <li>Escolha **"Conectar com número de telefone em vez disso"** (na parte inferior).</li>
+                                      <li>Digite o código **{pairingCode ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : ''}** no seu celular.</li>
+                                    </ol>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs text-[#00a884] font-bold mb-4 animate-pulse">
+                                    <Loader2 className="animate-spin" size={14} /> Aguardando pareamento no celular...
+                                  </div>
+                                </>
+                              )}
                             </>
                           )}
                         </div>
