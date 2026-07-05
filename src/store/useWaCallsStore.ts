@@ -110,7 +110,28 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
       set((state) => {
         const next = new Map(state.ownConnections);
         next.set(call.callId, conn);
-        return { ownConnections: next };
+        
+        // Adiciona a chamada localmente de forma preventiva para abrir o widget de imediato
+        const localCall: CallSummary = {
+          sessionId: sid,
+          callId: call.callId,
+          owner: get().clientId,
+          direction: "outbound",
+          peer: cleanPhone + "@s.whatsapp.net",
+          startedAt: Date.now(),
+          status: "starting"
+        };
+        
+        // Evita duplicidade se o SSE for ultra rápido
+        const updatedCalls = state.calls.some(c => c.callId === call.callId)
+          ? state.calls
+          : [...state.calls, localCall];
+
+        return { 
+          ownConnections: next,
+          calls: updatedCalls,
+          isOpenWidget: true 
+        };
       });
     } catch (e: any) {
       console.error("[useWaCallsStore/startCall] Falha ao abrir WebRTC:", e.message);
@@ -141,7 +162,18 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
       set((state) => {
         const next = new Map(state.ownConnections);
         next.set(call.callId, conn);
-        return { ownConnections: next, incoming: null };
+        
+        // Atualiza a chamada localmente e garante abertura do painel
+        const updatedCalls = state.calls.map(c => 
+          c.callId === call.callId ? { ...c, status: "connected" as const } : c
+        );
+
+        return { 
+          ownConnections: next, 
+          incoming: null,
+          calls: updatedCalls,
+          isOpenWidget: true
+        };
       });
     } catch (e) {
       // Se falhar na conexão de mídia, encerra a chamada
