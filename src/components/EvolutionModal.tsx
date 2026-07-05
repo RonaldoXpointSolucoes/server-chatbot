@@ -474,7 +474,7 @@ export default function EvolutionModal({
               }
             }
           } else {
-            setConnectionStatusMessage("QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)...");
+            setConnectionStatusMessage("Escaneie o QR Code no seu WhatsApp.");
           }
         } else if (st === "connected" || st === "connected_local") {
           handleSuccess();
@@ -507,7 +507,7 @@ export default function EvolutionModal({
                     }
                   }
                 } else {
-                  setConnectionStatusMessage("QR Code lido! Conectando e pareando aparelho (isso pode levar de 30 a 60 segundos)...");
+                  setConnectionStatusMessage("Escaneie o QR Code no seu WhatsApp.");
                 }
               }
             } catch (e) {
@@ -533,6 +533,9 @@ export default function EvolutionModal({
       alert("Por favor, digite o número do telefone com código do país (ex: 5511991649959).");
       return;
     }
+    
+    setConnectMode('pairing');
+    setQrBase64(null);
     
     const logger = useDevStore.getState();
     if (!logger.isVisible) {
