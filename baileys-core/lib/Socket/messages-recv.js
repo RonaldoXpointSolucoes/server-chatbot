@@ -5,7 +5,7 @@ import Long from 'long';
 import { proto } from '../../WAProto/index.js';
 import { DEFAULT_CACHE_TTLS, KEY_BUNDLE_TYPE, MIN_PREKEY_COUNT, PLACEHOLDER_MAX_AGE_SECONDS, STATUS_EXPIRY_SECONDS } from '../Defaults/index.js';
 import { WAMessageStatus, WAMessageStubType } from '../Types/index.js';
-import { aesDecryptCTR, aesEncryptGCM, cleanMessage, Curve, decodeMediaRetryNode, decodeMessageNode, decryptMessageNode, delay, derivePairingCodeKey, encodeBigEndian, encodeSignedDeviceIdentity, extractAddressingContext, getCallStatusFromNode, getHistoryMsg, getNextPreKeys, getStatusFromReceiptType, handleIdentityChange, hkdf, MISSING_KEYS_ERROR_TEXT, NACK_REASONS, NO_MESSAGE_FOUND_ERROR_TEXT, toNumber, unixTimestampSeconds, xmppPreKey, xmppSignedPreKey } from '../Utils/index.js';
+import { aesDecryptCTR, aesEncryptGCM, cleanMessage, Curve, decodeMediaRetryNode, decodeMessageNode, decryptMessageNode, delay, derivePairingCodeKey, encodeBigEndian, encodeSignedDeviceIdentity, extractAddressingContext, getCallStatusFromNode, getHistoryMsg, getNextPreKeys, getStatusFromReceiptType, getPlatformType, handleIdentityChange, hkdf, makeShortcakeFlow, MISSING_KEYS_ERROR_TEXT, NACK_REASONS, NO_MESSAGE_FOUND_ERROR_TEXT, toNumber, unixTimestampSeconds, xmppPreKey, xmppSignedPreKey } from '../Utils/index.js';
 import { makeMutex } from '../Utils/make-mutex.js';
 import { makeOfflineNodeProcessor } from '../Utils/offline-node-processor.js';
 import { buildAckStanza } from '../Utils/stanza-ack.js';
@@ -18,6 +18,41 @@ export const makeMessagesRecvSocket = (config) => {
     const { ev, authState, ws, messageMutex, notificationMutex, receiptMutex, signalRepository, query, upsertMessage, resyncAppState, onUnexpectedError, assertSessions, sendNode, relayMessage, sendReceipt, uploadPreKeys, sendPeerDataOperationMessage, messageRetryManager } = sock;
     /** this mutex ensures that each retryRequest will wait for the previous one to finish */
     const retryMutex = makeMutex();
+    /**
+     * Companion side of the WhatsApp "Shortcake" passkey-linking handshake. Only
+     * created when a `signPasskeyAssertion` is configured; otherwise a server
+     * forced passkey prologue is just acked (and surfaced via `connection.update`).
+     */
+    const shortcakeFlow = config.signPasskeyAssertion
+        ? makeShortcakeFlow({
+            logger,
+            query,
+            signAssertion: config.signPasskeyAssertion,
+            getCreds: () => authState.creds,
+            updateCreds: patch => ev.emit('creds.update', patch),
+            deviceType: getPlatformType(config.browser[1]),
+            emitVerificationCode: code => logger.debug({ code }, 'shortcake verification code')
+        })
+        : null;
+    /**
+     * Handles the server-forced passkey ("Shortcake") prologue. With a configured
+     * `signPasskeyAssertion` the full handshake runs; without one we surface the
+     * requirement via `connection.update` and let the notification ack, instead of
+     * silently stalling, which is what happens today when the server demands a
+     * passkey after a successful pairing-code `companion_finish`.
+     */
+    const handleShortcakeNotification = async (node) => {
+        if (node.attrs.type === 'passkey_prologue_request') {
+            ev.emit('connection.update', { passkeyRequired: { hasSigner: !!shortcakeFlow } });
+        }
+        if (shortcakeFlow) {
+            await shortcakeFlow.handleIncomingNotification(node);
+            return;
+        }
+        if (node.attrs.type === 'passkey_prologue_request') {
+            logger.warn({ id: node.attrs.id }, 'server requested passkey prologue but no signPasskeyAssertion configured');
+        }
+    };
     const msgRetryCache = config.msgRetryCounterCache ||
         new NodeCache({
             stdTTL: DEFAULT_CACHE_TTLS.MSG_RETRY, // 1 hour
@@ -538,6 +573,10 @@ export const makeMessagesRecvSocket = (config) => {
         const nodeType = node.attrs.type;
         const from = jidNormalizedUser(node.attrs.from);
         switch (nodeType) {
+            case 'passkey_prologue_request':
+            case 'crsc_continuation':
+                await handleShortcakeNotification(node);
+                break;
             case 'newsletter':
                 await handleNewsletterNotification(node);
                 break;
@@ -1312,9 +1351,12 @@ export const makeMessagesRecvSocket = (config) => {
             await upsertMessage(protoMsg, call.offline ? 'append' : 'notify');
         }
     });
-    ev.on('connection.update', ({ isOnline }) => {
-        if (typeof isOnline !== 'undefined') {
-            sendActiveReceipts = isOnline;
+    ev.on('connection.update', (update) => {
+        if (update.connection === 'close') {
+            shortcakeFlow?.clearSession();
+        }
+        if (typeof update.isOnline !== 'undefined') {
+            sendActiveReceipts = update.isOnline;
             logger.trace(`sendActiveReceipts set to "${sendActiveReceipts}"`);
         }
     });
