@@ -1498,6 +1498,25 @@ class EventProcessor {
         let eventName = 'instance.status';
 
         try {
+            if (update.passkeyRequired) {
+                const errMsg = "Chave de Acesso (Passkey) Ativa: A conexão falhou porque há uma Chave de Acesso ativa nesta conta. Por segurança do WhatsApp, vinculações externas não funcionam com chaves de acesso ativas. Vá em Configurações > Conta > Chaves de acesso no WhatsApp do celular, remova a chave de acesso e tente novamente.";
+                await supabase.from('whatsapp_instances')
+                    .update({ status: 'offline', last_error: errMsg })
+                    .eq('id', instanceId)
+                    .eq('assigned_node_id', NODE_ID);
+                
+                await supabase.from('whatsapp_instance_runtime')
+                    .update({ pairing_code: 'PASSKEY_BLOCKED', last_error: errMsg })
+                    .eq('instance_id', instanceId);
+
+                payload.status = 'offline';
+                payload.last_error = errMsg;
+                payload.passkeyBlocked = true;
+
+                await realtime.publishInstanceEvent(tenantId, instanceId, 'instance.status', payload);
+                return;
+            }
+
             if (qr) {
                 try {
                     const qrBase64 = await qrcode.toDataURL(qr);

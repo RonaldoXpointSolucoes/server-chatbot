@@ -450,6 +450,19 @@ export default function EvolutionModal({
       })
       .on("broadcast", { event: "instance.status" }, (payload: any) => {
         const st = payload.payload?.status;
+        const lastError = payload.payload?.last_error;
+
+        if (lastError && (lastError.includes("Chave de Acesso") || lastError.includes("Passkey") || lastError.includes("PASSKEY_BLOCKED"))) {
+          setError(lastError);
+          setLoading(false);
+          setQrBase64(null);
+          setActivePollingId(null);
+          setPairingCode(null);
+          setConnectionStatusMessage(null);
+          setCodeEntered(false);
+          return;
+        }
+
         if (st === "offline") {
           if (pairingCodeRef.current) {
             console.log("[Realtime] Ignorando status offline na conexão via Pairing Code (transição esperada)");
@@ -490,6 +503,20 @@ export default function EvolutionModal({
               if(!currInst) return;
               
               const st = await fetchEngineStatus(tenantId, activePollingIdRef.current, currInst.api_key || "");
+              const lastError = st?.data?.last_error || st?.data?.whatsapp_instance_runtime?.last_error;
+
+              if (lastError && (lastError.includes("Chave de Acesso") || lastError.includes("Passkey") || lastError.includes("PASSKEY_BLOCKED"))) {
+                setError(lastError);
+                setLoading(false);
+                setQrBase64(null);
+                setActivePollingId(null);
+                setPairingCode(null);
+                setConnectionStatusMessage(null);
+                setCodeEntered(false);
+                clearInterval(pollInterval);
+                return;
+              }
+
               if (st?.data?.status === "connected" || st?.data?.status === "connected_local") {
                 handleSuccess();
                 clearInterval(pollInterval);
@@ -649,6 +676,7 @@ export default function EvolutionModal({
         });
         const respJson = await res.json();
         const data = respJson.data;
+        const lastError = data?.last_error || data?.whatsapp_instance_runtime?.last_error;
         
         logger.addLog({
           type: 'info',
@@ -656,6 +684,18 @@ export default function EvolutionModal({
           source: 'WhatsApp Pairing',
           details: data
         });
+
+        if (lastError && (lastError.includes("Chave de Acesso") || lastError.includes("Passkey") || lastError.includes("PASSKEY_BLOCKED"))) {
+          setError(lastError);
+          setLoading(false);
+          setQrBase64(null);
+          setActivePollingId(null);
+          setPairingCode(null);
+          setConnectionStatusMessage(null);
+          setCodeEntered(false);
+          clearInterval(interval);
+          return;
+        }
         
         if (data && (data.status === 'connected' || data.status === 'connected_local')) {
           logger.addLog({
