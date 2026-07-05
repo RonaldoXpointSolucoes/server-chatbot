@@ -57,6 +57,7 @@ class SessionManager {
         this.watchdogs = new Map();
         this.authenticatedSessions = new Set();
         this.pairingPendingSync = new Map();
+        this.closingSessions = new Set();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -332,6 +333,12 @@ class SessionManager {
 
                 if (connection === 'close') {
                     this.clearWatchdog(instanceId);
+                    
+                    if (this.closingSessions?.has(instanceId)) {
+                        console.log(`[SessionManager] Conexão da instância ${instanceId} fechada intencionalmente (closeSession). Ignorando lógica de reconexão.`);
+                        this.closingSessions.delete(instanceId);
+                        return;
+                    }
                     
                     // Clear stable connection timeouts if it disconnected early
                     if (this.conflictTimeouts.has(instanceId)) {
@@ -655,6 +662,7 @@ class SessionManager {
     }
 
     async closeSession(instanceId) {
+        this.closingSessions.add(instanceId);
         this.clearWatchdog(instanceId);
         
         // Cancela qualquer timer de reconexão pendente
