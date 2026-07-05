@@ -2395,7 +2395,6 @@ export default function EvolutionModal({
                     </div>
                   </div>
                 )}
-              </div>
             </div>
           ) : (
             <div className="w-full flex flex-col items-center justify-center min-h-[260px] bg-white/30 dark:bg-black/30 p-2 sm:p-5 rounded-3xl border border-white/20 dark:border-white/5 shadow-inner">
