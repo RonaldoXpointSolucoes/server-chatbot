@@ -2,7 +2,7 @@ import { supabase } from './supabase.js';
 
 const getWaCallsUrl = () => {
     const envUrl = process.env.WACALLS_URL?.trim();
-    if (envUrl) return envUrl;
+    if (envUrl && !envUrl.includes('172.17.0.1')) return envUrl;
     
     // Como rodamos localmente no mesmo container, usamos localhost:8080 por padrão
     return 'http://127.0.0.1:8080';
