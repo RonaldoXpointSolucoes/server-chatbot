@@ -2362,28 +2362,6 @@ export default function EvolutionModal({
                 </div>
               ) : activePollingId ? (
                 <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center w-full pb-4">
-                  {/* Seletor de Abas */}
-                  <div className="flex gap-2 mb-6 bg-gray-200/50 dark:bg-white/5 p-1 rounded-2xl w-full max-w-sm">
-                    <button
-                      onClick={() => {
-                        setConnectMode('qr');
-                        handleConnectExisting(existingInstances.find(i => i.id === activePollingId));
-                      }}
-                      className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${connectMode === 'qr' ? 'bg-[#00a884] text-white shadow-sm' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-300/30'}`}
-                    >
-                      <QrCode size={14} /> Escanear QR Code
-                    </button>
-                    <button
-                      onClick={() => {
-                        setConnectMode('pairing');
-                        setQrBase64(null);
-                      }}
-                      className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${connectMode === 'pairing' ? 'bg-[#00a884] text-white shadow-sm' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-300/30'}`}
-                    >
-                      <Smartphone size={14} /> Código de 8 Dígitos
-                    </button>
-                  </div>
-
                   {connectMode === 'qr' && (
                     <div className="flex flex-col items-center w-full">
                       {qrBase64 ? (
@@ -2407,42 +2385,43 @@ export default function EvolutionModal({
                           {connectionStatusMessage || "Escaneie o QR Code no seu WhatsApp."}
                         </p>
                       </div>
+
+                      {/* Formulário de Pareamento integrado na mesma tela */}
+                      <div className="w-full border-t border-gray-200 dark:border-white/10 pt-5 mt-4 flex flex-col items-center">
+                        <p className="text-[10px] text-gray-400 dark:text-gray-500 font-bold uppercase tracking-wider mb-2.5">
+                          Ou conecte via código de pareamento:
+                        </p>
+                        <div className="w-full max-w-xs text-left mb-2.5">
+                          <input
+                            type="text"
+                            placeholder="Número ex: 5511991649959"
+                            value={pairingPhone}
+                            onChange={(e) => setPairingPhone(e.target.value)}
+                            className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-xl px-4 py-2.5 text-xs font-semibold text-gray-800 dark:text-white focus:outline-none focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all"
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleRequestPairingCode(activePollingId, existingInstances.find(i => i.id === activePollingId)?.api_key)}
+                          disabled={pairingLoading}
+                          className="w-full max-w-xs py-2.5 bg-[#00a884]/10 hover:bg-[#00a884]/20 text-[#00a884] dark:text-[#00c298] rounded-xl font-bold transition-all text-xs flex items-center justify-center gap-2 cursor-pointer border border-[#00a884]/20"
+                        >
+                          {pairingLoading ? (
+                            <>
+                              <Loader2 className="animate-spin" size={14} /> Gerando Código...
+                            </>
+                          ) : (
+                            <>
+                              <Smartphone size={14} /> Gerar Código de Pareamento
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   )}
 
                   {connectMode === 'pairing' && (
                     <div className="w-full max-w-sm flex flex-col items-center px-2">
-                      {!pairingCode ? (
-                        <>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-5 text-center">Digite o número completo do WhatsApp no formato internacional para gerar o código de pareamento.</p>
-                          <div className="w-full mb-4 text-left">
-                            <label className="block text-[10px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider mb-1">Número do WhatsApp (com DDI e DDD)</label>
-                            <input
-                              type="text"
-                              placeholder="Ex: 5511991649959"
-                              value={pairingPhone}
-                              onChange={(e) => setPairingPhone(e.target.value)}
-                              className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/5 rounded-xl px-4 py-3 text-sm font-semibold text-gray-800 dark:text-white focus:outline-none focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all"
-                            />
-                            <p className="text-[10px] text-amber-500 dark:text-amber-400 mt-1.5 leading-relaxed">
-                              ⚠️ <strong>Dica Brasil (DDI 55):</strong> Se o celular exibir "Não foi possível conectar o dispositivo", tente gerar o código novamente <strong>removendo o primeiro 9</strong> após o DDD (ex: 551191649959). Contas antigas costumam requerer o formato de 8 dígitos.
-                            </p>
-                          </div>
-                          <button
-                            onClick={() => handleRequestPairingCode(activePollingId, existingInstances.find(i => i.id === activePollingId)?.api_key)}
-                            disabled={pairingLoading}
-                            className="w-full py-3.5 bg-[#00a884] hover:bg-[#008f6f] disabled:bg-[#00a884]/50 text-white rounded-xl font-bold transition-all text-sm flex items-center justify-center gap-2 mb-4 cursor-pointer"
-                          >
-                            {pairingLoading ? (
-                              <>
-                                <Loader2 className="animate-spin" size={16} /> Gerando Código...
-                              </>
-                            ) : (
-                              'Gerar Código de Pareamento'
-                            )}
-                          </button>
-                        </>
-                      ) : (
+                      { (
                         <div className="w-full flex flex-col items-center animate-in fade-in duration-200">
                           {codeEntered ? (
                             <div className="w-full flex flex-col items-center py-4 px-2 animate-in fade-in zoom-in-95 duration-300">
@@ -2531,18 +2510,28 @@ export default function EvolutionModal({
 
                   <button
                     onClick={() => {
-                      setQrBase64(null);
-                      setLoading(false);
-                      setActivePollingId(null);
-                      setPairingCode(null);
-                      setPairingPhone('');
-                      setConnectionStatusMessage(null);
-                      setCodeEntered(false);
-                      setHasSeenAwaitingState(false);
+                      if (connectMode === 'pairing') {
+                        setPairingCode(null);
+                        setConnectionStatusMessage(null);
+                        setCodeEntered(false);
+                        setHasSeenAwaitingState(false);
+                        setConnectMode('qr');
+                        setLoading(true);
+                        handleConnectExisting(existingInstances.find(i => i.id === activePollingId));
+                      } else {
+                        setQrBase64(null);
+                        setLoading(false);
+                        setActivePollingId(null);
+                        setPairingCode(null);
+                        setPairingPhone('');
+                        setConnectionStatusMessage(null);
+                        setCodeEntered(false);
+                        setHasSeenAwaitingState(false);
+                      }
                     }}
                     className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 uppercase mt-4 bg-emerald-500/10 px-6 py-2.5 rounded-full hover:bg-emerald-500/20 transition-colors cursor-pointer"
                   >
-                    Cancelar
+                    {connectMode === 'pairing' ? 'Voltar para o QR Code' : 'Cancelar'}
                   </button>
                 </div>
               ) : targetInstObj ? (
