@@ -1499,7 +1499,7 @@ class EventProcessor {
 
         try {
             if (update.passkeyRequired) {
-                const errMsg = "Chave de Acesso (Passkey) Ativa: A conexão falhou porque há uma Chave de Acesso ativa nesta conta. Por segurança do WhatsApp, vinculações externas não funcionam com chaves de acesso ativas. Vá em Configurações > Conta > Chaves de acesso no WhatsApp do celular, remova a chave de acesso e tente novamente.";
+                const errMsg = "Chave de Acesso (Passkey) Ativa: A conexão falhou porque há uma Chave de Acesso ativa nesta conta. Por segurança do WhatsApp, vinculações automatizadas não funcionam com chaves de acesso ativas. Se o aplicativo do celular forçar a criação de uma chave para conectar dispositivos (Catch-22), as soluções recomendadas são: 1) Migrar a conta para o WhatsApp Business; 2) Deixar a conta sem tentativas por 48h a 72h (Período de Resfriamento) para reduzir o score de risco; ou 3) Limpar o cache/reinstalar o WhatsApp no celular principal.";
                 await supabase.from('whatsapp_instances')
                     .update({ status: 'offline', last_error: errMsg })
                     .eq('id', instanceId)

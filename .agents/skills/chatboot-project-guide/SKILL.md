@@ -114,3 +114,12 @@ Ao mudar o estado da conexão para `'open'`, a sessão correspondente deve ser i
 
 ### C. Atualização Ativa no Debounce do Store (Frontend)
 O método `setInstanceStatus` no [chatStore.ts](file:///c:/Users/NOTE-(FORM)02JUL26/Documents/Projetos/Antigravity/ChatBoot/src/store/chatStore.ts) gerencia uma verificação assíncrona contra oscilações (`_offline_checks_${id}`). Caso essa rotina detecte que a instância retornou para o status `"connected"` ou `"connected_local"` no Supabase, ela deve **obrigatoriamente gravar o estado atualizado no store** imediatamente, em vez de apenas limpar o intervalo, garantindo o desaparecimento imediato dos banners de alerta ("Restabelecendo Conexão") no painel do usuário.
+
+### D. Restrição de Chaves de Acesso (Passkeys) no WhatsApp
+*   **Problema de Círculo Fechado (Catch-22)**: O WhatsApp implementa uma verificação de segurança ("Shortcake") que exige a assinatura de um desafio WebAuthn (`passkey_prologue_request`) quando a conta tem uma Chave de Acesso ativa. Headless clients (como o Baileys rodando em VPS) não possuem o assinante local (`signPasskeyAssertion`), fazendo com que a conexão expire.
+*   **Restrição de Exclusão da Passkey**: Em contas com score de risco elevado ou sob políticas de segurança rígidas do WhatsApp, a remoção da Chave de Acesso no celular faz com que o aplicativo exiba a mensagem: `"Criar uma chave de acesso para entrar - Por questões de segurança, sua conta precisa de uma chave de acesso para conectar dispositivos."` impedindo a vinculação de qualquer dispositivo sem a criação de uma nova chave de acesso.
+*   **Soluções Alternativas Conhecidas**:
+    1.  **Migração para WhatsApp Business**: Contas do WhatsApp Business possuem políticas de segurança mais flexíveis quanto a pareamento e geralmente aceitam conexões sem exigir a criação forçada de Chave de Acesso.
+    2.  **Período de Resfriamento (Cooling Period)**: Deixar a conta sem tentativas de pareamento por 48 a 72 horas para que o score de risco do WhatsApp expire, permitindo a conexão no fluxo clássico sem passkey.
+    3.  **Reinstalação ou Troca de Aparelho**: Limpar os dados/cache do WhatsApp (ou reinstalar com backup prévio) para resetar o score de segurança local do dispositivo.
+
