@@ -3318,7 +3318,7 @@ export default function ChatDashboard() {
     }
 
     try {
-      await useWaCallsStore.getState().startCall(targetInstanceNameResolved || targetInstanceId, activeChat.phone);
+      await useWaCallsStore.getState().startCall(targetInstanceId, activeChat.phone);
     } catch (err: any) {
       alert(err.message || "Erro ao efetuar chamada de voz.");
     }
