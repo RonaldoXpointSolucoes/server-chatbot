@@ -5811,7 +5811,7 @@ export default function ChatDashboard() {
             <div className="flex items-center gap-2 sm:gap-4">
               
               {/* Botão de Chamada de Voz WaCalls */}
-              {activeChat && activeChat.phone && isCurrentBoxVoipReady && (
+              {activeChat && activeChat.phone && (
                 <button
                   onClick={handleCallContact}
                   className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] dark:hover:text-[#00a884] transition-all duration-200 flex items-center justify-center"
@@ -6608,7 +6608,7 @@ export default function ChatDashboard() {
                       </button>
                     </div>
 
-                    {isCurrentBoxVoipReady && (
+                    {activeChat && (
                       <button
                         type="button"
                         onClick={() => useWaCallsStore.getState().setIsOpenWidget(!isOpenWidget)}
