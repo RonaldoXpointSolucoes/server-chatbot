@@ -1459,7 +1459,7 @@ export default function EvolutionModal({
                           <span className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Pareie um dispositivo de áudio virtual.</span>
                         </div>
                         {(() => {
-                          const wacallsSid = targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
+                          const wacallsSid = targetInstObj?.id || targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
                           const sessionsList = wacallsSessions || [];
                           const currentWacallSession = sessionsList.find(s => s && s.id === wacallsSid);
                           return (
@@ -1477,7 +1477,7 @@ export default function EvolutionModal({
                       </div>
 
                       {(() => {
-                        const wacallsSid = targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
+                        const wacallsSid = targetInstObj?.id || targetInstObj?.display_name || targetInstanceName || useChatStore.getState().connectedInstanceName;
                         const sessionsList = wacallsSessions || [];
                         const qrCodesObj = wacallsQrCodes || {};
                         const currentWacallSession = sessionsList.find(s => s && s.id === wacallsSid);
