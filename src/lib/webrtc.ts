@@ -90,7 +90,7 @@ export const openCall = async (
         micStream.getTracks().forEach((t) => t.stop());
       } catch {}
       try {
-        ctx.close();
+        ctx.close().catch(() => {});
       } catch {}
       try {
         pc.close();

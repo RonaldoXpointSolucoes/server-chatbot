@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import sessionManager from './session-manager/index.js';
 
 const getWaCallsUrl = () => {
     const envUrl = process.env.WACALLS_URL?.trim();
@@ -120,8 +121,44 @@ async function handleWaCallsEvent(ev) {
         }
 
         const { peer, direction, startedAt } = callRecord;
-        const cleanPeer = peer.split('@')[0]; // ex: 5511999999999
+        let cleanPeer = peer.split('@')[0]; // ex: 5511999999999
         
+        // Se for um LID (@lid), tentamos resolver para o número de telefone real (PN)
+        if (peer.includes('@lid')) {
+            let resolved = false;
+            const sock = sessionManager.getSocket(sessionId);
+            if (sock?.signalRepository?.lidMapping) {
+                try {
+                    const resolvedPn = await sock.signalRepository.lidMapping.getPNForLID(peer);
+                    if (resolvedPn) {
+                        cleanPeer = resolvedPn.split('@')[0].split(':')[0];
+                        console.log(`[WaCalls Listener] LID resolvido para o telefone: ${cleanPeer}`);
+                        resolved = true;
+                    }
+                } catch (err) {
+                    console.error(`[WaCalls Listener] Erro ao tentar resolver LID via socket:`, err.message);
+                }
+            }
+            if (!resolved) {
+                try {
+                    const { data: dbKey } = await supabase
+                        .from('wa_auth_keys')
+                        .select('key_data')
+                        .eq('instance_id', sessionId)
+                        .eq('key_name', `lid-mapping-${cleanPeer}_reverse`)
+                        .maybeSingle();
+                    if (dbKey && dbKey.key_data) {
+                        cleanPeer = typeof dbKey.key_data === 'string' ? dbKey.key_data : String(dbKey.key_data);
+                        console.log(`[WaCalls Listener] LID resolvido via DB para o telefone: ${cleanPeer}`);
+                    } else {
+                        console.warn(`[WaCalls Listener] Não foi possível encontrar mapeamento LID para ${cleanPeer} na tabela wa_auth_keys.`);
+                    }
+                } catch (dbErr) {
+                    console.error(`[WaCalls Listener] Erro ao buscar reverse LID mapping no DB:`, dbErr.message);
+                }
+            }
+        }
+
         // 2. Buscar o contato no Supabase
         const { data: contact, error: contactErr } = await supabase
             .from('contacts')

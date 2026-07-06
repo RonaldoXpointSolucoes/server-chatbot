@@ -49,7 +49,14 @@ export function startWaCallsProcess() {
         wacallsProcess.stderr.on('data', (data) => {
             const lines = data.toString().trim().split('\n');
             for (const line of lines) {
-                if (line) console.error(`[WaCalls Go Error] ${line}`);
+                if (!line) continue;
+                if (line.includes('level=INFO') || line.includes('level=info')) {
+                    console.log(`[WaCalls Go] ${line}`);
+                } else if (line.includes('level=WARN') || line.includes('level=warn')) {
+                    console.warn(`[WaCalls Go Warn] ${line}`);
+                } else {
+                    console.error(`[WaCalls Go Error] ${line}`);
+                }
             }
         });
 

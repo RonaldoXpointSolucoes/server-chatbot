@@ -127,7 +127,7 @@ export default function WaCallsWidget() {
         (ringtoneRef as any).current = {
           stop: () => {
             clearInterval(playInterval);
-            try { audioCtx.close(); } catch(e){}
+            try { audioCtx.close().catch(() => {}); } catch(e){}
           }
         };
       }

@@ -19,18 +19,40 @@ const formatValueToString = (val: any): string => {
 
 class GeminiService {
   getApiKey(): string {
+    const LEAKED_KEYS = [
+      "AIzaSyBS_DkByF6W2bCSue7RJbW4l43E7jqTozc"
+    ];
+
     // 1. Check local override
     const localKey = typeof window !== 'undefined' ? localStorage.getItem('user_gemini_api_key') : null;
-    if (localKey && localKey.length > 5) return localKey.replace(/^['"]|['"]$/g, '');
+    if (localKey && localKey.length > 5) {
+      const cleanKey = localKey.replace(/^['"]|['"]$/g, '').trim();
+      if (LEAKED_KEYS.includes(cleanKey)) {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('user_gemini_api_key');
+        }
+      } else {
+        return cleanKey;
+      }
+    }
     
     // 2. Check store / database settings
     try {
       const storeKey = useChatStore.getState().tenantInfo?.settings?.gemini_api_key;
-      if (storeKey && storeKey.length > 5) return storeKey.replace(/^['"]|['"]$/g, '');
+      if (storeKey && storeKey.length > 5) {
+        const cleanKey = storeKey.replace(/^['"]|['"]$/g, '').trim();
+        if (!LEAKED_KEYS.includes(cleanKey)) {
+          return cleanKey;
+        }
+      }
     } catch (e) {}
 
     // 3. Fallback to env variable
-    return fallbackApiKey.replace(/^['"]|['"]$/g, '');
+    const cleanFallback = fallbackApiKey.replace(/^['"]|['"]$/g, '').trim();
+    if (LEAKED_KEYS.includes(cleanFallback)) {
+      return '';
+    }
+    return cleanFallback;
   }
 
   private getGenAI(): GoogleGenerativeAI {
