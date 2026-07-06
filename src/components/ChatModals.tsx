@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus } from 'lucide-react';
+import { AlertCircle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -97,7 +97,15 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
       setFormData({
         name: contactData.custom_name || contactData.name || '',
         fantasy_name: contactData.fantasy_name || '',
-        document_type: contactData.document_type || 'contato',
+        document_type: (() => {
+          if (contactData.document_type) return contactData.document_type;
+          const jid = contactData.whatsapp_jid || '';
+          const p = contactData.phone || '';
+          if (jid.endsWith('@g.us') || (p.length > 12 && !p.startsWith('55'))) {
+            return 'grupo';
+          }
+          return 'contato';
+        })(),
         document_number: contactData.document_number ? formatDocumentNumber(contactData.document_number, contactData.document_type || 'cpf') : '',
         email: contactData.email || '',
         cep: initialAddresses[0]?.cep || '',
@@ -111,6 +119,10 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
         longitude: initialAddresses[0]?.longitude || '',
         phone: (() => {
           let p = contactData.phone || '';
+          const jid = contactData.whatsapp_jid || '';
+          if (jid.endsWith('@g.us') || (p.length > 12 && !p.startsWith('55'))) {
+            return p;
+          }
           if (p.startsWith('55') && p.length > 10) {
             return p.substring(2);
           }
@@ -400,7 +412,12 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
     try {
       const principalAddress = formData.addresses[0] || {};
       let finalPhone = formData.phone?.replace(/\D/g, '') || '';
-      if (finalPhone && !finalPhone.startsWith('55')) {
+      
+      const isGroup = formData.document_type === 'grupo' || 
+                      contactData?.whatsapp_jid?.endsWith('@g.us') || 
+                      finalPhone.length > 12;
+
+      if (!isGroup && finalPhone && !finalPhone.startsWith('55')) {
         finalPhone = '55' + finalPhone;
       }
 
@@ -437,7 +454,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
         <div className="flex items-center justify-between p-6 bg-white dark:bg-[#202c33] border-b border-gray-200 dark:border-white/5">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-[#00a884]/10 flex items-center justify-center text-[#00a884]">
-               <User size={24} />
+               {formData.document_type === 'grupo' ? <Users size={24} /> : <User size={24} />}
             </div>
             <div>
                <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef]">Ficha do Contato</h2>
@@ -469,10 +486,11 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                          <option value="contato">Contato</option>
                          <option value="cpf">CPF</option>
                          <option value="cnpj">CNPJ</option>
+                         <option value="grupo">Grupo</option>
                       </select>
                     </div>
                     
-                    {formData.document_type !== 'contato' && (
+                    {formData.document_type !== 'contato' && formData.document_type !== 'grupo' && (
                       <div className="w-full sm:w-2/3 flex flex-col relative">
                         <label className="flex justify-between text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">
                            <span>Número do Documento</span>
@@ -510,21 +528,26 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                      <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Celular (ID)</label>
                      <div className="relative">
                         <Phone size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <span className="absolute left-9 top-1/2 -translate-y-1/2 text-gray-400 dark:text-[#8696a0] font-mono text-sm border-r border-gray-200 dark:border-white/10 pr-2">
-                          +55
-                        </span>
+                        {formData.document_type !== 'grupo' && (
+                          <span className="absolute left-9 top-1/2 -translate-y-1/2 text-gray-400 dark:text-[#8696a0] font-mono text-sm border-r border-gray-200 dark:border-white/10 pr-2">
+                            +55
+                          </span>
+                        )}
                         <input 
                           type="text" 
                           value={formData.phone}
                           onChange={e => {
                             let val = e.target.value.replace(/\D/g, '');
-                            if (val.startsWith('55') && val.length > 10) {
+                            if (formData.document_type !== 'grupo' && val.startsWith('55') && val.length > 10) {
                               val = val.substring(2);
                             }
                             setFormData({...formData, phone: val});
                           }}
-                          className="w-full pl-20 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
-                          placeholder="11999999999"
+                          className={cn(
+                            "w-full pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono",
+                            formData.document_type === 'grupo' ? "pl-10" : "pl-20"
+                          )}
+                          placeholder={formData.document_type === 'grupo' ? 'ID do grupo' : '11999999999'}
                         />
                      </div>
                   </div>
