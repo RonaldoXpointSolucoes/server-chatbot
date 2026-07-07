@@ -500,12 +500,66 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
         }
         
         console.log(`[AutoHealing] Sincronizando adicionais para os produtos...`);
-        
-        for (let i = 0; i < produtos.length; i++) {
-            const product = produtos[i];
+
+        // Busca passos e adicionais já existentes no banco de dados para evitar requisições redundantes
+        let existingPassos = [];
+        try {
+            const { data: fetchPassos, error: errPassos } = await supabase
+                .from('cardapio_passos')
+                .select('produto_id, created_at')
+                .eq('tenant_id', tenantId);
+            if (!errPassos && fetchPassos) {
+                existingPassos = fetchPassos;
+            }
+        } catch (dbErr) {
+            console.error('[AutoHealing] Erro ao carregar passos existentes:', dbErr.message);
+        }
+
+        // Mapeia produto_id para seu created_at mais antigo/recente
+        const productPassosMap = new Map();
+        existingPassos.forEach(p => {
+            const t = p.created_at ? new Date(p.created_at).getTime() : 0;
+            if (!productPassosMap.has(p.produto_id) || t > productPassosMap.get(p.produto_id)) {
+                productPassosMap.set(p.produto_id, t);
+            }
+        });
+
+        const nowTime = Date.now();
+        const refreshThreshold = 24 * 60 * 60 * 1000; // 24 horas
+
+        const productsToSync = [];
+        const productsToRefresh = [];
+
+        for (const product of produtos) {
+            if (!productPassosMap.has(product.id)) {
+                // Produto novo que não possui adicionais gravados. Sincroniza obrigatoriamente!
+                productsToSync.push(product);
+            } else {
+                const lastSync = productPassosMap.get(product.id);
+                if (nowTime - lastSync > refreshThreshold) {
+                    // Produto cujos adicionais foram atualizados há mais de 24 horas. Precisa de refresh.
+                    productsToRefresh.push({ product, lastSync });
+                }
+            }
+        }
+
+        // Ordena a lista de refresh pela data mais antiga primeiro
+        productsToRefresh.sort((a, b) => a.lastSync - b.lastSync);
+
+        // Limita a quantidade de refresh de produtos existentes por ciclo de sync
+        // ex: atualiza no máximo 15 produtos existentes a cada ciclo de 10m
+        const MAX_REFRESH_PER_CYCLE = 15;
+        const selectedRefresh = productsToRefresh.slice(0, MAX_REFRESH_PER_CYCLE).map(r => r.product);
+
+        const finalProductsToSync = [...productsToSync, ...selectedRefresh];
+
+        console.log(`[AutoHealing] Total de produtos do cardápio: ${produtos.length}. Novos a sincronizar: ${productsToSync.length}. Antigos a atualizar (throttled): ${selectedRefresh.length}/${productsToRefresh.length}`);
+
+        for (let i = 0; i < finalProductsToSync.length; i++) {
+            const product = finalProductsToSync[i];
             
             // Pequeno delay para não sobrecarregar as conexões
-            await new Promise(resolve => setTimeout(resolve, 200));
+            await new Promise(resolve => setTimeout(resolve, 300));
             
             try {
                 logGastrofoodCall({
