@@ -2097,7 +2097,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     // VALIDAÇÃO INTELIGENTE APPWEB (Realtime Barreira)
-    if (contact.whatsapp_jid && contact.whatsapp_jid.includes('@lid')) return;
+    if (contact.whatsapp_jid && (contact.whatsapp_jid.includes('@lid') || contact.whatsapp_jid.includes('undefined') || contact.whatsapp_jid.includes('null'))) return;
+    if (contact.phone === 'undefined' || contact.phone === 'null' || !contact.phone) return;
     const isGroup = contact.whatsapp_jid?.endsWith('@g.us');
     if (contact.phone && contact.phone.length > 15 && !contact.phone.includes('+') && !isGroup) return;
 
@@ -2225,6 +2226,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       delete dbPayload.bot_status;
       delete dbPayload.assigned_to;
       delete dbPayload.conv_status;
+      delete dbPayload.ap;
+      delete dbPayload.block;
+      delete dbPayload.reference;
 
       // Recupera o estado original puro do banco para o log
       let rawBeforeState = null;
@@ -2787,7 +2791,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
             const jid = c.whatsapp_jid || '';
             const phone = c.phone || '';
-            if (jid.includes('@lid')) return false;
+            if (jid.includes('@lid') || jid.includes('undefined') || jid.includes('null')) return false;
+            if (phone === 'undefined' || phone === 'null' || !phone) return false;
             const isGroup = jid.endsWith('@g.us');
             if (phone.length > 15 && !phone.includes('+') && !isGroup) return false;
             return true;
@@ -2967,7 +2972,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
            const validContacts = dbContacts.filter(c => {
                const jid = c.whatsapp_jid || '';
                const phone = c.phone || '';
-               if (jid.includes('@lid')) return false; // Bloqueia LIDs
+               if (jid.includes('@lid') || jid.includes('undefined') || jid.includes('null')) return false; // Bloqueia LIDs e undefined/null
+               if (phone === 'undefined' || phone === 'null' || !phone) return false;
                const isGroup = jid.endsWith('@g.us');
                if (phone.length > 15 && !phone.includes('+') && !isGroup) return false; // Provável ID mascarado
                return true;

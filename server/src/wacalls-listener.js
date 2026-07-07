@@ -172,21 +172,36 @@ async function handleWaCallsEvent(ev) {
             return;
         }
 
-        // 3. Buscar ou criar a conversa ativa desse contato
+        // 3. Buscar ou criar a conversa ativa desse contato (buscando sem restrição de status para evitar violação de UNIQUE)
         let { data: conversation, error: convErr } = await supabase
             .from('conversations')
-            .select('id')
+            .select('id, status')
             .eq('tenant_id', contact.tenant_id)
             .eq('contact_id', contact.id)
-            .eq('status', 'open')
             .maybeSingle();
 
-        if (convErr || !conversation) {
+        if (convErr) {
+            console.error(`[WaCalls Listener] Erro ao buscar conversa:`, convErr);
+            return;
+        }
+
+        if (conversation) {
+            if (conversation.status !== 'open') {
+                const { error: updateErr } = await supabase
+                    .from('conversations')
+                    .update({ status: 'open' })
+                    .eq('id', conversation.id);
+                if (updateErr) {
+                    console.error(`[WaCalls Listener] Falha ao reabrir conversa existente:`, updateErr);
+                }
+            }
+        } else {
             const { data: newConv, error: createConvErr } = await supabase
                 .from('conversations')
                 .insert({
                     tenant_id: contact.tenant_id,
                     contact_id: contact.id,
+                    instance_id: sessionId,
                     status: 'open'
                 })
                 .select('id')

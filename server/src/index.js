@@ -14,7 +14,7 @@ import apiGateway from './api-gateway/index.js';
 import publicRestRoutes from './api-gateway/public-rest.js';
 import { setupSwagger } from './api-gateway/swagger.js';
 import systemLogger, { errorBuffer } from './system-logger.js';
-import { supabase } from './supabase.js';
+import { supabase, NODE_ID } from './supabase.js';
 import sessionManager from './session-manager/index.js';
 import snoozeManager from './snooze-manager.js';
 import queueProcessor from './session-manager/queue-processor.js';
@@ -443,6 +443,15 @@ app.listen(PORT, '0.0.0.0', async () => {
 const gracefulShutdown = async (signal) => {
     console.log(`[Antigravity Boot] Recebido sinal ${signal}. Iniciando desligamento gracioso...`);
     try {
+        console.log(`[Antigravity Boot] Liberando locks de instâncias para o NODE_ID: ${NODE_ID}`);
+        await supabase.from('whatsapp_instances')
+            .update({
+                assigned_node_id: null,
+                lease_until: null,
+                status: 'offline'
+            })
+            .eq('assigned_node_id', NODE_ID);
+            
         const { flushAllPendingWrites } = await import('./session-manager/auth.js');
         await flushAllPendingWrites();
         console.log(`[Antigravity Boot] Sincronização de chaves concluída com sucesso.`);

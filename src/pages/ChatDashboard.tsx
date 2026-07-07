@@ -92,8 +92,18 @@ export const getStrictInstance = (c: any): string | null => {
 };
 
 export function getContactDisplayName(name: string | undefined | null, pushName: string | undefined | null, phone: string | undefined | null): string {
-  let finalName = name || pushName;
-  if (!finalName) return formatPhoneNumber(phone) || phone || '';
+  let cleanName = (name && name !== 'undefined' && name !== 'null') ? name.trim() : null;
+  let cleanPush = (pushName && pushName !== 'undefined' && pushName !== 'null') ? pushName.trim() : null;
+  let finalName = cleanName || cleanPush;
+  if (!finalName) {
+    if (phone && phone !== 'undefined' && phone !== 'null') {
+      if (phone.startsWith('NO_PHONE_')) {
+        return 'Contato Sem Telefone';
+      }
+      return formatPhoneNumber(phone) || phone;
+    }
+    return 'Contato Desconhecido';
+  }
   return finalName;
 }
 
