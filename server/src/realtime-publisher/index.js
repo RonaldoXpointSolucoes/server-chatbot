@@ -24,7 +24,11 @@ class RealtimePublisher {
         timestamp: new Date().toISOString()
       });
     } catch(e) {
-      console.error("[RealtimePublisher] Error publishInstanceEvent:", e);
+      if (e.name === 'AbortError' || e.message?.includes('aborted') || e.message?.includes('timeout') || e.message?.includes('fetch failed')) {
+        console.warn(`[RealtimePublisher] Broadcast instance event timed out/aborted for instance ${instanceId}`);
+      } else {
+        console.error("[RealtimePublisher] Error publishInstanceEvent:", e);
+      }
     }
   }
 
@@ -38,7 +42,11 @@ class RealtimePublisher {
         timestamp: new Date().toISOString()
       });
     } catch(e) {
-      console.error("[RealtimePublisher] Error publishInboxEvent:", e);
+      if (e.name === 'AbortError' || e.message?.includes('aborted') || e.message?.includes('timeout') || e.message?.includes('fetch failed')) {
+        console.warn(`[RealtimePublisher] Broadcast inbox event timed out/aborted for tenant ${tenantId}`);
+      } else {
+        console.error("[RealtimePublisher] Error publishInboxEvent:", e);
+      }
     }
   }
 }

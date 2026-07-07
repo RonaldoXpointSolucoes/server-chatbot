@@ -15,7 +15,7 @@ const key = keyMatch[1].trim().replace(/^"(.*)"$/, '$1');
 
 async function run() {
   const supabase = createClient(url, key);
-  const tenantId = '9057ca36-0b29-4fe5-89fb-be5e13387030';
+  const tenantId = '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21'; // X-Point
   
   // 1. Get products
   const { data: produtos, error: errP } = await supabase
@@ -71,10 +71,6 @@ async function run() {
   console.log(`Products: ${produtos.length}`);
   console.log(`Unsynced (to sync): ${productsToSync.length}`);
   console.log(`Synced but older than 24h (to refresh): ${productsToRefresh.length}`);
-  
-  if (productsToSync.length > 0) {
-      console.log("Unsynced sample:", productsToSync.slice(0, 5).map(p => ({ id: p.id, name: p.name })));
-  }
 }
 
 run();

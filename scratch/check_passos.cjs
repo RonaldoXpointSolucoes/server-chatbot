@@ -15,17 +15,12 @@ const key = keyMatch[1].trim().replace(/^"(.*)"$/, '$1');
 
 async function run() {
   const supabase = createClient(url, key);
-  const tenantId = '9057ca36-0b29-4fe5-89fb-be5e13387030';
+  const tenantId = '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
   
   console.log("Fetching company settings...");
   const { data: company, error: errC } = await supabase.from('companies').select('*').eq('id', tenantId).single();
-  console.log("Company settings:", company?.settings);
+  console.log("Company Name:", company?.name, "Settings:", company?.settings);
   if (errC) console.error("Err company:", errC);
-  
-  console.log("Fetching bot settings...");
-  const { data: bots, error: errB } = await supabase.from('bots').select('*').eq('tenant_id', tenantId);
-  console.log("Bots:", bots?.map(b => ({ id: b.id, name: b.name, cardapio_origem: b.cardapio_origem, cardapio_json_url: b.cardapio_json_url })));
-  if (errB) console.error("Err bot:", errB);
 }
 
 run();

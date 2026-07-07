@@ -696,7 +696,11 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                     });
                 }
             } catch (stepErr) {
-                console.error(`[AutoHealing] Erro ao sincronizar adicionais para o produto ${product.name}:`, stepErr);
+                if (stepErr.message?.includes('fetch failed') || stepErr.message?.includes('timeout') || stepErr.message?.includes('aborted') || stepErr.name === 'AbortError') {
+                    console.warn(`[AutoHealing] Sincronização de adicionais para o produto ${product.name} falhou temporariamente (rede):`, stepErr.message);
+                } else {
+                    console.error(`[AutoHealing] Erro ao sincronizar adicionais para o produto ${product.name}:`, stepErr);
+                }
                 logGastrofoodCall({
                     direction: 'error',
                     action: 'Consultar Adicionais',

@@ -17,54 +17,17 @@ async function run() {
   const supabase = createClient(url, key);
   const tenantId = '9057ca36-0b29-4fe5-89fb-be5e13387030';
   
-  // 1. Get products
-  const { data: produtos, error: errP } = await supabase
-      .from('cardapio_produtos')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .eq('ativo', true);
-      
-  if (errP) {
-      console.error("Error products:", errP);
-      return;
-  }
+  console.log("Checking total rows in cardapio_produtos...");
+  const { count, error: errC } = await supabase.from('cardapio_produtos').select('*', { count: 'exact', head: true });
+  console.log("Total rows in cardapio_produtos:", count, "Error:", errC);
 
-  // 2. Get existing steps
-  let existingPassos = [];
-  try {
-      const { data: fetchPassos, error: errPassos } = await supabase
-          .from('cardapio_passos')
-          .select('produto_id, created_at')
-          .eq('tenant_id', tenantId);
-      if (!errPassos && fetchPassos) {
-          existingPassos = fetchPassos;
-      }
-  } catch (dbErr) {
-      console.error('Error loading existing steps:', dbErr.message);
-  }
+  console.log("Checking total rows in cardapio_produtos for tenant 9057ca36-0b29-4fe5-89fb-be5e13387030...");
+  const { count: countTenant, error: errCT } = await supabase.from('cardapio_produtos').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
+  console.log("Total rows for tenant in cardapio_produtos:", countTenant, "Error:", errCT);
 
-  const productPassosMap = new Map();
-  existingPassos.forEach(p => {
-      const t = p.created_at ? new Date(p.created_at).getTime() : 0;
-      if (!productPassosMap.has(p.produto_id) || t > productPassosMap.get(p.produto_id)) {
-          productPassosMap.set(p.produto_id, t);
-      }
-  });
-
-  console.log(`Total active products in Supabase: ${produtos.length}`);
-  console.log(`Total steps in cardapio_passos: ${existingPassos.length}`);
-  
-  const unsynced = [];
-  for (const product of produtos) {
-      if (!productPassosMap.has(product.id)) {
-          unsynced.push(product);
-      }
-  }
-  
-  console.log(`Unsynced products count: ${unsynced.length}`);
-  if (unsynced.length > 0) {
-      console.log("Unsynced product IDs:", unsynced.map(u => u.id));
-  }
+  console.log("Fetching first 10 products for tenant...");
+  const { data: prods, error: errP } = await supabase.from('cardapio_produtos').select('id, name, active, ativo, tenant_id').eq('tenant_id', tenantId).limit(10);
+  console.log("Products:", prods, "Error:", errP);
 }
 
 run();
