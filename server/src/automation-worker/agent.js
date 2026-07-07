@@ -825,12 +825,88 @@ class AutomationWorker {
 
     clearCardapioCache(tenantId) {
         if (tenantId) {
-            cardapioInMemoryCache.delete(tenantId);
+            for (const key of cardapioInMemoryCache.keys()) {
+                if (key === tenantId || key.startsWith(tenantId + '_')) {
+                    cardapioInMemoryCache.delete(key);
+                }
+            }
             console.log(`[AutomationWorker - Cache] Cache do cardápio limpo para o tenant ${tenantId}`);
         } else {
             cardapioInMemoryCache.clear();
             console.log(`[AutomationWorker - Cache] Todos os caches de cardápio foram limpos`);
         }
+    }
+
+    startCardapioBackgroundSync() {
+        console.log("[CardapioSync] Inicializando Agendador de Sincronização do Cardápio (a cada 10m)...");
+        
+        const syncAllCardapios = async () => {
+            try {
+                console.log("[CardapioSync] Iniciando ciclo de sincronização de cardápios...");
+                const { data: companies, error } = await supabase
+                    .from('companies')
+                    .select('id, name, settings');
+                    
+                if (error) {
+                    console.error("[CardapioSync] Erro ao buscar empresas para sincronização:", error.message);
+                    return;
+                }
+                
+                if (!companies || companies.length === 0) {
+                    console.log("[CardapioSync] Nenhuma empresa encontrada para sincronização.");
+                    return;
+                }
+                
+                for (const company of companies) {
+                    const tenantId = company.id;
+                    const companySettings = company.settings || {};
+                    const cardapioUrl = companySettings.cardapio_json_url;
+                    
+                    if (!cardapioUrl) {
+                        continue;
+                    }
+                    
+                    console.log(`[CardapioSync] Sincronizando cardápio para a empresa ${company.name} (${tenantId})...`);
+                    
+                    // Limpa caches anteriores para forçar a API externa
+                    this.clearCardapioCache(tenantId);
+                    
+                    const mockBotSettings = {
+                        cardapio_origem: 'api',
+                        cardapio_json_url: cardapioUrl,
+                        cardapio_json_token: companySettings.cardapio_json_token,
+                        cardapio_json_payload: companySettings.cardapio_json_payload
+                    };
+                    
+                    try {
+                        const cache = await getOrUpdateCardapioCache(tenantId, companySettings, mockBotSettings);
+                        if (cache && cache.produtos && cache.produtos.length > 0) {
+                            console.log(`[CardapioSync] Salvando/Atualizando cardápio no Supabase para ${company.name}...`);
+                            await autoHealAndIndexCardapio(tenantId, companySettings, {
+                                grupos: cache.grupos,
+                                produtos: cache.produtos
+                            });
+                        }
+                        console.log(`[CardapioSync] Sincronização concluída para ${company.name}. Origem: ${cache.origem}. Produtos: ${cache.produtos?.length || 0}`);
+                    } catch (syncErr) {
+                        console.error(`[CardapioSync] Erro ao sincronizar cardápio de ${company.name}:`, syncErr.message);
+                    }
+                    
+                    // Delay de 5 segundos entre empresas para preservar recursos
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                }
+            } catch (e) {
+                console.error("[CardapioSync] Erro no ciclo de sincronização de cardápios:", e.message);
+            }
+        };
+        
+        // Executa 10 segundos após o boot do servidor
+        setTimeout(() => {
+            syncAllCardapios().catch(err => console.error("[CardapioSync] Erro na execução inicial:", err));
+        }, 10000);
+        
+        // Executa a cada 10 minutos
+        setInterval(syncAllCardapios, 10 * 60 * 1000);
     }
 
     async getRecentMessagesForRouting(tenantId, conversationId, limit = 6) {

@@ -238,6 +238,40 @@ class EventProcessor {
             }
 
             if (!jid) continue;
+
+            // Grava a mensagem na tabela wa_incoming_messages (logs do Edge)
+            try {
+                const fromMe = msg.key.fromMe || false;
+                const pushName = msg.pushName || (fromMe ? 'Me' : null);
+                let bodyText = '';
+                let mType = 'text';
+                
+                const content = msg.message;
+                if (content) {
+                    const keys = Object.keys(content);
+                    if (keys.length > 0) {
+                        mType = keys[0];
+                        const mTypeObj = content[mType];
+                        bodyText = content.conversation || mTypeObj?.text || mTypeObj?.caption || '';
+                    }
+                }
+
+                supabase.from('wa_incoming_messages').upsert({
+                    instance_id: instanceId,
+                    tenant_id: tenantId,
+                    chat_jid: jid,
+                    message_id: msg.key.id,
+                    from_me: fromMe,
+                    push_name: pushName,
+                    body: bodyText,
+                    message_type: mType,
+                    raw_payload: msg
+                }, { onConflict: 'instance_id, message_id' }).then(({ error }) => {
+                    if (error) console.error('[EventProcessor] Erro ao gravar wa_incoming_messages:', error.message);
+                });
+            } catch (err) {
+                console.error('[EventProcessor] Erro ao preparar gravação wa_incoming_messages:', err.message);
+            }
             
             const instanceConfig = await this.getInstanceConfig(instanceId);
             const allowedGroups = instanceConfig.allowed_groups || [];

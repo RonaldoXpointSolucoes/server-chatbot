@@ -17,7 +17,9 @@ import systemLogger, { errorBuffer } from './system-logger.js';
 import { supabase } from './supabase.js';
 import sessionManager from './session-manager/index.js';
 import snoozeManager from './snooze-manager.js';
+import queueProcessor from './session-manager/queue-processor.js';
 import autoRagTrainer from './automation-worker/auto-rag-trainer.js';
+import AutomationWorker from './automation-worker/agent.js';
 import { startWaCallsListener } from './wacalls-listener.js';
 import { startWaCallsProcess } from './wacalls-process.js';
 import { dispatchWebhookTriggers } from './event-processor/index.js';
@@ -346,6 +348,20 @@ app.listen(PORT, '0.0.0.0', async () => {
         snoozeManager.start();
     } catch(err) {
         console.error("[Worker Boot] Erro ao iniciar SnoozeManager:", err.message);
+    }
+
+    try {
+        console.log("[Worker Boot] Inicializando QueueProcessor de Mensagens...");
+        queueProcessor.start();
+    } catch(err) {
+        console.error("[Worker Boot] Erro ao iniciar QueueProcessor:", err.message);
+    }
+
+    try {
+        console.log("[Worker Boot] Inicializando Cardapio Background Sync...");
+        AutomationWorker.startCardapioBackgroundSync();
+    } catch(err) {
+        console.error("[Worker Boot] Erro ao iniciar Cardapio Background Sync:", err.message);
     }
 
     try {

@@ -58,6 +58,7 @@ class SessionManager {
         this.authenticatedSessions = new Set();
         this.pairingPendingSync = new Map();
         this.closingSessions = new Set();
+        this.pendingHistorySyncs = new Map();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -117,7 +118,8 @@ class SessionManager {
                     await retryWithBackoff(() =>
                         supabase.from('whatsapp_instances')
                             .update({
-                                lease_until: new Date(Date.now() + 60000).toISOString()
+                                lease_until: new Date(Date.now() + 90000).toISOString(),
+                                updated_at: new Date().toISOString()
                             })
                             .in('id', activeIds)
                             .eq('assigned_node_id', NODE_ID)
@@ -178,12 +180,48 @@ class SessionManager {
                 throw new Error(errorMsg);
             }
 
-            // Assume o lease e trava a posse do worker antes de iniciar
+            // 1. Verifica se há um lock ativo por outro worker
+            const { data: currentInstance } = await retryWithBackoff(() =>
+                supabase
+                    .from('whatsapp_instances')
+                    .select('assigned_node_id, lease_until, status')
+                    .eq('id', instanceId)
+                    .single()
+            );
+
+            const now = new Date();
+            if (currentInstance && currentInstance.lease_until && new Date(currentInstance.lease_until) > now) {
+                if (currentInstance.assigned_node_id && currentInstance.assigned_node_id !== NODE_ID) {
+                    const errorMsg = `Instância ${instanceId} já possui um lock ativo pelo worker ${currentInstance.assigned_node_id} (lease até ${currentInstance.lease_until}). Conexão negada.`;
+                    console.warn(`[SessionManager] Lock negado: ${errorMsg}`);
+                    throw new Error(errorMsg);
+                }
+            }
+
+            // 2. Health Check de IP Geográfico
+            try {
+                await this.assertBrazilianEgress(tenantId, instanceId);
+            } catch (ipErr) {
+                console.error(`[SessionManager] Falha no health check de IP para instância ${instanceId}:`, ipErr.message);
+                
+                // Libera o lock e limpa o lease para não travar a instância
+                await retryWithBackoff(() =>
+                    supabase.from('whatsapp_instances').update({
+                        status: 'paused',
+                        assigned_node_id: null,
+                        lease_until: null
+                    }).eq('id', instanceId)
+                );
+                throw ipErr;
+            }
+
+            // 3. Assume o lease/lock da sessão com 90 segundos de TTL
             await retryWithBackoff(() =>
                 supabase.from('whatsapp_instances').update({
                     status: 'connecting',
                     assigned_node_id: NODE_ID,
-                    lease_until: new Date(Date.now() + 60000).toISOString()
+                    lease_until: new Date(Date.now() + 90000).toISOString(),
+                    updated_at: new Date().toISOString()
                 }).eq('id', instanceId)
             );
 
@@ -258,6 +296,19 @@ class SessionManager {
                 if (update.connection === 'open') {
                     this.authenticatedSessions.add(instanceId);
                     this.pairingPendingSync.delete(instanceId);
+                    
+                    // Atualiza status no banco e zera tentativas
+                    supabase.from('whatsapp_instances')
+                        .update({ 
+                            status: 'connected', 
+                            reconnect_attempts: 0,
+                            last_connected_at: new Date().toISOString(),
+                            last_error: null 
+                        })
+                        .eq('id', instanceId)
+                        .then(() => {});
+
+                    this.logConnectionEvent(tenantId, instanceId, 'connected', 'connected', null, null, null).catch(()=>{});
                 }
 
                 await eventProcessor.handleConnectionUpdate(tenantId, instanceId, update);
@@ -315,6 +366,7 @@ class SessionManager {
                     const recTimeout = setTimeout(() => {
                         this.reconnectAttempts.delete(instanceId);
                         this.reconnectTimeouts.delete(instanceId);
+                        supabase.from('whatsapp_instances').update({ reconnect_attempts: 0 }).eq('id', instanceId).then(() => {});
                         console.log(`[SessionManager] Conexão estável de rede estabelecida na instância ${instanceId}. Histórico de reconexões limpo.`);
                     }, 180000); // 3 minutos
                     this.reconnectTimeouts.set(instanceId, recTimeout);
@@ -354,12 +406,18 @@ class SessionManager {
                     const reason = lastDisconnect?.error?.message || '';
                     const loggedOut = status === DisconnectReason.loggedOut;
                     const isConflict = status === 440 || reason.includes('conflict') || reason.includes('replaced');
+                    const isBlocked12h = reason.includes('blocked') || reason.includes('12h') || status === 410 || status === 429;
+                    const isForbidden = status === 403 || reason.includes('forbidden');
+                    const isBadSession = status === 500 || reason.includes('bad session');
 
                     this.sessions.delete(instanceId);
+                    this.pendingHistorySyncs.delete(instanceId);
 
                     const meId = sock?.user?.id || state?.creds?.me?.id;
                     const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || (meId && String(meId).includes(':'));
                     const isPairingPendingSync = this.pairingPendingSync.get(instanceId);
+
+                    await this.logConnectionEvent(tenantId, instanceId, 'disconnected', 'close', reason || `status_${status}`, null, null);
 
                     if ((loggedOut || status === 401 || status === 403 || status === 400) && !isFullyAuthenticated && !isPairingPendingSync) {
                         console.log(`[SessionManager] Pareamento pendente falhou/rejeitado na instância ${instanceId} (status: ${status}). Limpando credenciais temporárias.`);
@@ -385,20 +443,76 @@ class SessionManager {
                             connection: 'close', 
                             lastDisconnect: { error: { output: { statusCode: status || 400 } } } 
                         });
-                    } else if ((loggedOut || status === 401 || status === 403 || status === 400) && isFullyAuthenticated) {
-                        console.log(`[SessionManager] Instância ${instanceId} desconectada ou erro crítico (status: ${status}) com sessão autenticada ativa. Limpando credenciais.`);
+                    } else if (loggedOut && isFullyAuthenticated) {
+                        console.log(`[SessionManager] Instância ${instanceId} desconectada pelo celular (loggedOut). Limpando credenciais e definindo como logged_out.`);
                         this.authenticatedSessions.delete(instanceId);
                         await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId));
                         
                         this.reconnectAttempts.delete(instanceId);
-                        // Tentar reconectar limpo após 5s
-                        const timer = setTimeout(() => {
-                            this.reconnectingTimers.delete(instanceId);
-                            this.createSession(tenantId, instanceId);
-                        }, 5000);
-                        this.reconnectingTimers.set(instanceId, timer);
+                        
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .update({ 
+                                    status: 'logged_out', 
+                                    last_error: 'Desconectado pelo celular. A sessão do WhatsApp foi encerrada no dispositivo móvel. Por favor, faça um novo pareamento.' 
+                                })
+                                .eq('id', instanceId)
+                        );
+                        
+                        await this.logConnectionEvent(tenantId, instanceId, 'logged_out', 'logged_out', reason, null, null);
+                        
+                        await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
+                            connection: 'close', 
+                            lastDisconnect: { error: { output: { statusCode: 401 } } } 
+                        });
+                    } else if (isBlocked12h && isFullyAuthenticated) {
+                        console.error(`[SessionManager] Instância ${instanceId} está BLOQUEADA por 12h no WhatsApp.`);
+                        this.authenticatedSessions.delete(instanceId);
+                        this.reconnectAttempts.delete(instanceId);
+                        
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .update({ 
+                                    status: 'blocked_12h',
+                                    safety_mode: true,
+                                    block_until: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
+                                    last_error: 'Sua conta de WhatsApp foi suspensa temporariamente por 12h. O sistema bloqueou novas tentativas de reconexão e envios para proteger o seu chip.',
+                                    last_disconnected_at: new Date().toISOString(),
+                                    last_disconnect_reason: 'blocked_12h'
+                                })
+                                .eq('id', instanceId)
+                        );
+
+                        await this.logConnectionEvent(tenantId, instanceId, 'blocked_12h_detected', 'blocked_12h', reason, null, null);
+
+                        await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
+                            connection: 'close', 
+                            lastDisconnect: { error: { output: { statusCode: 410 } } } 
+                        });
+                    } else if ((isForbidden || isBadSession) && isFullyAuthenticated) {
+                        console.error(`[SessionManager] Conexão com erro crítico (${isForbidden ? 'forbidden' : 'badSession'}) para ${instanceId}.`);
+                        this.authenticatedSessions.delete(instanceId);
+                        this.reconnectAttempts.delete(instanceId);
+                        
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .update({ 
+                                    status: isForbidden ? 'forbidden' : 'bad_session', 
+                                    last_error: isForbidden ? 'Acesso proibido ou restrito pelo WhatsApp.' : 'Sessão corrompida ou inválida.',
+                                    last_disconnected_at: new Date().toISOString(),
+                                    last_disconnect_reason: isForbidden ? 'forbidden' : 'bad_session'
+                                })
+                                .eq('id', instanceId)
+                        );
+
+                        await this.logConnectionEvent(tenantId, instanceId, isForbidden ? 'forbidden' : 'bad_session', 'close', reason, null, null);
+
+                        await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
+                            connection: 'close', 
+                            lastDisconnect: { error: { output: { statusCode: status } } } 
+                        });
                     } else if (isConflict) {
                         const isLocal = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
                         const cAttempts = (this.conflictAttempts.get(instanceId) || 0) + 1;
@@ -438,42 +552,46 @@ class SessionManager {
                         const nextAttempt = attempts + 1;
                         this.reconnectAttempts.set(instanceId, nextAttempt);
 
-                        if (nextAttempt >= 10) {
-                            console.error(`[SessionManager] Limite de 10 tentativas de reconexão consecutivas atingido para a instância ${instanceId}. Interrompendo reconexões para evitar banimento.`);
+                        if (nextAttempt > 5) {
+                            console.error(`[SessionManager] Limite de 5 tentativas de reconexão atingido para a instância ${instanceId}. Pausando sessão.`);
                             this.reconnectAttempts.delete(instanceId);
                             this.pairingPendingSync.delete(instanceId);
                             
                             await retryWithBackoff(() =>
                                 supabase.from('whatsapp_instances')
                                     .update({ 
-                                        status: 'offline', 
-                                        last_error: 'Falha persistente de conexão (10 tentativas consecutivas falhas). O sistema interrompeu as reconexões automáticas para evitar o banimento do seu chip. Por favor, verifique se o celular está conectado à internet ou reconecte manualmente no painel.' 
+                                        status: 'paused', 
+                                        last_error: 'Limite de 5 tentativas de reconexão atingido. O sistema pausou a conexão para evitar o banimento do seu chip. Por favor, reconecte manualmente no painel quando o celular estiver ativo.' 
                                     })
                                     .eq('id', instanceId)
                             );
                             
+                            await this.logConnectionEvent(tenantId, instanceId, 'max_reconnect_attempts', 'paused', '5 reconexões falhas consecutivas', null, null);
+
                             // Publica evento de status offline para o frontend
                             await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
                                 connection: 'close', 
                                 lastDisconnect: { error: { output: { statusCode: 503 } } } 
                             });
                         } else {
-                            // Rastrear se é erro 503 da Meta (temporariamente indisponível ou rate limit)
-                            const is503 = status === 503 || reason.includes('503') || JSON.stringify(lastDisconnect?.error).includes('503');
+                            const delayMap = [30000, 60000, 300000, 900000, 1800000]; // 30s, 1m, 5m, 15m, 30m
+                            const delay = delayMap[nextAttempt - 1] || 1800000;
 
-                            const baseDelay = is503 ? 15000 : 5000;
-                            const maxDelay = is503 ? 120000 : 60000;
-                            const delay = Math.min(baseDelay * Math.pow(2, attempts), maxDelay);
-
-                            console.log(`[SessionManager] Instância ${instanceId} fechou. Motivo: ${status} (Erro 503: ${is503}). Tentativa ${nextAttempt}/10. Reconectando em ${delay / 1000}s...`);
+                            console.log(`[SessionManager] Instância ${instanceId} fechou. Tentativa ${nextAttempt}/5. Reconectando em ${delay / 1000}s...`);
 
                             await retryWithBackoff(() =>
                                 supabase.from('whatsapp_instances')
                                     .update({ 
-                                        last_error: `Conexão instável (Erro ${status || 'N/A'}). Tentando reconectar em ${delay / 1000}s (Tentativa ${nextAttempt}/10).`
+                                        reconnect_attempts: nextAttempt,
+                                        status: 'reconnecting',
+                                        last_disconnected_at: new Date().toISOString(),
+                                        last_disconnect_reason: reason || `status_${status}`,
+                                        last_error: `Conexão instável. Tentando reconectar em ${delay / 1000}s (Tentativa ${nextAttempt}/5).`
                                     })
                                     .eq('id', instanceId)
                             );
+
+                            await this.logConnectionEvent(tenantId, instanceId, 'reconnecting', 'reconnecting', `Tentativa ${nextAttempt}/5 em ${delay / 1000}s`, null, null);
 
                             const timer = setTimeout(() => {
                                 this.reconnectingTimers.delete(instanceId);
@@ -486,7 +604,8 @@ class SessionManager {
             });
 
             sock.ev.on('messaging-history.set', async (history) => {
-                await eventProcessor.handleMessagingHistorySet(tenantId, instanceId, sock, history);
+                console.log(`[SessionManager] Recebido messaging-history.set para a instância ${instanceId}. Armazenando no cache para sincronização manual.`);
+                this.pendingHistorySyncs.set(instanceId, history);
             });
 
             sock.ev.on('chats.upsert', async (chats) => {
@@ -690,6 +809,7 @@ class SessionManager {
 
         const data = this.sessions.get(instanceId);
         this.authenticatedSessions.delete(instanceId);
+        this.pendingHistorySyncs.delete(instanceId);
         if (data && data.sock) {
             try { data.sock.ws.close(); } catch(e){}
             this.sessions.delete(instanceId);
@@ -734,14 +854,32 @@ class SessionManager {
                 }
             }
         }, 60000); // Checa a cada 1 minuto
+
+        // Loop de verificação periódica de IP de saída (a cada 5 minutos)
+        const ipCheckInterval = setInterval(async () => {
+            try {
+                if (sock.ws && sock.ws.isOpen) {
+                    await this.assertBrazilianEgress(tenantId, instanceId);
+                }
+            } catch (err) {
+                console.error(`[SessionManager/IPCheckPeriodic] Instância ${instanceId} perdeu os critérios geográficos no loop. Encerrando socket:`, err.message);
+                this.clearWatchdog(instanceId);
+                try {
+                    sock.end(new Error("Egress geographic location constraint violated"));
+                } catch(e) {
+                    try { sock.ws.close(); } catch(err){}
+                }
+            }
+        }, parseInt(process.env.EGRESS_CHECK_INTERVAL_SECONDS || '300', 10) * 1000);
         
-        this.watchdogs.set(instanceId, { interval, updateListener, sock });
+        this.watchdogs.set(instanceId, { interval, ipCheckInterval, updateListener, sock });
     }
 
     clearWatchdog(instanceId) {
         if (this.watchdogs.has(instanceId)) {
-            const { interval, updateListener, sock } = this.watchdogs.get(instanceId);
+            const { interval, ipCheckInterval, updateListener, sock } = this.watchdogs.get(instanceId);
             clearInterval(interval);
+            if (ipCheckInterval) clearInterval(ipCheckInterval);
             try {
                 sock.ev.off('connection.update', updateListener);
                 sock.ev.off('creds.update', updateListener);
@@ -752,6 +890,115 @@ class SessionManager {
             } catch(e) {}
             this.watchdogs.delete(instanceId);
         }
+    }
+
+    async logConnectionEvent(tenantId, instanceId, eventType, connectionStatus, disconnectReason, egressIp, egressCountry, payload = {}) {
+        try {
+            await retryWithBackoff(() =>
+                supabase.from('wa_connection_events').insert({
+                    instance_id: instanceId,
+                    tenant_id: tenantId,
+                    node_id: NODE_ID,
+                    event_type: eventType,
+                    connection_status: connectionStatus,
+                    disconnect_reason: disconnectReason,
+                    egress_ip: egressIp,
+                    egress_country: egressCountry,
+                    payload: payload
+                })
+            );
+        } catch (err) {
+            console.error(`[SessionManager/LogEvent] Erro ao gravar evento ${eventType}:`, err.message);
+        }
+    }
+
+    async assertBrazilianEgress(tenantId, instanceId) {
+        if (process.env.EGRESS_CHECK_ENABLED === 'false') {
+            console.log(`[SessionManager] Check de IP de saída desabilitado (EGRESS_CHECK_ENABLED=false).`);
+            return null;
+        }
+
+        const requiredCountry = process.env.EGRESS_COUNTRY_REQUIRED || 'BR';
+        const simulateBr = process.env.SIMULATE_BR_EGRESS === 'true';
+
+        console.log(`[SessionManager] Iniciando health check de IP de saída (Requerido: ${requiredCountry}, Simular: ${simulateBr})...`);
+
+        let data = null;
+        try {
+            const res = await fetch('https://ipapi.co/json/');
+            if (res.ok) {
+                const json = await res.json();
+                data = {
+                    ip: json.ip,
+                    country: json.country_code || json.country,
+                    city: json.city
+                };
+            }
+        } catch (e) {
+            console.warn(`[SessionManager] Falha ao consultar ipapi.co, tentando fallback ip-api.com:`, e.message);
+        }
+
+        if (!data) {
+            try {
+                const res = await fetch('http://ip-api.com/json/');
+                if (res.ok) {
+                    const json = await res.json();
+                    data = {
+                        ip: json.query,
+                        country: json.countryCode,
+                        city: json.city
+                    };
+                }
+            } catch (e) {
+                console.error(`[SessionManager] Falha no fallback ip-api.com:`, e.message);
+            }
+        }
+
+        if (!data) {
+            const errMsg = 'Não foi possível verificar o IP público de saída. Abortando conexão por segurança.';
+            await this.logConnectionEvent(tenantId, instanceId, 'ip_check_failed', 'paused', errMsg, null, null, { error: 'IP check APIs offline' });
+            throw new Error(errMsg);
+        }
+
+        console.log(`[SessionManager] IP detectado: ${data.ip} (${data.country} - ${data.city})`);
+
+        const isMatch = String(data.country).toUpperCase() === requiredCountry.toUpperCase();
+
+        if (!isMatch) {
+            const errMsg = `País de saída inválido: detectado ${data.country}, necessário ${requiredCountry}.`;
+            await this.logConnectionEvent(tenantId, instanceId, 'ip_check_failed', 'paused', errMsg, data.ip, data.country, data);
+
+            await retryWithBackoff(() =>
+                supabase.from('whatsapp_instances')
+                    .update({ 
+                        status: 'paused', 
+                        last_error: `Conexão bloqueada: IP de saída não é brasileiro (${data.ip} - ${data.country}).` 
+                    })
+                    .eq('id', instanceId)
+            );
+
+            if (!simulateBr) {
+                throw new Error(errMsg);
+            } else {
+                console.warn(`[SessionManager] [Simulação BR] Ignorando falha geográfica porque SIMULATE_BR_EGRESS=true.`);
+                await this.logConnectionEvent(tenantId, instanceId, 'ip_check_ok', 'connecting', 'Simulado via bypass', data.ip, data.country, { ...data, simulated: true });
+            }
+        } else {
+            await this.logConnectionEvent(tenantId, instanceId, 'ip_check_ok', 'connecting', null, data.ip, data.country, data);
+        }
+
+        await retryWithBackoff(() =>
+            supabase.from('whatsapp_instances')
+                .update({ 
+                    egress_ip: data.ip, 
+                    egress_country: data.country,
+                    egress_city: data.city,
+                    region: requiredCountry
+                })
+                .eq('id', instanceId)
+        );
+
+        return data;
     }
 }
 

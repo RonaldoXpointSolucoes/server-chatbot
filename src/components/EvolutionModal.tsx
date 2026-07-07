@@ -1196,6 +1196,55 @@ export default function EvolutionModal({
 
               {configTab === "geral" && (
                 <div className="w-full animate-in fade-in slide-in-from-left-4 duration-300">
+                  {(() => {
+                    const activeInst = targetInstObj || existingInstances.find(i => i.id === useChatStore.getState().connectedInstanceName);
+                    if (!activeInst) return null;
+                    return (
+                      <div className="w-full mt-4 flex flex-col bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-white/5 p-5 rounded-3xl shadow-sm gap-3">
+                        <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-100 dark:border-white/5">
+                          <Activity size={16} className="text-emerald-500" />
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                            WhatsApp Edge BR
+                          </span>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-3 text-xs">
+                          <div className="flex flex-col bg-white dark:bg-zinc-900 border border-slate-100 dark:border-white/5 p-3 rounded-2xl">
+                            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">IP de Saída</span>
+                            <span className="font-mono font-bold mt-1 text-slate-800 dark:text-slate-200">
+                              {activeInst.egress_ip || "Desconhecido"}
+                            </span>
+                          </div>
+                          <div className="flex flex-col bg-white dark:bg-zinc-900 border border-slate-100 dark:border-white/5 p-3 rounded-2xl">
+                            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Localização</span>
+                            <span className="font-bold mt-1 text-slate-800 dark:text-slate-200">
+                              {activeInst.egress_country ? `${activeInst.egress_country} (${activeInst.egress_city || "BR"})` : "Brasil (Simulado)"}
+                            </span>
+                          </div>
+                          <div className="flex flex-col bg-white dark:bg-zinc-900 border border-slate-100 dark:border-white/5 p-3 rounded-2xl">
+                            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Reconexões</span>
+                            <span className="font-mono font-bold mt-1 text-slate-800 dark:text-slate-200">
+                              {activeInst.reconnect_attempts || 0} / 5
+                            </span>
+                          </div>
+                          <div className="flex flex-col bg-white dark:bg-zinc-900 border border-slate-100 dark:border-white/5 p-3 rounded-2xl">
+                            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Modo de Segurança</span>
+                            <span className={`font-bold mt-1 ${activeInst.safety_mode ? "text-amber-500" : "text-emerald-500"}`}>
+                              {activeInst.safety_mode ? "ATIVADO" : "INATIVO"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {activeInst.last_error && (
+                          <div className="mt-2 text-[11px] bg-red-500/5 dark:bg-red-500/10 border border-red-500/10 text-red-500 p-3 rounded-xl flex items-start gap-2">
+                            <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+                            <span className="flex-1 text-left">{activeInst.last_error}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div className="w-full mt-4 flex flex-col items-center bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-white/5 p-4 rounded-2xl">
                     <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mb-3 uppercase tracking-wider">
                       Cor da Instância

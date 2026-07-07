@@ -169,41 +169,86 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
 
         // Intercept custom macros that don't exist directly on sock
         if (method === 'syncContacts') {
-            return res.json({ ok: true, message: 'Os contatos são sincronizados assincronamente pelo Baileys em background após a conexão.' });
+            const history = sessionManager.pendingHistorySyncs?.get(instanceId);
+            if (!history) {
+                return res.json({ 
+                    ok: false, 
+                    message: 'Histórico de sincronização não encontrado em cache. Certifique-se de que a instância esteja conectada. Se necessário, desconecte e reconecte no painel para forçar o carregamento do histórico.' 
+                });
+            }
+            
+            // Dispara a sincronização em segundo plano de forma assíncrona
+            import('../event-processor/index.js').then(({ default: eventProcessor }) => {
+                eventProcessor.handleMessagingHistorySet(req.tenantId, instanceId, sock, history)
+                    .then(() => {
+                        console.log(`[SessionManager] Sincronização manual do histórico concluída com sucesso para a instância ${instanceId}`);
+                    })
+                    .catch(err => {
+                        console.error(`[SessionManager] Erro na sincronização manual do histórico para ${instanceId}:`, err);
+                    });
+            }).catch(err => {
+                console.error(`[SessionManager] Erro ao carregar EventProcessor para sincronização:`, err);
+            });
+
+            return res.json({ 
+                ok: true, 
+                message: 'A sincronização de contatos e histórico foi iniciada em segundo plano. Os dados serão carregados no seu painel em instantes.' 
+            });
         }
         
         if (method === 'clearStore') {
             return res.json({ ok: true, message: 'A arquitetura atual não utiliza in-memory store global, RAM está otimizada automaticamente.' });
         }
 
+        if (method === 'sendMessage') {
+            const jid = args[0];
+            const content = args[1];
+            
+            let messageType = 'text';
+            let body = content.text || '';
+            let mediaUrl = null;
+
+            if (content.image || content.video || content.audio || content.document) {
+                messageType = 'media';
+                const mediaObj = content.image || content.video || content.audio || content.document;
+                mediaUrl = mediaObj.url;
+                body = content.caption || '';
+            }
+
+            const { data: newOutbox, error: outboxErr } = await supabase
+                .from('wa_outgoing_messages')
+                .insert({
+                    instance_id: instanceId,
+                    tenant_id: req.tenantId,
+                    chat_jid: jid,
+                    message_type: messageType,
+                    body: body,
+                    media_url: mediaUrl,
+                    status: 'pending'
+                })
+                .select()
+                .single();
+
+            if (outboxErr) throw outboxErr;
+
+            const mockId = `EDGE_${newOutbox.id.replace(/-/g, '')}`;
+            return res.json({ 
+                ok: true, 
+                result: {
+                    key: {
+                        remoteJid: jid,
+                        fromMe: true,
+                        id: mockId
+                    },
+                    messageTimestamp: Math.floor(Date.now() / 1000)
+                }
+            });
+        }
+
         if(typeof sock[method] !== 'function') return res.status(400).json({ error: `Method ${method} not found on Baileys socket` });
 
         try {
             const result = await sock[method](...(args || []));
-            if (method === 'sendMessage' && result?.key?.id) {
-                try {
-                    const { EventProcessor, default: eventProcessorInst } = await import('../event-processor/index.js');
-                    if (EventProcessor && eventProcessorInst) {
-                        // Protege contra duplicação de human messages cache
-                        if (EventProcessor.humanMessagesCache) {
-                            EventProcessor.humanMessagesCache.set(`${instanceId}_${result.key.id}`, true);
-                            setTimeout(() => EventProcessor.humanMessagesCache.delete(`${instanceId}_${result.key.id}`), 60000);
-                        }
-
-                        // Emula um evento messages.upsert para garantir a persistência imediata
-                        const mockUpsert = {
-                            messages: [result],
-                            type: 'append'
-                        };
-                        
-                        eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert).catch(e => {
-                            console.error("Erro assíncrono ao injetar a mensagem de saída no EventProcessor (invoke):", e);
-                        });
-                    }
-                } catch(e) {
-                    console.error("Erro ao injetar a mensagem de saída no EventProcessor (invoke):", e);
-                }
-            }
             res.json({ ok: true, result });
         } catch (sockError) {
             // Se o Baileys disparar um erro (ex: not-authorized ao buscar avatar protegido)
@@ -229,63 +274,36 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
             return res.status(400).json({ error: 'Missing mediaUrl, jid or messageType' });
         }
 
-        console.log(`[send-media-url] Sending ${messageType} from URL: ${mediaUrl} to ${jid}`);
+        console.log(`[send-media-url] Queueing ${messageType} from URL: ${mediaUrl} to ${jid}`);
 
-        const sendPayload = {};
-        if (messageType === 'image') {
-            sendPayload.image = { url: mediaUrl };
-            if (caption) sendPayload.caption = caption;
-        } else if (messageType === 'video') {
-            sendPayload.video = { url: mediaUrl };
-            if (caption) sendPayload.caption = caption;
-        } else if (messageType === 'audio') {
-            sendPayload.audio = { url: mediaUrl };
-            if (mimetype) sendPayload.mimetype = mimetype;
-            if (ptt === 'true' || ptt === true) sendPayload.ptt = true;
-        } else if (messageType === 'document') {
-            sendPayload.document = { url: mediaUrl };
-            if (mimetype) sendPayload.mimetype = mimetype;
-            if (fileName) sendPayload.fileName = fileName;
-            if (caption) sendPayload.caption = caption;
-        } else {
-            return res.status(400).json({ error: 'Unsupported messageType' });
-        }
+        const { data: newOutbox, error: outboxErr } = await supabase
+            .from('wa_outgoing_messages')
+            .insert({
+                instance_id: instanceId,
+                tenant_id: req.tenantId,
+                chat_jid: jid,
+                message_type: 'media',
+                body: caption || '',
+                media_url: mediaUrl,
+                status: 'pending'
+            })
+            .select()
+            .single();
 
-        const result = await sock.sendMessage(jid, sendPayload);
+        if (outboxErr) throw outboxErr;
 
-        // Resolvendo o Bug do F5: Força a persistência imediata da mensagem de saída no BD
-        if (result?.key?.id) {
-            try {
-                const { EventProcessor, default: eventProcessorInst } = await import('../event-processor/index.js');
-                if (EventProcessor && eventProcessorInst) {
-                    // Protege contra duplicação de human messages cache
-                    if (EventProcessor.humanMessagesCache) {
-                        EventProcessor.humanMessagesCache.set(result.key.id, true);
-                        setTimeout(() => EventProcessor.humanMessagesCache.delete(result.key.id), 60000);
-                    }
-                    
-                    // Armazena URL de mídia se aplicável
-                    if (mediaUrl && mediaUrl !== 'upload_failed' && EventProcessor.pendingMediaCache) {
-                        EventProcessor.pendingMediaCache.set(result.key.id, mediaUrl);
-                        setTimeout(() => EventProcessor.pendingMediaCache.delete(result.key.id), 60000);
-                    }
-                    
-                    // Emula um evento messages.upsert para garantir a persistência imediata
-                    const mockUpsert = {
-                        messages: [result],
-                        type: 'append'
-                    };
-                    
-                    eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert).catch(err => {
-                        console.error("Erro ao injetar a mensagem de saída no EventProcessor (send-media-url):", err);
-                    });
-                }
-            } catch (err) {
-                console.error("Erro ao injetar a mensagem de saída no EventProcessor (send-media-url):", err);
-            }
-        }
-
-        res.json({ ok: true, result, media_url: mediaUrl });
+        res.json({ 
+            ok: true, 
+            result: {
+                key: {
+                    remoteJid: jid,
+                    fromMe: true,
+                    id: `EDGE_${newOutbox.id.replace(/-/g, '')}`
+                },
+                messageTimestamp: Math.floor(Date.now() / 1000)
+            },
+            media_url: mediaUrl 
+        });
     } catch (e) {
         console.error('Send media url error:', e);
         res.status(500).json({ error: e.message });
@@ -385,63 +403,35 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
             mediaUrl = publicUrlData.publicUrl;
         }
 
-        // Prepare message payload for Baileys
-        const sendPayload = {};
-        if (messageType === 'image') {
-            sendPayload.image = file.buffer;
-            if (caption) sendPayload.caption = caption;
-        } else if (messageType === 'video') {
-            sendPayload.video = file.buffer;
-            if (caption) sendPayload.caption = caption;
-        } else if (messageType === 'audio') {
-            sendPayload.audio = file.buffer;
-            sendPayload.mimetype = file.mimetype;
-            // if voice note: sendPayload.ptt = true
-            if (req.body.ptt === 'true') sendPayload.ptt = true;
-        } else if (messageType === 'document') {
-            sendPayload.document = file.buffer;
-            sendPayload.mimetype = file.mimetype;
-            sendPayload.fileName = file.originalname;
-            if (caption) sendPayload.caption = caption;
-        } else {
-            return res.status(400).json({ error: 'Unsupported messageType' });
-        }
+        // Em vez de enviar diretamente via sock.sendMessage, enfileira na fila do Edge BR
+        const { data: newOutbox, error: outboxErr } = await supabase
+            .from('wa_outgoing_messages')
+            .insert({
+                instance_id: instanceId,
+                tenant_id: tenantId,
+                chat_jid: jid,
+                message_type: 'media',
+                body: caption || '',
+                media_url: mediaUrl,
+                status: 'pending'
+            })
+            .select()
+            .single();
 
-        const result = await sock.sendMessage(jid, sendPayload);
+        if (outboxErr) throw outboxErr;
 
-        // Resolvendo o Bug do F5: Força a persistência imediata da mensagem de saída no BD
-        if (result?.key?.id) {
-            try {
-                const { EventProcessor, default: eventProcessorInst } = await import('../event-processor/index.js');
-                if (EventProcessor && eventProcessorInst) {
-                    // Protege contra duplicação de human messages cache
-                    if (EventProcessor.humanMessagesCache) {
-                        EventProcessor.humanMessagesCache.set(result.key.id, true);
-                        setTimeout(() => EventProcessor.humanMessagesCache.delete(result.key.id), 60000);
-                    }
-                    
-                    // Armazena URL de mídia se aplicável
-                    if (mediaUrl && mediaUrl !== 'upload_failed' && EventProcessor.pendingMediaCache) {
-                        EventProcessor.pendingMediaCache.set(result.key.id, mediaUrl);
-                        setTimeout(() => EventProcessor.pendingMediaCache.delete(result.key.id), 60000);
-                    }
-                    
-                    // Emula um evento messages.upsert para garantir a persistência imediata
-                    const mockUpsert = {
-                        messages: [result],
-                        type: 'append'
-                    };
-                    
-                    eventProcessorInst.handleMessageUpsert(req.tenantId, instanceId, sock, mockUpsert).catch(err => {
-                        console.error("Erro ao injetar a mensagem de saída no EventProcessor:", err);
-                    });
-                }
-            } catch (err) {
-                console.error("Erro ao injetar a mensagem de saída no EventProcessor:", err);
-            }
-        }
-
-        res.json({ ok: true, result, media_url: mediaUrl });
+        res.json({ 
+            ok: true, 
+            result: {
+                key: {
+                    remoteJid: jid,
+                    fromMe: true,
+                    id: `EDGE_${newOutbox.id.replace(/-/g, '')}`
+                },
+                messageTimestamp: Math.floor(Date.now() / 1000)
+            },
+            media_url: mediaUrl 
+        });
     } catch (e) {
         console.error('Send media error:', e);
         res.status(500).json({ error: e.message });

@@ -4,7 +4,7 @@ import {
   Bot, User, MoreVertical, Edit2, Trash2, Ban, 
   MessageSquareReply, Camera, Video, VideoOff, Mic, 
   FileText, MapPin, Sparkles, Check, CheckCheck, RefreshCw,
-  LayoutTemplate, Smartphone, Eye, ClipboardList, CheckSquare,
+  LayoutTemplate, Smartphone, Eye, EyeOff, ClipboardList, CheckSquare,
   UserCheck, Copy
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
@@ -69,6 +69,7 @@ export const MessageBubble = memo(({
   // Usado pra saber se a bolha precisa exibir menu pra cima ou baixo
   const [dropdownDirection, setDropdownDirection] = useState<'up' | 'down'>('down');
   const [dropdownCoords, setDropdownCoords] = useState<{x: number, y: number} | null>(null);
+  const [showDeletedContent, setShowDeletedContent] = useState(false);
 
   const handleDownloadMedia = async (url: string, mediaType: string, id: string) => {
     try {
@@ -577,62 +578,94 @@ export const MessageBubble = memo(({
            );
          })()}
 
-        {msg.status === 'deleted' ? (
-            <div className="flex flex-col gap-1.5 py-2 animate-in fade-in slide-in-from-top-1 duration-300">
-              <div className="flex items-center gap-2 text-[#54656f]/70 dark:text-[#8696a0]/70 select-none">
-                <Ban size={14} className="opacity-60 text-red-500 shrink-0" />
-                <span className="text-[13px] italic tracking-wide font-normal">
+         {msg.status === 'deleted' ? (
+           <div className="flex flex-col gap-2 py-1.5 animate-in fade-in slide-in-from-top-1 duration-300">
+            {/* Header com a indicação de apagada e o botão Eye/EyeOff */}
+            <div className="flex items-center justify-between gap-4 select-none">
+              <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500/80">
+                <Ban size={14} className="text-red-500/80 shrink-0" />
+                <span className="text-[12.5px] italic tracking-wide font-medium">
                   {msg.sender === 'bot' || msg.sender === 'human' || msg.sender === 'me'
                     ? 'Você apagou esta mensagem' 
                     : 'Esta mensagem foi apagada'}
                 </span>
               </div>
               
-              {/* Marca d'água com o conteúdo original (Apenas para atendentes) */}
-              {msg.text && (
-                <div className="mt-1 pl-3 border-l border-black/15 dark:border-white/15 text-[11px] text-[#54656f]/40 dark:text-[#8696a0]/30 italic whitespace-pre-wrap break-words leading-relaxed select-text font-light relative">
-                  <span className="block text-[8px] uppercase tracking-wider font-semibold text-black/25 dark:text-white/25 not-italic mb-0.5 select-none">Conteúdo original apagado:</span>
-                  {msg.text.replace(' *(Editado)*', '')}
-                </div>
-              )}
-
-              {/* Se for uma mídia apagada e tivermos o tipo */}
-              {msg.mediaType && (
-                <div className="mt-1 pl-3 border-l border-black/15 dark:border-white/15 text-[11px] text-[#54656f]/40 dark:text-[#8696a0]/30 italic leading-relaxed select-text font-light">
-                  <span className="block text-[8px] uppercase tracking-wider font-semibold text-black/25 dark:text-white/25 not-italic mb-0.5 select-none">Mídia original apagada:</span>
-                  {msg.mediaUrl ? (
-                    <div className="mt-2 opacity-85 filter grayscale-[20%]">
-                      {msg.mediaType === 'image' && (
-                        <div 
-                          className="relative overflow-hidden rounded-xl border border-black/5 dark:border-white/5 mb-1 bg-black/5 dark:bg-black/20 cursor-pointer"
-                          onClick={(e) => { e.stopPropagation(); setFullscreenImage(msg.mediaUrl || null); }}
-                        >
-                          <img src={msg.mediaUrl} alt="Imagem Apagada" className="max-w-full h-auto max-h-[250px] object-cover pointer-events-none" />
-                        </div>
-                      )}
-                      
-                      {msg.mediaType === 'audio' && (
-                        <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] sm:max-w-[260px] h-10 custom-audio" />
-                      )}
-
-                      {(msg.mediaType === 'video' || msg.mediaUrl.endsWith('.mp4')) && (
-                        <VideoPlayerPremium src={msg.mediaUrl} />
-                      )}
-
-                      {msg.mediaType === 'document' && (
-                        <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 bg-black/5 dark:bg-white/5 rounded text-[#00a884] hover:underline font-medium w-fit">
-                          <FileText size={16} /> Baixar Documento
-                        </a>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="select-none">[{msg.mediaType === 'image' ? 'Imagem' : msg.mediaType === 'video' ? 'Vídeo' : msg.mediaType === 'audio' ? 'Áudio' : 'Documento'}]</span>
-                  )}
-                </div>
-              )}
-              
-              <span className="inline-block w-12 h-2 shrink-0"></span>
+              {/* Botão de Revelação minimalista estilo pill/glass */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDeletedContent(!showDeletedContent);
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold rounded-lg border transition-all duration-200 cursor-pointer shadow-sm select-none",
+                  showDeletedContent 
+                    ? "bg-slate-500/10 border-slate-500/20 text-slate-500 hover:bg-slate-500/20 dark:text-slate-400" 
+                    : "bg-emerald-500/10 border-emerald-500/20 text-emerald-500 hover:bg-emerald-500/20 shadow-emerald-500/5 dark:text-emerald-400"
+                )}
+              >
+                {showDeletedContent ? (
+                  <>
+                    <EyeOff size={12} /> Ocultar
+                  </>
+                ) : (
+                  <>
+                    <Eye size={12} /> Ver Conteúdo
+                  </>
+                )}
+              </button>
             </div>
+            
+            {/* Bloco colapsável com o conteúdo original */}
+            {showDeletedContent && (
+              <div className="mt-1.5 flex flex-col gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                {/* Texto Original */}
+                {msg.text && (
+                  <div className="pl-3.5 border-l-2 border-dashed border-slate-300 dark:border-white/10 text-[12px] text-slate-500 dark:text-slate-400/90 whitespace-pre-wrap break-words leading-relaxed select-text font-normal">
+                    <span className="block text-[8px] uppercase tracking-wider font-extrabold text-slate-400 dark:text-slate-500 not-italic mb-1 select-none">Conteúdo original apagado:</span>
+                    {msg.text.replace(' *(Editado)*', '')}
+                  </div>
+                )}
+
+                {/* Mídia Original */}
+                {msg.mediaType && (
+                  <div className="pl-3.5 border-l-2 border-dashed border-slate-300 dark:border-white/10 text-[12px] text-slate-500 dark:text-slate-400/90 leading-relaxed select-text font-normal">
+                    <span className="block text-[8px] uppercase tracking-wider font-extrabold text-slate-400 dark:text-slate-500 not-italic mb-1 select-none">Mídia original apagada:</span>
+                    {msg.mediaUrl ? (
+                      <div className="mt-2.5 opacity-85 filter grayscale-[20%]">
+                        {msg.mediaType === 'image' && (
+                          <div 
+                            className="relative overflow-hidden rounded-2xl border border-black/10 dark:border-white/10 mb-1 bg-black/5 dark:bg-black/20 cursor-pointer w-fit"
+                            onClick={(e) => { e.stopPropagation(); setFullscreenImage(msg.mediaUrl || null); }}
+                          >
+                            <img src={msg.mediaUrl} alt="Imagem Apagada" className="max-w-full h-auto max-h-[220px] object-cover rounded-2xl pointer-events-none" />
+                          </div>
+                        )}
+                        
+                        {msg.mediaType === 'audio' && (
+                          <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] sm:max-w-[260px] h-10 custom-audio" />
+                        )}
+
+                        {(msg.mediaType === 'video' || msg.mediaUrl.endsWith('.mp4')) && (
+                          <VideoPlayerPremium src={msg.mediaUrl} />
+                        )}
+
+                        {msg.mediaType === 'document' && (
+                          <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-500 hover:bg-emerald-500/20 font-semibold w-fit transition-all duration-200">
+                            <FileText size={15} /> Baixar Documento
+                          </a>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="select-none font-mono text-[10px] bg-slate-500/10 px-1.5 py-0.5 rounded border border-slate-500/15">[{msg.mediaType === 'image' ? 'Imagem' : msg.mediaType === 'video' ? 'Vídeo' : msg.mediaType === 'audio' ? 'Áudio' : 'Documento'}]</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            
+            <span className="inline-block w-12 h-2 shrink-0"></span>
+          </div>
          ) : (
             <>
                {msg.quoted && (

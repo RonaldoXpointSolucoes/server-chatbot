@@ -1300,28 +1300,33 @@ export default function DevLogger() {
       )}
 
       <div className={`fixed z-[9999] right-4 sm:right-8 transition-all duration-300 ease-in-out ${isVisible ? 'top-4' : '-top-[650px]'}`}>
-        <div className="bg-[#0b141a]/95 backdrop-blur-2xl border border-gray-700/50 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] w-[90vw] sm:w-[580px] flex flex-col max-h-[85vh]">
+        <div className="bg-[#0b141a]/85 backdrop-blur-2xl border border-white/10 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.6)] w-[90vw] sm:w-[580px] flex flex-col max-h-[85vh] overflow-hidden">
           {/* Header */}
-        <div 
-          className="flex items-center justify-between p-3 border-b border-gray-700/50 cursor-pointer bg-black/20 rounded-t-2xl hover:bg-black/30 transition-colors"
-          onClick={toggleVisibility}
-        >
-          <div className="flex items-center gap-3">
-            <Terminal size={16} className="text-emerald-500" />
-            <h3 className="text-sm font-bold text-gray-200 tracking-tight">Antigravity Dev Logger</h3>
-            
-            {/* Status Chip */}
-            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${engineStatus === 'online' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : engineStatus === 'checking' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
-              <Activity size={10} className={engineStatus === 'online' ? 'animate-pulse' : ''} />
-              {engineStatus.toUpperCase()} {lastPing ? `(${lastPing.toLocaleTimeString()})` : ''}
-            </div>
+          <div 
+            className="flex items-center justify-between p-4 border-b border-white/5 cursor-pointer bg-gradient-to-r from-emerald-500/5 to-teal-500/5 hover:from-emerald-500/10 hover:to-teal-500/10 transition-colors"
+            onClick={toggleVisibility}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                <Terminal size={16} className="text-white" />
+              </div>
+              <div className="text-left">
+                <h3 className="text-xs font-black text-white tracking-tight leading-tight">Antigravity</h3>
+                <span className="text-[9px] text-emerald-400 font-bold tracking-widest block uppercase font-mono leading-none mt-0.5">Dev Logger</span>
+              </div>
+              
+              {/* Status Chip */}
+              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold border font-mono ${engineStatus === 'online' ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400' : engineStatus === 'checking' ? 'bg-blue-500/10 border-blue-500/25 text-blue-400' : 'bg-red-500/10 border-red-500/25 text-red-400'}`}>
+                <Activity size={10} className={engineStatus === 'online' ? 'animate-pulse' : ''} />
+                {engineStatus.toUpperCase()}
+              </div>
 
-            {logs.filter(l => l.type === 'error').length > 0 && (
-              <span className="flex items-center gap-1 bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full text-[10px] font-bold">
-                <Bug size={10} /> {logs.filter(l => l.type === 'error').length}
-              </span>
-            )}
-          </div>
+              {logs.filter(l => l.type === 'error').length > 0 && (
+                <span className="flex items-center gap-1 bg-red-500/15 border border-red-500/25 text-red-400 px-2 py-0.5 rounded-full text-[9px] font-bold font-mono">
+                  <Bug size={10} /> {logs.filter(l => l.type === 'error').length}
+                </span>
+              )}
+            </div>
           <div className="flex items-center gap-2">
              <button onClick={(e) => { e.stopPropagation(); setShowServerLogs(!showServerLogs); }} className="text-gray-400 hover:text-green-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Abrir Server Terminal SSE">
                 <Terminal size={14} />
@@ -1499,22 +1504,22 @@ export default function DevLogger() {
 
         {/* Tabs Selector Premium */}
         {isVisible && (
-          <div className="flex border-b border-gray-800 bg-black/20 backdrop-blur-md relative z-20 shrink-0">
+          <div className="flex p-1.5 bg-black/40 border-b border-white/5 relative z-20 shrink-0 gap-1 select-none">
             <button 
               onClick={(e) => { e.stopPropagation(); setActiveTab('console'); }}
-              className={`flex-1 py-3 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer select-none ${activeTab === 'console' ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5 shadow-[0_0_15px_rgba(16,185,129,0.05)]' : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+              className={`flex-1 py-2 font-mono text-[9px] font-extrabold uppercase tracking-widest flex items-center justify-center gap-2 rounded-xl transition-all duration-200 cursor-pointer select-none border-0 ${activeTab === 'console' ? 'bg-emerald-500/10 text-emerald-400 shadow-[0_2px_8px_rgba(16,185,129,0.1)]' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
             >
               <Terminal size={12} /> Console ({logs.length})
             </button>
             <button 
               onClick={(e) => { e.stopPropagation(); setActiveTab('gastrofood'); }}
-              className={`flex-1 py-3 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer select-none ${activeTab === 'gastrofood' ? 'border-blue-500 text-blue-400 bg-blue-500/5 shadow-[0_0_15px_rgba(59,130,246,0.05)]' : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+              className={`flex-1 py-2 font-mono text-[9px] font-extrabold uppercase tracking-widest flex items-center justify-center gap-2 rounded-xl transition-all duration-200 cursor-pointer select-none border-0 ${activeTab === 'gastrofood' ? 'bg-blue-500/10 text-blue-400 shadow-[0_2px_8px_rgba(59,130,246,0.1)]' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
             >
               <Network size={12} /> Gastrofood ({gastrofoodLogs.length})
             </button>
             <button 
               onClick={(e) => { e.stopPropagation(); setActiveTab('asts'); }}
-              className={`flex-1 py-3 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer select-none ${activeTab === 'asts' ? 'border-orange-500 text-orange-400 bg-orange-500/5 shadow-[0_0_15px_rgba(249,115,22,0.05)]' : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+              className={`flex-1 py-2 font-mono text-[9px] font-extrabold uppercase tracking-widest flex items-center justify-center gap-2 rounded-xl transition-all duration-200 cursor-pointer select-none border-0 ${activeTab === 'asts' ? 'bg-orange-500/10 text-orange-400 shadow-[0_2px_8px_rgba(249,115,22,0.1)]' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
             >
               <Activity size={12} className={isTestingApp ? 'animate-pulse text-orange-500' : ''} /> ASTS {testSummary ? `(${testSummary.healthScore}%)` : ''}
             </button>
@@ -1922,46 +1927,52 @@ export default function DevLogger() {
                     });
                   }
                 });
+                return groupedList.map((log) => {
+                  const isErr = log.type === 'error';
+                  const isWrn = log.type === 'warn';
+                  const isSucc = log.type === 'success';
+                  const isInf = log.type === 'info';
 
-                return groupedList.map((log) => (
-                  <div 
-                    key={log.id} 
-                    className={`p-2 rounded-xl border flex flex-col gap-1 transition-all
-                      ${log.type === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-200' : ''}
-                      ${log.type === 'warn' ? 'bg-orange-500/10 border-orange-500/20 text-orange-200' : ''}
-                      ${log.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200' : ''}
-                      ${log.type === 'info' ? 'bg-blue-500/10 border-blue-500/20 text-blue-200' : ''}
-                      ${log.type === 'log' ? 'bg-gray-800/40 border-gray-700/50 text-gray-300' : ''}
-                    `}
-                  >
-                    <div className="flex justify-between items-start">
-                       <div className="flex items-center gap-1.5 font-bold">
-                         {log.type === 'error' && <AlertTriangle size={12} className="text-red-400" />}
-                         {log.type === 'warn' && <AlertTriangle size={12} className="text-orange-400" />}
-                         {log.type === 'success' && <CheckCircle2 size={12} className="text-emerald-400" />}
-                         {log.type === 'info' && <Info size={12} className="text-blue-400" />}
-                         {log.type === 'log' && <Terminal size={12} className="text-gray-400" />}
-                         <span className="truncate max-w-[260px] sm:max-w-[320px]">{log.source}</span>
-                         {log.count > 1 && (
-                           <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-white/15 text-white border border-white/5 whitespace-nowrap animate-pulse">
-                             x{log.count}
-                           </span>
-                         )}
-                       </div>
-                       <span className="text-[10px] opacity-50 flex-shrink-0">
-                         {new Date(log.timestamp).toLocaleTimeString()}
-                       </span>
-                    </div>
-                    <p className="break-all whitespace-pre-wrap mt-1 opacity-90 leading-relaxed font-semibold">
-                      {log.message}
-                    </p>
-                    {log.details && (
-                      <div className="mt-1 p-2 bg-black/30 rounded-md text-[10px] overflow-x-auto opacity-80 border border-black/20">
-                        {typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details)}
+                  return (
+                    <div 
+                      key={log.id} 
+                      className={`p-3 rounded-2xl border transition-all duration-300 flex flex-col gap-1.5 hover:bg-white/5
+                        ${isErr ? 'bg-red-500/5 border-red-500/20 text-red-200 shadow-[0_0_15px_rgba(239,68,68,0.1)]' : ''}
+                        ${isWrn ? 'bg-orange-500/5 border-orange-500/20 text-orange-200 shadow-[0_0_15px_rgba(249,115,22,0.1)]' : ''}
+                        ${isSucc ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-200' : ''}
+                        ${isInf ? 'bg-blue-500/5 border-blue-500/20 text-blue-200' : ''}
+                        ${log.type === 'log' ? 'bg-white/5 border-white/10 text-gray-300' : ''}
+                      `}
+                    >
+                      <div className="flex justify-between items-start select-none">
+                         <div className="flex items-center gap-2 font-mono text-[10px] font-black uppercase tracking-wider">
+                           {isErr && <AlertTriangle size={12} className="text-red-400 animate-pulse" />}
+                           {isWrn && <AlertTriangle size={12} className="text-orange-400" />}
+                           {isSucc && <CheckCircle2 size={12} className="text-emerald-400" />}
+                           {isInf && <Info size={12} className="text-blue-400" />}
+                           {log.type === 'log' && <Terminal size={12} className="text-gray-400" />}
+                           <span className="truncate max-w-[200px] sm:max-w-[280px]">{log.source}</span>
+                           {log.count > 1 && (
+                             <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-white/10 text-white border border-white/5 whitespace-nowrap animate-pulse">
+                               x{log.count}
+                             </span>
+                           )}
+                         </div>
+                         <span className="text-[9px] font-bold opacity-60 flex-shrink-0 font-mono">
+                           {new Date(log.timestamp).toLocaleTimeString('pt-BR', { hour12: false })}
+                         </span>
                       </div>
-                    )}
-                  </div>
-                ));
+                      <p className="break-all whitespace-pre-wrap mt-0.5 opacity-90 leading-relaxed font-semibold font-mono text-[11px]">
+                        {log.message}
+                      </p>
+                      {log.details && (
+                        <pre className="mt-2 p-3 bg-black/40 border border-white/5 rounded-xl text-[10px] text-blue-300/90 overflow-x-auto max-h-[180px] custom-scrollbar font-mono leading-relaxed select-all">
+                          {typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details)}
+                        </pre>
+                      )}
+                    </div>
+                  );
+                });
               })()}
               <div ref={bottomRef} />
             </div>
