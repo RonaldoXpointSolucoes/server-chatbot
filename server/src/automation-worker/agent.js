@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { supabase } from '../supabase.js';
+import { supabase, NODE_ID } from '../supabase.js';
 import { pipeline } from '@xenova/transformers';
 
 // Helper if EmbeddingsPipeline is not exported easily:
@@ -461,8 +461,17 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
     };
 }
 
+const activeAutoHealingTenants = new Set();
+
 async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
-    console.log(`[AutoHealing - Background Sync] Iniciando sincronização do cardápio para o tenant ${tenantId}...`);
+    if (activeAutoHealingTenants.has(tenantId)) {
+        console.log(`[AutoHealing] Sincronização já está em andamento para o tenant ${tenantId}. Ignorando chamada concorrente.`);
+        return;
+    }
+    activeAutoHealingTenants.add(tenantId);
+
+    try {
+        console.log(`[AutoHealing - Background Sync] Iniciando sincronização do cardápio para o tenant ${tenantId}...`);
     
     const { grupos, produtos } = data;
     if (!produtos || produtos.length === 0) {
@@ -515,7 +524,7 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
         try {
             const { data: fetchPassos, error: errPassos } = await supabase
                 .from('cardapio_passos')
-                .select('produto_id, created_at')
+                .select('id, produto_id, created_at')
                 .eq('tenant_id', tenantId);
             if (!errPassos && fetchPassos) {
                 existingPassos = fetchPassos;
@@ -524,17 +533,19 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
             console.error('[AutoHealing] Erro ao carregar passos existentes:', dbErr.message);
         }
 
-        // Mapeia produto_id para seu created_at mais antigo/recente
+        // Mapeia produto_id para seu created_at e se é dummy
         const productPassosMap = new Map();
         existingPassos.forEach(p => {
             const t = p.created_at ? new Date(p.created_at).getTime() : 0;
-            if (!productPassosMap.has(p.produto_id) || t > productPassosMap.get(p.produto_id)) {
-                productPassosMap.set(p.produto_id, t);
+            const isDummy = String(p.id).startsWith('no_steps_');
+            if (!productPassosMap.has(p.produto_id) || t > productPassosMap.get(p.produto_id).lastSync) {
+                productPassosMap.set(p.produto_id, { lastSync: t, isDummy });
             }
         });
 
         const nowTime = Date.now();
-        const refreshThreshold = 24 * 60 * 60 * 1000; // 24 horas
+        const normalThreshold = 24 * 60 * 60 * 1000; // 24 horas para produtos com adicionais
+        const dummyThreshold = 5 * 24 * 60 * 60 * 1000; // 5 dias para produtos sem adicionais
 
         const productsToSync = [];
         const productsToRefresh = [];
@@ -544,10 +555,11 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                 // Produto novo que não possui adicionais gravados. Sincroniza obrigatoriamente!
                 productsToSync.push(product);
             } else {
-                const lastSync = productPassosMap.get(product.id);
-                if (nowTime - lastSync > refreshThreshold) {
-                    // Produto cujos adicionais foram atualizados há mais de 24 horas. Precisa de refresh.
-                    productsToRefresh.push({ product, lastSync });
+                const info = productPassosMap.get(product.id);
+                const threshold = info.isDummy ? dummyThreshold : normalThreshold;
+                if (nowTime - info.lastSync > threshold) {
+                    // Produto que atingiu a expiração de sincronização. Precisa de refresh.
+                    productsToRefresh.push({ product, lastSync: info.lastSync });
                 }
             }
         }
@@ -830,6 +842,8 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
         
     } catch (ragErr) {
         console.error(`[AutoHealing - RAG] Erro ao vetorizar cardápio para RAG:`, ragErr);
+    } finally {
+        activeAutoHealingTenants.delete(tenantId);
     }
 }
 
@@ -931,9 +945,29 @@ class AutomationWorker {
         const syncAllCardapios = async () => {
             try {
                 console.log("[CardapioSync] Iniciando ciclo de sincronização de cardápios...");
+
+                // Busca as instâncias do WhatsApp designadas para este NODE_ID específico
+                const { data: myInstances, error: errInst } = await supabase
+                    .from('whatsapp_instances')
+                    .select('tenant_id')
+                    .eq('assigned_node_id', NODE_ID);
+                
+                if (errInst) {
+                    console.error("[CardapioSync] Erro ao buscar instâncias designadas para este nó:", errInst.message);
+                    return;
+                }
+
+                if (!myInstances || myInstances.length === 0) {
+                    console.log(`[CardapioSync] Nenhuma instância ativa designada para o NODE_ID: ${NODE_ID}. Sincronização ignorada neste nó.`);
+                    return;
+                }
+
+                const myTenantIds = myInstances.map(inst => inst.tenant_id);
+
                 const { data: companies, error } = await supabase
                     .from('companies')
-                    .select('id, name, settings');
+                    .select('id, name, settings')
+                    .in('id', myTenantIds);
                     
                 if (error) {
                     console.error("[CardapioSync] Erro ao buscar empresas para sincronização:", error.message);
@@ -941,7 +975,7 @@ class AutomationWorker {
                 }
                 
                 if (!companies || companies.length === 0) {
-                    console.log("[CardapioSync] Nenhuma empresa encontrada para sincronização.");
+                    console.log("[CardapioSync] Nenhuma empresa ativa designada para este nó encontrada para sincronização.");
                     return;
                 }
                 
