@@ -590,69 +590,85 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                         response: stepsData
                     });
 
-                    if (stepsData.status === 200 && stepsData.data) {
-                        const passosRaw = stepsData.data.passos || stepsData.data.Passos || [];
-                        const passos = Array.isArray(passosRaw) ? passosRaw : [];
+                    // Check if response contains steps/passos at top level or wrapped in status/data
+                    const passosRaw = stepsData.passos || stepsData.Passos || (stepsData.data ? (stepsData.data.passos || stepsData.data.Passos) : null) || [];
+                    const passos = Array.isArray(passosRaw) ? passosRaw : [];
+
+                    if (passos.length > 0) {
+                        // Se o produto passou a ter passos reais, remove o registro dummy se existir
+                        try {
+                            await supabase.from('cardapio_passos').delete().eq('id', `no_steps_${product.id}`);
+                        } catch (delErr) {}
                         
-                        if (passos.length > 0) {
-                            const passosToUpsert = passos.map((p, idx) => {
-                                const idPasso = p.IdProdutoPassos || p.id || p.Id;
-                                const pergunta = p.Pergunta || p.pergunta || p.SubTitulo || p.subTitulo || 'Opções';
-                                const subTitulo = p.SubTitulo || p.subTitulo || null;
-                                const qtdMin = p.QtdMin !== undefined ? p.QtdMin : (p.qtdMin !== undefined ? p.qtdMin : 0);
-                                const qtdMax = p.QtdMax !== undefined ? p.QtdMax : (p.qtdMax !== undefined ? p.qtdMax : 1);
-                                const ativo = p.Ativo !== false && p.ativo !== false;
-                                return {
-                                    id: idPasso,
-                                    tenant_id: tenantId,
-                                    produto_id: product.id,
-                                    pergunta,
-                                    sub_titulo: subTitulo,
-                                    qtd_min: qtdMin,
-                                    qtd_max: qtdMax,
-                                    ordem: idx,
-                                    ativo
-                                };
-                            });
-                            
-                            await supabase.from('cardapio_passos').upsert(passosToUpsert, { onConflict: 'id' });
-                            
-                            const opcoesToUpsert = [];
-                            passos.forEach(p => {
-                                const rawLista = p.ListaProdutos || p.listaProdutos || p.produtos || p.Produtos || [];
-                                const idPasso = p.IdProdutoPassos || p.id || p.Id;
-                                if (Array.isArray(rawLista)) {
-                                    rawLista.forEach(opt => {
-                                        const precoList = opt.ListaPreco || opt.listaPreco || [];
-                                        const precoAdicional = precoList?.[0]?.Preco !== undefined 
-                                            ? precoList[0].Preco 
-                                            : (precoList?.[0]?.preco !== undefined 
-                                                ? precoList[0].preco 
-                                                : (opt.Preco !== undefined 
-                                                    ? opt.Preco 
-                                                    : (opt.preco !== undefined ? opt.preco : 0)));
-                                        const idOpcao = opt.IdProduto || opt.id || opt.Id;
-                                        const descricao = opt.Descricao || opt.descricao || 'Opção';
-                                        const imagem = opt.Imagem || opt.imagem || opt.image || null;
-                                        const ativoOpcao = opt.Ativo !== false && opt.ativo !== false;
-                                        
-                                        opcoesToUpsert.push({
-                                            id: idOpcao,
-                                            tenant_id: tenantId,
-                                            passo_id: idPasso,
-                                            descricao,
-                                            preco: precoAdicional,
-                                            imagem,
-                                            ativo: ativoOpcao
-                                        });
+                        const passosToUpsert = passos.map((p, idx) => {
+                            const idPasso = p.IdProdutoPassos || p.id || p.Id;
+                            const pergunta = p.Pergunta || p.pergunta || p.SubTitulo || p.subTitulo || 'Opções';
+                            const subTitulo = p.SubTitulo || p.subTitulo || null;
+                            const qtdMin = p.QtdMin !== undefined ? p.QtdMin : (p.qtdMin !== undefined ? p.qtdMin : 0);
+                            const qtdMax = p.QtdMax !== undefined ? p.QtdMax : (p.qtdMax !== undefined ? p.qtdMax : 1);
+                            const ativo = p.Ativo !== false && p.ativo !== false;
+                            return {
+                                id: idPasso,
+                                tenant_id: tenantId,
+                                produto_id: product.id,
+                                pergunta,
+                                sub_titulo: subTitulo,
+                                qtd_min: qtdMin,
+                                qtd_max: qtdMax,
+                                ordem: idx,
+                                ativo
+                            };
+                        });
+                        
+                        await supabase.from('cardapio_passos').upsert(passosToUpsert, { onConflict: 'id' });
+                        
+                        const opcoesToUpsert = [];
+                        passos.forEach(p => {
+                            const rawLista = p.ListaProdutos || p.listaProdutos || p.produtos || p.Produtos || [];
+                            const idPasso = p.IdProdutoPassos || p.id || p.Id;
+                            if (Array.isArray(rawLista)) {
+                                rawLista.forEach(opt => {
+                                    const precoList = opt.ListaPreco || opt.listaPreco || [];
+                                    const precoAdicional = precoList?.[0]?.Preco !== undefined 
+                                        ? precoList[0].Preco 
+                                        : (precoList?.[0]?.preco !== undefined 
+                                            ? precoList[0].preco 
+                                            : (opt.Preco !== undefined 
+                                                ? opt.Preco 
+                                                : (opt.preco !== undefined ? opt.preco : 0)));
+                                    const idOpcao = opt.IdProduto || opt.id || opt.Id;
+                                    const descricao = opt.Descricao || opt.descricao || 'Opção';
+                                    const imagem = opt.Imagem || opt.imagem || opt.image || null;
+                                    const ativoOpcao = opt.Ativo !== false && opt.ativo !== false;
+                                    
+                                    opcoesToUpsert.push({
+                                        id: idOpcao,
+                                        tenant_id: tenantId,
+                                        passo_id: idPasso,
+                                        descricao,
+                                        preco: precoAdicional,
+                                        imagem,
+                                        ativo: ativoOpcao
                                     });
-                                }
-                            });
-                            
-                            if (opcoesToUpsert.length > 0) {
-                                await supabase.from('cardapio_opcoes').upsert(opcoesToUpsert, { onConflict: 'id' });
+                                });
                             }
+                        });
+                        
+                        if (opcoesToUpsert.length > 0) {
+                            await supabase.from('cardapio_opcoes').upsert(opcoesToUpsert, { onConflict: 'id' });
                         }
+                    } else {
+                        // Se o produto NÃO possui passos (passos.length === 0), gravamos um registro "dummy" de controle
+                        // para sabermos que este produto foi sincronizado com sucesso e não tem adicionais.
+                        // Isso impede que o sistema o classifique como "novo" e o consulte repetidamente a cada ciclo!
+                        const dummyPasso = {
+                            id: `no_steps_${product.id}`,
+                            tenant_id: tenantId,
+                            produto_id: product.id,
+                            pergunta: 'Nenhum Adicional',
+                            ativo: false
+                        };
+                        await supabase.from('cardapio_passos').upsert(dummyPasso, { onConflict: 'id' });
                     }
                 } else {
                     const errText = await resSteps.text();
