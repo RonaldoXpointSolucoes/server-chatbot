@@ -94,15 +94,24 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
         calculatedSubTotal += price * amount;
 
         const rawCustom = item.itemsCuston || item.customItems || item.adicionais || [];
-        const normalizedCustom = rawCustom.map(c => ({
-            code: c.code || c.id || "",
-            name: c.name || "",
-            amount: Number(c.amount || c.quantity || 1),
-            price: Number(c.price || 0),
-            typeCalc: c.typeCalc !== undefined ? c.typeCalc : 0,
-            fkPasso: c.fkPasso || c.stepId || "",
-            numberPasso: c.numberPasso !== undefined ? c.numberPasso : 1
-        }));
+        const normalizedCustom = rawCustom.map(c => {
+            const rawCode = c.code || c.id || "";
+            const rawFkPasso = c.fkPasso || c.stepId || "";
+            
+            // Strip any product_id/passo_id suffix from the step and option IDs to send original values to Gastrofood API
+            const cleanCode = rawCode.includes('_') ? rawCode.split('_')[0] : rawCode;
+            const cleanFkPasso = rawFkPasso.includes('_') ? rawFkPasso.split('_')[0] : rawFkPasso;
+
+            return {
+                code: cleanCode,
+                name: c.name || "",
+                amount: Number(c.amount || c.quantity || 1),
+                price: Number(c.price || 0),
+                typeCalc: c.typeCalc !== undefined ? c.typeCalc : 0,
+                fkPasso: cleanFkPasso,
+                numberPasso: c.numberPasso !== undefined ? c.numberPasso : 1
+            };
+        });
 
         return {
             code: item.code || item.id || "",
@@ -601,7 +610,9 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                         } catch (delErr) {}
                         
                         const passosToUpsert = passos.map((p, idx) => {
-                            const idPasso = p.IdProdutoPassos || p.id || p.Id;
+                            const rawIdPasso = p.IdProdutoPassos || p.id || p.Id;
+                            // Make ID unique to product to prevent overwrites when multiple products share the same step ID
+                            const idPasso = `${rawIdPasso}_${product.id}`;
                             const pergunta = p.Pergunta || p.pergunta || p.SubTitulo || p.subTitulo || 'Opções';
                             const subTitulo = p.SubTitulo || p.subTitulo || null;
                             const qtdMin = p.QtdMin !== undefined ? p.QtdMin : (p.qtdMin !== undefined ? p.qtdMin : 0);
@@ -625,7 +636,8 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                         const opcoesToUpsert = [];
                         passos.forEach(p => {
                             const rawLista = p.ListaProdutos || p.listaProdutos || p.produtos || p.Produtos || [];
-                            const idPasso = p.IdProdutoPassos || p.id || p.Id;
+                            const rawIdPasso = p.IdProdutoPassos || p.id || p.Id;
+                            const idPasso = `${rawIdPasso}_${product.id}`;
                             if (Array.isArray(rawLista)) {
                                 rawLista.forEach(opt => {
                                     const precoList = opt.ListaPreco || opt.listaPreco || [];
@@ -636,7 +648,9 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                                             : (opt.Preco !== undefined 
                                                 ? opt.Preco 
                                                 : (opt.preco !== undefined ? opt.preco : 0)));
-                                    const idOpcao = opt.IdProduto || opt.id || opt.Id;
+                                    const rawIdOpcao = opt.IdProduto || opt.id || opt.Id;
+                                    // Make ID unique to step to prevent conflict between same option in different steps
+                                    const idOpcao = `${rawIdOpcao}_${idPasso}`;
                                     const descricao = opt.Descricao || opt.descricao || 'Opção';
                                     const imagem = opt.Imagem || opt.imagem || opt.image || null;
                                     const ativoOpcao = opt.Ativo !== false && opt.ativo !== false;

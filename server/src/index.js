@@ -334,9 +334,16 @@ app.listen(PORT, '0.0.0.0', async () => {
             if (activeLeases && activeLeases.length > 0) {
                 console.log(`[Worker Boot] Retomando ${activeLeases.length} sockets...`);
                 for (const instance of activeLeases) {
-                    sessionManager.createSession(instance.tenant_id, instance.id).catch(e => {
-                        console.error(`Falha Auto-Restart: ${instance.id}`, e);
-                    });
+                    const startSessionWithRetry = (attempt = 1) => {
+                        sessionManager.createSession(instance.tenant_id, instance.id).catch(e => {
+                            console.error(`Falha Auto-Restart (Tentativa ${attempt}): ${instance.id}`, e);
+                            if ((e.message.includes('lock ativo') || e.message.includes('Lock negado') || e.message.includes('Conexão negada')) && attempt < 3) {
+                                console.log(`[Worker Boot] Agendando retentativa de Auto-Restart para ${instance.id} em 30s devido a lock ativo de outro worker...`);
+                                setTimeout(() => startSessionWithRetry(attempt + 1), 30000);
+                            }
+                        });
+                    };
+                    startSessionWithRetry();
                     await new Promise(r => setTimeout(r, 1500));
                 }
             }
