@@ -76,6 +76,121 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
   const [testPedidoResult, setTestPedidoResult] = useState<any>(null);
   const [testPedidoError, setTestPedidoError] = useState('');
 
+  // Permissões de Acesso do Robô aos Endpoints (GastroFood API)
+  const [enabledEndpoints, setEnabledEndpoints] = useState<string[]>([
+    'cardapio', 'adicionais', 'cep', 'cliente', 'cadastro', 'pix', 'pedido', 'status'
+  ]);
+
+  // Utilitário de Teste de Endpoints no Robô
+  const [testEndpointKey, setTestEndpointKey] = useState<string>('cardapio');
+  const [testEndpointUrl, setTestEndpointUrl] = useState<string>('');
+  const [testEndpointToken, setTestEndpointToken] = useState<string>('');
+  const [testEndpointPayload, setTestEndpointPayload] = useState<string>('');
+  const [isTestingEndpoint, setIsTestingEndpoint] = useState<boolean>(false);
+  const [testEndpointResult, setTestEndpointResult] = useState<any>(null);
+  const [testEndpointError, setTestEndpointError] = useState<string>('');
+
+  const GASTROFOOD_BASE_URL_DEFAULT = 'https://service.xpointsolucoes.com.br:8443';
+  const ENDPOINT_DEFAULTS: Record<string, { url: string; token: string; payload: string }> = {
+    cardapio: {
+      url: `${GASTROFOOD_BASE_URL_DEFAULT}/v6/server/nuvem/ProdutoPdvService/GetCardapioCompleto`,
+      token: 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw',
+      payload: '{}'
+    },
+    adicionais: {
+      url: `${GASTROFOOD_BASE_URL_DEFAULT}/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos`,
+      token: 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw',
+      payload: `{\n  "AIdEstab": "6D0187D9-E905-4479-AB15-B908F0222607",\n  "AIdProduto": "ID_DO_PRODUTO_AQUI"\n}`
+    },
+    cep: {
+      url: `${GASTROFOOD_BASE_URL_DEFAULT}/v6/usuario_2.0/ConsultaCepService/Execute`,
+      token: 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw',
+      payload: `{\n  "ACep": "06764365"\n}`
+    },
+    cliente: {
+      url: `${GASTROFOOD_BASE_URL_DEFAULT}/v6/usuario_2.0/LoginService/ValidaTelefone`,
+      token: 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw',
+      payload: `{\n  "ATelefone": "973933247"\n}`
+    },
+    cadastro: {
+      url: `${GASTROFOOD_BASE_URL_DEFAULT}/v6/usuario_2.0/UsuarioService/CreateUserWithAuthentication`,
+      token: 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw',
+      payload: `{\n  "JSONUser": {\n    "name": "Cliente de Teste",\n    "phone": "11973933247",\n    "verified": true\n  }\n}`
+    },
+    pix: {
+      url: `${GASTROFOOD_BASE_URL_DEFAULT}/v1/pagamentos/PixCardapioService/IniciarTransacao`,
+      token: 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw',
+      payload: `{\n  "APaymentData": {},\n  "AIdPedido": "B7D7ADDD-AC17-4F63-994B-072BE6CE48D4"\n}`
+    },
+    pedido: {
+      url: `${GASTROFOOD_BASE_URL_DEFAULT}/v6/server/nuvem/PedidoCardapioService/FinalizeOrder`,
+      token: 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw',
+      payload: `{\n  "jsOrder": {\n    "module": 1,\n    "fkCustomer": "9EA3F679-5565-4DA0-930F-0971A8B8A3CD",\n    "fkStore": "6D0187D9-E905-4479-AB15-B908F0222607",\n    "subTotal": 10.00,\n    "txDelivery": 0,\n    "received": 10.00,\n    "discount": 0,\n    "address": {\n      "Cep": "06764-365",\n      "Logradouro": "Rua de Exemplo",\n      "Numero": "100",\n      "Bairro": "Bairro de Exemplo",\n      "Cidade": "Cidade Exemplo",\n      "Uf": "SP"\n    },\n    "items": []\n  }\n}`
+    },
+    status: {
+      url: `${GASTROFOOD_BASE_URL_DEFAULT}/v6/server/nuvem/BnPedido(50DA243C-4F4F-4293-95C8-34FFC00391D1)`,
+      token: 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw',
+      payload: '{}'
+    }
+  };
+
+  const handleSelectTestEndpoint = (key: string) => {
+    setTestEndpointKey(key);
+    const defaults = ENDPOINT_DEFAULTS[key];
+    if (defaults) {
+      setTestEndpointUrl(defaults.url);
+      setTestEndpointToken(defaults.token);
+      setTestEndpointPayload(defaults.payload);
+    }
+    setTestEndpointResult(null);
+    setTestEndpointError('');
+  };
+
+  const handleTestEndpoint = async () => {
+    setIsTestingEndpoint(true);
+    setTestEndpointResult(null);
+    setTestEndpointError('');
+    try {
+      if (!testEndpointUrl) {
+        throw new Error('A URL do endpoint é obrigatória para realizar o teste.');
+      }
+
+      let parsedPayload = null;
+      if (testEndpointPayload && testEndpointPayload.trim()) {
+        try {
+          parsedPayload = JSON.parse(testEndpointPayload);
+        } catch (e) {
+          throw new Error('O corpo da requisição (JSON Payload) não é um JSON válido. Verifique as aspas duplas, chaves e vírgulas.');
+        }
+      }
+
+      const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
+      const res = await fetch(`${apiBase}/api/v1/utils/test-cardapio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: testEndpointUrl,
+          token: testEndpointToken,
+          payload: parsedPayload
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `Erro na requisição. Status: ${res.status}`);
+      }
+
+      const resData = await res.json();
+      setTestEndpointResult(resData);
+    } catch (err: any) {
+      setTestEndpointError(err.message || 'Ocorreu um erro desconhecido.');
+    } finally {
+      setIsTestingEndpoint(false);
+    }
+  };
+
   const fetchDocuments = async () => {
     try {
       const { data, error } = await supabase
@@ -330,6 +445,11 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
                 : JSON.stringify(botToEdit.pedido_json_payload, null, 2)) 
             : ''
         );
+        setEnabledEndpoints(
+          Array.isArray(botToEdit.enabled_endpoints) 
+            ? botToEdit.enabled_endpoints 
+            : ['cardapio', 'adicionais', 'cep', 'cliente', 'cadastro', 'pix', 'pedido', 'status']
+        );
       } else if (initialTemplate) {
         setName(initialTemplate.name || '');
         setDescription(initialTemplate.description || '');
@@ -355,6 +475,7 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         setPedidoJsonUrl('');
         setPedidoJsonToken('');
         setPedidoJsonPayload('');
+        setEnabledEndpoints(['cardapio', 'adicionais', 'cep', 'cliente', 'cadastro', 'pix', 'pedido', 'status']);
       } else {
         setName('');
         setDescription('');
@@ -380,7 +501,18 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         setPedidoJsonUrl('');
         setPedidoJsonToken('');
         setPedidoJsonPayload('');
+        setEnabledEndpoints(['cardapio', 'adicionais', 'cep', 'cliente', 'cadastro', 'pix', 'pedido', 'status']);
       }
+      
+      // Inicializa utilitário de teste do robô com defaults do cardápio
+      const defaults = ENDPOINT_DEFAULTS['cardapio'];
+      setTestEndpointKey('cardapio');
+      setTestEndpointUrl(defaults.url);
+      setTestEndpointToken(defaults.token);
+      setTestEndpointPayload(defaults.payload);
+      setTestEndpointResult(null);
+      setTestEndpointError('');
+      
       setActiveTab('identity');
     }
   }, [isOpen, botToEdit, initialTemplate]);
@@ -479,6 +611,7 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         pedido_json_url: pedidoJsonUrl.trim() || null,
         pedido_json_token: pedidoJsonToken.trim() || null,
         pedido_json_payload: parsedPedidoPayload,
+        enabled_endpoints: enabledEndpoints,
       });
     }
     onClose();
@@ -1370,7 +1503,171 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
                          )}
                       </div>
                     )}
-                 </div>
+                  </div>
+
+                  {/* Permissões de Acesso do Robô aos Endpoints (GastroFood API) */}
+                  <div className="space-y-6 p-6 sm:p-8 bg-white/[0.02] border border-white/10 rounded-[2rem] shadow-inner relative overflow-hidden">
+                     <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-bl-full pointer-events-none" />
+
+                     <div className="flex items-center gap-3 text-emerald-400 border-b border-white/10 pb-4 relative z-10">
+                       <CheckCircle2 className="w-6 h-6" />
+                       <h4 className="text-sm font-black uppercase tracking-widest">Permissões de Acesso do Robô aos Endpoints</h4>
+                     </div>
+
+                     <p className="text-[11px] font-medium text-white/40 ml-1 leading-relaxed -mt-3 relative z-10">
+                       Selecione a quais endpoints e funcionalidades da GastroFood este robô terá permissão de acesso.
+                     </p>
+
+                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 relative z-10">
+                       {[
+                         { key: 'cardapio', label: 'Consultar Cardápio', desc: 'Permitir buscar lista de produtos e categorias do cardápio digital.' },
+                         { key: 'adicionais', label: 'Consultar Opcionais', desc: 'Permitir verificar opcionais, adicionais e acompanhamentos de produtos.' },
+                         { key: 'cep', label: 'Consultar CEP', desc: 'Permitir consultar CEP e endereços de entrega.' },
+                         { key: 'cliente', label: 'Validar Cliente', desc: 'Permitir validar cadastro do cliente por número de celular.' },
+                         { key: 'cadastro', label: 'Cadastrar Cliente', desc: 'Permitir registrar um novo cliente na GastroFood.' },
+                         { key: 'pix', label: 'Iniciar PIX', desc: 'Permitir gerar QR Code PIX para pagamento de pedidos.' },
+                         { key: 'pedido', label: 'Enviar Pedido', desc: 'Permitir finalizar e enviar pedidos estruturados.' },
+                         { key: 'status', label: 'Status de Pedido', desc: 'Permitir rastrear e consultar status de pedidos integrados.' }
+                       ].map(item => {
+                         const isChecked = enabledEndpoints.includes(item.key);
+                         return (
+                           <div 
+                             key={item.key} 
+                             onClick={() => {
+                               if (isChecked) {
+                                 setEnabledEndpoints(enabledEndpoints.filter(k => k !== item.key));
+                               } else {
+                                 setEnabledEndpoints([...enabledEndpoints, item.key]);
+                               }
+                             }}
+                             className={cn(
+                               "p-4 rounded-2xl border transition-all cursor-pointer select-none flex flex-col gap-1 text-left",
+                               isChecked 
+                                 ? "bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500/50" 
+                                 : "bg-white/[0.01] border-white/5 hover:border-white/10"
+                             )}
+                           >
+                             <div className="flex items-center justify-between">
+                               <span className={cn("text-xs font-bold", isChecked ? "text-emerald-400" : "text-white/80")}>
+                                 {item.label}
+                               </span>
+                               <div className={cn(
+                                 "w-4 h-4 rounded border flex items-center justify-center transition-all",
+                                 isChecked ? "border-emerald-500 bg-emerald-500 text-white" : "border-white/20 bg-transparent"
+                               )}>
+                                 {isChecked && <CheckCircle2 className="w-3 h-3" />}
+                                </div>
+                             </div>
+                             <p className="text-[10px] text-white/40 leading-relaxed mt-1 font-medium">{item.desc}</p>
+                           </div>
+                         );
+                       })}
+                     </div>
+                  </div>
+
+                  {/* Utilitário de Teste de Requisições direto no Robô */}
+                  <div className="space-y-6 p-6 sm:p-8 bg-white/[0.02] border border-white/10 rounded-[2rem] shadow-inner relative overflow-hidden">
+                     <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-bl-full pointer-events-none" />
+
+                     <div className="flex items-center gap-3 text-indigo-400 border-b border-white/10 pb-4 relative z-10">
+                       <Zap className="w-6 h-6 animate-pulse" />
+                       <h4 className="text-sm font-black uppercase tracking-widest">Testador de Requisições da GastroFood</h4>
+                     </div>
+
+                     <p className="text-[11px] font-medium text-white/40 ml-1 leading-relaxed -mt-3 relative z-10">
+                       Execute testes de requisição simulando chamadas reais aos endpoints diretamente na I.A. do robô.
+                     </p>
+
+                     <div className="space-y-4 relative z-10">
+                        <div className="space-y-2">
+                           <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">Selecione o Endpoint para Teste</label>
+                           <select
+                             value={testEndpointKey}
+                             onChange={(e) => handleSelectTestEndpoint(e.target.value)}
+                             className="w-full bg-[#18181b]/80 border border-white/10 rounded-2xl px-4 py-3.5 text-sm font-medium text-white appearance-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)] backdrop-blur-sm"
+                           >
+                             <option value="cardapio">Buscar Cardápio completo</option>
+                             <option value="adicionais">Buscar Adicionais/Opcionais do Produto</option>
+                             <option value="cep">Buscar CEP e Endereço</option>
+                             <option value="cliente">Validar Cliente por Celular</option>
+                             <option value="cadastro">Cadastrar Novo Cliente</option>
+                             <option value="pix">Iniciar Transação de Pagamento PIX</option>
+                             <option value="pedido">Finalizar e Enviar Pedido</option>
+                             <option value="status">Consultar Status do Pedido</option>
+                           </select>
+                        </div>
+
+                        <div className="space-y-4 p-5 bg-[#18181b]/50 border border-white/5 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-300">
+                           <div className="space-y-2">
+                              <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">URL do Endpoint</label>
+                              <input
+                                type="text"
+                                value={testEndpointUrl}
+                                onChange={(e) => setTestEndpointUrl(e.target.value)}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-white placeholder-white/20 focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all shadow-inner"
+                              />
+                           </div>
+
+                           <div className="space-y-2">
+                              <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">Token de Autorização (Bearer)</label>
+                              <input
+                                type="text"
+                                value={testEndpointToken}
+                                onChange={(e) => setTestEndpointToken(e.target.value)}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-white placeholder-white/20 focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all shadow-inner"
+                              />
+                           </div>
+
+                           <div className="space-y-2">
+                              <label className="text-xs font-bold text-white/70 uppercase tracking-widest ml-1 block">Corpo da Requisição (JSON Payload)</label>
+                              <textarea
+                                rows={5}
+                                value={testEndpointPayload}
+                                onChange={(e) => setTestEndpointPayload(e.target.value)}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-mono text-white placeholder-white/20 focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all resize-none styled-scrollbar shadow-inner"
+                              />
+                           </div>
+
+                           <div className="pt-2 flex flex-col gap-3">
+                              <div className="flex items-center gap-4">
+                                 <button
+                                   type="button"
+                                   onClick={handleTestEndpoint}
+                                   disabled={isTestingEndpoint || !testEndpointUrl}
+                                   className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-[0_10px_20px_-10px_rgba(99,102,241,0.4)]"
+                                 >
+                                   {isTestingEndpoint ? 'Executando Requisição...' : 'Testar Endpoint Selecionado'}
+                                 </button>
+                              </div>
+
+                              {testEndpointError && (
+                                 <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-xs font-mono whitespace-pre-wrap animate-in fade-in duration-300">
+                                    <strong>Erro:</strong> {testEndpointError}
+                                 </div>
+                              )}
+
+                              {testEndpointResult && (
+                                 <div className="bg-black/20 border border-white/5 p-4 rounded-xl space-y-3 animate-in fade-in duration-300">
+                                    <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                                       <span className="text-[10px] font-bold text-white/40">Resposta do Servidor:</span>
+                                       <span className={cn(
+                                         "px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider",
+                                         testEndpointResult.status === 200 || testEndpointResult.status === 201 
+                                           ? "bg-emerald-500/10 text-emerald-400" 
+                                           : "bg-rose-500/10 text-rose-400"
+                                       )}>
+                                          Status: {testEndpointResult.status}
+                                       </span>
+                                    </div>
+                                    <div className="max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed text-[10px] font-mono text-white/70 styled-scrollbar text-left">
+                                       {JSON.stringify(testEndpointResult.data, null, 2)}
+                                    </div>
+                                 </div>
+                              )}
+                           </div>
+                        </div>
+                     </div>
+                  </div>
 
             </div>
 

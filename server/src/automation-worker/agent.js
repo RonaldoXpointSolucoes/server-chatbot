@@ -1657,184 +1657,209 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             if (modelName === 'gemini-1.5-pro' || modelName === 'gemini-1.5-flash') {
                 modelName = 'gemini-2.5-flash';
             }
-            const model = this.genAI.getGenerativeModel({ 
-                model: modelName,
-                systemInstruction: { parts: [{ text: systemPrompt }] },
-                tools: [{
-                    functionDeclarations: [
-                        {
-                            name: "Buscar_janelas_disponiveis",
-                            description: "Busca os horários de agendamento disponíveis para um determinado dia.",
-                            parameters: { type: "OBJECT", properties: { data_referencia: { type: "STRING", description: "Data YYYY-MM-DD" } }, required: ["data_referencia"] }
-                        },
-                        {
-                            name: "Criar_agendamento",
-                            description: "Cria um novo agendamento no sistema para o cliente.",
-                            parameters: { type: "OBJECT", properties: { data_hora: { type: "STRING", description: "Data/hora ISO 8601" }, nome_cliente: { type: "STRING" }, assunto: { type: "STRING" } }, required: ["data_hora", "nome_cliente"] }
-                        },
-                        {
-                            name: "Buscar_agendamentos_do_contato",
-                            description: "Busca se este cliente já possui algum agendamento ativo.",
-                            parameters: { type: "OBJECT", properties: {} }
-                        },
-                        {
-                            name: "Escalar_humano",
-                            description: "Transfere o atendimento para um atendente humano.",
-                            parameters: { type: "OBJECT", properties: { motivo: { type: "STRING" } }, required: ["motivo"] }
-                        },
-                        {
-                            name: "Enviar_texto_separado",
-                            description: "Envia uma mensagem parcial antes da resposta final.",
-                            parameters: { type: "OBJECT", properties: { texto: { type: "STRING" } }, required: ["texto"] }
-                        },
-                        {
-                            name: "Atualizar_nome_contato",
-                            description: "Atualiza o nome do contato no sistema quando o cliente informar seu nome na conversa ou no resumo de pedidos.",
-                            parameters: { type: "OBJECT", properties: { nome_cliente: { type: "STRING" } }, required: ["nome_cliente"] }
-                        },
-                        {
-                            name: "Atualizar_endereco_contato",
-                            description: "Salva ou atualiza os dados de endereço do cliente (CEP, rua, número, bairro, cidade, estado, apartamento, bloco, ponto de referência e coordenadas) na ficha de contatos do sistema.",
-                            parameters: {
-                                type: "OBJECT",
-                                properties: {
-                                    cep: { type: "STRING", description: "O CEP do cliente (opcional)." },
-                                    rua: { type: "STRING", description: "O nome da rua/logradouro (opcional)." },
-                                    numero: { type: "STRING", description: "O número da residência (opcional)." },
-                                    bairro: { type: "STRING", description: "O bairro (opcional)." },
-                                    cidade: { type: "STRING", description: "A cidade (opcional)." },
-                                    estado: { type: "STRING", description: "A sigla do estado/UF, ex: SP, RJ (opcional)." },
-                                    ap: { type: "STRING", description: "O número do apartamento se residir em condomínio (opcional)." },
-                                    bloco: { type: "STRING", description: "O bloco ou torre do apartamento se residir em condomínio (opcional)." },
-                                    referencia: { type: "STRING", description: "Ponto de referência para a entrega (opcional)." },
-                                    latitude: { type: "STRING", description: "A latitude do endereço (opcional)." },
-                                    longitude: { type: "STRING", description: "A longitude do endereço (opcional)." },
-                                    notes: { type: "STRING", description: "Anotações adicionais/observações internas sobre o cliente (opcional)." }
-                                }
+            // Filtra declarações de funções com base nos endpoints habilitados no robô
+            const endpointToolsMap = {
+                Consultar_cep: 'cep',
+                Consultar_produtos_cardapio: 'cardapio',
+                Consultar_adicionais_produto: 'adicionais',
+                Validar_cliente_cadastrado: 'cliente',
+                Enviar_pedido_gastrofood: 'pedido',
+                Buscar_status_pedido: 'status',
+                Iniciar_transacao_pix: 'pix',
+                Cadastrar_cliente_gastrofood: 'cadastro'
+            };
+
+            const enabledEndpoints = Array.isArray(botSettings.enabled_endpoints)
+                ? botSettings.enabled_endpoints
+                : ['cardapio', 'adicionais', 'cep', 'cliente', 'cadastro', 'pix', 'pedido', 'status']; // Fallback
+
+            const functionDeclarations = [
+                {
+                    name: "Buscar_janelas_disponiveis",
+                    description: "Busca os horários de agendamento disponíveis para um determinado dia.",
+                    parameters: { type: "OBJECT", properties: { data_referencia: { type: "STRING", description: "Data YYYY-MM-DD" } }, required: ["data_referencia"] }
+                },
+                {
+                    name: "Criar_agendamento",
+                    description: "Cria um novo agendamento no sistema para o cliente.",
+                    parameters: { type: "OBJECT", properties: { data_hora: { type: "STRING", description: "Data/hora ISO 8601" }, nome_cliente: { type: "STRING" }, assunto: { type: "STRING" } }, required: ["data_hora", "nome_cliente"] }
+                },
+                {
+                    name: "Buscar_agendamentos_do_contato",
+                    description: "Busca se este cliente já possui algum agendamento ativo.",
+                    parameters: { type: "OBJECT", properties: {} }
+                },
+                {
+                    name: "Escalar_humano",
+                    description: "Transfere o atendimento para um atendente humano.",
+                    parameters: { type: "OBJECT", properties: { motivo: { type: "STRING" } }, required: ["motivo"] }
+                },
+                {
+                    name: "Enviar_texto_separado",
+                    description: "Envia uma mensagem parcial antes da resposta final.",
+                    parameters: { type: "OBJECT", properties: { texto: { type: "STRING" } }, required: ["texto"] }
+                },
+                {
+                    name: "Atualizar_nome_contato",
+                    description: "Atualiza o nome do contato no sistema quando o cliente informar seu nome na conversa ou no resumo de pedidos.",
+                    parameters: { type: "OBJECT", properties: { nome_cliente: { type: "STRING" } }, required: ["nome_cliente"] }
+                },
+                {
+                    name: "Atualizar_endereco_contato",
+                    description: "Salva ou atualiza os dados de endereço do cliente (CEP, rua, número, bairro, cidade, estado, apartamento, bloco, ponto de referência e coordenadas) na ficha de contatos do sistema.",
+                    parameters: {
+                        type: "OBJECT",
+                        properties: {
+                            cep: { type: "STRING", description: "O CEP do cliente (opcional)." },
+                            rua: { type: "STRING", description: "O nome da rua/logradouro (opcional)." },
+                            numero: { type: "STRING", description: "O número da residência (opcional)." },
+                            bairro: { type: "STRING", description: "O bairro (opcional)." },
+                            cidade: { type: "STRING", description: "A cidade (opcional)." },
+                            estado: { type: "STRING", description: "A sigla do estado/UF, ex: SP, RJ (opcional)." },
+                            ap: { type: "STRING", description: "O número do apartamento se residir em condomínio (opcional)." },
+                            bloco: { type: "STRING", description: "O bloco ou torre do apartamento se residir em condomínio (opcional)." },
+                            referencia: { type: "STRING", description: "Ponto de referência para a entrega (opcional)." },
+                            latitude: { type: "STRING", description: "A latitude do endereço (opcional)." },
+                            longitude: { type: "STRING", description: "A longitude do endereço (opcional)." },
+                            notes: { type: "STRING", description: "Anotações adicionais/observações internas sobre o cliente (opcional)." }
+                        }
+                    }
+                },
+                {
+                    name: "Consultar_cep",
+                    description: "Consulta informações de endereço completo (rua, bairro, cidade e estado) a partir de um número de CEP fornecido pelo cliente.",
+                    parameters: {
+                        type: "OBJECT",
+                        properties: {
+                            cep: {
+                                type: "STRING",
+                                description: "O número de CEP fornecido pelo cliente (ex: 01001-000 ou 01001000)."
                             }
                         },
-                        {
-                            name: "Consultar_cep",
-                            description: "Consulta informações de endereço completo (rua, bairro, cidade e estado) a partir de um número de CEP fornecido pelo cliente.",
-                            parameters: {
-                                type: "OBJECT",
-                                properties: {
-                                    cep: {
-                                        type: "STRING",
-                                        description: "O número de CEP fornecido pelo cliente (ex: 01001-000 ou 01001000)."
-                                    }
-                                },
-                                required: ["cep"]
-                            }
-                        },
-                        {
-                            name: "Consultar_produtos_cardapio",
-                            description: "Consulta a lista de produtos, preços, descrições e detalhes do cardápio digital completo da empresa.",
-                            parameters: {
-                                type: "OBJECT",
-                                properties: {
-                                    termo_busca: {
-                                        type: "STRING",
-                                        description: "Termo, palavra-chave ou nome do produto para pesquisar e filtrar na lista (opcional)."
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            name: "Consultar_adicionais_produto",
-                            description: "Consulta as opções de adicionais, opcionais, preferências, passos obrigatórios ou grátis de um determinado produto do cardápio.",
-                            parameters: {
-                                type: "OBJECT",
-                                properties: {
-                                    nome_produto: {
-                                        type: "STRING",
-                                        description: "O nome completo ou termo de busca do produto (ex: Costela Burguer)."
-                                    }
-                                },
-                                required: ["nome_produto"]
-                            }
-                        },
-                        {
-                            name: "Validar_cliente_cadastrado",
-                            description: "Verifica se o cliente já possui cadastro prévio no sistema Gastrofood utilizando o número do seu telefone celular.",
-                            parameters: {
-                                type: "OBJECT",
-                                properties: {
-                                    telefone: {
-                                        type: "STRING",
-                                        description: "Número do telefone celular do cliente com DDD (ex: 11973933247 ou 973933247)."
-                                    }
-                                },
-                                required: ["telefone"]
-                            }
-                        },
-                        {
-                            name: "Enviar_pedido_gastrofood",
-                            description: "Envia o pedido finalizado e confirmado do cliente para integração no sistema Gastrofood. Retorna o status da criação do pedido.",
-                            parameters: {
-                                type: "OBJECT",
-                                properties: {
-                                    payload_pedido: {
-                                        type: "OBJECT",
-                                        description: "O payload JSON completo do pedido contendo a estrutura jsOrder esperada pela API Gastrofood."
-                                    }
-                                },
-                                required: ["payload_pedido"]
-                            }
-                        },
-                        {
-                            name: "Buscar_status_pedido",
-                            description: "Busca o status atual de um pedido no Gastrofood utilizando o ID do pedido.",
-                            parameters: {
-                                type: "OBJECT",
-                                properties: {
-                                    id_pedido: {
-                                        type: "STRING",
-                                        description: "O ID do pedido no formato UUID (ex: 50DA243C-4F4F-4293-95C8-34FFC00391D1)."
-                                    }
-                                },
-                                required: ["id_pedido"]
-                            }
-                        },
-                        {
-                            name: "Iniciar_transacao_pix",
-                            description: "Gera e busca o QR Code e o copia e cola do PIX para o pagamento de um pedido no Gastrofood.",
-                            parameters: {
-                                type: "OBJECT",
-                                properties: {
-                                    id_pedido: {
-                                        type: "STRING",
-                                        description: "O ID do pedido no formato UUID (ex: B7D7ADDD-AC17-4F63-994B-072BE6CE48D4)."
-                                    },
-                                    id_estab: {
-                                        type: "STRING",
-                                        description: "O ID do estabelecimento/loja no formato UUID (opcional, usa o padrão se omitido)."
-                                    }
-                                },
-                                required: ["id_pedido"]
-                            }
-                        },
-                        {
-                            name: "Cadastrar_cliente_gastrofood",
-                            description: "Cadastra um novo cliente no sistema Gastrofood com nome e telefone celular para viabilizar pedidos futuros.",
-                            parameters: {
-                                type: "OBJECT",
-                                properties: {
-                                    nome: {
-                                        type: "STRING",
-                                        description: "Nome completo do cliente a ser cadastrado."
-                                    },
-                                    telefone: {
-                                        type: "STRING",
-                                        description: "Número do telefone celular do cliente com DDD (apenas dígitos, ex: 11973933247)."
-                                    }
-                                },
-                                required: ["nome", "telefone"]
+                        required: ["cep"]
+                    }
+                },
+                {
+                    name: "Consultar_produtos_cardapio",
+                    description: "Consulta a lista de produtos, preços, descrições e detalhes do cardápio digital completo da empresa.",
+                    parameters: {
+                        type: "OBJECT",
+                        properties: {
+                            termo_busca: {
+                                type: "STRING",
+                                description: "Termo, palavra-chave ou nome do produto para pesquisar e filtrar na lista (opcional)."
                             }
                         }
-                    ]
-                }]
+                    }
+                },
+                {
+                    name: "Consultar_adicionais_produto",
+                    description: "Consulta as opções de adicionais, opcionais, preferences, passos obrigatórios ou grátis de um determinado produto do cardápio.",
+                    parameters: {
+                        type: "OBJECT",
+                        properties: {
+                            nome_produto: {
+                                type: "STRING",
+                                description: "O nome completo ou termo de busca do produto (ex: Costela Burguer)."
+                            }
+                        },
+                        required: ["nome_produto"]
+                    }
+                },
+                {
+                    name: "Validar_cliente_cadastrado",
+                    description: "Verifica se o cliente já possui cadastro prévio no sistema Gastrofood utilizando o número do seu telefone celular.",
+                    parameters: {
+                        type: "OBJECT",
+                        properties: {
+                            telefone: {
+                                type: "STRING",
+                                description: "Número do telefone celular do cliente com DDD (ex: 11973933247 ou 973933247)."
+                            }
+                        },
+                        required: ["telefone"]
+                    }
+                },
+                {
+                    name: "Enviar_pedido_gastrofood",
+                    description: "Envia o pedido finalizado e confirmado do cliente para integração no sistema Gastrofood. Retorna o status da criação do pedido.",
+                    parameters: {
+                        type: "OBJECT",
+                        properties: {
+                            payload_pedido: {
+                                type: "OBJECT",
+                                description: "O payload JSON completo do pedido contendo a estrutura jsOrder esperada pela API Gastrofood."
+                            }
+                        },
+                        required: ["payload_pedido"]
+                    }
+                },
+                {
+                    name: "Buscar_status_pedido",
+                    description: "Busca o status atual de um pedido no Gastrofood utilizando o ID do pedido.",
+                    parameters: {
+                        type: "OBJECT",
+                        properties: {
+                            id_pedido: {
+                                type: "STRING",
+                                description: "O ID do pedido no formato UUID (ex: 50DA243C-4F4F-4293-95C8-34FFC00391D1)."
+                            }
+                        },
+                        required: ["id_pedido"]
+                    }
+                },
+                {
+                    name: "Iniciar_transacao_pix",
+                    description: "Gera e busca o QR Code e o copia e cola do PIX para o pagamento de um pedido no Gastrofood.",
+                    parameters: {
+                        type: "OBJECT",
+                        properties: {
+                            id_pedido: {
+                                type: "STRING",
+                                description: "O ID do pedido no formato UUID (ex: B7D7ADDD-AC17-4F63-994B-072BE6CE48D4)."
+                            },
+                            id_estab: {
+                                type: "STRING",
+                                description: "O ID do estabelecimento/loja no formato UUID (opcional, usa o padrão se omitido)."
+                            }
+                        },
+                        required: ["id_pedido"]
+                    }
+                },
+                {
+                    name: "Cadastrar_cliente_gastrofood",
+                    description: "Cadastra um novo cliente no sistema Gastrofood com nome e telefone celular para viabilizar pedidos futuros.",
+                    parameters: {
+                        type: "OBJECT",
+                        properties: {
+                            nome: {
+                                type: "STRING",
+                                description: "Nome completo do cliente a ser cadastrado."
+                            },
+                            telefone: {
+                                type: "STRING",
+                                description: "Número do telefone celular do cliente com DDD (apenas dígitos, ex: 11973933247)."
+                            }
+                        },
+                        required: ["nome", "telefone"]
+                    }
+                }
+            ].filter(decl => {
+                const endpointKey = endpointToolsMap[decl.name];
+                if (!endpointKey) return true; // Sempre habilitado
+                return enabledEndpoints.includes(endpointKey);
             });
+
+            const modelConfig = { 
+                model: modelName,
+                systemInstruction: { parts: [{ text: systemPrompt }] }
+            };
+
+            if (functionDeclarations.length > 0) {
+                modelConfig.tools = [{ functionDeclarations }];
+            }
+
+            const model = this.genAI.getGenerativeModel(modelConfig);
 
             const chat = model.startChat({
                 history: history,
@@ -2740,7 +2765,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     }
                                 }
 
-                                const formattedProducts = filteredProducts.slice(0, 30).map(p => ({
+                                const formattedProducts = filteredProducts.slice(0, 2000).map(p => ({
                                     produto_id: p.id,
                                     categoria: gruposMap[p.grupo_id] || 'Outros',
                                     nome: p.name,

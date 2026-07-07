@@ -280,6 +280,8 @@ async function runMigrations() {
           ALTER TABLE cardapio_opcoes ENABLE ROW LEVEL SECURITY;
           DROP POLICY IF EXISTS "Permitir tudo em cardapio_opcoes" ON cardapio_opcoes;
           CREATE POLICY "Permitir tudo em cardapio_opcoes" ON cardapio_opcoes FOR ALL USING (true) WITH CHECK (true);
+
+          ALTER TABLE bots ADD COLUMN IF NOT EXISTS enabled_endpoints text[] DEFAULT ARRAY['cardapio', 'adicionais', 'cep', 'cliente', 'cadastro', 'pix', 'pedido', 'status'];
         `;
         await client.query(migrationSQL);
         console.log("[Migration] Migração DDL executada com sucesso!");
