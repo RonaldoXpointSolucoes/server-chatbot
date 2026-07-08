@@ -198,6 +198,19 @@ router.get('/gastrofood', (req, res) => {
 router.delete('/gastrofood', (req, res) => {
   try {
     gastrofoodBuffer.length = 0;
+    
+    // Filtra e remove os logs do Gastrofood de logBuffer e errorBuffer
+    for (let i = logBuffer.length - 1; i >= 0; i--) {
+      if (logBuffer[i] && logBuffer[i].message && logBuffer[i].message.includes('[Gastrofood API]')) {
+        logBuffer.splice(i, 1);
+      }
+    }
+    for (let i = errorBuffer.length - 1; i >= 0; i--) {
+      if (errorBuffer[i] && errorBuffer[i].message && errorBuffer[i].message.includes('[Gastrofood API]')) {
+        errorBuffer.splice(i, 1);
+      }
+    }
+
     res.json({ success: true, message: 'Logs excluídos de forma definitiva.' });
   } catch (err) {
     res.status(500).json({ error: err.message });

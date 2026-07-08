@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useDevStore } from '../store/devStore';
 import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert } from 'lucide-react';
 import { supabase } from '../services/supabase';
@@ -24,7 +24,48 @@ export default function DevLogger() {
     setActiveTab(val ? 'asts' : 'console');
   };
   const [gastrofoodLogs, setGastrofoodLogs] = useState<any[]>([]);
+  const [companies, setCompanies] = useState<any[]>([]);
   const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    supabase.from('companies').select('id, name').then(({ data }) => {
+      if (data) setCompanies(data);
+    });
+  }, []);
+
+  const groupedGastrofoodLogs = useMemo(() => {
+    const grouped: any[] = [];
+    const requestMap = new Map<string, any>();
+    
+    gastrofoodLogs.forEach((log) => {
+      if (log.direction === 'request') {
+        const key = `${log.action || ''}_${log.url || ''}_${log.method || ''}`;
+        if (!requestMap.has(key)) {
+          requestMap.set(key, []);
+        }
+        const requestLog = { ...log, response: null, status: null, error: null, responseTimestamp: null, isPending: true };
+        requestMap.get(key).push(requestLog);
+        grouped.push(requestLog);
+      } else if (log.direction === 'response' || log.direction === 'error') {
+        const key = `${log.action || ''}_${log.url || ''}_${log.method || ''}`;
+        const pendingList = requestMap.get(key);
+        if (pendingList && pendingList.length > 0) {
+          const pairedRequest = pendingList.shift();
+          pairedRequest.response = log.response;
+          pairedRequest.status = log.status;
+          pairedRequest.error = log.error;
+          pairedRequest.responseTimestamp = log.timestamp;
+          pairedRequest.isPending = false;
+          pairedRequest.direction = log.direction;
+        } else {
+          grouped.push({ ...log, isPending: false });
+        }
+      } else {
+        grouped.push({ ...log, isPending: false });
+      }
+    });
+    return grouped;
+  }, [gastrofoodLogs]);
 
   const toggleExpandLog = (id: string) => {
     setExpandedLogs(prev => ({
@@ -727,22 +768,26 @@ export default function DevLogger() {
   };
 
   const copyGastrofoodLogs = () => {
-    if (gastrofoodLogs.length === 0) {
+    if (groupedGastrofoodLogs.length === 0) {
       navigator.clipboard.writeText('Nenhum log do Gastrofood para copiar.');
       setCopyFeedback('Nenhum log para copiar');
       setTimeout(() => setCopyFeedback(null), 3000);
       return;
     }
 
-    const formatted = gastrofoodLogs.map(log => {
+    const formatted = groupedGastrofoodLogs.map(log => {
       const timeStr = new Date(log.timestamp).toLocaleString('pt-BR');
       const isError = log.direction === 'error';
-      const isReq = log.direction === 'request';
-      const directionText = isError ? 'ERROR' : (isReq ? 'REQUEST' : 'RESPONSE');
+      const isPending = log.isPending;
+      const directionText = isError ? 'ERROR' : (isPending ? 'PENDING' : 'SUCCESS');
       const statusText = log.status ? ` (Status: ${log.status})` : '';
       
       let header = `[${timeStr}] ${log.action || 'API Gastrofood'} - ${log.method || 'POST'} - ${directionText}${statusText}`;
       header += `\nURL: ${log.url || 'N/A'}`;
+      if (log.tenant_id) {
+        const company = companies.find(c => c.id === log.tenant_id);
+        header += `\nEmpresa: ${company ? company.name : log.tenant_id}`;
+      }
       
       const parts = [header];
       
@@ -756,7 +801,7 @@ export default function DevLogger() {
         parts.push(`Erro / Resposta com Falha:\n${errStr}`);
       } else if (log.response) {
         const respStr = typeof log.response === 'object' ? JSON.stringify(log.response, null, 2) : String(log.response);
-        parts.push(`Dados Recebidos:\n${respStr}`);
+        parts.push(`Dados Recebidos (Retorno):\n${respStr}`);
       }
       
       return parts.join('\n\n');
@@ -1515,7 +1560,7 @@ export default function DevLogger() {
               onClick={(e) => { e.stopPropagation(); setActiveTab('gastrofood'); }}
               className={`flex-1 py-2 font-mono text-[9px] font-extrabold uppercase tracking-widest flex items-center justify-center gap-2 rounded-xl transition-all duration-200 cursor-pointer select-none border-0 ${activeTab === 'gastrofood' ? 'bg-blue-500/10 text-blue-400 shadow-[0_2px_8px_rgba(59,130,246,0.1)]' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
             >
-              <Network size={12} /> Gastrofood ({gastrofoodLogs.length})
+              <Network size={12} /> Gastrofood ({groupedGastrofoodLogs.length})
             </button>
             <button 
               onClick={(e) => { e.stopPropagation(); setActiveTab('asts'); }}
@@ -1757,7 +1802,6 @@ export default function DevLogger() {
                         <span>Avisos: <strong className="text-amber-400">{testSummary.totalErrors}</strong></span>
                         <span>Erros: <strong className={testSummary.healthScore < 100 ? 'text-red-400' : 'text-gray-400'}>{testSummary.healthScore < 100 ? 1 : 0}</strong></span>
                      </div>
-
                      {/* Ação de Fechamento */}
                      <button
                         onClick={(e) => { e.stopPropagation(); setShowCompletionModal(false); }}
@@ -1772,31 +1816,33 @@ export default function DevLogger() {
             </div>
           ) : activeTab === 'gastrofood' ? (
             /* Gastrofood API Logs Monitor */
-            <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5 font-mono text-xs custom-scrollbar min-h-[250px] max-h-[500px] bg-[#121b22]/90 relative rounded-b-2xl select-none">
-              {gastrofoodLogs.length === 0 ? (
-                <div className="m-auto text-gray-500 flex flex-col items-center gap-2 select-none animate-in fade-in duration-300">
-                  <Network size={24} className="opacity-50 text-blue-400 animate-pulse" />
-                  <p className="font-bold tracking-wide text-gray-400">Aguardando transações...</p>
-                  <p className="text-[9px] opacity-75 max-w-[280px] text-center text-gray-500 leading-relaxed">Interaja com o chat ou execute consultas no sistema para capturar requisições e respostas da API Gastrofood em tempo real.</p>
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 font-mono text-xs custom-scrollbar min-h-[250px] max-h-[500px] bg-slate-950/85 backdrop-blur-md border border-white/5 relative rounded-b-2xl select-none">
+               {groupedGastrofoodLogs.length === 0 ? (
+                <div className="m-auto text-gray-500 flex flex-col items-center gap-3 select-none animate-in fade-in duration-300">
+                  <Network size={28} className="opacity-40 text-blue-500 animate-pulse" />
+                  <p className="font-bold tracking-wider text-gray-400 text-sm">Aguardando transações...</p>
+                  <p className="text-[10px] opacity-75 max-w-[320px] text-center text-gray-500 leading-relaxed">
+                    Interaja com o chat ou aguarde a sincronização automática do cardápio para ver as chamadas consolidadas da API em tempo real.
+                  </p>
                 </div>
               ) : (
-                <div className="flex flex-col gap-2.5">
-                  <div className="flex justify-between items-center bg-black/30 p-2 rounded-lg border border-gray-800/80 shrink-0 select-none">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping"></span>
-                      <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">Monitor da API Gastrofood</span>
+                <div className="flex flex-col gap-3">
+                  <div className="flex justify-between items-center bg-black/40 p-2.5 rounded-xl border border-white/5 shrink-0 select-none">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.8)]"></span>
+                      <span className="text-[10px] text-blue-400 font-extrabold uppercase tracking-widest">Monitor API Gastrofood</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="relative flex items-center">
                         <button
                           onClick={(e) => { e.stopPropagation(); copyGastrofoodLogs(); }}
-                          className="text-emerald-400 hover:text-emerald-300 font-bold text-[9px] uppercase tracking-wider bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 flex items-center gap-1 transition-colors cursor-pointer"
+                          className="text-emerald-400 hover:text-emerald-300 font-bold text-[9px] uppercase tracking-wider bg-emerald-500/10 px-2.5 py-1.5 rounded-lg border border-emerald-500/20 flex items-center gap-1.5 transition-all duration-200 cursor-pointer shadow-[0_2px_8px_rgba(16,185,129,0.05)] hover:scale-102"
                           title="Copiar todos os logs do Gastrofood"
                         >
-                          <Copy size={10} /> Copiar
+                          <Copy size={10} /> Copiar Logs
                         </button>
                         {copyFeedback && copyFeedback.includes('Gastrofood') && (
-                          <div className="absolute right-full mr-2 whitespace-nowrap bg-emerald-500 text-white text-[9px] font-bold px-2 py-1 rounded shadow-lg animate-in fade-in slide-in-from-right-2">
+                          <div className="absolute right-full mr-2 whitespace-nowrap bg-emerald-500 text-white text-[9px] font-bold px-2.5 py-1.5 rounded-lg shadow-lg animate-in fade-in slide-in-from-right-2 z-30">
                             {copyFeedback}
                           </div>
                         )}
@@ -1815,65 +1861,86 @@ export default function DevLogger() {
                             setGastrofoodLogs([]);
                           }
                         }}
-                        className="text-red-400 hover:text-red-300 font-bold text-[9px] uppercase tracking-wider bg-red-500/10 px-2 py-1 rounded border border-red-500/20 flex items-center gap-1 transition-colors cursor-pointer"
+                        className="text-red-400 hover:text-red-300 font-bold text-[9px] uppercase tracking-wider bg-red-500/10 px-2.5 py-1.5 rounded-lg border border-red-500/20 flex items-center gap-1.5 transition-all duration-200 cursor-pointer shadow-[0_2px_8px_rgba(239,68,68,0.05)] hover:scale-102"
                       >
-                        <Trash2 size={10} /> Limpar
+                        <Trash2 size={10} /> Limpar Tudo
                       </button>
                     </div>
                   </div>
                   
-                  <div className="flex flex-col gap-2">
-                    {gastrofoodLogs.map((log) => {
+                  <div className="flex flex-col gap-2.5">
+                    {groupedGastrofoodLogs.map((log) => {
                       const isExpanded = !!expandedLogs[log.id];
-                      const isRequest = log.direction === 'request';
-                      const isResponse = log.direction === 'response';
+                      const isPending = log.isPending;
                       const isError = log.direction === 'error';
                       
+                      const duration = log.responseTimestamp 
+                        ? (new Date(log.responseTimestamp).getTime() - new Date(log.timestamp).getTime()) 
+                        : null;
+                      
+                      const company = companies.find(c => c.id === log.tenant_id);
+                      const companyName = company ? company.name : (log.tenant_id ? `Empresa (${log.tenant_id.substring(0, 8)})` : 'Sincronização');
+                      
                       let statusText = 'REQ';
-                      let badgeColor = 'bg-blue-500/10 border-blue-500/30 text-blue-400';
-                      if (isResponse) {
-                        statusText = log.status ? `${log.status} OK` : 'RESPONSE';
-                        badgeColor = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400';
-                      } else if (isError) {
-                        statusText = log.status ? `${log.status} ERR` : 'ERROR';
-                        badgeColor = 'bg-red-500/10 border-red-500/30 text-red-400';
+                      let badgeColor = 'bg-blue-500/10 border-blue-500/20 text-blue-400';
+                      let cardStyle = 'border-slate-800 bg-slate-900/30 hover:bg-slate-900/50';
+                      
+                      if (isError) {
+                        statusText = log.status ? `${log.status}` : 'ERROR';
+                        badgeColor = 'bg-red-500/10 border-red-500/20 text-red-400';
+                        cardStyle = 'border-red-500/25 bg-red-950/10 hover:bg-red-950/15 shadow-[0_0_12px_rgba(239,68,68,0.08)]';
+                      } else if (!isPending) {
+                        statusText = log.status ? `${log.status}` : 'SUCCESS';
+                        badgeColor = 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400';
+                        cardStyle = 'border-emerald-500/10 bg-emerald-950/5 hover:bg-emerald-950/10';
+                      } else {
+                        // Pending request
+                        badgeColor = 'bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse';
+                        cardStyle = 'border-amber-500/15 bg-amber-950/5 hover:bg-amber-950/10';
                       }
                       
                       return (
                         <div 
                           key={log.id} 
-                          className={`p-2.5 rounded-xl border flex flex-col gap-1.5 transition-all cursor-pointer ${
-                            isError 
-                              ? 'border-red-500 bg-red-950/20 hover:bg-red-950/30 shadow-[0_0_12px_rgba(239,68,68,0.2)] animate-pulse' 
-                              : 'border-gray-800 bg-black/20 hover:bg-black/35'
-                          }`}
+                          className={`p-3 rounded-xl border flex flex-col gap-2 transition-all duration-200 cursor-pointer ${cardStyle}`}
                           onClick={() => toggleExpandLog(log.id)}
                         >
                           <div className="flex justify-between items-center gap-2 select-none">
                             <div className="flex items-center gap-2 font-mono min-w-0">
-                              <span className={`px-1.5 py-0.5 rounded text-[8px] font-black border uppercase tracking-wider ${badgeColor}`}>
+                              <span className={`px-2 py-0.5 rounded-md text-[8px] font-black border uppercase tracking-wider ${badgeColor} flex items-center gap-1`}>
+                                {isPending && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping mr-0.5"></span>}
                                 {statusText}
                               </span>
                               {isError && <AlertTriangle size={12} className="text-red-500 animate-bounce shrink-0" />}
-                              <span className={`font-bold truncate ${isError ? 'text-red-400 font-extrabold text-[13px]' : 'text-gray-200'}`}>{log.action || 'API Gastrofood'}</span>
-                              <span className="text-[9px] text-gray-500 font-bold uppercase">{log.method || 'POST'}</span>
+                              <span className={`font-bold truncate ${isError ? 'text-red-400 font-extrabold text-[12px]' : 'text-gray-200'}`}>
+                                {log.action || 'API Gastrofood'}
+                              </span>
+                              <span className="text-[8px] text-gray-500 font-bold bg-black/30 px-1 py-0.5 rounded uppercase border border-white/5">{log.method || 'POST'}</span>
+                              <span className="text-[8px] font-semibold bg-blue-500/5 text-blue-400/90 border border-blue-500/10 px-1.5 py-0.5 rounded truncate max-w-[100px]" title={companyName}>
+                                🏢 {companyName}
+                              </span>
                             </div>
-                            <div className="flex items-center gap-1.5 shrink-0 font-mono text-[9px] text-gray-500">
-                              <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
+                            <div className="flex items-center gap-2 shrink-0 font-mono text-[9px] text-gray-500">
+                              {duration !== null && (
+                                <span className="text-amber-500/80 font-bold bg-amber-500/5 border border-amber-500/10 px-1 rounded-md text-[8px]">
+                                  ⚡ {duration}ms
+                                </span>
+                              )}
+                              <span>{new Date(log.timestamp).toLocaleTimeString('pt-BR')}</span>
                               {isExpanded ? <ChevronUp size={12} className="text-gray-400" /> : <ChevronDown size={12} className="text-gray-400" />}
                             </div>
                           </div>
 
-                          <div className="text-[10px] text-gray-400 truncate opacity-85 select-all">
+                          <div className="text-[9px] text-gray-400 truncate opacity-85 select-all font-mono pl-1">
                             <span className="text-gray-600 font-bold mr-1 select-none">URL:</span> {log.url || 'N/A'}
                           </div>
 
                           {isExpanded && (
-                            <div className="flex flex-col gap-2 mt-1.5 pt-2 border-t border-gray-800/80 animate-in fade-in duration-200" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex flex-col gap-3 mt-2 pt-2.5 border-t border-white/5 animate-in fade-in duration-200" onClick={(e) => e.stopPropagation()}>
                               {log.payload && (
                                 <div className="flex flex-col gap-1">
-                                  <span className="text-[9px] text-gray-500 font-bold uppercase select-none">Payload (Requisição)</span>
-                                  <pre className="bg-black/40 border border-gray-900 rounded-lg p-2 text-[10px] text-blue-300 overflow-x-auto max-h-[150px] custom-scrollbar font-mono leading-relaxed select-all">
+                                  <span className="text-[8px] text-gray-500 font-black uppercase tracking-wider select-none">Dados de Envio (Payload)</span>
+                                  <pre className="bg-black/50 border border-white/5 rounded-lg p-2.5 text-[10px] text-blue-300 overflow-x-auto max-h-[150px] custom-scrollbar font-mono leading-relaxed select-all">
                                     {typeof log.payload === 'object' ? JSON.stringify(log.payload, null, 2) : String(log.payload)}
                                   </pre>
                                 </div>
@@ -1881,10 +1948,10 @@ export default function DevLogger() {
                               
                               {(log.response || log.error) && (
                                 <div className="flex flex-col gap-1">
-                                  <span className="text-[9px] text-gray-500 font-bold uppercase select-none">
-                                    {isError ? 'Erro / Resposta com Falha' : 'Dados Recebidos'}
+                                  <span className="text-[8px] text-gray-500 font-black uppercase tracking-wider select-none">
+                                    {isError ? 'Erro / Retorno Falho' : 'Dados Recebidos (Retorno)'}
                                   </span>
-                                  <pre className={`bg-black/40 border border-gray-900 rounded-lg p-2 text-[10px] overflow-x-auto max-h-[200px] custom-scrollbar font-mono leading-relaxed select-all ${isError ? 'text-red-400 border-red-500/25 bg-red-950/10' : 'text-emerald-300'}`}>
+                                  <pre className={`bg-black/50 border border-white/5 rounded-lg p-2.5 text-[10px] overflow-x-auto max-h-[200px] custom-scrollbar font-mono leading-relaxed select-all ${isError ? 'text-red-400 border-red-500/20 bg-red-950/5' : 'text-emerald-300'}`}>
                                     {isError 
                                       ? (log.error ? (typeof log.error === 'object' ? JSON.stringify(log.error, null, 2) : String(log.error)) : 'Erro indefinido')
                                       : (typeof log.response === 'object' ? JSON.stringify(log.response, null, 2) : String(log.response))

@@ -1,6 +1,9 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase, NODE_ID } from '../supabase.js';
 import { pipeline } from '@xenova/transformers';
+import { AsyncLocalStorage } from 'async_hooks';
+
+const tenantStorage = new AsyncLocalStorage();
 
 // Helper if EmbeddingsPipeline is not exported easily:
 class LocalEmbeddingsPipeline {
@@ -198,7 +201,8 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
     };
 }
 
-function logGastrofoodCall({ direction, action, method, url, payload, status, response, error }) {
+function logGastrofoodCall({ direction, action, method, url, payload, status, response, error, tenantId }) {
+    const finalTenantId = tenantId || tenantStorage.getStore();
     try {
         const parsedResponse = typeof response === 'object' ? response : (response ? JSON.parse(response) : null);
         
@@ -216,6 +220,7 @@ function logGastrofoodCall({ direction, action, method, url, payload, status, re
             action,
             method,
             url,
+            tenant_id: finalTenantId,
             payload: typeof payload === 'object' ? payload : (payload ? JSON.parse(payload) : null),
             status: hasLogicalError ? `${status} FAILED` : status,
             response: parsedResponse,
@@ -242,6 +247,7 @@ function logGastrofoodCall({ direction, action, method, url, payload, status, re
             action,
             method,
             url,
+            tenant_id: finalTenantId,
             payload: String(payload),
             status: hasLogicalErrorInRaw ? `${status} FAILED` : status,
             response: String(response),
@@ -251,7 +257,8 @@ function logGastrofoodCall({ direction, action, method, url, payload, status, re
 }
 
 async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) {
-    const now = Date.now();
+    return tenantStorage.run(tenantId, async () => {
+        const now = Date.now();
     const cacheKey = tenantId + '_' + (botSettings?.id || 'default');
     let cache = cardapioInMemoryCache.get(cacheKey);
     
@@ -459,11 +466,13 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
         timestamp: now,
         origem: 'vazio'
     };
+    });
 }
 
 const activeAutoHealingTenants = new Set();
 
 async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
+    return tenantStorage.run(tenantId, async () => {
     if (activeAutoHealingTenants.has(tenantId)) {
         console.log(`[AutoHealing] Sincronização já está em andamento para o tenant ${tenantId}. Ignorando chamada concorrente.`);
         return;
@@ -848,6 +857,7 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
     } finally {
         activeAutoHealingTenants.delete(tenantId);
     }
+    });
 }
 
 async function getCoordsFromAddress(cep, street, number, city, state) {
@@ -1360,6 +1370,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
     }
 
     async generateResponse({ tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock, botDelay, botInstructions, history: passedHistory }) {
+        return tenantStorage.run(tenantId, async () => {
         try {
             this.init();
              if (!this.genAI) {
@@ -3149,6 +3160,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
             console.error('[AutomationWorker] Falha ao processar AI na geração:', error);
             return null;
         }
+        });
     }
 
     async sendFinalResponse(params, finalResponseText) {
