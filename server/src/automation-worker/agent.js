@@ -842,6 +842,9 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
         
     } catch (ragErr) {
         console.error(`[AutoHealing - RAG] Erro ao vetorizar cardápio para RAG:`, ragErr);
+    }
+    } catch (outerErr) {
+        console.error(`[AutoHealing] Erro crítico na sincronização do cardápio para o tenant ${tenantId}:`, outerErr);
     } finally {
         activeAutoHealingTenants.delete(tenantId);
     }
