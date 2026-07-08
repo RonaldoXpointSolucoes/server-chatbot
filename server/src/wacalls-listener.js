@@ -173,16 +173,22 @@ async function handleWaCallsEvent(ev) {
         }
 
         // 3. Buscar ou criar a conversa ativa desse contato (buscando sem restrição de status para evitar violação de UNIQUE)
-        let { data: conversation, error: convErr } = await supabase
+        let { data: conversations, error: convErr } = await supabase
             .from('conversations')
-            .select('id, status')
+            .select('id, status, instance_id')
             .eq('tenant_id', contact.tenant_id)
-            .eq('contact_id', contact.id)
-            .maybeSingle();
+            .eq('contact_id', contact.id);
 
         if (convErr) {
             console.error(`[WaCalls Listener] Erro ao buscar conversa:`, convErr);
             return;
+        }
+
+        let conversation = null;
+        if (conversations && conversations.length > 0) {
+            conversation = conversations.find(c => c.instance_id === sessionId) ||
+                           conversations.find(c => !c.instance_id) ||
+                           conversations[0];
         }
 
         if (conversation) {
