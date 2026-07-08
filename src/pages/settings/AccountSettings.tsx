@@ -614,7 +614,7 @@ export default function AccountSettings() {
 
       const { error: errGrupos } = await supabase
         .from('cardapio_grupos')
-        .upsert(gruposToUpsert, { onConflict: 'id' });
+        .upsert(gruposToUpsert, { onConflict: 'tenant_id,id' });
 
       if (errGrupos) throw errGrupos;
       addLog(`Grupos salvos com sucesso (${gruposToUpsert.length} itens).`);
@@ -634,7 +634,7 @@ export default function AccountSettings() {
 
       const { error: errProdutos } = await supabase
         .from('cardapio_produtos')
-        .upsert(produtosToUpsert, { onConflict: 'id' });
+        .upsert(produtosToUpsert, { onConflict: 'tenant_id,id' });
 
       if (errProdutos) throw errProdutos;
       addLog(`Produtos salvos com sucesso (${produtosToUpsert.length} itens).`);
@@ -719,7 +719,7 @@ export default function AccountSettings() {
 
                 const { error: errPassos } = await supabase
                   .from('cardapio_passos')
-                  .upsert(passosToUpsert, { onConflict: 'id' });
+                  .upsert(passosToUpsert, { onConflict: 'tenant_id,id' });
 
                 if (errPassos) throw errPassos;
 
@@ -760,7 +760,7 @@ export default function AccountSettings() {
                 if (opcoesToUpsert.length > 0) {
                   const { error: errOpcoes } = await supabase
                     .from('cardapio_opcoes')
-                    .upsert(opcoesToUpsert, { onConflict: 'id' });
+                    .upsert(opcoesToUpsert, { onConflict: 'tenant_id,id' });
 
                   if (errOpcoes) throw errOpcoes;
                   addLog(`  -> ${opcoesToUpsert.length} opções salvas no Supabase.`);

@@ -225,57 +225,64 @@ async function runMigrations() {
 
           -- Tabelas do Cardápio (Gastrofood)
           CREATE TABLE IF NOT EXISTS cardapio_grupos (
-            id text PRIMARY KEY,
+            id text,
             tenant_id uuid NOT NULL,
             ordem integer DEFAULT 0,
             descricao text NOT NULL,
             ativo boolean DEFAULT true,
-            created_at timestamp with time zone DEFAULT now()
+            created_at timestamp with time zone DEFAULT now(),
+            PRIMARY KEY (tenant_id, id)
           );
           ALTER TABLE cardapio_grupos ENABLE ROW LEVEL SECURITY;
           DROP POLICY IF EXISTS "Permitir tudo em cardapio_grupos" ON cardapio_grupos;
           CREATE POLICY "Permitir tudo em cardapio_grupos" ON cardapio_grupos FOR ALL USING (true) WITH CHECK (true);
 
           CREATE TABLE IF NOT EXISTS cardapio_produtos (
-            id text PRIMARY KEY,
+            id text,
             tenant_id uuid NOT NULL,
-            grupo_id text REFERENCES cardapio_grupos(id) ON DELETE CASCADE,
+            grupo_id text,
             name text NOT NULL,
             description text,
             price numeric(10,2) NOT NULL DEFAULT 0.00,
             image text,
             ativo boolean DEFAULT true,
-            created_at timestamp with time zone DEFAULT now()
+            created_at timestamp with time zone DEFAULT now(),
+            PRIMARY KEY (tenant_id, id),
+            FOREIGN KEY (tenant_id, grupo_id) REFERENCES cardapio_grupos(tenant_id, id) ON DELETE CASCADE
           );
           ALTER TABLE cardapio_produtos ENABLE ROW LEVEL SECURITY;
           DROP POLICY IF EXISTS "Permitir tudo em cardapio_produtos" ON cardapio_produtos;
           CREATE POLICY "Permitir tudo em cardapio_produtos" ON cardapio_produtos FOR ALL USING (true) WITH CHECK (true);
 
           CREATE TABLE IF NOT EXISTS cardapio_passos (
-            id text PRIMARY KEY,
+            id text,
             tenant_id uuid NOT NULL,
-            produto_id text REFERENCES cardapio_produtos(id) ON DELETE CASCADE,
+            produto_id text,
             pergunta text NOT NULL,
             sub_titulo text,
             qtd_min integer DEFAULT 0,
             qtd_max integer DEFAULT 1,
             ordem integer DEFAULT 0,
             ativo boolean DEFAULT true,
-            created_at timestamp with time zone DEFAULT now()
+            created_at timestamp with time zone DEFAULT now(),
+            PRIMARY KEY (tenant_id, id),
+            FOREIGN KEY (tenant_id, produto_id) REFERENCES cardapio_produtos(tenant_id, id) ON DELETE CASCADE
           );
           ALTER TABLE cardapio_passos ENABLE ROW LEVEL SECURITY;
           DROP POLICY IF EXISTS "Permitir tudo em cardapio_passos" ON cardapio_passos;
           CREATE POLICY "Permitir tudo em cardapio_passos" ON cardapio_passos FOR ALL USING (true) WITH CHECK (true);
 
           CREATE TABLE IF NOT EXISTS cardapio_opcoes (
-            id text PRIMARY KEY,
+            id text,
             tenant_id uuid NOT NULL,
-            passo_id text REFERENCES cardapio_passos(id) ON DELETE CASCADE,
+            passo_id text,
             descricao text NOT NULL,
             preco numeric(10,2) NOT NULL DEFAULT 0.00,
             imagem text,
             ativo boolean DEFAULT true,
-            created_at timestamp with time zone DEFAULT now()
+            created_at timestamp with time zone DEFAULT now(),
+            PRIMARY KEY (tenant_id, id),
+            FOREIGN KEY (tenant_id, passo_id) REFERENCES cardapio_passos(tenant_id, id) ON DELETE CASCADE
           );
           ALTER TABLE cardapio_opcoes ENABLE ROW LEVEL SECURITY;
           DROP POLICY IF EXISTS "Permitir tudo em cardapio_opcoes" ON cardapio_opcoes;

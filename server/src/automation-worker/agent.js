@@ -484,7 +484,7 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
         console.log(`[AutoHealing] Salvando ${grupos.length} grupos no Supabase...`);
         const { error: errG } = await supabase
             .from('cardapio_grupos')
-            .upsert(grupos, { onConflict: 'id' });
+            .upsert(grupos, { onConflict: 'tenant_id,id' });
         if (errG) {
             console.error(`[AutoHealing] Erro ao salvar grupos no Supabase:`, errG);
         }
@@ -494,7 +494,7 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
     console.log(`[AutoHealing] Salvando ${produtos.length} produtos no Supabase...`);
     const { error: errP } = await supabase
         .from('cardapio_produtos')
-        .upsert(produtos, { onConflict: 'id' });
+        .upsert(produtos, { onConflict: 'tenant_id,id' });
     if (errP) {
         console.error(`[AutoHealing] Erro ao salvar produtos no Supabase:`, errP);
     }
@@ -643,7 +643,7 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                             };
                         });
                         
-                        await supabase.from('cardapio_passos').upsert(passosToUpsert, { onConflict: 'id' });
+                        await supabase.from('cardapio_passos').upsert(passosToUpsert, { onConflict: 'tenant_id,id' });
                         
                         const opcoesToUpsert = [];
                         passos.forEach(p => {
@@ -681,7 +681,7 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                         });
                         
                         if (opcoesToUpsert.length > 0) {
-                            await supabase.from('cardapio_opcoes').upsert(opcoesToUpsert, { onConflict: 'id' });
+                            await supabase.from('cardapio_opcoes').upsert(opcoesToUpsert, { onConflict: 'tenant_id,id' });
                         }
                     } else {
                         // Se o produto NÃO possui passos (passos.length === 0), gravamos um registro "dummy" de controle
@@ -694,7 +694,7 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                             pergunta: 'Nenhum Adicional',
                             ativo: false
                         };
-                        await supabase.from('cardapio_passos').upsert(dummyPasso, { onConflict: 'id' });
+                        await supabase.from('cardapio_passos').upsert(dummyPasso, { onConflict: 'tenant_id,id' });
                     }
                 } else {
                     const errText = await resSteps.text();
