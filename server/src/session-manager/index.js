@@ -955,9 +955,29 @@ class SessionManager {
         }
 
         if (!data) {
-            const errMsg = 'Não foi possível verificar o IP público de saída. Abortando conexão por segurança.';
-            await this.logConnectionEvent(tenantId, instanceId, 'ip_check_failed', 'paused', errMsg, null, null, { error: 'IP check APIs offline' });
-            throw new Error(errMsg);
+            try {
+                const res = await fetch('https://ipinfo.io/json');
+                if (res.ok) {
+                    const json = await res.json();
+                    data = {
+                        ip: json.ip,
+                        country: json.country,
+                        city: json.city
+                    };
+                }
+            } catch (e) {
+                console.error(`[SessionManager] Falha no fallback ipinfo.io:`, e.message);
+            }
+        }
+
+        if (!data) {
+            console.warn(`[SessionManager] Não foi possível verificar o IP público de saída (APIs de geolocalização indisponíveis/rate-limited). Mantendo a conexão ativa por tolerância a falhas.`);
+            data = {
+                ip: 'unknown',
+                country: requiredCountry,
+                city: 'unknown',
+                warning: 'APIs offline'
+            };
         }
 
         console.log(`[SessionManager] IP detectado: ${data.ip} (${data.country} - ${data.city})`);

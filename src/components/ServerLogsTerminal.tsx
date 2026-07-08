@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Terminal as TerminalIcon, X, Trash2, Pause, Play, Maximize2, Minimize2, Copy, Check, Bug, AlertCircle } from 'lucide-react';
+import { Terminal as TerminalIcon, X, Trash2, Pause, Play, Maximize2, Minimize2, Copy, Check, Bug, AlertCircle, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import clsx from 'clsx';
 
 interface LogEntry {
@@ -128,6 +128,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
       alert('Falha ao copiar os logs!');
     });
   };
+  
   const logsRef = useRef(logs);
   logsRef.current = logs;
 
@@ -196,138 +197,193 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   return (
     <div 
       className={clsx(
-        "fixed right-4 bottom-4 z-50 flex flex-col overflow-hidden transition-all duration-300 ease-in-out shadow-2xl rounded-2xl border border-white/10 backdrop-blur-xl bg-black/85",
-        isExpanded ? "w-[80vw] h-[80vh]" : "w-[500px] h-[400px]"
+        "fixed right-4 bottom-4 z-50 flex flex-col overflow-hidden transition-all duration-300 ease-in-out shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-2xl border border-white/10 backdrop-blur-xl bg-slate-950/85",
+        isExpanded ? "w-[90vw] h-[85vh] sm:w-[80vw] sm:h-[80vh]" : "w-[calc(100vw-32px)] sm:w-[540px] h-[450px]"
       )}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-white/5">
+      <div className="flex items-center justify-between px-4 py-3.5 border-b border-white/5 bg-slate-900/60 backdrop-blur-md select-none shrink-0">
         <div className="flex items-center gap-2">
-          <TerminalIcon className="w-5 h-5 text-green-400" />
-          <h3 className="text-sm font-semibold text-white/90 font-mono tracking-wide">
-            Server Console
-          </h3>
-          <span className="relative flex h-2 w-2 ml-2">
-            <span className={clsx(
-              "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-              isConnected ? "bg-green-400" : "bg-red-400"
-            )}></span>
-            <span className={clsx(
-              "relative inline-flex rounded-full h-2 w-2",
-               isConnected ? "bg-green-500" : "bg-red-500"
-            )}></span>
-          </span>
+          <div className="p-1.5 bg-emerald-500/10 rounded-lg border border-emerald-500/20 text-emerald-400">
+            <TerminalIcon className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="text-xs font-bold text-white tracking-wider font-mono uppercase">
+              Server Console
+            </h3>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="relative flex h-2 w-2">
+                <span className={clsx(
+                  "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                  isConnected ? "bg-emerald-400" : "bg-red-400"
+                )}></span>
+                <span className={clsx(
+                  "relative inline-flex rounded-full h-2 w-2",
+                   isConnected ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]"
+                )}></span>
+              </span>
+              <span className="text-[8px] text-gray-400 font-semibold font-mono tracking-widest uppercase">
+                {isConnected ? "online" : "offline"}
+              </span>
+            </div>
+          </div>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button 
             onClick={toggleDebugMode}
             className={clsx(
-              "p-1.5 rounded-md transition-all shadow-sm border", 
-              isDebugMode ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 border-purple-500/30" : "bg-transparent hover:bg-white/10 text-white/70 hover:text-white border-transparent"
+              "p-2 rounded-lg transition-all border text-xs cursor-pointer hover:scale-105 active:scale-95 duration-150", 
+              isDebugMode 
+                ? "bg-purple-500/20 text-purple-400 border-purple-500/30 shadow-[0_0_12px_rgba(168,85,247,0.15)]" 
+                : "bg-white/5 border-white/5 hover:border-white/10 text-gray-400 hover:text-white"
             )}
             title={isDebugMode ? "Modo Debug: ATIVO" : "Ativar Modo Debug (Trace)"}
           >
-            <Bug className="w-4 h-4" />
+            <Bug className="w-3.5 h-3.5" />
           </button>
-          <div className="w-px h-4 bg-white/20 mx-1"></div>
+          
+          <div className="w-px h-5 bg-white/10 mx-0.5 shrink-0"></div>
+          
           <button 
             onClick={() => setIsPaused(!isPaused)}
-            className="p-1.5 hover:bg-white/10 rounded-md text-white/70 hover:text-white transition-colors"
+            className="p-2 bg-white/5 border border-white/5 hover:border-white/10 rounded-lg text-gray-400 hover:text-white transition-all hover:scale-105 active:scale-95 duration-150 cursor-pointer"
             title={isPaused ? "Retomar" : "Pausar"}
           >
-            {isPaused ? <Play className="w-4 h-4 text-yellow-400" /> : <Pause className="w-4 h-4" />}
+            {isPaused ? <Play className="w-3.5 h-3.5 text-yellow-400 fill-current" /> : <Pause className="w-3.5 h-3.5" />}
           </button>
+          
           <div className="relative">
             <button 
               onClick={() => setShowCopyOptions(!showCopyOptions)}
-              className="p-1.5 hover:bg-white/10 rounded-md text-white/70 hover:text-white transition-colors"
+              className="p-2 bg-white/5 border border-white/5 hover:border-white/10 rounded-lg text-gray-400 hover:text-white transition-all hover:scale-105 active:scale-95 duration-150 cursor-pointer"
               title="Copiar Logs"
             >
-              {isCopied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+              {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
             {showCopyOptions && (
               <div className="absolute right-0 top-full mt-2 w-48 bg-slate-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 z-50">
-                <button onClick={() => { setShowCopyOptions(false); handleCopyLogs('all'); }} className="w-full text-left px-4 py-2.5 text-xs text-white/90 hover:bg-white/10 transition-colors font-medium">Log Completo</button>
+                <button 
+                  onClick={() => { setShowCopyOptions(false); handleCopyLogs('all'); }} 
+                  className="w-full text-left px-4 py-2.5 text-xs text-white/90 hover:bg-white/10 transition-colors font-medium font-mono cursor-pointer border-0 bg-transparent"
+                >
+                  Log Completo
+                </button>
                 <div className="h-px bg-white/10 w-full" />
-                <button onClick={() => { setShowCopyOptions(false); handleCopyLogs('errors'); }} className="w-full text-left px-4 py-2.5 text-xs text-red-400 hover:bg-white/10 transition-colors font-medium flex items-center justify-between">Apenas Erros/Avisos <AlertCircle size={14}/></button>
+                <button 
+                  onClick={() => { setShowCopyOptions(false); handleCopyLogs('errors'); }} 
+                  className="w-full text-left px-4 py-2.5 text-xs text-red-400 hover:bg-white/10 transition-colors font-medium flex items-center justify-between font-mono cursor-pointer border-0 bg-transparent"
+                >
+                  Apenas Erros/Avisos <AlertCircle size={14}/>
+                </button>
               </div>
             )}
           </div>
+          
           <button 
             onClick={() => setLogs([])}
-            className="p-1.5 hover:bg-white/10 rounded-md text-white/70 hover:text-white transition-colors"
+            className="p-2 bg-white/5 border border-white/5 hover:border-white/10 rounded-lg text-gray-400 hover:text-white transition-all hover:scale-105 active:scale-95 duration-150 cursor-pointer"
             title="Limpar Logs"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-3.5 h-3.5" />
           </button>
+          
           <button 
             onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1.5 hover:bg-white/10 rounded-md text-white/70 hover:text-white transition-colors"
+            className="p-2 bg-white/5 border border-white/5 hover:border-white/10 rounded-lg text-gray-400 hover:text-white transition-all hover:scale-105 active:scale-95 duration-150 cursor-pointer"
             title={isExpanded ? "Minimizar" : "Expandir"}
           >
-            {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
-          <div className="w-px h-4 bg-white/20 mx-1"></div>
+          
+          <div className="w-px h-5 bg-white/10 mx-0.5 shrink-0"></div>
+          
           <button 
             onClick={onClose}
-            className="p-1.5 hover:bg-red-500/20 rounded-md text-white/70 hover:text-red-400 transition-colors"
+            className="p-2 bg-white/5 border border-white/5 hover:bg-red-500/20 hover:border-red-500/30 rounded-lg text-gray-400 hover:text-red-400 transition-all hover:scale-105 active:scale-95 duration-150 cursor-pointer"
             title="Fechar"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
       </div>
 
       {/* Logs Area */}
-      <div className="flex-1 overflow-y-auto p-4 font-mono text-xs sm:text-sm leading-relaxed scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2.5 font-mono text-[10.5px] leading-relaxed custom-scrollbar bg-slate-950/40">
         {logs.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-white/30 space-y-2 select-none animate-in fade-in duration-500">
-            <TerminalIcon className="w-8 h-8 opacity-50" />
-            <p>Aguardando logs do servidor...</p>
+          <div className="m-auto flex flex-col items-center justify-center text-gray-500 space-y-3 select-none animate-in fade-in duration-500">
+            <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-center text-gray-400 animate-pulse">
+              <TerminalIcon className="w-6 h-6" />
+            </div>
+            <p className="font-semibold text-xs tracking-wider uppercase">Aguardando logs do servidor...</p>
           </div>
         ) : (
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-2">
             {logs.map((log) => {
               const date = new Date(log.timestamp);
               const timeString = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`;
               
-              let colorClass = 'text-gray-300';
-              if (log.level === 'error') colorClass = 'text-red-400 font-medium';
-              if (log.level === 'warn') colorClass = 'text-yellow-400';
+              const isErr = log.level === 'error';
+              const isWrn = log.level === 'warn';
+              
+              let cardStyle = 'border-l-2 border-slate-500/20 bg-slate-900/10 text-gray-300';
+              let textStyle = 'text-gray-300';
+              
+              if (isErr) {
+                cardStyle = 'border-l-2 border-red-500/80 bg-red-950/10 text-red-200 shadow-[0_2px_8px_rgba(239,68,68,0.02)]';
+                textStyle = 'text-red-300 font-semibold';
+              } else if (isWrn) {
+                cardStyle = 'border-l-2 border-amber-500/80 bg-amber-950/5 text-amber-200 shadow-[0_2px_8px_rgba(245,158,11,0.02)]';
+                textStyle = 'text-amber-300 font-semibold';
+              }
+              
               const parseResult = parseLogMessage(log.message);
 
               return (
-                <div key={log.id} className="flex flex-col gap-1 hover:bg-white/5 p-1.5 rounded-md transition-colors break-words group">
-                  <div className="flex gap-3">
-                    <span className="text-white/40 shrink-0 select-none">[{timeString}]</span>
+                <div 
+                  key={log.id} 
+                  className={clsx(
+                    "flex flex-col gap-1.5 p-2.5 rounded-r-xl border border-y-white/5 border-r-white/5 hover:bg-white/5 transition-all duration-150 group shrink-0",
+                    cardStyle
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-[9px] font-bold text-slate-500 select-none bg-slate-950/40 px-1.5 py-0.5 rounded border border-white/5 shrink-0 shadow-sm mt-0.5">
+                      {timeString}
+                    </span>
                     {parseResult.isParsed ? (
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {parseResult.prefix && <span className="text-purple-400 font-bold opacity-80">{parseResult.prefix}</span>}
-                          <span className={clsx("font-semibold", colorClass)}>{parseResult.action}</span>
-                        </div>
-                    ) : (
-                        <span className={clsx("flex-1 whitespace-pre-wrap font-medium tracking-tight", colorClass)}>
-                          {parseResult.text}
+                      <div className="flex items-center gap-2 flex-wrap min-w-0">
+                        {parseResult.prefix && (
+                          <span className="text-[8px] font-black bg-purple-500/10 border border-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded uppercase tracking-wider select-none shrink-0">
+                            {parseResult.prefix}
+                          </span>
+                        )}
+                        <span className={clsx("font-bold truncate text-xs", textStyle)}>
+                          {parseResult.action}
                         </span>
+                      </div>
+                    ) : (
+                      <span className={clsx("flex-1 whitespace-pre-wrap tracking-wide font-mono break-all", textStyle)}>
+                        {parseResult.text}
+                      </span>
                     )}
                   </div>
                   
                   {parseResult.isParsed && parseResult.data && (
-                    <div className="ml-[68px] mt-1 mb-1">
+                    <div className="pl-14">
                       {typeof parseResult.data === 'object' && Object.keys(parseResult.data).length > 0 ? (
-                        <div className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 bg-black/40 rounded-lg border border-white/5 p-2.5 text-[11px] font-mono shadow-inner overflow-x-auto custom-scrollbar">
+                        <div className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 bg-black/60 rounded-xl border border-white/5 p-3 text-[10px] font-mono shadow-inner overflow-x-auto custom-scrollbar select-text leading-relaxed">
                           {Object.entries(parseResult.data).map(([k, v]) => (
                             <React.Fragment key={k}>
-                              <div className="text-gray-400 font-bold shrink-0">{k}</div>
-                              <div className="text-gray-200 opacity-90 break-all whitespace-pre-wrap">
+                              <div className="text-blue-400 font-extrabold shrink-0 select-none">{k}:</div>
+                              <div className="text-amber-200/90 break-all whitespace-pre-wrap font-semibold">
                                 {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)}
                               </div>
                             </React.Fragment>
                           ))}
                         </div>
                       ) : (
-                        <div className="bg-black/40 rounded-lg border border-white/5 p-2.5 text-[11px] text-gray-200">
+                        <div className="bg-black/60 rounded-xl border border-white/5 p-2.5 text-[10px] text-gray-200 select-text leading-relaxed">
                           {JSON.stringify(parseResult.data)}
                         </div>
                       )}
