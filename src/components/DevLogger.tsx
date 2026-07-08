@@ -1802,7 +1802,19 @@ export default function DevLogger() {
                         )}
                       </div>
                       <button
-                        onClick={() => setGastrofoodLogs([])}
+                        onClick={async () => {
+                          try {
+                            const res = await fetch(`${engineUrl}/api/v1/system/logs/gastrofood`, {
+                              method: 'DELETE'
+                            });
+                            if (res.ok) {
+                              setGastrofoodLogs([]);
+                            }
+                          } catch (err) {
+                            console.error('Error clearing gastrofood logs on server:', err);
+                            setGastrofoodLogs([]);
+                          }
+                        }}
                         className="text-red-400 hover:text-red-300 font-bold text-[9px] uppercase tracking-wider bg-red-500/10 px-2 py-1 rounded border border-red-500/20 flex items-center gap-1 transition-colors cursor-pointer"
                       >
                         <Trash2 size={10} /> Limpar

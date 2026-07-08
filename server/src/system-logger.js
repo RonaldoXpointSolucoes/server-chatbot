@@ -194,6 +194,16 @@ router.get('/gastrofood', (req, res) => {
   }
 });
 
+// Endpoint para limpar os logs da API Gastrofood de forma definitiva
+router.delete('/gastrofood', (req, res) => {
+  try {
+    gastrofoodBuffer.length = 0;
+    res.json({ success: true, message: 'Logs excluídos de forma definitiva.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Endpoint para obter todos os logs recentes (diagnóstico avançado)
 router.get('/all', (req, res) => {
   try {
