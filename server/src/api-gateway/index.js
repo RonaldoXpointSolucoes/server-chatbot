@@ -152,6 +152,26 @@ router.post('/v1/utils/clear-cardapio-cache', async (req, res) => {
     try {
         const { tenantId } = req.body;
         AutomationWorker.clearCardapioCache(tenantId);
+        
+        // Se for um tenant específico, remove a data de sincronização no banco de dados
+        // para que a próxima verificação force uma requisição limpa para a API externa.
+        if (tenantId) {
+            const { data: company } = await supabase
+                .from('companies')
+                .select('settings')
+                .eq('id', tenantId)
+                .single();
+                
+            if (company) {
+                const settings = company.settings || {};
+                delete settings.last_cardapio_sync_time;
+                await supabase
+                    .from('companies')
+                    .update({ settings })
+                    .eq('id', tenantId);
+            }
+        }
+        
         return res.json({ success: true, message: `Cache do cardápio limpo para o tenant ${tenantId || 'todos'}` });
     } catch (e) {
         return res.status(500).json({ error: e.message });

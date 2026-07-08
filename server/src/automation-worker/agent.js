@@ -272,12 +272,25 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
     const cardapioToken = (botSettings && botSettings.cardapio_json_token) || companySettings.cardapio_json_token || GASTROFOOD_DEFAULT_TOKEN;
     const cardapioPayload = (botSettings && botSettings.cardapio_json_payload) || companySettings.cardapio_json_payload || DEFAULT_CARDAPIO_PAYLOAD;
 
-    console.log(`[CardapioCache] Cache MISS para a chave ${cacheKey}. Origem configurada: ${cardapioOrigem}`);
+    // Regra dos 60 minutos: se a última consulta foi realizada há menos de 60 minutos,
+    // mudamos a origem efetiva para 'supabase' para evitar batidas desnecessárias na API externa.
+    let effectiveCardapioOrigem = cardapioOrigem;
+    const lastSyncTimeStr = companySettings.last_cardapio_sync_time;
+    if (cardapioOrigem === 'api' && lastSyncTimeStr) {
+        const lastSync = new Date(lastSyncTimeStr).getTime();
+        const sixtyMinutes = 60 * 60 * 1000;
+        if (now - lastSync < sixtyMinutes) {
+            console.log(`[CardapioCache] Pulando consulta externa da API para o tenant ${tenantId}. Última consulta foi em ${new Date(lastSync).toLocaleString('pt-BR')} (há menos de 60m). Carregando dados locais.`);
+            effectiveCardapioOrigem = 'supabase';
+        }
+    }
+
+    console.log(`[CardapioCache] Cache MISS para a chave ${cacheKey}. Origem configurada: ${cardapioOrigem}. Origem efetiva: ${effectiveCardapioOrigem}`);
 
     let apiAttempted = false;
 
     // Se origem for 'supabase', tenta primeiro carregar do Supabase
-    if (cardapioOrigem === 'supabase') {
+    if (effectiveCardapioOrigem === 'supabase') {
         try {
             console.log(`[CardapioCache] Buscando do Supabase para o tenant ${tenantId}...`);
             const { data: dbProdutos, error: errProd } = await supabase
@@ -311,7 +324,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
     }
 
     // Se a origem for 'api' OU se a busca do Supabase retornou vazia, tenta API externa
-    if (cardapioOrigem === 'api' || !cache) {
+    if (effectiveCardapioOrigem === 'api' || !cache) {
         apiAttempted = true;
         if (cardapioUrl) {
             try {
@@ -390,6 +403,24 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                         };
                         cardapioInMemoryCache.set(cacheKey, cache);
                         
+                        // Atualiza last_cardapio_sync_time no Supabase para persistir a consulta
+                        const updatedSettings = {
+                            ...companySettings,
+                            last_cardapio_sync_time: new Date().toISOString()
+                        };
+                        supabase
+                            .from('companies')
+                            .update({ settings: updatedSettings })
+                            .eq('id', tenantId)
+                            .then(({ error: errUp }) => {
+                                if (errUp) {
+                                    console.error(`[CardapioCache - SyncTime] Erro ao atualizar settings da empresa ${tenantId}:`, errUp.message);
+                                } else {
+                                    console.log(`[CardapioCache - SyncTime] settings.last_cardapio_sync_time atualizada com sucesso para ${tenantId}.`);
+                                    companySettings.last_cardapio_sync_time = updatedSettings.last_cardapio_sync_time;
+                                }
+                            });
+                        
                         // Dispara Auto-Healing em background se a origem geral do tenant permitir ou for o fluxo fallback
                         if (cardapioOrigem !== 'api') {
                             autoHealAndIndexCardapio(tenantId, companySettings, {
@@ -427,7 +458,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
     }
 
     // Fallback de Resiliência: se o bot estava configurado como 'api', tentou a API, mas ela falhou, tenta carregar do Supabase para não deixar o cliente sem atendimento.
-    if (cardapioOrigem === 'api' && apiAttempted && !cache) {
+    if (effectiveCardapioOrigem === 'api' && apiAttempted && !cache) {
         try {
             console.log(`[CardapioCache - Fallback Resiliência] API falhou. Tentando resgatar cardápio do Supabase local...`);
             const { data: dbProdutos } = await supabase
@@ -953,7 +984,7 @@ class AutomationWorker {
     }
 
     startCardapioBackgroundSync() {
-        console.log("[CardapioSync] Inicializando Agendador de Sincronização do Cardápio (a cada 10m)...");
+        console.log("[CardapioSync] Inicializando Agendador de Sincronização do Cardápio (a cada 60m)...");
         
         const syncAllCardapios = async () => {
             try {
@@ -1040,8 +1071,8 @@ class AutomationWorker {
             syncAllCardapios().catch(err => console.error("[CardapioSync] Erro na execução inicial:", err));
         }, 10000);
         
-        // Executa a cada 10 minutos
-        setInterval(syncAllCardapios, 10 * 60 * 1000);
+        // Executa a cada 60 minutos
+        setInterval(syncAllCardapios, 60 * 60 * 1000);
     }
 
     async getRecentMessagesForRouting(tenantId, conversationId, limit = 6) {
