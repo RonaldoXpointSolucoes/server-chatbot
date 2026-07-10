@@ -26,3 +26,9 @@ Sempre que o usuário digitar `deploy!`, ou solicitar um deploy, o agente **OBRI
    * Atualizações de dependências no arquivo `/server/package.json`.
 3. **INDICAÇÃO DE DEPLOY**: Ao efetuar commits puramente visuais, faça o commit com mensagens que deixem claro que a mudança é exclusiva do frontend (ex: `feat(ui): ...` ou `fix(ui): ...`) e apenas efetue o deploy do frontend (Vercel).
 
+## Regras de Execução de Comandos Assíncronos e Deploys
+
+1. **PROIBIDO CANCELAR OU INTERROMPER PROCESSOS DE DEPLOY EM MEIO À EXECUÇÃO**: Nunca force o cancelamento, interrupção ou concorrência de comandos de deploy ativos (ex: `npm run deploy` que invoca `vercel --prod`) ou chamadas sensíveis de infraestrutura. Interromper prematuramente processos de upload da CLI da Vercel ou Coolify bloqueia o estado do deploy remoto, resultando em builds parciais, arquivos de assets corrompidos (como js/css compilados apontando para caminhos antigos) ou perda de variáveis de ambiente ativas.
+2. **AGUARDAR SEMPRE A CONCLUSÃO TOTAL**: Todo e qualquer comando de deploy iniciado deve ter seu ciclo completo acompanhado através dos logs até que o resultado final de sucesso ou falha real seja devolvido.
+
+
