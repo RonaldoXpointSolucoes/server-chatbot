@@ -433,22 +433,55 @@ router.post('/v1/bots/simulate', async (req, res) => {
 
 // Diagnostic route to check server IP and geolocation (to verify proxy)
 router.get('/v1/utils/my-ip', async (req, res) => {
+    let geo = null;
+    let supabasePing = null;
+    let dbTest = null;
+    
     try {
         const response = await fetch('https://ipinfo.io/json');
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const data = await response.json();
-        res.json({
-            status: 'success',
-            ip: data.ip,
-            country: data.country,
-            region: data.region,
-            city: data.city,
-            org: data.org
-        });
+        if (response.ok) {
+            geo = await response.json();
+        } else {
+            geo = { error: `HTTP ${response.status}` };
+        }
     } catch (e) {
-        console.error('[my-ip] Erro ao obter IP do servidor:', e.message);
-        res.status(500).json({ error: e.message });
+        geo = { error: e.message };
     }
+
+    try {
+        const startTime = Date.now();
+        const response = await fetch('https://yzbxsxabzncdzuxvlppt.supabase.co/rest/v1/', {
+            headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || '' }
+        });
+        const duration = Date.now() - startTime;
+        supabasePing = {
+            status: response.status,
+            ok: response.ok,
+            durationMs: duration
+        };
+    } catch (e) {
+        supabasePing = { error: e.message };
+    }
+
+    try {
+        const startTime = Date.now();
+        const { data, error } = await supabase.from('tenants').select('id').limit(1);
+        const duration = Date.now() - startTime;
+        if (error) {
+            dbTest = { error: error.message, durationMs: duration };
+        } else {
+            dbTest = { success: true, count: data?.length, durationMs: duration };
+        }
+    } catch (e) {
+        dbTest = { error: e.message };
+    }
+
+    res.json({
+        status: 'success',
+        geo,
+        supabasePing,
+        dbTest
+    });
 });
 
 export default router;
