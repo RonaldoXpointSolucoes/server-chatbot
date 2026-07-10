@@ -431,4 +431,25 @@ router.post('/v1/bots/simulate', async (req, res) => {
     }
 });
 
+// Diagnostic route to check server IP and geolocation (to verify proxy)
+router.get('/v1/utils/my-ip', async (req, res) => {
+    try {
+        const response = await fetch('https://ipinfo.io/json');
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        res.json({
+            status: 'success',
+            ip: data.ip,
+            country: data.country,
+            region: data.region,
+            city: data.city,
+            org: data.org
+        });
+    } catch (e) {
+        console.error('[my-ip] Erro ao obter IP do servidor:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 export default router;
+
