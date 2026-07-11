@@ -1238,6 +1238,18 @@ class EventProcessor {
              }
         }
 
+        if (payload.peerDataRequestSessionId && messages && messages.length > 0) {
+            console.log(`[EventProcessor] Sincronização On-Demand Detectada. Processando ${messages.length} mensagens para o banco.`);
+            const chronologicMessages = [...messages].reverse();
+            await this.handleMessageUpsert(tenantId, instanceId, sock, { messages: chronologicMessages, type: 'append' });
+            
+            // Emitir trigger de recarregamento para o frontend recarregar a conversa atualizada
+            await realtime.publishInboxEvent(tenantId, 'history.sync.completed', {
+                count: chronologicMessages.length
+            });
+            return;
+        }
+
         // Verifica se a caixa já possui histórico de conversas gravado no Supabase
         let hasExistingHistory = false;
         try {

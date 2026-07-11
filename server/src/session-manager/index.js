@@ -258,6 +258,16 @@ class SessionManager {
                 retryRequestDelayMs: 10000,
                 maxMsgRetryCount: 0, // Desativado para evitar loops de retry em grupos que causam BAN
                 msgRetryCounterCache,
+                shouldSyncHistoryMessage: (histNotification) => {
+                    const syncType = histNotification?.syncType;
+                    if (syncType === 6 || syncType === 'ON_DEMAND') {
+                        return true;
+                    }
+                    if (syncType === 2 || syncType === 'FULL') {
+                        return false;
+                    }
+                    return true;
+                },
                 getMessage: async (key) => {
                     return { conversation: 'MENSAGEM_RECUPEERADA_COM_FALHA' };
                 }
@@ -621,8 +631,15 @@ class SessionManager {
             });
 
             sock.ev.on('messaging-history.set', async (history) => {
-                console.log(`[SessionManager] Recebido messaging-history.set para a instância ${instanceId}. Armazenando no cache para sincronização manual.`);
-                this.pendingHistorySyncs.set(instanceId, history);
+                if (history.peerDataRequestSessionId) {
+                    console.log(`[SessionManager] Recebido messaging-history.set (On-Demand) para a instância ${instanceId}. Processando de forma imediata.`);
+                    eventProcessor.handleMessagingHistorySet(tenantId, instanceId, sock, history).catch(err => {
+                        console.error(`[SessionManager] Erro ao processar histórico on-demand:`, err);
+                    });
+                } else {
+                    console.log(`[SessionManager] Recebido messaging-history.set para a instância ${instanceId}. Armazenando no cache para sincronização manual.`);
+                    this.pendingHistorySyncs.set(instanceId, history);
+                }
             });
 
             sock.ev.on('chats.upsert', async (chats) => {
