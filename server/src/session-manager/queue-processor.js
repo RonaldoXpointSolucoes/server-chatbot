@@ -60,6 +60,7 @@ class QueueProcessor {
     }
 
     async processInstanceQueue(tenantId, instanceId) {
+        let msg = null;
         try {
             // Busca a próxima mensagem pendente da fila para esta instância
             const { data: messages, error } = await supabase
@@ -75,7 +76,7 @@ class QueueProcessor {
             if (error) throw error;
             if (!messages || messages.length === 0) return;
 
-            const msg = messages[0];
+            msg = messages[0];
 
             // 1. Marca a mensagem como em processamento
             const { data: updatedMsg, error: updateErr } = await supabase
@@ -161,19 +162,23 @@ class QueueProcessor {
 
             console.log(`[QueueProcessor] Mensagem ${msg.id} enviada com sucesso.`);
         } catch (err) {
-            console.error(`[QueueProcessor] Falha ao enviar mensagem ${msg.id}:`, err.message);
-            
-            const maxAttempts = 3;
-            const newStatus = msg.attempts + 1 >= maxAttempts ? 'failed' : 'pending';
+            if (msg) {
+                console.error(`[QueueProcessor] Falha ao enviar mensagem ${msg.id}:`, err.message);
+                
+                const maxAttempts = 3;
+                const newStatus = msg.attempts + 1 >= maxAttempts ? 'failed' : 'pending';
 
-            await supabase
-                .from('wa_outgoing_messages')
-                .update({ 
-                    status: newStatus,
-                    last_error: err.message || 'Erro de conexão/envio',
-                    scheduled_at: new Date(Date.now() + 15000).toISOString() // Retenta em 15s
-                })
-                .eq('id', msg.id);
+                await supabase
+                    .from('wa_outgoing_messages')
+                    .update({ 
+                        status: newStatus,
+                        last_error: err.message || 'Erro de conexão/envio',
+                        scheduled_at: new Date(Date.now() + 15000).toISOString() // Retenta em 15s
+                    })
+                    .eq('id', msg.id);
+            } else {
+                console.error(`[QueueProcessor] Falha ao carregar fila de mensagens:`, err.message);
+            }
         }
     }
 }
