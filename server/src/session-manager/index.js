@@ -392,6 +392,16 @@ class SessionManager {
                         return;
                     }
                     
+                    const status = lastDisconnect?.error?.output?.statusCode;
+                    const reason = lastDisconnect?.error?.message || '';
+
+                    if (status === 515 || status === DisconnectReason.restartRequired) {
+                        console.log(`[SessionManager] WhatsApp solicitou reinício de conexão (código 515 / restartRequired) para a instância ${instanceId}. Reiniciando sessão imediatamente...`);
+                        this.sessions.delete(instanceId);
+                        this.createSession(tenantId, instanceId);
+                        return;
+                    }
+                    
                     // Clear stable connection timeouts if it disconnected early
                     if (this.conflictTimeouts.has(instanceId)) {
                         clearTimeout(this.conflictTimeouts.get(instanceId));
@@ -402,8 +412,6 @@ class SessionManager {
                         this.reconnectTimeouts.delete(instanceId);
                     }
 
-                    const status = lastDisconnect?.error?.output?.statusCode;
-                    const reason = lastDisconnect?.error?.message || '';
                     const loggedOut = status === DisconnectReason.loggedOut;
                     const isConflict = status === 440 || reason.includes('conflict') || reason.includes('replaced');
                     const isBlocked12h = reason.includes('blocked') || reason.includes('12h') || status === 410 || status === 429;
