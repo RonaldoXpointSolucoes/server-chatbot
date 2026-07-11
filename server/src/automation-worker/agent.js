@@ -583,44 +583,24 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
             }
         });
 
-        const nowTime = Date.now();
-        const normalThreshold = 24 * 60 * 60 * 1000; // 24 horas para produtos com adicionais
-        const dummyThreshold = 5 * 24 * 60 * 60 * 1000; // 5 dias para produtos sem adicionais
-
         const productsToSync = [];
-        const productsToRefresh = [];
 
         for (const product of produtos) {
             if (!productPassosMap.has(product.id)) {
                 // Produto novo que não possui adicionais gravados. Sincroniza obrigatoriamente!
                 productsToSync.push(product);
-            } else {
-                const info = productPassosMap.get(product.id);
-                const threshold = info.isDummy ? dummyThreshold : normalThreshold;
-                if (nowTime - info.lastSync > threshold) {
-                    // Produto que atingiu a expiração de sincronização. Precisa de refresh.
-                    productsToRefresh.push({ product, lastSync: info.lastSync });
-                }
             }
         }
 
-        // Ordena a lista de refresh pela data mais antiga primeiro
-        productsToRefresh.sort((a, b) => a.lastSync - b.lastSync);
+        const finalProductsToSync = productsToSync;
 
-        // Limita a quantidade de refresh de produtos existentes por ciclo de sync
-        // ex: atualiza no máximo 15 produtos existentes a cada ciclo de 10m
-        const MAX_REFRESH_PER_CYCLE = 15;
-        const selectedRefresh = productsToRefresh.slice(0, MAX_REFRESH_PER_CYCLE).map(r => r.product);
-
-        const finalProductsToSync = [...productsToSync, ...selectedRefresh];
-
-        console.log(`[AutoHealing] Total de produtos do cardápio: ${produtos.length}. Novos a sincronizar: ${productsToSync.length}. Antigos a atualizar (throttled): ${selectedRefresh.length}/${productsToRefresh.length}`);
+        console.log(`[AutoHealing] Total de produtos do cardápio: ${produtos.length}. Novos a sincronizar (sem adicionais locais): ${productsToSync.length}`);
 
         for (let i = 0; i < finalProductsToSync.length; i++) {
             const product = finalProductsToSync[i];
             
-            // Pequeno delay para não sobrecarregar as conexões
-            await new Promise(resolve => setTimeout(resolve, 300));
+            // Delay de 3 segundos para evitar requisições simultâneas ou sobrecarregar o servidor do cliente
+            await new Promise(resolve => setTimeout(resolve, 3000));
             
             try {
                 logGastrofoodCall({

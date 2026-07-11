@@ -169,6 +169,18 @@ router.post('/v1/utils/clear-cardapio-cache', async (req, res) => {
                     .from('companies')
                     .update({ settings })
                     .eq('id', tenantId);
+
+                // Também limpa do banco local os passos e opcionais sincronizados anteriormente
+                // para que a próxima sincronização possa recarregá-los do zero
+                await supabase
+                    .from('cardapio_passos')
+                    .delete()
+                    .eq('tenant_id', tenantId);
+                    
+                await supabase
+                    .from('cardapio_opcoes')
+                    .delete()
+                    .eq('tenant_id', tenantId);
             }
         }
         
