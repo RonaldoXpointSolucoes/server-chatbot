@@ -413,10 +413,10 @@ class SessionManager {
                     }
 
                     const loggedOut = status === DisconnectReason.loggedOut;
-                    const isConflict = status === 440 || reason.includes('conflict') || reason.includes('replaced');
-                    const isBlocked12h = reason.includes('blocked') || reason.includes('12h') || status === 410 || status === 429;
-                    const isForbidden = status === 403 || reason.includes('forbidden');
-                    const isBadSession = status === 500 || reason.includes('bad session');
+                    const isConflict = status === 440 || reason.toLowerCase().includes('conflict') || reason.toLowerCase().includes('replaced');
+                    const isBlocked12h = reason.toLowerCase().includes('blocked') || reason.toLowerCase().includes('12h') || status === 410 || status === 429;
+                    const isForbidden = (status === 403 || reason.toLowerCase().includes('forbidden')) && status !== 503 && status !== 502 && status !== 504;
+                    const isBadSession = (status === 500 || reason.toLowerCase().includes('bad session')) && status !== 503 && status !== 502 && status !== 504;
 
                     this.sessions.delete(instanceId);
                     this.pendingHistorySyncs.delete(instanceId);
