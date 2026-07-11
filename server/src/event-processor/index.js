@@ -1576,6 +1576,23 @@ class EventProcessor {
                 const reason = lastDisconnect?.error?.output?.statusCode;
                 const loggedOut = reason === 401;
 
+                // Primeiro verifica o estado atual no banco para não sobrescrever status persistentes/finais
+                const { data: currentInst } = await supabase.from('whatsapp_instances')
+                    .select('status')
+                    .eq('id', instanceId)
+                    .maybeSingle();
+
+                const isPausedOrBlocked = currentInst && ['paused', 'blocked_12h', 'forbidden', 'bad_session'].includes(currentInst.status);
+
+                if (isPausedOrBlocked) {
+                    console.log(`[EventProcessor] Mantendo status persistente '${currentInst.status}' para a instância ${instanceId}. Ignorando update de connection close.`);
+                    payload.status = currentInst.status;
+                    payload.reason = reason;
+                    if (loggedOut) payload.loggedOut = true;
+                    await realtime.publishInstanceEvent(tenantId, instanceId, 'instance.status', payload);
+                    return;
+                }
+
                 // Verifica se há pareamento pendente de sincronização para tratar o close como transiente
                 const { data: runtime } = await supabase.from('whatsapp_instance_runtime')
                     .select('pairing_code')
@@ -1583,7 +1600,8 @@ class EventProcessor {
                     .maybeSingle();
                 const isPairingPendingSync = runtime?.pairing_code === 'CONNECTED_PENDING_SYNC';
 
-                const isTransient = [102, 408, 428, 440, 503, 515, 1006].includes(reason) || !reason || isPairingPendingSync;
+                // Trata como transiente qualquer erro que não seja um encerramento definitivo/manual ou logout
+                const isTransient = ![401, 403, 409, 410].includes(reason) || !reason || isPairingPendingSync;
 
                 if (isTransient) {
                     await supabase.from('whatsapp_instances')

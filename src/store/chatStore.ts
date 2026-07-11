@@ -563,7 +563,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
     } else {
       const currentState = get().instancesStatus[id];
-      if (currentState === 'connected' || currentState === 'connected_local' || !currentState) {
+      if (currentState === 'connected' || currentState === 'connected_local') {
          if ((window as any)[`_offline_checks_${id}`] || instanceStatusTimeouts[id]) {
             return;
          }
