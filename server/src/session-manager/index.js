@@ -184,7 +184,7 @@ class SessionManager {
             const { data: currentInstance } = await retryWithBackoff(() =>
                 supabase
                     .from('whatsapp_instances')
-                    .select('assigned_node_id, lease_until, status')
+                    .select('assigned_node_id, lease_until, status, monitoring_until')
                     .eq('id', instanceId)
                     .single()
             );
@@ -298,15 +298,23 @@ class SessionManager {
                     this.pairingPendingSync.delete(instanceId);
                     
                     // Atualiza status no banco e zera tentativas
+                    const monitoringUntil = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+                    const sessionData = this.sessions.get(instanceId);
+                    if (sessionData) {
+                        sessionData.monitoringUntil = monitoringUntil;
+                    }
                     supabase.from('whatsapp_instances')
                         .update({ 
                             status: 'connected', 
                             reconnect_attempts: 0,
                             last_connected_at: new Date().toISOString(),
+                            monitoring_until: monitoringUntil,
                             last_error: null 
                         })
                         .eq('id', instanceId)
                         .then(() => {});
+
+                    this.logMonitoringEvent(instanceId, 'connection_established', { status: 'connected' }).catch(()=>{});
 
                     this.logConnectionEvent(tenantId, instanceId, 'connected', 'connected', null, null, null).catch(()=>{});
                 }
@@ -418,6 +426,7 @@ class SessionManager {
                     const isForbidden = (status === 403 || reason.toLowerCase().includes('forbidden')) && status !== 503 && status !== 502 && status !== 504;
                     const isBadSession = (status === 500 || reason.toLowerCase().includes('bad session')) && status !== 503 && status !== 502 && status !== 504;
 
+                    this.logMonitoringEvent(instanceId, 'connection_lost', { reason: reason || `status_${status}`, status_code: status }).catch(()=>{});
                     this.sessions.delete(instanceId);
                     this.pendingHistorySyncs.delete(instanceId);
 
@@ -739,7 +748,7 @@ class SessionManager {
                 });
             };
             
-            this.sessions.set(instanceId, { sock, tenantId });
+            this.sessions.set(instanceId, { sock, tenantId, monitoringUntil: currentInstance?.monitoring_until });
 
             await retryWithBackoff(() =>
                 supabase.from('whatsapp_instances').update({
@@ -917,6 +926,43 @@ class SessionManager {
             );
         } catch (err) {
             console.error(`[SessionManager/LogEvent] Erro ao gravar evento ${eventType}:`, err.message);
+        }
+    }
+
+    async logMonitoringEvent(instanceId, eventType, details) {
+        try {
+            const sessionData = this.sessions.get(instanceId);
+            const tenantId = sessionData?.tenantId;
+            let monitoringUntil = sessionData?.monitoringUntil;
+
+            if (!monitoringUntil) {
+                const { data: inst } = await supabase
+                    .from('whatsapp_instances')
+                    .select('tenant_id, monitoring_until')
+                    .eq('id', instanceId)
+                    .maybeSingle();
+                
+                if (inst) {
+                    monitoringUntil = inst.monitoring_until;
+                    if (sessionData) {
+                        sessionData.tenantId = inst.tenant_id;
+                        sessionData.monitoringUntil = inst.monitoring_until;
+                    }
+                }
+            }
+
+            const finalTenantId = tenantId || sessionData?.tenantId;
+            if (finalTenantId && monitoringUntil && new Date(monitoringUntil) > new Date()) {
+                await supabase.from('wa_instance_monitoring_logs').insert({
+                    instance_id: instanceId,
+                    tenant_id: finalTenantId,
+                    event_type: eventType,
+                    details: details || {}
+                });
+                console.log(`[SessionManager/MonitoringLog] Evento ${eventType} registrado com sucesso para a instância ${instanceId}.`);
+            }
+        } catch (err) {
+            console.error(`[SessionManager/MonitoringLog] Erro ao gravar log de monitoramento:`, err.message);
         }
     }
 

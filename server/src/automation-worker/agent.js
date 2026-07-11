@@ -1390,6 +1390,14 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
              }
 
             console.log(`[AutomationWorker] Gerando resposta para o bot: ${botSettings.name} | Tenant: ${tenantId}`);
+            try {
+                const { default: sManager } = await import('../session-manager/index.js');
+                sManager.logMonitoringEvent(instanceId, 'bot_generation_start', { 
+                    jid, 
+                    message_preview: textMessage ? textMessage.substring(0, 150) : '',
+                    bot_name: botSettings?.name
+                }).catch(()=>{});
+            } catch (logErr) {}
 
             // Carrega as variáveis globais da empresa
             let companyName = '';
@@ -3165,10 +3173,25 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                 })();
             }
 
+            try {
+                const { default: sManager } = await import('../session-manager/index.js');
+                sManager.logMonitoringEvent(instanceId, 'bot_generation_success', { 
+                    jid, 
+                    response_preview: finalResponseText ? finalResponseText.substring(0, 150) : ''
+                }).catch(()=>{});
+            } catch (logErr) {}
+
             return finalResponseText;
 
         } catch (error) {
             console.error('[AutomationWorker] Falha ao processar AI na geração:', error);
+            try {
+                const { default: sManager } = await import('../session-manager/index.js');
+                sManager.logMonitoringEvent(instanceId, 'bot_generation_failed', { 
+                    jid, 
+                    error: error.message
+                }).catch(()=>{});
+            } catch (logErr) {}
             return null;
         }
         });
@@ -3198,6 +3221,14 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                 }
 
                 const msgResult = await sock.sendMessage(jid, { text: finalResponseText });
+                try {
+                    const { default: sManager } = await import('../session-manager/index.js');
+                    sManager.logMonitoringEvent(instanceId, 'bot_message_sent', { 
+                        jid, 
+                        message_id: msgResult?.key?.id,
+                        bot_name: botSettings?.name
+                    }).catch(()=>{});
+                } catch (logErr) {}
                 if (msgResult && msgResult.key) {
                     const { data: savedMsg } = await supabase.from('messages').insert({
                         tenant_id: tenantId,

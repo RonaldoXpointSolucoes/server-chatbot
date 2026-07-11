@@ -96,8 +96,15 @@ class QueueProcessor {
 
             console.log(`[QueueProcessor] Processando mensagem ${msg.id} para ${msg.chat_jid} via instância ${instanceId}`);
 
-            // 2. Obtém o socket da instância ativa (Importação dinâmica para evitar dependência circular)
             const { default: sessionManager } = await import('./index.js');
+            sessionManager.logMonitoringEvent(instanceId, 'message_processing', { 
+                msg_id: msg.id, 
+                chat_jid: msg.chat_jid, 
+                message_type: msg.message_type,
+                attempts: msg.attempts 
+            }).catch(()=>{});
+
+            // 2. Obtém o socket da instância ativa (Importação dinâmica para evitar dependência circular)
             const sock = sessionManager.getSocket(instanceId);
             if (!sock) {
                 throw new Error('Sessão/Socket offline ou desconectado no SessionManager.');
@@ -214,9 +221,24 @@ class QueueProcessor {
             }
 
             console.log(`[QueueProcessor] Mensagem ${msg.id} enviada com sucesso.`);
+            sessionManager.logMonitoringEvent(instanceId, 'message_sent_success', { 
+                msg_id: msg.id, 
+                chat_jid: msg.chat_jid,
+                result: result ? { key: result.key } : null
+            }).catch(()=>{});
         } catch (err) {
             if (msg) {
                 console.error(`[QueueProcessor] Falha ao enviar mensagem ${msg.id}:`, err.message);
+                
+                try {
+                    const { default: sManager } = await import('./index.js');
+                    sManager.logMonitoringEvent(instanceId, 'message_sent_failed', { 
+                        msg_id: msg.id, 
+                        chat_jid: msg.chat_jid,
+                        error: err.message,
+                        attempts: msg.attempts
+                    }).catch(()=>{});
+                } catch (logErr) {}
                 
                 const maxAttempts = 3;
                 const newStatus = msg.attempts + 1 >= maxAttempts ? 'failed' : 'pending';

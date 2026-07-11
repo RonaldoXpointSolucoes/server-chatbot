@@ -710,6 +710,39 @@ export default function ChatDashboard() {
   const [showImplantacaoModal, setShowImplantacaoModal] = useState(false);
   const [implantacaoSelectedAgent, setImplantacaoSelectedAgent] = useState<string | null>(null);
 
+  const [showLog48Modal, setShowLog48Modal] = useState<string | null>(null);
+  const [monitoringLogs, setMonitoringLogs] = useState<any[]>([]);
+  const [loadingMonitoringLogs, setLoadingMonitoringLogs] = useState(false);
+
+  const fetchMonitoringLogs = async (instanceId: string) => {
+    setLoadingMonitoringLogs(true);
+    try {
+      const { data, error } = await supabase
+        .from('wa_instance_monitoring_logs')
+        .select('*')
+        .eq('instance_id', instanceId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setMonitoringLogs(data || []);
+    } catch (err) {
+      console.error('Error fetching monitoring logs:', err);
+    } finally {
+      setLoadingMonitoringLogs(false);
+    }
+  };
+
+  const handleOpenLog48 = (instanceId: string) => {
+    setShowLog48Modal(instanceId);
+    fetchMonitoringLogs(instanceId);
+  };
+
+  const handleRefreshLogs = () => {
+    if (showLog48Modal) {
+      fetchMonitoringLogs(showLog48Modal);
+    }
+  };
+
   // Estados locais independentes para o Modal de Edição de Notas/Tarefas CRM
   const [editingNote, setEditingNote] = useState<any | null>(null);
   const [editNoteText, setEditNoteText] = useState('');
@@ -4691,9 +4724,14 @@ export default function ChatDashboard() {
              <p className="text-xs text-yellow-700/80 dark:text-yellow-400/80 leading-tight">
                 A conexão com o WhatsApp oscilou e o sistema está reconectando automaticamente em segundo plano. Por favor, aguarde alguns instantes.
              </p>
-             <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="mt-1 text-xs bg-yellow-100 dark:bg-yellow-900/40 hover:bg-yellow-200 dark:hover:bg-yellow-800/40 text-yellow-700 dark:text-yellow-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
-                Resolver Agora (Manual)
-             </button>
+             <div className="flex items-center gap-2 mt-1">
+                 <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="text-xs bg-yellow-100 dark:bg-yellow-900/40 hover:bg-yellow-200 dark:hover:bg-yellow-800/40 text-yellow-700 dark:text-yellow-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
+                    Resolver Agora (Manual)
+                 </button>
+                 <button onClick={() => handleOpenLog48(activeChannelFilter)} className="text-xs bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/40 text-blue-700 dark:text-blue-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
+                    <History size={12} /> Log 48s
+                 </button>
+              </div>
           </div>
         )}
 
@@ -4710,9 +4748,14 @@ export default function ChatDashboard() {
              <p className="text-xs text-orange-700/80 dark:text-orange-300/80 leading-tight">
                 A instância {activeChannelFilter} está offline. Verifique o aparelho ou reconecte.
              </p>
-             <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="mt-1 text-xs bg-orange-100 dark:bg-orange-900/40 hover:bg-orange-200 dark:hover:bg-orange-800/40 text-orange-700 dark:text-orange-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
-                Resolver Agora
-             </button>
+             <div className="flex items-center gap-2 mt-1">
+                 <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="text-xs bg-orange-100 dark:bg-orange-900/40 hover:bg-orange-200 dark:hover:bg-orange-800/40 text-orange-700 dark:text-orange-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
+                    Resolver Agora
+                 </button>
+                 <button onClick={() => handleOpenLog48(activeChannelFilter)} className="text-xs bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/40 text-blue-700 dark:text-blue-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
+                    <History size={12} /> Log 48s
+                 </button>
+              </div>
           </div>
         )}
 
@@ -7666,6 +7709,118 @@ export default function ChatDashboard() {
                   Entendi
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Monitoramento (Log 48s) */}
+      {showLog48Modal && (
+        <div className="fixed inset-0 z-[99999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white/95 dark:bg-[#1c2730]/95 backdrop-blur-2xl w-full max-w-4xl h-[85vh] rounded-[32px] border border-blue-500/20 dark:border-white/10 shadow-2xl overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 flex flex-col">
+            
+            {/* Header */}
+            <div className="p-6 border-b border-gray-100 dark:border-white/5 bg-gradient-to-r from-blue-500/10 to-transparent flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-400 shadow-inner">
+                  <Terminal size={20} className="animate-pulse" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">
+                    Monitoramento Avançado (Log 48s)
+                  </h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 font-sans">
+                    Logs pós-conexão para identificação de loops e falhas
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleRefreshLogs}
+                  disabled={loadingMonitoringLogs}
+                  className="text-gray-500 hover:text-blue-500 dark:text-gray-400 dark:hover:text-blue-400 transition-all p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-white/5 disabled:opacity-50"
+                  title="Atualizar Logs"
+                >
+                  <RefreshCw size={16} className={loadingMonitoringLogs ? "animate-spin" : ""} />
+                </button>
+                <button 
+                  onClick={() => setShowLog48Modal(null)}
+                  className="text-gray-400 hover:text-red-500 transition-all p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-white/5"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Main Log List / Content */}
+            <div className="flex-1 overflow-y-auto p-6 font-sans flex flex-col gap-4">
+              {loadingMonitoringLogs ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                  <Loader2 size={32} className="text-blue-500 animate-spin" />
+                  <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Carregando logs de rastreamento do Supabase...</p>
+                </div>
+              ) : monitoringLogs.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
+                  <Clock size={40} className="text-gray-300 dark:text-gray-600 animate-bounce" />
+                  <h3 className="text-base font-bold text-gray-700 dark:text-gray-300">Nenhum log encontrado</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 max-w-sm">
+                    Não há logs de monitoramento ativos para esta instância. Certifique-se de que a instância foi conectada ou reconectada recentemente para iniciar a janela de 48h.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <div className="text-xs font-bold text-gray-500 dark:text-gray-400 flex justify-between items-center bg-gray-50 dark:bg-white/5 p-3 rounded-xl border border-gray-100 dark:border-white/5">
+                    <span>Exibindo {monitoringLogs.length} eventos registrados</span>
+                    <span className="text-blue-600 dark:text-blue-400">Status da Janela: Ativa (48h pós-conexão)</span>
+                  </div>
+                  
+                  <div className="flex flex-col gap-2.5">
+                    {monitoringLogs.map((log) => {
+                      let badgeColor = "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
+                      if (log.event_type.includes('error') || log.event_type.includes('failed')) {
+                        badgeColor = "bg-rose-100 text-rose-700 dark:bg-rose-950/30 dark:text-rose-400";
+                      } else if (log.event_type.includes('success') || log.event_type.includes('established')) {
+                        badgeColor = "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400";
+                      } else if (log.event_type.includes('start') || log.event_type.includes('processing')) {
+                        badgeColor = "bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400";
+                      }
+
+                      return (
+                        <div key={log.id} className="p-4 rounded-2xl bg-white dark:bg-[#1a232a]/40 border border-gray-100 dark:border-white/5 flex flex-col gap-2 hover:border-blue-500/20 dark:hover:border-white/10 transition-all">
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-md shrink-0 ${badgeColor}`}>
+                                {log.event_type}
+                              </span>
+                              <span className="text-xs font-bold text-gray-800 dark:text-gray-200 truncate">
+                                {log.details?.chat_jid || log.details?.jid || 'Sistema'}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium shrink-0">
+                              {new Date(log.created_at).toLocaleString()}
+                            </span>
+                          </div>
+                          
+                          <div className="text-[11px] font-mono bg-gray-50 dark:bg-black/30 p-2.5 rounded-xl text-gray-600 dark:text-gray-300 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-40 border border-gray-100/50 dark:border-white/5">
+                            {JSON.stringify(log.details, null, 2)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {/* Footer */}
+            <div className="p-6 border-t border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-black/20 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowLog48Modal(null)}
+                className="bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 text-gray-800 dark:text-gray-200 px-6 py-2.5 rounded-2xl text-xs font-bold transition-all"
+              >
+                Fechar Painel
+              </button>
             </div>
           </div>
         </div>
