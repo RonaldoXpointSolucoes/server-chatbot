@@ -119,15 +119,68 @@ class QueueProcessor {
                 result = await sendFn(msg.chat_jid, { text: msg.body });
             } else if (msg.message_type === 'media' && msg.media_url) {
                 // Envio de mídia por URL
-                const isImage = msg.media_url.match(/\.(jpeg|jpg|gif|png)$/i);
-                const isVideo = msg.media_url.match(/\.(mp4|3gp|mov)$/i);
-                const isAudio = msg.media_url.match(/\.(mp3|ogg|wav)$/i) || msg.media_url.includes('audio');
-                
+                let pathname = '';
+                try {
+                    pathname = new URL(msg.media_url).pathname;
+                } catch (e) {
+                    pathname = msg.media_url || '';
+                }
+
+                const isImage = pathname.match(/\.(jpeg|jpg|gif|png|webp)$/i);
+                const isVideo = pathname.match(/\.(mp4|3gp|mov|webm|avi|m4v)$/i);
+                const isAudio = pathname.match(/\.(mp3|ogg|wav|m4a|aac)$/i) || msg.media_url.includes('audio');
+
+                let forceDocument = false;
+                let fileSize = 0;
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 5000);
+                    const headRes = await fetch(msg.media_url, { method: 'HEAD', signal: controller.signal });
+                    clearTimeout(timeoutId);
+                    
+                    if (headRes.ok) {
+                        const len = headRes.headers.get('content-length');
+                        if (len) {
+                            fileSize = parseInt(len, 10);
+                            if (fileSize > 15 * 1024 * 1024) {
+                                console.log(`[QueueProcessor] Arquivo de mídia é muito grande (${(fileSize / (1024 * 1024)).toFixed(2)}MB). Forçando envio como documento.`);
+                                forceDocument = true;
+                            }
+                        }
+                    }
+                } catch (headErr) {
+                    console.warn(`[QueueProcessor] Falha ao consultar cabeçalho da mídia por URL (HEAD):`, headErr.message);
+                }
+
                 const mediaOptions = {};
-                if (isImage) mediaOptions.image = { url: msg.media_url };
-                else if (isVideo) mediaOptions.video = { url: msg.media_url };
-                else if (isAudio) mediaOptions.audio = { url: msg.media_url };
-                else mediaOptions.document = { url: msg.media_url };
+                if (forceDocument) {
+                    mediaOptions.document = { url: msg.media_url };
+                    if (isVideo) mediaOptions.mimetype = 'video/mp4';
+                    else if (isImage) mediaOptions.mimetype = 'image/jpeg';
+                    else if (isAudio) mediaOptions.mimetype = 'audio/ogg';
+                    else mediaOptions.mimetype = 'application/octet-stream';
+
+                    let origName = msg.media_url.split('/').pop()?.split('?')[0] || '';
+                    if (origName.includes('_')) {
+                        origName = origName.split('_').slice(1).join('_');
+                    }
+                    mediaOptions.fileName = origName || (isVideo ? 'video.mp4' : isImage ? 'image.jpg' : isAudio ? 'audio.ogg' : 'arquivo');
+                } else if (isImage) {
+                    mediaOptions.image = { url: msg.media_url };
+                    mediaOptions.mimetype = 'image/jpeg';
+                } else if (isVideo) {
+                    mediaOptions.video = { url: msg.media_url };
+                    mediaOptions.mimetype = 'video/mp4';
+                    mediaOptions.gifPlayback = false;
+                } else if (isAudio) {
+                    mediaOptions.audio = { url: msg.media_url };
+                    mediaOptions.mimetype = 'audio/ogg; codecs=opus';
+                    mediaOptions.ptt = msg.media_url.includes('ptt') || msg.media_url.includes('audio');
+                } else {
+                    mediaOptions.document = { url: msg.media_url };
+                    mediaOptions.mimetype = 'application/octet-stream';
+                    mediaOptions.fileName = msg.media_url.split('/').pop()?.split('?')[0] || 'documento';
+                }
 
                 if (msg.body) mediaOptions.caption = msg.body;
 
