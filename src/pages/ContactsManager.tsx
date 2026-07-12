@@ -113,12 +113,21 @@ export default function ContactsManager() {
     if (search) {
       const searchLower = search.toLowerCase();
       
-      // Lightweight search to find explicit matches and their company links
+      // Cria um termo limpo apenas com números para buscar documentos/celulares formatados ou não
+      const cleanSearch = search.replace(/\D/g, '');
+      let orCondition = `name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%`;
+      
+      if (cleanSearch) {
+        orCondition += `,document_number.ilike.%${cleanSearch}%,phone.ilike.%${cleanSearch}%,document_number.ilike.%${search}%,phone.ilike.%${search}%`;
+      } else {
+        orCondition += `,document_number.ilike.%${search}%,phone.ilike.%${search}%`;
+      }
+
       const { data: matchedContacts } = await supabase
         .from('contacts')
         .select('id, company_ids')
         .eq('tenant_id', tenantId)
-        .or(`name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%,document_number.ilike.%${search}%,phone.ilike.%${search}%`);
+        .or(orCondition);
       
       const matchedContactIds = matchedContacts?.map(c => c.id) || [];
       const linkedCompanyIds = matchedContacts?.flatMap(c => c.company_ids || []) || [];

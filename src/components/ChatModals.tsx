@@ -392,7 +392,13 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
           setIsSaving(true);
           const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
           const { supabase } = await import('../services/supabase');
-          let query = supabase.from('contacts').select('id, document_number').eq('tenant_id', tenantId).eq('document_number', cleanDoc);
+          let query = supabase
+            .from('contacts')
+            .select('id, document_number, phone')
+            .eq('tenant_id', tenantId)
+            .or(`document_number.eq.${cleanDoc},document_number.eq."${formData.document_number}"`)
+            .not('phone', 'like', 'NO_PHONE_%')
+            .not('phone', 'like', 'CNPJ_%');
           
           if (contactData && contactData.id) {
              query = query.neq('id', contactData.id);
@@ -401,7 +407,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
           const { data, error } = await query.limit(1);
           
           if (!error && data && data.length > 0) {
-             setDocFeedback(`Atenção: Este ${formData.document_type.toUpperCase()} já está cadastrado em outro contato.`);
+             setDocFeedback(`Atenção: Este ${formData.document_type.toUpperCase()} já está cadastrado em outro contato ativo.`);
              setIsSaving(false);
              return;
           }
