@@ -379,6 +379,8 @@ export default function DevLogger() {
       if (typeof args[0] === 'string' && args[0].includes('vite-plugin-react')) return;
       // Evitar spam do wacalls
       if (typeof args[0] === 'string' && (args[0].includes('[useWaCallsStore') || args[0].includes('wacalls') || args[0].includes('WaCalls'))) return;
+      // Evitar spam de lock do Supabase gotrue-js
+      if (typeof args[0] === 'string' && (args[0].includes('@supabase/gotrue-js') || args[0].includes('auth-token') || args[0].includes('orphaned lock') || args[0].includes('lock:sb-'))) return;
 
       const serializedArgs = args.map(arg => {
         if (arg instanceof Error) {
@@ -401,6 +403,8 @@ export default function DevLogger() {
       if (typeof args[0] === 'string' && args[0].includes('A component is changing an uncontrolled input')) return;
       // Evitar spam do wacalls
       if (typeof args[0] === 'string' && (args[0].includes('[useWaCallsStore') || args[0].includes('wacalls') || args[0].includes('WaCalls'))) return;
+      // Evitar spam de lock do Supabase gotrue-js
+      if (typeof args[0] === 'string' && (args[0].includes('@supabase/gotrue-js') || args[0].includes('auth-token') || args[0].includes('orphaned lock') || args[0].includes('lock:sb-'))) return;
       
       addLog({
         type: 'warn',

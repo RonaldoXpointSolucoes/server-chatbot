@@ -1,24 +1,60 @@
-import React, { useState, useEffect } from 'react';
-import { WifiOff, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Wifi, WifiOff, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 export function NetworkStatusToast() {
   const [isVisible, setIsVisible] = useState(false);
   const [message, setMessage] = useState('');
+  const [toastType, setToastType] = useState<'offline' | 'error' | 'restored'>('error');
+  const [isOnline, setIsOnline] = useState(true);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    const handleNetworkError = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      setMessage(customEvent.detail?.message || "Houve uma falha ao comunicar com o servidor.");
+    const handleOnline = () => {
+      setIsOnline(true);
+      setToastType('restored');
+      setMessage("Conexão restabelecida com sucesso!");
       setIsVisible(true);
       
-      // Auto-hide after 6 seconds
-      setTimeout(() => setIsVisible(false), 6000);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setIsVisible(false), 3000);
     };
 
+    const handleOffline = () => {
+      setIsOnline(false);
+      setToastType('offline');
+      setMessage("Sem conexão com a internet. Tentando reconectar...");
+      setIsVisible(true);
+      
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+
+    const handleNetworkError = (e: Event) => {
+      if (!navigator.onLine) return; // Keep showing offline banner
+
+      const customEvent = e as CustomEvent;
+      setToastType('error');
+      setMessage(customEvent.detail?.message || "Instabilidade na rede detectada ou tempo limite excedido.");
+      setIsVisible(true);
+      
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setIsVisible(false), 6000);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
     window.addEventListener('supabase-network-error', handleNetworkError);
+
+    // Initial check
+    if (!navigator.onLine) {
+      handleOffline();
+    }
+
     return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
       window.removeEventListener('supabase-network-error', handleNetworkError);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, []);
 
@@ -30,10 +66,16 @@ export function NetworkStatusToast() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -20, scale: 0.95 }}
           transition={{ duration: 0.3, ease: 'easeOut' }}
-          className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-3 bg-red-500/90 backdrop-blur-md text-white px-4 py-3 rounded-2xl shadow-xl shadow-red-500/20 max-w-[90vw] md:max-w-[400px] border border-red-400/30"
+          className={`fixed top-6 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-3 backdrop-blur-md text-white px-4 py-3 rounded-2xl shadow-xl max-w-[90vw] md:max-w-[420px] border transition-all duration-300
+            ${toastType === 'offline' ? 'bg-amber-600/90 dark:bg-amber-600/95 border-amber-500/30 shadow-amber-500/20' : ''}
+            ${toastType === 'error' ? 'bg-red-500/90 dark:bg-red-500/95 border-red-400/30 shadow-red-500/20' : ''}
+            ${toastType === 'restored' ? 'bg-emerald-600/90 dark:bg-emerald-600/95 border-emerald-500/30 shadow-emerald-500/20' : ''}
+          `}
         >
           <div className="flex-shrink-0 bg-white/20 p-2 rounded-full">
-            <WifiOff size={20} className="text-white" />
+            {toastType === 'offline' && <WifiOff size={20} className="text-white animate-pulse" />}
+            {toastType === 'error' && <AlertTriangle size={20} className="text-white" />}
+            {toastType === 'restored' && <Wifi size={20} className="text-white" />}
           </div>
           <div className="flex-1 text-sm font-medium leading-snug">
             {message}
