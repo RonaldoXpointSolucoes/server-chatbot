@@ -60,201 +60,223 @@ class QueueProcessor {
     }
 
     async processInstanceQueue(tenantId, instanceId) {
-        let msg = null;
-        try {
-            // Busca a próxima mensagem pendente da fila para esta instância
-            const { data: messages, error } = await supabase
-                .from('wa_outgoing_messages')
-                .select('*')
-                .eq('instance_id', instanceId)
-                .eq('status', 'pending')
-                .lte('scheduled_at', new Date().toISOString())
-                .order('priority', { ascending: true })
-                .order('created_at', { ascending: true })
-                .limit(1);
+        while (this.running) {
+            let msg = null;
+            try {
+                // Busca a próxima mensagem pendente da fila para esta instância
+                const { data: messages, error } = await supabase
+                    .from('wa_outgoing_messages')
+                    .select('*')
+                    .eq('instance_id', instanceId)
+                    .eq('status', 'pending')
+                    .lte('scheduled_at', new Date().toISOString())
+                    .order('priority', { ascending: true })
+                    .order('created_at', { ascending: true })
+                    .limit(1);
 
-            if (error) throw error;
-            if (!messages || messages.length === 0) return;
-
-            msg = messages[0];
-
-            // 1. Marca a mensagem como em processamento
-            const { data: updatedMsg, error: updateErr } = await supabase
-                .from('wa_outgoing_messages')
-                .update({ 
-                    status: 'processing',
-                    attempts: msg.attempts + 1
-                })
-                .eq('id', msg.id)
-                .eq('status', 'pending') // Garante que nenhum outro worker tomou a mensagem
-                .select()
-                .single();
-
-            if (updateErr || !updatedMsg) {
-                return; // Outro processo assumiu, aborta
-            }
-
-            console.log(`[QueueProcessor] Processando mensagem ${msg.id} para ${msg.chat_jid} via instância ${instanceId}`);
-
-            const { default: sessionManager } = await import('./index.js');
-            sessionManager.logMonitoringEvent(instanceId, 'message_processing', { 
-                msg_id: msg.id, 
-                chat_jid: msg.chat_jid, 
-                message_type: msg.message_type,
-                attempts: msg.attempts 
-            }).catch(()=>{});
-
-            // 2. Obtém o socket da instância ativa (Importação dinâmica para evitar dependência circular)
-            const sock = sessionManager.getSocket(instanceId);
-            if (!sock) {
-                throw new Error('Sessão/Socket offline ou desconectado no SessionManager.');
-            }
-
-            // 3. Rate Limit / Delay Humano Estrito (6 a 12 segundos)
-            const delay = Math.floor(Math.random() * (12000 - 6000 + 1)) + 6000;
-            console.log(`[QueueProcessor] Aplicando delay humano de ${delay / 1000}s antes do envio...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-
-            // 4. Dispara o envio real usando o Baileys originalSendMessage ou sendMessage
-            const sendFn = sock.originalSendMessage || sock.sendMessage;
-            if (typeof sendFn !== 'function') {
-                throw new Error('Função de envio de mensagens indisponível no socket.');
-            }
-
-            let result;
-            if (msg.message_type === 'text') {
-                result = await sendFn(msg.chat_jid, { text: msg.body });
-            } else if (msg.message_type === 'media' && msg.media_url) {
-                // Envio de mídia por URL
-                let pathname = '';
-                try {
-                    pathname = new URL(msg.media_url).pathname;
-                } catch (e) {
-                    pathname = msg.media_url || '';
+                if (error) throw error;
+                if (!messages || messages.length === 0) {
+                    break; // Fila vazia, sai do loop de processamento contínuo
                 }
 
-                const isImage = pathname.match(/\.(jpeg|jpg|gif|png|webp)$/i);
-                const isVideo = pathname.match(/\.(mp4|3gp|mov|webm|avi|m4v)$/i);
-                const isAudio = pathname.match(/\.(mp3|ogg|wav|m4a|aac)$/i) || msg.media_url.includes('audio');
+                msg = messages[0];
 
-                let forceDocument = false;
-                let fileSize = 0;
-                try {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 5000);
-                    const headRes = await fetch(msg.media_url, { method: 'HEAD', signal: controller.signal });
-                    clearTimeout(timeoutId);
-                    
-                    if (headRes.ok) {
-                        const len = headRes.headers.get('content-length');
-                        if (len) {
-                            fileSize = parseInt(len, 10);
-                            if (fileSize > 15 * 1024 * 1024) {
-                                console.log(`[QueueProcessor] Arquivo de mídia é muito grande (${(fileSize / (1024 * 1024)).toFixed(2)}MB). Forçando envio como documento.`);
-                                forceDocument = true;
+                // 1. Marca a mensagem como em processamento
+                const { data: updatedMsg, error: updateErr } = await supabase
+                    .from('wa_outgoing_messages')
+                    .update({ 
+                        status: 'processing',
+                        attempts: msg.attempts + 1
+                    })
+                    .eq('id', msg.id)
+                    .eq('status', 'pending') // Garante que nenhum outro worker tomou a mensagem
+                    .select()
+                    .single();
+
+                if (updateErr || !updatedMsg) {
+                    continue; // Outro processo assumiu, tenta a próxima do loop
+                }
+
+                console.log(`[QueueProcessor] Processando mensagem ${msg.id} para ${msg.chat_jid} via instância ${instanceId}`);
+
+                const { default: sessionManager } = await import('./index.js');
+                sessionManager.logMonitoringEvent(instanceId, 'message_processing', { 
+                    msg_id: msg.id, 
+                    chat_jid: msg.chat_jid, 
+                    message_type: msg.message_type,
+                    attempts: msg.attempts 
+                }).catch(()=>{});
+
+                // 2. Obtém o socket da instância ativa (Importação dinâmica para evitar dependência circular)
+                const sock = sessionManager.getSocket(instanceId);
+                if (!sock) {
+                    throw new Error('Sessão/Socket offline ou desconectado no SessionManager.');
+                }
+
+                // 3. Rate Limit / Delay Humano Inteligente:
+                // Se priority for >= 5 (campanhas/automoto), aplicamos delay humano estrito (6 a 12s)
+                // Se priority for < 5 (operador manual), aplicamos um micro-delay de 100ms para evitar concorrência de rede
+                if (msg.priority >= 5) {
+                    const delay = Math.floor(Math.random() * (12000 - 6000 + 1)) + 6000;
+                    console.log(`[QueueProcessor] Aplicando delay humano de ${delay / 1000}s antes do envio...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    console.log(`[QueueProcessor] Mensagem de alta prioridade (operador). Pulando delay de campanha (micro-delay 100ms).`);
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+
+                // 4. Dispara o envio real usando o Baileys originalSendMessage ou sendMessage
+                const sendFn = sock.originalSendMessage || sock.sendMessage;
+                if (typeof sendFn !== 'function') {
+                    throw new Error('Função de envio de mensagens indisponível no socket.');
+                }
+
+                let result;
+                if (msg.message_type === 'text') {
+                    result = await sendFn(msg.chat_jid, { text: msg.body });
+                } else if (msg.message_type === 'media' && msg.media_url) {
+                    // Envio de mídia por URL
+                    let pathname = '';
+                    try {
+                        pathname = new URL(msg.media_url).pathname;
+                    } catch (e) {
+                        pathname = msg.media_url || '';
+                    }
+
+                    const isImage = pathname.match(/\.(jpeg|jpg|gif|png|webp)$/i);
+                    const isVideo = pathname.match(/\.(mp4|3gp|mov|webm|avi|m4v)$/i);
+                    const isAudio = pathname.match(/\.(mp3|ogg|wav|m4a|aac)$/i) || msg.media_url.includes('audio');
+
+                    let forceDocument = false;
+                    let fileSize = 0;
+                    try {
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 5000);
+                        const headRes = await fetch(msg.media_url, { method: 'HEAD', signal: controller.signal });
+                        clearTimeout(timeoutId);
+                        
+                        if (headRes.ok) {
+                            const len = headRes.headers.get('content-length');
+                            if (len) {
+                                fileSize = parseInt(len, 10);
+                                if (fileSize > 15 * 1024 * 1024) {
+                                    console.log(`[QueueProcessor] Arquivo de mídia é muito grande (${(fileSize / (1024 * 1024)).toFixed(2)}MB). Forçando envio como documento.`);
+                                    forceDocument = true;
+                                }
                             }
                         }
+                    } catch (headErr) {
+                        console.warn(`[QueueProcessor] Falha ao consultar cabeçalho da mídia por URL (HEAD):`, headErr.message);
                     }
-                } catch (headErr) {
-                    console.warn(`[QueueProcessor] Falha ao consultar cabeçalho da mídia por URL (HEAD):`, headErr.message);
-                }
 
-                const mediaOptions = {};
-                if (forceDocument) {
-                    mediaOptions.document = { url: msg.media_url };
-                    if (isVideo) mediaOptions.mimetype = 'video/mp4';
-                    else if (isImage) mediaOptions.mimetype = 'image/jpeg';
-                    else if (isAudio) mediaOptions.mimetype = 'audio/ogg';
-                    else mediaOptions.mimetype = 'application/octet-stream';
+                    const mediaOptions = {};
+                    if (forceDocument) {
+                        mediaOptions.document = { url: msg.media_url };
+                        if (isVideo) mediaOptions.mimetype = 'video/mp4';
+                        else if (isImage) mediaOptions.mimetype = 'image/jpeg';
+                        else if (isAudio) mediaOptions.mimetype = 'audio/ogg';
+                        else mediaOptions.mimetype = 'application/octet-stream';
 
-                    let origName = msg.media_url.split('/').pop()?.split('?')[0] || '';
-                    if (origName.includes('_')) {
-                        origName = origName.split('_').slice(1).join('_');
+                        let origName = msg.media_url.split('/').pop()?.split('?')[0] || '';
+                        if (origName.includes('_')) {
+                            origName = origName.split('_').slice(1).join('_');
+                        }
+                        mediaOptions.fileName = origName || (isVideo ? 'video.mp4' : isImage ? 'image.jpg' : isAudio ? 'audio.ogg' : 'arquivo');
+                    } else if (isImage) {
+                        mediaOptions.image = { url: msg.media_url };
+                        mediaOptions.mimetype = 'image/jpeg';
+                    } else if (isVideo) {
+                        mediaOptions.video = { url: msg.media_url };
+                        mediaOptions.mimetype = 'video/mp4';
+                        mediaOptions.gifPlayback = false;
+                    } else if (isAudio) {
+                        mediaOptions.audio = { url: msg.media_url };
+                        mediaOptions.mimetype = 'audio/ogg; codecs=opus';
+                        mediaOptions.ptt = msg.media_url.includes('ptt') || msg.media_url.includes('audio');
+                    } else {
+                        mediaOptions.document = { url: msg.media_url };
+                        mediaOptions.mimetype = 'application/octet-stream';
+                        mediaOptions.fileName = msg.media_url.split('/').pop()?.split('?')[0] || 'documento';
                     }
-                    mediaOptions.fileName = origName || (isVideo ? 'video.mp4' : isImage ? 'image.jpg' : isAudio ? 'audio.ogg' : 'arquivo');
-                } else if (isImage) {
-                    mediaOptions.image = { url: msg.media_url };
-                    mediaOptions.mimetype = 'image/jpeg';
-                } else if (isVideo) {
-                    mediaOptions.video = { url: msg.media_url };
-                    mediaOptions.mimetype = 'video/mp4';
-                    mediaOptions.gifPlayback = false;
-                } else if (isAudio) {
-                    mediaOptions.audio = { url: msg.media_url };
-                    mediaOptions.mimetype = 'audio/ogg; codecs=opus';
-                    mediaOptions.ptt = msg.media_url.includes('ptt') || msg.media_url.includes('audio');
+
+                    if (msg.body) mediaOptions.caption = msg.body;
+
+                    result = await sendFn(msg.chat_jid, mediaOptions);
                 } else {
-                    mediaOptions.document = { url: msg.media_url };
-                    mediaOptions.mimetype = 'application/octet-stream';
-                    mediaOptions.fileName = msg.media_url.split('/').pop()?.split('?')[0] || 'documento';
+                    throw new Error(`Tipo de mensagem não suportado: ${msg.message_type}`);
                 }
 
-                if (msg.body) mediaOptions.caption = msg.body;
-
-                result = await sendFn(msg.chat_jid, mediaOptions);
-            } else {
-                throw new Error(`Tipo de mensagem não suportado: ${msg.message_type}`);
-            }
-
-            // 5. Sucesso: Atualiza a fila
-            await supabase
-                .from('wa_outgoing_messages')
-                .update({ 
-                    status: 'sent',
-                    sent_at: new Date().toISOString(),
-                    last_error: null
-                })
-                .eq('id', msg.id);
-
-            // 6. Sincroniza a mensagem enviada com a tabela clássica de mensagens para o Frontend refletir
-            try {
-                const { default: eventProcessor } = await import('../event-processor/index.js');
-                if (eventProcessor && result) {
-                    const mockUpsert = {
-                        messages: [result],
-                        type: 'append'
-                    };
-                    await eventProcessor.handleMessageUpsert(tenantId, instanceId, sock, mockUpsert);
-                }
-            } catch (compatErr) {
-                console.error(`[QueueProcessor/Compatibility] Erro ao sincronizar mensagem enviada com as tabelas legadas:`, compatErr.message);
-            }
-
-            console.log(`[QueueProcessor] Mensagem ${msg.id} enviada com sucesso.`);
-            sessionManager.logMonitoringEvent(instanceId, 'message_sent_success', { 
-                msg_id: msg.id, 
-                chat_jid: msg.chat_jid,
-                result: result ? { key: result.key } : null
-            }).catch(()=>{});
-        } catch (err) {
-            if (msg) {
-                console.error(`[QueueProcessor] Falha ao enviar mensagem ${msg.id}:`, err.message);
-                
-                try {
-                    const { default: sManager } = await import('./index.js');
-                    sManager.logMonitoringEvent(instanceId, 'message_sent_failed', { 
-                        msg_id: msg.id, 
-                        chat_jid: msg.chat_jid,
-                        error: err.message,
-                        attempts: msg.attempts
-                    }).catch(()=>{});
-                } catch (logErr) {}
-                
-                const maxAttempts = 3;
-                const newStatus = msg.attempts + 1 >= maxAttempts ? 'failed' : 'pending';
-
+                // 5. Sucesso: Atualiza a fila
                 await supabase
                     .from('wa_outgoing_messages')
                     .update({ 
-                        status: newStatus,
-                        last_error: err.message || 'Erro de conexão/envio',
-                        scheduled_at: new Date(Date.now() + 15000).toISOString() // Retenta em 15s
+                        status: 'sent',
+                        sent_at: new Date().toISOString(),
+                        last_error: null
                     })
                     .eq('id', msg.id);
-            } else {
-                console.error(`[QueueProcessor] Falha ao carregar fila de mensagens:`, err.message);
+
+                // 6. Sincroniza a mensagem enviada com a tabela clássica de mensagens para o Frontend refletir
+                try {
+                    const { default: eventProcessor } = await import('../event-processor/index.js');
+                    if (eventProcessor && result) {
+                        const mockUpsert = {
+                            messages: [result],
+                            type: 'append'
+                        };
+                        await eventProcessor.handleMessageUpsert(tenantId, instanceId, sock, mockUpsert);
+                    }
+                } catch (compatErr) {
+                    console.error(`[QueueProcessor/Compatibility] Erro ao sincronizar mensagem enviada com as tabelas legadas:`, compatErr.message);
+                }
+
+                console.log(`[QueueProcessor] Mensagem ${msg.id} enviada com sucesso.`);
+                sessionManager.logMonitoringEvent(instanceId, 'message_sent_success', { 
+                    msg_id: msg.id, 
+                    chat_jid: msg.chat_jid,
+                    result: result ? { key: result.key } : null
+                }).catch(()=>{});
+            } catch (err) {
+                if (msg) {
+                    console.error(`[QueueProcessor] Falha ao enviar mensagem ${msg.id}:`, err.message);
+                    
+                    try {
+                        const { default: sManager } = await import('./index.js');
+                        sManager.logMonitoringEvent(instanceId, 'message_sent_failed', { 
+                            msg_id: msg.id, 
+                            chat_jid: msg.chat_jid,
+                            error: err.message,
+                            attempts: msg.attempts
+                        }).catch(()=>{});
+                    } catch (logErr) {}
+                    
+                    const maxAttempts = 3;
+                    const newStatus = msg.attempts + 1 >= maxAttempts ? 'failed' : 'pending';
+
+                    await supabase
+                        .from('wa_outgoing_messages')
+                        .update({ 
+                            status: newStatus,
+                            last_error: err.message || 'Erro de conexão/envio',
+                            scheduled_at: new Date(Date.now() + 15000).toISOString() // Retenta em 15s
+                        })
+                        .eq('id', msg.id);
+                } else {
+                    console.error(`[QueueProcessor] Falha ao carregar fila de mensagens:`, err.message);
+                    break;
+                }
             }
         }
+    }
+
+    trigger(tenantId, instanceId) {
+        if (!this.running) return;
+        if (this.activeProcessors.has(instanceId)) return;
+
+        this.activeProcessors.add(instanceId);
+        this.processInstanceQueue(tenantId, instanceId).finally(() => {
+            this.activeProcessors.delete(instanceId);
+        });
     }
 }
 

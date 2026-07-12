@@ -1,5 +1,6 @@
 import express from 'express';
 import sessionManager from '../session-manager/index.js';
+import queueProcessor from '../session-manager/queue-processor.js';
 import { supabase } from '../supabase.js';
 import multer from 'multer';
 import fs from 'fs';
@@ -224,12 +225,16 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     message_type: messageType,
                     body: body,
                     media_url: mediaUrl,
-                    status: 'pending'
+                    status: 'pending',
+                    priority: 1
                 })
                 .select()
                 .single();
 
             if (outboxErr) throw outboxErr;
+
+            // Despacha a mensagem instantaneamente acordando o QueueProcessor
+            queueProcessor.trigger(req.tenantId, instanceId);
 
             const mockId = `EDGE_${newOutbox.id.replace(/-/g, '')}`;
             return res.json({ 
@@ -285,12 +290,16 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
                 message_type: 'media',
                 body: caption || '',
                 media_url: mediaUrl,
-                status: 'pending'
+                status: 'pending',
+                priority: 1
             })
             .select()
             .single();
 
         if (outboxErr) throw outboxErr;
+
+        // Despacha a mensagem instantaneamente acordando o QueueProcessor
+        queueProcessor.trigger(req.tenantId, instanceId);
 
         res.json({ 
             ok: true, 
@@ -413,12 +422,16 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                 message_type: 'media',
                 body: caption || '',
                 media_url: mediaUrl,
-                status: 'pending'
+                status: 'pending',
+                priority: 1
             })
             .select()
             .single();
 
         if (outboxErr) throw outboxErr;
+
+        // Despacha a mensagem instantaneamente acordando o QueueProcessor
+        queueProcessor.trigger(tenantId, instanceId);
 
         res.json({ 
             ok: true, 
