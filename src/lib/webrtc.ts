@@ -105,7 +105,13 @@ export const openCall = async (
   });
 
   if (!response.ok) {
-    throw new Error('Falha ao enviar oferta WebRTC para o servidor.');
+    let errMsg = "Falha ao enviar oferta WebRTC para o servidor.";
+    try {
+      const errData = await response.json();
+      if (errData.error) errMsg = `Erro do Servidor: ${errData.error}`;
+      else if (errData.message) errMsg = `Erro do Servidor: ${errData.message}`;
+    } catch {}
+    throw new Error(errMsg);
   }
 
   const { sdp_answer } = await response.json();
