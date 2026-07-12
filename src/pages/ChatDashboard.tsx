@@ -737,6 +737,49 @@ export default function ChatDashboard() {
     fetchMonitoringLogs(instanceId);
   };
 
+  const [reconnectingStatus, setReconnectingStatus] = useState<Record<string, boolean>>({});
+
+  const handleQuickReconnect = async (instanceId: string) => {
+    if (reconnectingStatus[instanceId]) return;
+    setReconnectingStatus(prev => ({ ...prev, [instanceId]: true }));
+    try {
+      const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (!tenantId) {
+        alert('Tenant ID não encontrado.');
+        return;
+      }
+      
+      const { data: instData } = await supabase
+        .from('whatsapp_instances')
+        .select('api_key')
+        .eq('id', instanceId)
+        .single();
+      
+      const apiKey = instData?.api_key || '';
+      const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+      
+      const res = await fetch(`${ENGINE_URL}/api/v1/instances/${instanceId}/reconnect`, {
+        method: 'POST',
+        headers: {
+          'x-tenant-id': tenantId,
+          'apikey': apiKey
+        }
+      });
+      
+      if (!res.ok) {
+        throw new Error('Falha na resposta do servidor.');
+      }
+      
+      const data = await res.json();
+      alert(data.message || 'Tentativa de reconexão disparada com sucesso!');
+    } catch (err: any) {
+      console.error('Erro ao solicitar reconexão:', err);
+      alert('Erro ao solicitar reconexão da instância.');
+    } finally {
+      setReconnectingStatus(prev => ({ ...prev, [instanceId]: false }));
+    }
+  };
+
   const handleRefreshLogs = () => {
     if (showLog48Modal) {
       fetchMonitoringLogs(showLog48Modal);
@@ -4725,8 +4768,11 @@ export default function ChatDashboard() {
                 A conexão com o WhatsApp oscilou e o sistema está reconectando automaticamente em segundo plano. Por favor, aguarde alguns instantes.
              </p>
              <div className="flex items-center gap-2 mt-1">
+                 <button onClick={() => handleQuickReconnect(activeChannelFilter)} disabled={reconnectingStatus[activeChannelFilter]} className="text-xs bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-800/50 text-white py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
+                    {reconnectingStatus[activeChannelFilter] ? 'Reconectando...' : 'Forçar Conexão'}
+                 </button>
                  <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="text-xs bg-yellow-100 dark:bg-yellow-900/40 hover:bg-yellow-200 dark:hover:bg-yellow-800/40 text-yellow-700 dark:text-yellow-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
-                    Resolver Agora (Manual)
+                    Novo QR (Manual)
                  </button>
                  <button onClick={() => handleOpenLog48(activeChannelFilter)} className="text-xs bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/40 text-blue-700 dark:text-blue-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
                     <History size={12} /> Log 48s
@@ -4746,11 +4792,14 @@ export default function ChatDashboard() {
                 Atenção: Instância Offline
              </div>
              <p className="text-xs text-orange-700/80 dark:text-orange-300/80 leading-tight">
-                A instância {activeChannelFilter} está offline. Verifique o aparelho ou reconecte.
+                A instância {activeChannelFilter} está offline. Verifique o aparelho ou tente reconectar.
              </p>
              <div className="flex items-center gap-2 mt-1">
+                 <button onClick={() => handleQuickReconnect(activeChannelFilter)} disabled={reconnectingStatus[activeChannelFilter]} className="text-xs bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-800/50 text-white py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
+                    {reconnectingStatus[activeChannelFilter] ? 'Reconectando...' : 'Tentar Reconectar'}
+                 </button>
                  <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="text-xs bg-orange-100 dark:bg-orange-900/40 hover:bg-orange-200 dark:hover:bg-orange-800/40 text-orange-700 dark:text-orange-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
-                    Resolver Agora
+                    Novo QR Code
                  </button>
                  <button onClick={() => handleOpenLog48(activeChannelFilter)} className="text-xs bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/40 text-blue-700 dark:text-blue-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
                     <History size={12} /> Log 48s

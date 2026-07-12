@@ -59,6 +59,8 @@ class SessionManager {
         this.pairingPendingSync = new Map();
         this.closingSessions = new Set();
         this.pendingHistorySyncs = new Map();
+        this.consecutiveForbiddenAttempts = new Map();
+        this.consecutiveBadSessionAttempts = new Map();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -307,6 +309,12 @@ class SessionManager {
                     this.authenticatedSessions.add(instanceId);
                     this.pairingPendingSync.delete(instanceId);
                     
+                    // Zera contadores de tentativas ao conectar com sucesso
+                    this.reconnectAttempts.delete(instanceId);
+                    this.conflictAttempts.delete(instanceId);
+                    this.consecutiveForbiddenAttempts.delete(instanceId);
+                    this.consecutiveBadSessionAttempts.delete(instanceId);
+                    
                     // Atualiza status no banco e zera tentativas
                     const monitoringUntil = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
                     const sessionData = this.sessions.get(instanceId);
@@ -519,9 +527,46 @@ class SessionManager {
                             lastDisconnect: { error: { output: { statusCode: 410 } } } 
                         });
                     } else if ((isForbidden || isBadSession) && isFullyAuthenticated) {
-                        console.error(`[SessionManager] Conexão com erro crítico (${isForbidden ? 'forbidden' : 'badSession'}) para ${instanceId}.`);
+                        let consecutiveCount = 0;
+                        if (isForbidden) {
+                            consecutiveCount = (this.consecutiveForbiddenAttempts.get(instanceId) || 0) + 1;
+                            this.consecutiveForbiddenAttempts.set(instanceId, consecutiveCount);
+                        } else {
+                            consecutiveCount = (this.consecutiveBadSessionAttempts.get(instanceId) || 0) + 1;
+                            this.consecutiveBadSessionAttempts.set(instanceId, consecutiveCount);
+                        }
+
+                        if (consecutiveCount < 3) {
+                            console.warn(`[SessionManager] Conexão falhou com erro crítico potencialmente temporário (${isForbidden ? 'forbidden' : 'badSession'}, tentativa ${consecutiveCount}/3) para a instância ${instanceId}. Tratando como transiente e tentando reconectar...`);
+                            
+                            const attempts = this.reconnectAttempts.get(instanceId) || 0;
+                            const nextAttempt = attempts + 1;
+                            this.reconnectAttempts.set(instanceId, nextAttempt);
+
+                            if (nextAttempt <= 10) {
+                                const delays = [15000, 30000, 60000, 120000, 300000];
+                                const delay = delays[Math.min(nextAttempt - 1, delays.length - 1)];
+                                console.log(`[SessionManager] Agendando reconexão após erro crítico transiente para instância ${instanceId} em ${delay / 1000}s (Tentativa ${nextAttempt}/10)...`);
+                                
+                                const timer = setTimeout(() => {
+                                    this.reconnectTimeouts.delete(instanceId);
+                                    this.createSession(tenantId, instanceId);
+                                }, delay);
+                                this.reconnectTimeouts.set(instanceId, timer);
+                            }
+                            
+                            await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
+                                connection: 'close', 
+                                lastDisconnect: { error: { output: { statusCode: status } } } 
+                            });
+                            return;
+                        }
+
+                        console.error(`[SessionManager] Limite de tentativas consecutivas atingido para erro crítico (${isForbidden ? 'forbidden' : 'badSession'}) na instância ${instanceId}. Definindo status persistente final offline.`);
                         this.authenticatedSessions.delete(instanceId);
                         this.reconnectAttempts.delete(instanceId);
+                        this.consecutiveForbiddenAttempts.delete(instanceId);
+                        this.consecutiveBadSessionAttempts.delete(instanceId);
                         
                         await retryWithBackoff(() =>
                             supabase.from('whatsapp_instances')
@@ -888,25 +933,8 @@ class SessionManager {
                 }
             }
         }, 60000); // Checa a cada 1 minuto
-
-        // Loop de verificação periódica de IP de saída (a cada 5 minutos)
-        const ipCheckInterval = setInterval(async () => {
-            try {
-                if (sock.ws && sock.ws.isOpen) {
-                    await this.assertBrazilianEgress(tenantId, instanceId);
-                }
-            } catch (err) {
-                console.error(`[SessionManager/IPCheckPeriodic] Instância ${instanceId} perdeu os critérios geográficos no loop. Encerrando socket:`, err.message);
-                this.clearWatchdog(instanceId);
-                try {
-                    sock.end(new Error("Egress geographic location constraint violated"));
-                } catch(e) {
-                    try { sock.ws.close(); } catch(err){}
-                }
-            }
-        }, parseInt(process.env.EGRESS_CHECK_INTERVAL_SECONDS || '300', 10) * 1000);
         
-        this.watchdogs.set(instanceId, { interval, ipCheckInterval, updateListener, sock });
+        this.watchdogs.set(instanceId, { interval, updateListener, sock });
     }
 
     clearWatchdog(instanceId) {
