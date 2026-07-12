@@ -171,19 +171,51 @@ class QueueProcessor {
                         console.warn(`[QueueProcessor] Falha ao consultar cabeçalho da mídia por URL (HEAD):`, headErr.message);
                     }
 
+                    const getMimeTypeFromFileName = (fileName) => {
+                        const ext = fileName.split('.').pop()?.toLowerCase();
+                        switch (ext) {
+                            case 'pdf': return 'application/pdf';
+                            case 'doc': return 'application/msword';
+                            case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+                            case 'xls': return 'application/vnd.ms-excel';
+                            case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                            case 'ppt': return 'application/vnd.ms-powerpoint';
+                            case 'pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+                            case 'txt': return 'text/plain';
+                            case 'csv': return 'text/csv';
+                            case 'zip': return 'application/zip';
+                            case 'rar': return 'application/x-rar-compressed';
+                            case 'png': return 'image/png';
+                            case 'jpg':
+                            case 'jpeg': return 'image/jpeg';
+                            case 'gif': return 'image/gif';
+                            case 'webp': return 'image/webp';
+                            case 'mp3': return 'audio/mpeg';
+                            case 'ogg': return 'audio/ogg';
+                            case 'wav': return 'audio/wav';
+                            case 'mp4': return 'video/mp4';
+                            default: return 'application/octet-stream';
+                        }
+                    };
+
                     const mediaOptions = {};
+                    let rawFileName = msg.media_url.split('/').pop()?.split('?')[0] || '';
+                    let cleanFileName = rawFileName;
+                    if (cleanFileName.includes('_')) {
+                        const parts = cleanFileName.split('_');
+                        if (parts.length > 1 && /^\d+$/.test(parts[0])) {
+                            cleanFileName = parts.slice(1).join('_');
+                        }
+                    }
+
                     if (forceDocument) {
                         mediaOptions.document = { url: msg.media_url };
                         if (isVideo) mediaOptions.mimetype = 'video/mp4';
                         else if (isImage) mediaOptions.mimetype = 'image/jpeg';
                         else if (isAudio) mediaOptions.mimetype = 'audio/ogg';
-                        else mediaOptions.mimetype = 'application/octet-stream';
+                        else mediaOptions.mimetype = getMimeTypeFromFileName(cleanFileName);
 
-                        let origName = msg.media_url.split('/').pop()?.split('?')[0] || '';
-                        if (origName.includes('_')) {
-                            origName = origName.split('_').slice(1).join('_');
-                        }
-                        mediaOptions.fileName = origName || (isVideo ? 'video.mp4' : isImage ? 'image.jpg' : isAudio ? 'audio.ogg' : 'arquivo');
+                        mediaOptions.fileName = cleanFileName || (isVideo ? 'video.mp4' : isImage ? 'image.jpg' : isAudio ? 'audio.ogg' : 'arquivo');
                     } else if (isImage) {
                         mediaOptions.image = { url: msg.media_url };
                         mediaOptions.mimetype = 'image/jpeg';
@@ -197,8 +229,8 @@ class QueueProcessor {
                         mediaOptions.ptt = msg.media_url.includes('ptt') || msg.media_url.includes('audio');
                     } else {
                         mediaOptions.document = { url: msg.media_url };
-                        mediaOptions.mimetype = 'application/octet-stream';
-                        mediaOptions.fileName = msg.media_url.split('/').pop()?.split('?')[0] || 'documento';
+                        mediaOptions.mimetype = getMimeTypeFromFileName(cleanFileName);
+                        mediaOptions.fileName = cleanFileName || 'documento';
                     }
 
                     if (msg.body) mediaOptions.caption = msg.body;
