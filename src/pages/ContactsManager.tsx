@@ -3,13 +3,13 @@ import { supabase, ContactRow } from '../services/supabase';
 import { useChatStore } from '../store/chatStore';
 import { 
   Search, Plus, Edit2, Trash2, X, Phone, Mail, FileText,
-  User, CheckCircle2, AlertCircle, Building2, UserCircle2, ArrowLeft, MessageSquare
+  User, CheckCircle2, AlertCircle, Building2, UserCircle2, ArrowLeft, MessageSquare, ChevronDown
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { RenameModal } from '../components/ChatModals';
 import { ContactGroupManager } from '../components/ContactGroupManager';
-import { formatDocumentNumber } from '../utils/format';
+import { formatDocumentNumber, formatPhoneNumber } from '../utils/format';
 
 export default function ContactsManager() {
   const navigate = useNavigate();
@@ -593,7 +593,7 @@ export default function ContactsManager() {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-screen bg-[#111b21] text-[#e9edef] overflow-hidden relative">
+    <div className="flex-1 flex flex-col h-[100dvh] bg-[#111b21] text-[#e9edef] overflow-hidden relative">
       
       {/* Header Premium */}
       <div className="h-[72px] shrink-0 w-full bg-[#202c33]/80 backdrop-blur-md border-b border-[#2a3942] flex items-center px-6 justify-between z-10">
@@ -677,11 +677,11 @@ export default function ContactsManager() {
            showMobileFilters ? "flex animate-in slide-in-from-top-2" : "hidden md:flex"
          )}>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-wrap gap-2.5 w-full">
-               <div className="flex flex-col gap-1 w-full md:w-auto">
+               <div className="relative flex flex-col gap-1 w-full md:w-auto">
                  <select 
                     value={sortOrder}
                     onChange={(e) => setSortOrder(e.target.value)}
-                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl px-3 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none bg-no-repeat"
+                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-3 pr-8 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
                  >
                     <option value="recent">Mais Recentes</option>
                     <option value="oldest">Mais Antigos</option>
@@ -692,58 +692,63 @@ export default function ContactsManager() {
                     <option value="phone_asc">Celular (Crescente)</option>
                     <option value="phone_desc">Celular (Decrescente)</option>
                  </select>
+                 <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
                </div>
                
-               <div className="flex flex-col gap-1 w-full md:w-auto">
+               <div className="relative flex flex-col gap-1 w-full md:w-auto">
                  <select 
                     value={filterType}
                     onChange={(e) => setFilterType(e.target.value)}
-                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl px-3 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
+                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-3 pr-8 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
                  >
                     <option value="all">Todos os Tipos</option>
                     <option value="companies">Apenas Empresas</option>
                     <option value="contacts">Apenas Contatos</option>
                  </select>
+                 <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
                </div>
 
-               <div className="flex flex-col gap-1 w-full md:w-auto">
+               <div className="relative flex flex-col gap-1 w-full md:w-auto">
                  <select 
                     value={filterStatus}
                     onChange={(e) => setFilterStatus(e.target.value)}
-                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl px-3 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
+                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-3 pr-8 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
                  >
                     <option value="all">Todos os Status</option>
                     <option value="active">Apenas Ativos</option>
                     <option value="paused">Apenas Pausados</option>
                     <option value="blocked">Apenas Bloqueados</option>
                  </select>
+                 <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
                </div>
 
-               <div className="flex flex-col gap-1 w-full md:w-auto">
+               <div className="relative flex flex-col gap-1 w-full md:w-auto">
                  <select 
                     value={filterDate}
                     onChange={(e) => setFilterDate(e.target.value)}
-                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl px-3 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
+                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-3 pr-8 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
                  >
                     <option value="all">Todas as Datas</option>
                     <option value="today">Cadastrado Hoje</option>
                     <option value="week">Últimos 7 dias</option>
                     <option value="month">Últimos 30 dias</option>
                  </select>
+                 <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
                </div>
 
                {useChatStore.getState().tenantInfo?.settings?.contactGroups?.length > 0 && (
-                  <div className="flex flex-col gap-1 w-full md:w-auto col-span-2 sm:col-span-1">
+                  <div className="relative flex flex-col gap-1 w-full md:w-auto col-span-2 sm:col-span-1">
                     <select 
                       value={filterGroup}
                       onChange={(e) => setFilterGroup(e.target.value)}
-                      className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl px-3 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none cursor-pointer appearance-none"
+                      className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-3 pr-8 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none cursor-pointer appearance-none"
                     >
                        <option value="all">Todos os Grupos</option>
                        {useChatStore.getState().tenantInfo?.settings?.contactGroups.map((g: any) => (
                          <option key={g.id} value={g.id}>{g.name}</option>
                        ))}
                     </select>
+                    <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
                   </div>
                )}
 
@@ -801,11 +806,16 @@ export default function ContactsManager() {
                   contacts.map(contact => {
                     // Oculta o "55" inicial se existir, e não exibe telefones falsos
                     const isPseudoPhone = contact.phone?.startsWith('NO_PHONE_') || contact.phone?.startsWith('CNPJ_');
-                    const displayPhone = isPseudoPhone ? 'N/A' : (contact.phone?.startsWith('55') ? contact.phone.substring(2) : (contact.phone || 'N/A'));
+                    const displayPhone = isPseudoPhone ? 'N/A' : (contact.phone ? formatPhoneNumber(contact.phone) : 'N/A');
                     
                     return (
-                    <tr key={contact.id} className="hover:bg-[#202c33]/40 transition-colors group">
-                      <td className="px-6 py-4 whitespace-nowrap">
+                    <tr key={contact.id} className="hover:bg-[#202c33]/50 transition-colors group">
+                      <td className="px-6 py-4 whitespace-nowrap relative">
+                        {/* Barra lateral indicadora no hover */}
+                        <div className={cn(
+                          "absolute left-0 top-0 bottom-0 w-[3px] scale-y-0 group-hover:scale-y-100 transition-transform duration-200 origin-center shrink-0",
+                          contact.document_type === 'cnpj' ? "bg-blue-500" : "bg-[#00a884]"
+                        )} />
                         <div className="flex items-center gap-3">
                           {contact.profile_picture_url ? (
                             <>
@@ -1009,12 +1019,15 @@ export default function ContactsManager() {
             ) : (
               contacts.map(contact => {
                 const isPseudoPhone = contact.phone?.startsWith('NO_PHONE_') || contact.phone?.startsWith('CNPJ_');
-                const displayPhone = isPseudoPhone ? 'N/A' : (contact.phone?.startsWith('55') ? contact.phone.substring(2) : (contact.phone || 'N/A'));
+                const displayPhone = isPseudoPhone ? 'N/A' : (contact.phone ? formatPhoneNumber(contact.phone) : 'N/A');
 
                 return (
                   <div 
                     key={`mob-card-${contact.id}`} 
-                    className="p-4 bg-[#182229] border border-[#2a3942] rounded-2xl shadow-md hover:border-[#2a3942]/80 transition-colors flex flex-col gap-2.5"
+                    className={cn(
+                      "p-4 bg-[#182229] border border-[#2a3942] rounded-2xl shadow-md hover:border-[#2a3942]/80 transition-all flex flex-col gap-2.5 border-l-4",
+                      contact.document_type === 'cnpj' ? "border-l-blue-500" : "border-l-[#00a884]"
+                    )}
                   >
                      {/* Linha 1: Avatar + Nome/Empresa + Status */}
                      <div className="flex items-start justify-between gap-3">
