@@ -3,7 +3,7 @@ import { supabase, ContactRow } from '../services/supabase';
 import { useChatStore } from '../store/chatStore';
 import { 
   Search, Plus, Edit2, Trash2, X, Phone, Mail, FileText,
-  User, CheckCircle2, AlertCircle, Building2, UserCircle2, ArrowLeft, MessageSquare, ChevronDown
+  User, CheckCircle2, AlertCircle, Building2, UserCircle2, ArrowLeft, MessageSquare, ChevronDown, MoreVertical
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
@@ -89,6 +89,7 @@ export default function ContactsManager() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<ContactRow | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [activeMenuContactId, setActiveMenuContactId] = useState<string | null>(null);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
 
   const totalPages = Math.ceil(totalCount / pageSize) || 1;
@@ -789,7 +790,7 @@ export default function ContactsManager() {
            <table className="w-full text-left border-collapse min-w-[900px]">
               <thead>
                 <tr className="border-b border-[#2a3942] bg-[#202c33]/50">
-                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider w-[130px]">Ações</th>
+                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider w-[80px]">Ações</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Identificação</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Celular (ID)</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Email & Docs</th>
@@ -819,7 +820,7 @@ export default function ContactsManager() {
                     
                     return (
                     <tr key={contact.id} className="hover:bg-[#202c33]/50 transition-colors group">
-                      <td className="px-6 py-4 whitespace-nowrap relative w-[130px]">
+                      <td className="px-6 py-4 whitespace-nowrap relative w-[80px]">
                         {/* Barra lateral indicadora no hover */}
                         <div className={cn(
                           "absolute left-0 top-0 bottom-0 w-[3px] scale-y-0 group-hover:scale-y-100 transition-transform duration-200 origin-center shrink-0",
@@ -827,27 +828,74 @@ export default function ContactsManager() {
                         )} />
                         
                         <div className="flex items-center gap-1.5 relative">
-                           <button 
-                              onClick={() => handleSendMessage(contact)} 
-                              className="p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-colors flex items-center justify-center shrink-0" 
-                              title="Enviar Mensagem"
-                           >
-                              <MessageSquare size={16} />
-                           </button>
+                            <button 
+                               onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveMenuContactId(activeMenuContactId === contact.id ? null : contact.id);
+                               }} 
+                               className={cn(
+                                 "p-2 hover:bg-[#2a3942] rounded-lg transition-colors flex items-center justify-center text-[#8696a0] hover:text-[#e9edef]",
+                                 activeMenuContactId === contact.id && "bg-[#2a3942] text-[#e9edef]"
+                               )}
+                               title="Opções"
+                            >
+                               <MoreVertical size={18} />
+                            </button>
 
-                           <button onClick={() => handleOpenModal(contact)} className="p-2 hover:bg-emerald-500/20 text-emerald-500 rounded-lg transition-colors flex items-center justify-center shrink-0" title="Editar">
-                              <Edit2 size={16} />
-                           </button>
+                            {activeMenuContactId === contact.id && (
+                              <>
+                                 <div 
+                                    className="fixed inset-0 z-30" 
+                                    onClick={(e) => {
+                                       e.stopPropagation();
+                                       setActiveMenuContactId(null);
+                                    }}
+                                 />
+                                 <div className="absolute left-12 top-2 bg-[#1f2c34] border border-[#2a3942] rounded-xl shadow-2xl py-1.5 z-40 animate-in fade-in slide-in-from-top-2 duration-150 min-w-[160px] text-left">
+                                    <button
+                                       onClick={(e) => {
+                                          e.stopPropagation();
+                                          setActiveMenuContactId(null);
+                                          handleSendMessage(contact);
+                                       }}
+                                       className="w-full px-4 py-2 text-left text-xs font-semibold text-[#e9edef] hover:bg-[#202c33] flex items-center gap-2.5 transition-colors"
+                                    >
+                                       <MessageSquare size={14} className="text-blue-400" />
+                                       <span>Enviar Mensagem</span>
+                                    </button>
+
+                                    <button
+                                       onClick={(e) => {
+                                          e.stopPropagation();
+                                          setActiveMenuContactId(null);
+                                          handleOpenModal(contact);
+                                       }}
+                                       className="w-full px-4 py-2 text-left text-xs font-semibold text-[#e9edef] hover:bg-[#202c33] flex items-center gap-2.5 transition-colors"
+                                    >
+                                       <Edit2 size={14} className="text-emerald-500" />
+                                       <span>Editar Contato</span>
+                                    </button>
+
+                                    <button
+                                       onClick={(e) => {
+                                          e.stopPropagation();
+                                          setDeleteConfirmId(contact.id);
+                                          setActiveMenuContactId(null);
+                                       }}
+                                       className="w-full px-4 py-2 text-left text-xs font-semibold text-red-400 hover:bg-red-500/10 flex items-center gap-2.5 transition-colors border-t border-[#2a3942]/60 mt-1"
+                                    >
+                                       <Trash2 size={14} className="text-red-400" />
+                                       <span>Excluir Contato</span>
+                                    </button>
+                                 </div>
+                              </>
+                            )}
                            
-                           {deleteConfirmId === contact.id ? (
-                              <div className="absolute left-6 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-[#202c33] border border-red-500/30 rounded-lg p-1 z-20 shadow-xl animate-in zoom-in-95 duration-200 whitespace-nowrap">
-                                 <button onClick={() => handleDelete(contact.id)} className="px-2 py-1 text-xs font-bold text-red-500 hover:bg-red-500 hover:text-white rounded transition-colors">Excluir</button>
-                                 <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 text-xs text-[#8696a0] hover:bg-black/20 rounded transition-colors">Cancelar</button>
+                           {deleteConfirmId === contact.id && (
+                              <div className="absolute left-12 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-[#202c33] border border-red-500/30 rounded-lg p-1.5 z-20 shadow-xl animate-in zoom-in-95 duration-200 whitespace-nowrap">
+                                 <button onClick={(e) => { e.stopPropagation(); handleDelete(contact.id); }} className="px-2.5 py-1 text-xs font-bold text-red-500 hover:bg-red-500 hover:text-white rounded transition-colors">Excluir</button>
+                                 <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(null); }} className="px-2.5 py-1 text-xs text-[#8696a0] hover:bg-black/20 rounded transition-colors">Cancelar</button>
                               </div>
-                           ) : (
-                              <button onClick={() => setDeleteConfirmId(contact.id)} className="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors flex items-center justify-center shrink-0" title="Remover">
-                                 <Trash2 size={16} />
-                              </button>
                            )}
                         </div>
                       </td>
