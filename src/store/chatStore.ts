@@ -3518,11 +3518,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         });
                     } else {
                         // O gateway do Node despacha a History Sync que entra numa fila assíncrona.
-                        // Vamos aguardar 5 segundos para que as mensagens cheguem e sejam atualizadas pelo Realtime (no on('postgres_changes')).
-
-                        // Mostramos um alert informativo (mas como é bloqueante, vamos só confiar no spinner).
+                        // Vamos aguardar 6 segundos para que as mensagens cheguem e sejam gravadas no banco de dados.
                         await new Promise(r => setTimeout(r, 6000));
-                        
+
                         const currentMsgsLength = (msgs && msgs.length) || 0;
                         const newLimit = currentMsgsLength + 100;
 
@@ -3536,11 +3534,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
                            
                         const newMsgsLength = fetchNewMsgs ? fetchNewMsgs.length : 0;
                         
-                        if (!fetchNewMsgs || newMsgsLength === 0 || newMsgsLength <= currentMsgsLength) {
-                            // Removido o alert bloqueante pois o backend pode levar mais de 6 segundos para inserir o histórico no banco de dados
+                        const initialIds = new Set((msgs || []).map(m => m.id));
+                        const addedCount = (fetchNewMsgs || []).filter(m => !initialIds.has(m.id)).length;
+                        
+                        if (addedCount > 0) {
+                            useDevStore.getState().addLog({
+                                type: 'success',
+                                message: `[History Sync] Sincronização concluída! ${addedCount} novas mensagens carregadas.`,
+                                source: 'ChatStore',
+                                details: { fetchCount: newMsgsLength, addedCount }
+                            });
+                            window.dispatchEvent(new CustomEvent('toast', { 
+                                detail: { 
+                                    message: `Sincronização concluída! ${addedCount} novas mensagens carregadas.`, 
+                                    type: 'success' 
+                                } 
+                            }));
+                        } else {
                             useDevStore.getState().addLog({
                                 type: 'warn',
-                                message: `[History Sync] Operação de busca aguardou 6s. Os dados podem não ter sido salvos ainda ou não há mais histórico disponível.`,
+                                message: `[History Sync] O WhatsApp não retornou novas mensagens para este contato.`,
                                 source: 'ChatStore',
                                 details: { 
                                     erroSupabase: fetchErr, 
@@ -3549,13 +3562,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
                                     instancia: instanceName
                                 }
                             });
-                        } else {
-                            useDevStore.getState().addLog({
-                                type: 'success',
-                                message: `[History Sync] Busca finalizada e novas mensagens renderizadas!`,
-                                source: 'ChatStore',
-                                details: { fetchCount: newMsgsLength }
-                            });
+                            window.dispatchEvent(new CustomEvent('toast', { 
+                                detail: { 
+                                    message: 'Nenhuma mensagem nova foi retornada pelo WhatsApp para este contato.', 
+                                    type: 'warning' 
+                                } 
+                            }));
                         }
                            
                         if (fetchNewMsgs) handleMapping(fetchNewMsgs);
