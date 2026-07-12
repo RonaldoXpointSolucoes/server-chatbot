@@ -5799,7 +5799,7 @@ export default function ChatDashboard() {
                   
                   {/* Premium Company Info Button or Phone with Copy Option */}
                   <div className="flex items-center gap-2 mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300 flex-nowrap whitespace-nowrap">
-                    {(activeChat.fantasy_name || activeChat.document_number) ? (
+                    (activeChat.fantasy_name || activeChat.document_number || activeChat.document_type === 'cnpj' || (Array.isArray(activeChat.company_ids) && activeChat.company_ids.length > 0) || (Array.isArray(activeChat.tags) && activeChat.tags.length > 0)) ? (
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
@@ -6649,7 +6649,7 @@ export default function ChatDashboard() {
                         className={cn(
                           "flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all duration-300 active:scale-95 shadow-sm",
                           chatMode === 'internal_note'
-                            ? "bg-amber-500 text-white border border-amber-500/10 shadow-[0_2px_8px_rgba(245,158,11,0.2)]"
+                            ? "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-600 text-white border border-amber-500/10 shadow-md shadow-amber-500/20"
                             : "bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                         )}
                       >
@@ -6943,24 +6943,24 @@ export default function ChatDashboard() {
                   )}
 
                   <div className={cn(
-                    "flex flex-1 border transition-all duration-300 relative shadow-sm",
+                    "flex flex-1 border transition-all duration-350 relative shadow-sm",
                     chatMode === 'internal_note'
                       ? cn(
-                          "flex-col items-stretch px-5 py-4 bg-gradient-to-b from-amber-500/[0.03] to-amber-600/[0.06] dark:from-amber-500/[0.06] dark:to-amber-600/[0.1] border-amber-500/35 focus-within:border-amber-500/60 focus-within:ring-4 focus-within:ring-amber-500/5 shadow-[0_8px_32px_rgba(245,158,11,0.06)] gap-3.5 order-first md:order-none",
-                          isTaskMode ? "rounded-b-[32px] rounded-t-none border-t-amber-500/10" : "rounded-[32px]"
+                          "flex-col items-stretch px-5 py-4 bg-gradient-to-b from-amber-500/[0.015] to-amber-600/[0.045] dark:from-[#231b13]/40 dark:to-[#2e2216]/55 border-amber-500/20 dark:border-amber-500/15 focus-within:border-amber-500/40 dark:focus-within:border-amber-500/35 focus-within:ring-2 focus-within:ring-amber-500/15 shadow-[0_8px_32px_rgba(245,158,11,0.03)] gap-3.5 order-first md:order-none transition-all duration-300",
+                          isTaskMode ? "rounded-b-[32px] rounded-t-none border-t-transparent" : "rounded-[32px]"
                         )
                       : "flex-row items-end px-4 py-2 bg-white dark:bg-[#2a3942] border-transparent focus-within:border-[#00a884]/50 gap-3 rounded-[24px]"
                   )}>
                     
                     {/* Barra de Ferramentas do Editor de Notas CRM */}
                     {chatMode === 'internal_note' && (
-                      <div className="w-full flex items-center justify-between border-b border-amber-500/15 pb-2.5 select-none animate-in fade-in duration-300">
+                      <div className="w-full flex items-center justify-between border-b border-amber-500/10 dark:border-amber-500/15 pb-2.5 select-none animate-in fade-in duration-300 flex-wrap gap-2">
                         {/* Botões de Formatação */}
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <button
                             type="button"
                             onClick={() => insertMarkdownTag('bold')}
-                            className="p-1.5 rounded-xl hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10"
+                            className="p-1.5 rounded-xl hover:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
                             title="Negrito (**)"
                           >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -6971,7 +6971,7 @@ export default function ChatDashboard() {
                           <button
                             type="button"
                             onClick={() => insertMarkdownTag('italic')}
-                            className="p-1.5 rounded-xl hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10"
+                            className="p-1.5 rounded-xl hover:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
                             title="Itálico (*)"
                           >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -6983,7 +6983,7 @@ export default function ChatDashboard() {
                           <button
                             type="button"
                             onClick={() => insertMarkdownTag('strikethrough')}
-                            className="p-1.5 rounded-xl hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10"
+                            className="p-1.5 rounded-xl hover:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
                             title="Riscado (~~)"
                           >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -6994,7 +6994,7 @@ export default function ChatDashboard() {
                           <button
                             type="button"
                             onClick={() => insertMarkdownTag('code')}
-                            className="p-1.5 rounded-xl hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10"
+                            className="p-1.5 rounded-xl hover:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
                             title="Bloco de Código (`)"
                           >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -7005,7 +7005,7 @@ export default function ChatDashboard() {
                           <button
                             type="button"
                             onClick={() => insertMarkdownTag('bullet_list')}
-                            className="p-1.5 rounded-xl hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10"
+                            className="p-1.5 rounded-xl hover:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
                             title="Lista Bullet (-)"
                           >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -7018,12 +7018,12 @@ export default function ChatDashboard() {
                             </svg>
                           </button>
 
-                          <div className="w-[1px] h-4 bg-amber-500/20 mx-1.5 shrink-0" />
+                          <div className="w-[1px] h-4 bg-amber-500/15 mx-1 shrink-0" />
 
                           <button
                             type="button"
                             onClick={handleExtractRulesForRag}
-                            className="px-3.5 py-1.5 rounded-xl text-[10px] bg-gradient-to-r from-amber-500 to-amber-650 hover:from-amber-600 hover:to-amber-700 text-white shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 cursor-pointer select-none font-bold mr-1 shrink-0"
+                            className="px-3.5 py-1.5 rounded-xl text-[10px] bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-md shadow-amber-500/10 hover:shadow-amber-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 cursor-pointer select-none font-bold mr-1 shrink-0"
                             title="Mapear Regras de Negócio para o RAG"
                           >
                             <BrainCircuit size={12} className="animate-pulse" />
@@ -7034,13 +7034,13 @@ export default function ChatDashboard() {
                           <div className="relative group/templates inline-block">
                             <button
                               type="button"
-                              className="px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-amber-500/10 hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/15 transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer hover:scale-105 select-none font-bold"
+                              className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-amber-500/10 hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/15 transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer hover:scale-105 select-none font-bold"
                             >
                               💡 Modelos
                               <ChevronDown size={11} />
                             </button>
                             
-                            <div className="absolute left-0 top-full mt-1.5 w-48 bg-white dark:bg-[#202c33] border border-amber-500/20 rounded-2xl shadow-xl hidden group-hover/templates:flex flex-col z-[110] py-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                            <div className="absolute left-0 top-full mt-1.5 w-48 bg-white dark:bg-[#202c33] border border-amber-500/15 rounded-2xl shadow-xl hidden group-hover/templates:flex flex-col z-[110] py-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
                               <button
                                 type="button"
                                 onClick={() => insertMarkdownTag('', '\n### 📅 Ata de Reunião\n- **Data/Hora**: \n- **Pautas Discutidas**:\n  - \n- **Decisões Tomadas**:\n  - \n- **Próximos Passos**:\n  - \n')}
@@ -7251,7 +7251,7 @@ export default function ChatDashboard() {
                           rows={1}
                           placeholder={
                             chatMode === 'internal_note'
-                              ? "Escreva uma anotação interna sobre este contato (não será enviada al cliente)..."
+                              ? "Escreva uma anotação interna sobre este contato (não será enviada ao cliente)..."
                               : "Responda como humano e a IA sera pausada automaticamente..."
                           }
                           className={cn(
