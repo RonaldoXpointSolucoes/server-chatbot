@@ -789,12 +789,12 @@ export default function ContactsManager() {
            <table className="w-full text-left border-collapse min-w-[900px]">
               <thead>
                 <tr className="border-b border-[#2a3942] bg-[#202c33]/50">
+                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider w-[130px]">Ações</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Identificação</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Celular (ID)</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Email & Docs</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Criado em</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Status Bot</th>
-                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#2a3942]/60">
@@ -819,12 +819,39 @@ export default function ContactsManager() {
                     
                     return (
                     <tr key={contact.id} className="hover:bg-[#202c33]/50 transition-colors group">
-                      <td className="px-6 py-4 whitespace-nowrap relative">
+                      <td className="px-6 py-4 whitespace-nowrap relative w-[130px]">
                         {/* Barra lateral indicadora no hover */}
                         <div className={cn(
                           "absolute left-0 top-0 bottom-0 w-[3px] scale-y-0 group-hover:scale-y-100 transition-transform duration-200 origin-center shrink-0",
                           contact.document_type === 'cnpj' ? "bg-blue-500" : "bg-[#00a884]"
                         )} />
+                        
+                        <div className="flex items-center gap-1.5 relative">
+                           <button 
+                              onClick={() => handleSendMessage(contact)} 
+                              className="p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-colors flex items-center justify-center shrink-0" 
+                              title="Enviar Mensagem"
+                           >
+                              <MessageSquare size={16} />
+                           </button>
+
+                           <button onClick={() => handleOpenModal(contact)} className="p-2 hover:bg-emerald-500/20 text-emerald-500 rounded-lg transition-colors flex items-center justify-center shrink-0" title="Editar">
+                              <Edit2 size={16} />
+                           </button>
+                           
+                           {deleteConfirmId === contact.id ? (
+                              <div className="absolute left-6 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-[#202c33] border border-red-500/30 rounded-lg p-1 z-20 shadow-xl animate-in zoom-in-95 duration-200 whitespace-nowrap">
+                                 <button onClick={() => handleDelete(contact.id)} className="px-2 py-1 text-xs font-bold text-red-500 hover:bg-red-500 hover:text-white rounded transition-colors">Excluir</button>
+                                 <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 text-xs text-[#8696a0] hover:bg-black/20 rounded transition-colors">Cancelar</button>
+                              </div>
+                           ) : (
+                              <button onClick={() => setDeleteConfirmId(contact.id)} className="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors flex items-center justify-center shrink-0" title="Remover">
+                                 <Trash2 size={16} />
+                              </button>
+                           )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-3">
                           {contact.profile_picture_url ? (
                             <>
@@ -858,7 +885,7 @@ export default function ContactsManager() {
                                   </span>
                                )}
                                {contact.fantasy_name && (
-                                  <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md ${contact.document_type === 'cnpj' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-[#202c33] border-[#2a3942] text-emerald-400'} text-[10px] font-bold`}>
+                                  <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md ${contact.document_type === 'cnpj' ? 'bg-blue-500/10 border border-blue-500/20 text-blue-400' : 'bg-[#202c33] border-[#2a3942] text-emerald-400'} text-[10px] font-bold`}>
                                      <Building2 size={10} />
                                      {contact.fantasy_name}
                                   </span>
@@ -980,32 +1007,7 @@ export default function ContactsManager() {
                            {contact.is_blocked ? 'Bloqueado' : contact.bot_status === 'active' ? 'Ativo' : 'Pausado'}
                          </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
-                         <div className="flex items-center justify-end gap-2 opacity-50 hover:opacity-100 transition-opacity">
-                            <button 
-                               onClick={() => handleSendMessage(contact)} 
-                               className="p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-colors" 
-                               title="Enviar Mensagem"
-                            >
-                               <MessageSquare size={16} />
-                            </button>
-
-                            <button onClick={() => handleOpenModal(contact)} className="p-2 hover:bg-emerald-500/20 text-emerald-500 rounded-lg transition-colors" title="Editar">
-                               <Edit2 size={16} />
-                            </button>
-                            
-                            {deleteConfirmId === contact.id ? (
-                               <div className="flex items-center gap-1 bg-red-500/10 border border-red-500/20 rounded-lg p-1 animate-in zoom-in-95 duration-200">
-                                  <button onClick={() => handleDelete(contact.id)} className="px-2 py-1 text-xs font-bold text-red-500 hover:bg-red-500 hover:text-white rounded transition-colors">Excluir</button>
-                                  <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 text-xs text-[#8696a0] hover:bg-black/20 rounded transition-colors">Cancelar</button>
-                               </div>
-                            ) : (
-                               <button onClick={() => setDeleteConfirmId(contact.id)} className="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors" title="Remover">
-                                  <Trash2 size={16} />
-                               </button>
-                            )}
-                         </div>
-                      </td>
+                    </tr>      </td>
                     </tr>
                   )})
                 )}
