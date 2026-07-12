@@ -88,7 +88,10 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
   setIsOpenWidget: (open) => set({ isOpenWidget: open }),
 
   startCall: async (sid, phone, record = false) => {
-    const cleanPhone = phone.replace(/\D/g, "");
+    let cleanPhone = phone.replace(/\D/g, "");
+    if (cleanPhone.length === 10 || cleanPhone.length === 11) {
+      cleanPhone = "55" + cleanPhone;
+    }
     
     // 1. Inicia a chamada na API
     const response = await fetch(`${API_URL}/api/v1/wacalls/sessions/${sid}/calls`, {

@@ -22,9 +22,15 @@ export const openCall = async (
   micDeviceId: string | null,
 ): Promise<OpenCall> => {
   console.log(`[WaCalls/WebRTC] 📞 Iniciando openCall para chamada '${callId}'. Solicitando acesso ao microfone...`);
-  const micStream = await navigator.mediaDevices.getUserMedia({
-    audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
-  });
+  let micStream: MediaStream;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
+    });
+  } catch (err) {
+    console.warn("[WaCalls/WebRTC] ⚠ Falha ao obter microfone selecionado. Tentando obter microfone padrão...", err);
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  }
   console.log("[WaCalls/WebRTC] ✔ Acesso ao microfone concedido.");
 
   const pc = new RTCPeerConnection({
@@ -78,14 +84,17 @@ export const openCall = async (
   await pc.setLocalDescription(offer);
   
   console.log("[WaCalls/WebRTC] Iniciando ICE Candidates Gathering...");
-  await new Promise<void>((resolve) => {
-    if (pc.iceGatheringState === "complete") resolve();
-    else
-      pc.addEventListener("icegatheringstatechange", () => {
-        if (pc.iceGatheringState === "complete") resolve();
-      });
-  });
-  console.log("[WaCalls/WebRTC] ICE Gathering concluído. Enviando SDP Offer para o backend...");
+  await Promise.race([
+    new Promise<void>((resolve) => {
+      if (pc.iceGatheringState === "complete") resolve();
+      else
+        pc.addEventListener("icegatheringstatechange", () => {
+          if (pc.iceGatheringState === "complete") resolve();
+        });
+    }),
+    new Promise<void>((resolve) => setTimeout(resolve, 5000))
+  ]);
+  console.log("[WaCalls/WebRTC] ICE Gathering concluído ou atingiu timeout limite de 5s. Enviando SDP Offer para o backend...");
 
   const response = await fetch(`${API_URL}/api/v1/wacalls/sessions/${sid}/calls/${callId}/webrtc`, {
     method: 'POST',
