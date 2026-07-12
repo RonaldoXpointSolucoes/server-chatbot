@@ -2246,12 +2246,175 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
   const [cnpjInput, setCnpjInput] = useState('');
   const [savingCnpj, setSavingCnpj] = useState(false);
 
+  const [selectedCompanyId, setSelectedCompanyId] = useState('');
+  const [selectedGroupId, setSelectedGroupId] = useState('');
+  const [allAvailableCompanies, setAllAvailableCompanies] = useState<any[]>([]);
+
   useEffect(() => {
     if (contact) {
       setCnpjInput(contact.document_number || '');
+      setSelectedCompanyId('');
+      setSelectedGroupId('');
       setEditingCnpj(false);
     }
   }, [contact, isOpen]);
+
+  const handleSaveAssociation = async () => {
+    setSavingCnpj(true);
+    try {
+      const { supabase } = await import('../services/supabase');
+      const realContactId = contact.id.includes('_') ? contact.id.split('_')[0] : contact.id;
+      
+      const newCompanyIds = [...(contact.company_ids || [])];
+      if (selectedCompanyId && !newCompanyIds.includes(selectedCompanyId)) {
+        newCompanyIds.push(selectedCompanyId);
+      }
+      
+      const newTags = [...(contact.tags || [])];
+      if (selectedGroupId && !newTags.includes(selectedGroupId)) {
+        newTags.push(selectedGroupId);
+      }
+      
+      const updatePayload: any = {};
+      if (selectedCompanyId) {
+        updatePayload.company_ids = newCompanyIds;
+      }
+      if (selectedGroupId) {
+        updatePayload.tags = newTags;
+      }
+      
+      if (Object.keys(updatePayload).length === 0) {
+        setEditingCnpj(false);
+        return;
+      }
+      
+      const { error } = await supabase
+        .from('contacts')
+        .update(updatePayload)
+        .eq('id', realContactId);
+
+      if (error) throw error;
+
+      await useChatStore.getState().logOperation(
+        'UPDATE',
+        'contacts',
+        realContactId,
+        { company_ids: contact.company_ids, tags: contact.tags },
+        updatePayload
+      );
+
+      // Update locally in useChatStore
+      const currentContacts = useChatStore.getState().contacts;
+      const updatedContacts = currentContacts.map((c: any) => {
+        if (c.id === contact.id) {
+          return { ...c, ...updatePayload };
+        }
+        return c;
+      });
+      useChatStore.setState({ contacts: updatedContacts });
+
+      // Update in active chat if matching
+      const activeChat = useChatStore.getState().activeChat;
+      if (activeChat && activeChat.id === contact.id) {
+        useChatStore.getState().setActiveChat({ ...activeChat, ...updatePayload });
+      }
+
+      // Update references
+      if (updatePayload.company_ids) contact.company_ids = updatePayload.company_ids;
+      if (updatePayload.tags) contact.tags = updatePayload.tags;
+
+      if (onUpdateCompany) {
+        onUpdateCompany({ id: contact.id, ...updatePayload });
+      }
+
+      setEditingCnpj(false);
+      setSelectedCompanyId('');
+      setSelectedGroupId('');
+    } catch (err: any) {
+      console.error('[Save Association] Error:', err);
+      alert('Erro ao salvar associação: ' + (err.message || String(err)));
+    } finally {
+      setSavingCnpj(false);
+    }
+  };
+
+  const handleRemoveCompanyAssociation = async (companyId: string) => {
+    if (!confirm('Deseja realmente desvincular esta empresa?')) return;
+    try {
+      const { supabase } = await import('../services/supabase');
+      const realContactId = contact.id.includes('_') ? contact.id.split('_')[0] : contact.id;
+      
+      const newCompanyIds = (contact.company_ids || []).filter((id: string) => id !== companyId);
+      
+      const { error } = await supabase
+        .from('contacts')
+        .update({ company_ids: newCompanyIds })
+        .eq('id', realContactId);
+
+      if (error) throw error;
+
+      const currentContacts = useChatStore.getState().contacts;
+      const updatedContacts = currentContacts.map((c: any) => {
+        if (c.id === contact.id) {
+          return { ...c, company_ids: newCompanyIds };
+        }
+        return c;
+      });
+      useChatStore.setState({ contacts: updatedContacts });
+
+      contact.company_ids = newCompanyIds;
+      
+      const activeChat = useChatStore.getState().activeChat;
+      if (activeChat && activeChat.id === contact.id) {
+        useChatStore.getState().setActiveChat({ ...activeChat, company_ids: newCompanyIds });
+      }
+
+      if (onUpdateCompany) {
+        onUpdateCompany({ id: contact.id, company_ids: newCompanyIds });
+      }
+    } catch (err: any) {
+      alert('Erro ao remover empresa: ' + (err.message || String(err)));
+    }
+  };
+
+  const handleRemoveGroupAssociation = async (groupId: string) => {
+    if (!confirm('Deseja realmente remover este contato do grupo?')) return;
+    try {
+      const { supabase } = await import('../services/supabase');
+      const realContactId = contact.id.includes('_') ? contact.id.split('_')[0] : contact.id;
+      
+      const newTags = (contact.tags || []).filter((t: string) => t !== groupId);
+      
+      const { error } = await supabase
+        .from('contacts')
+        .update({ tags: newTags })
+        .eq('id', realContactId);
+
+      if (error) throw error;
+
+      const currentContacts = useChatStore.getState().contacts;
+      const updatedContacts = currentContacts.map((c: any) => {
+        if (c.id === contact.id) {
+          return { ...c, tags: newTags };
+        }
+        return c;
+      });
+      useChatStore.setState({ contacts: updatedContacts });
+
+      contact.tags = newTags;
+
+      const activeChat = useChatStore.getState().activeChat;
+      if (activeChat && activeChat.id === contact.id) {
+        useChatStore.getState().setActiveChat({ ...activeChat, tags: newTags });
+      }
+
+      if (onUpdateCompany) {
+        onUpdateCompany({ id: contact.id, tags: newTags });
+      }
+    } catch (err: any) {
+      alert('Erro ao remover grupo: ' + (err.message || String(err)));
+    }
+  };
   
   const allContacts = useChatStore(s => s.contacts);
   const tenantInfo = useChatStore(s => s.tenantInfo);
@@ -2331,6 +2494,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
         }
 
         if (!companiesData) return;
+        setAllAvailableCompanies(companiesData);
 
         const groupIds = new Set<string>();
         if (Array.isArray(contact.tags)) {
@@ -2379,7 +2543,13 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
 
   if (!isOpen || !contact) return null;
 
-  const rawCnpj = contact.document_number ? contact.document_number.replace(/\D/g, '') : '';
+  const rawCnpj = (() => {
+    if (contact.document_number) return contact.document_number.replace(/\D/g, '');
+    const firstCompany = (contact.company_ids || [])
+      .map((id: string) => allAvailableCompanies.find(c => c.id === id))
+      .find((c: any) => c && c.document_number);
+    return firstCompany ? firstCompany.document_number.replace(/\D/g, '') : '';
+  })();
   const billingUrl = rawCnpj ? `https://mensalidadedatadivas.vercel.app/?e=${rawCnpj}` : null;
 
   // Format phone number to (XX) XXXXX-XXXX for display
@@ -2504,7 +2674,8 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
 
         <div className="flex flex-col gap-3 bg-[#f0f2f5]/80 dark:bg-black/20 p-4 rounded-2xl border border-black/5 dark:border-white/5">
           {/* CNPJ */}
-          {!hasGroupSync && matchingGroups.length === 0 && (
+          {/* CNPJ ou Associação de Empresa / Grupo */}
+          {contact.document_type === 'cnpj' ? (
             <>
               <div className="flex items-center justify-between group">
                 <div className="flex items-center gap-3 w-full">
@@ -2558,6 +2729,147 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                     {copiedDoc ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Copy size={16} />}
                   </button>
                 )}
+              </div>
+
+              {/* Divider */}
+              <div className="h-px w-full bg-gradient-to-r from-transparent via-gray-200 dark:via-gray-700 to-transparent my-1"></div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between group">
+                <div className="flex items-center gap-3 w-full">
+                  <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-400 shrink-0">
+                    <Building size={18} />
+                  </div>
+                  {editingCnpj ? (
+                    <div className="flex flex-col gap-2 w-full pr-2">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[9px] uppercase font-bold text-gray-400">Associar a uma Empresa</span>
+                        <select
+                          value={selectedCompanyId}
+                          onChange={e => setSelectedCompanyId(e.target.value)}
+                          className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none"
+                        >
+                          <option value="">Selecione uma Empresa...</option>
+                          {allAvailableCompanies
+                            .filter(c => c.id !== contact.id && !(contact.company_ids || []).includes(c.id))
+                            .map(c => (
+                              <option key={c.id} value={c.id}>
+                                {c.fantasy_name || c.name} {c.document_number ? `(${formatDocument(c.document_number)})` : ''}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                      
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[9px] uppercase font-bold text-gray-400">Associar a um Grupo</span>
+                        <select
+                          value={selectedGroupId}
+                          onChange={e => setSelectedGroupId(e.target.value)}
+                          className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none"
+                        >
+                          <option value="">Selecione um Grupo...</option>
+                          {(contactGroups || [])
+                            .filter(g => !(contact.tags || []).includes(g.id))
+                            .map(g => (
+                              <option key={g.id} value={g.id}>
+                                {g.name}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                      
+                      <div className="flex gap-2 justify-end mt-1">
+                        <button 
+                          onClick={handleSaveAssociation} 
+                          disabled={savingCnpj} 
+                          className="px-3 py-1 text-xs font-semibold rounded bg-emerald-500 hover:bg-emerald-600 text-white flex items-center gap-1 transition-colors"
+                        >
+                          {savingCnpj ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                          Salvar
+                        </button>
+                        <button 
+                          onClick={() => { setEditingCnpj(false); setSelectedCompanyId(''); setSelectedGroupId(''); }} 
+                          className="px-3 py-1 text-xs font-semibold rounded bg-gray-200 dark:bg-white/5 hover:bg-gray-300 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 transition-colors"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col w-full min-w-0">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Empresa / Grupo</span>
+                        <button 
+                          onClick={() => { setEditingCnpj(true); setSelectedCompanyId(''); setSelectedGroupId(''); }}
+                          className="p-1 text-gray-400 hover:text-emerald-500 transition-colors rounded hover:bg-black/5 dark:hover:bg-white/5"
+                          title="Editar Associações"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                      </div>
+                      
+                      <div className="flex flex-col gap-1 mt-1">
+                        {/* List of associated companies */}
+                        {(() => {
+                          const linked = (contact.company_ids || [])
+                            .map((id: string) => allAvailableCompanies.find(c => c.id === id))
+                            .filter(Boolean);
+                          
+                          return linked.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {linked.map((comp: any) => (
+                                <span key={comp.id} className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 pl-2 pr-1 py-0.5 rounded-full text-[11px] font-semibold">
+                                  <Building2 size={10} className="shrink-0" />
+                                  <span className="truncate max-w-[120px]">{comp.fantasy_name || comp.name}</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRemoveCompanyAssociation(comp.id);
+                                    }}
+                                    className="p-0.5 hover:bg-emerald-500/20 rounded text-emerald-600 dark:text-emerald-400 shrink-0"
+                                    title="Desvincular"
+                                  >
+                                    <X size={10} strokeWidth={2.5} />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-gray-500 dark:text-gray-400 italic">Nenhuma empresa vinculada</span>
+                          );
+                        })()}
+                        
+                        {/* List of associated groups */}
+                        {(() => {
+                          const linkedGroups = (contactGroups || [])
+                            .filter((g: any) => (contact.tags || []).includes(g.id));
+                          
+                          return linkedGroups.length > 0 ? (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {linkedGroups.map((g: any) => (
+                                <span key={g.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold text-white shadow-sm" style={{ backgroundColor: g.color || '#3b82f6' }}>
+                                  <Building size={10} className="shrink-0" />
+                                  <span className="truncate max-w-[120px]">{g.name}</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRemoveGroupAssociation(g.id);
+                                    }}
+                                    className="p-0.5 hover:bg-black/20 rounded text-white shrink-0"
+                                    title="Remover do Grupo"
+                                  >
+                                    <X size={10} strokeWidth={2.5} />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          ) : null;
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Divider */}
