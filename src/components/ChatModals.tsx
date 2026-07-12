@@ -2659,6 +2659,22 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
     }
   };
 
+  const companyColor = (() => {
+    if (contact.document_type === 'cnpj') {
+      const group = (contactGroups || []).find((g: any) => (contact.tags || []).includes(g.id));
+      return group?.color || '#10b981'; // Default emerald for company
+    } else {
+      const linked = (contact.company_ids || [])
+        .map((id: string) => allAvailableCompanies.find(c => c.id === id))
+        .filter(Boolean);
+      if (linked.length > 0) {
+        const group = (contactGroups || []).find((g: any) => (linked[0].tags || []).includes(g.id));
+        return group?.color || '#3b82f6'; // Associated company color
+      }
+      return '#6b7280'; // Default gray
+    }
+  })();
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
@@ -2667,8 +2683,15 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
         
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center shadow-inner border border-emerald-100 dark:border-emerald-500/20">
-            <Building2 className="w-6 h-6 text-emerald-500" />
+          <div 
+            className="w-12 h-12 rounded-full flex items-center justify-center shadow-inner border transition-all duration-300"
+            style={{ 
+              backgroundColor: `${companyColor}15`, 
+              borderColor: `${companyColor}30`,
+              color: companyColor 
+            }}
+          >
+            <Building2 className="w-6 h-6" />
           </div>
           <button onClick={onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 transition-colors">
             <X size={20} />
@@ -2687,7 +2710,8 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
               if (contact.document_type === 'cnpj') {
                 return (
                   <span 
-                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 select-none shadow-sm"
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 border rounded-full text-[10px] font-black uppercase tracking-wider select-none shadow-sm transition-all duration-300"
+                    style={{ backgroundColor: `${companyColor}15`, borderColor: `${companyColor}30`, color: companyColor }}
                     title="Este contato representa a própria empresa (Matriz/Filial)"
                   >
                     🏢 CNPJ (Empresa)
@@ -2720,11 +2744,39 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
               • Contato principal da própria empresa
             </p>
           )}
-          {contact.document_type !== 'cnpj' && contact.document_type !== 'cpf' && (
-            <p className="text-[10.5px] text-gray-500 dark:text-gray-400 font-medium leading-none flex items-center gap-1">
-              • Colaborador ou contato comum
-            </p>
-          )}
+
+          {/* Associated Companies list for collaborators */}
+          {contact.document_type !== 'cnpj' && (() => {
+            const linked = (contact.company_ids || [])
+              .map((id: string) => allAvailableCompanies.find(c => c.id === id))
+              .filter(Boolean);
+            
+            if (linked.length > 0) {
+              return (
+                <div className="flex flex-wrap gap-1.5 mt-0.5">
+                  {linked.map((comp: any) => {
+                    const compGroup = (contactGroups || []).find((g: any) => (comp.tags || []).includes(g.id));
+                    const cColor = compGroup?.color || '#3b82f6';
+                    return (
+                      <span 
+                        key={comp.id}
+                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[10.5px] font-bold text-white shadow-sm transition-all duration-300"
+                        style={{ backgroundColor: cColor }}
+                        title={`Empresa vinculada: ${comp.name}`}
+                      >
+                        🏢 {comp.fantasy_name || comp.name}
+                      </span>
+                    );
+                  })}
+                </div>
+              );
+            }
+            return (
+              <p className="text-[10.5px] text-gray-500 dark:text-gray-400 font-medium leading-none flex items-center gap-1">
+                • Colaborador ou contato comum
+              </p>
+            );
+          })()}
 
           {(contact.fantasy_name && contact.name) && (
             <p className="text-[13px] text-gray-500 dark:text-[#8696a0] leading-snug break-words mt-0.5">
