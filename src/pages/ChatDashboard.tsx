@@ -6726,46 +6726,7 @@ export default function ChatDashboard() {
                     </div>
                   )}
 
-                  {chatMode !== 'internal_note' && pendingMediaToSend && (
-                    <div className="absolute bottom-full left-4 mb-3.5 p-3.5 bg-white/80 dark:bg-[#111b21]/80 backdrop-blur-xl rounded-3xl border border-emerald-500/25 dark:border-emerald-500/35 flex items-center gap-3 animate-in slide-in-from-bottom-2 duration-300 z-50 shadow-2xl max-w-[280px]">
-                      {pendingMediaToSend.type === 'image' && (
-                        <img src={pendingMediaToSend.url} className="w-11 h-11 rounded-xl object-cover border border-emerald-500/20 shadow-sm shrink-0" />
-                      )}
-                      {pendingMediaToSend.type === 'video' && (
-                        <div className="w-11 h-11 rounded-xl bg-black/25 flex items-center justify-center border border-emerald-500/20 text-emerald-500 shrink-0">
-                          <Video size={16} />
-                        </div>
-                      )}
-                      {pendingMediaToSend.type === 'audio' && (
-                        <div className="w-11 h-11 rounded-xl bg-blue-500/15 flex items-center justify-center border border-blue-500/20 text-blue-500 shrink-0">
-                          <Mic size={16} />
-                        </div>
-                      )}
-                      {pendingMediaToSend.type === 'document' && (
-                        <div className="w-11 h-11 rounded-xl bg-emerald-500/15 flex items-center justify-center border border-emerald-500/20 text-emerald-500 shrink-0">
-                          <FileText size={16} />
-                        </div>
-                      )}
-                      
-                      <div className="flex-1 min-w-0 pr-2">
-                        <p className="text-[9px] uppercase font-extrabold tracking-wider text-emerald-600 dark:text-emerald-400">
-                          Mídia Pendente
-                        </p>
-                        <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mt-0.5 truncate" title={pendingMediaToSend.name}>
-                          {pendingMediaToSend.name}
-                        </p>
-                      </div>
-                      
-                      <button
-                        type="button"
-                        onClick={() => setPendingMediaToSend(null)}
-                        className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-full transition-colors shrink-0 active:scale-90"
-                        title="Remover anexo"
-                      >
-                        <X className="w-3.5 h-3.5" strokeWidth={2.5} />
-                      </button>
-                    </div>
-                  )}
+
 
                   {chatMode === 'internal_note' && isTaskMode && (
                     <div className="absolute bottom-full left-0 right-0 mb-[-1px] p-6 bg-gradient-to-br from-white/95 to-white/98 dark:from-[#152026]/95 dark:to-[#182229]/98 backdrop-blur-2xl rounded-t-[32px] border-t border-x border-amber-500/25 shadow-[0_-16px_48px_rgba(245,158,11,0.12)] flex flex-col gap-5 animate-in slide-in-from-bottom-3 duration-300 z-40 max-h-[380px] overflow-y-auto scrollbar-thin select-none">
@@ -7189,7 +7150,47 @@ export default function ChatDashboard() {
                       </div>
                     )}
                     
-                    <div className="relative flex-1 min-w-0 min-h-[20px] flex items-end">
+                    <div className="relative flex-1 min-w-0 min-h-[20px] flex flex-col gap-1.5 justify-end">
+                      {chatMode !== 'internal_note' && pendingMediaToSend && (
+                        <div className="flex items-center gap-2.5 p-2 bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/15 rounded-2xl self-start max-w-full mb-2 animate-in fade-in slide-in-from-bottom-1 duration-255 select-none shadow-sm">
+                          {pendingMediaToSend.type === 'image' && (
+                            <img src={pendingMediaToSend.url} className="w-8 h-8 rounded-lg object-cover border border-emerald-500/10 shadow-sm shrink-0" />
+                          )}
+                          {pendingMediaToSend.type === 'video' && (
+                            <div className="w-8 h-8 rounded-lg bg-black/25 flex items-center justify-center border border-emerald-500/10 text-emerald-500 shrink-0">
+                              <Video size={14} />
+                            </div>
+                          )}
+                          {pendingMediaToSend.type === 'audio' && (
+                            <div className="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center border border-blue-500/10 text-blue-500 shrink-0">
+                              <Mic size={14} />
+                            </div>
+                          )}
+                          {pendingMediaToSend.type === 'document' && (
+                            <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center border border-emerald-500/10 text-emerald-500 shrink-0">
+                              <FileText size={14} />
+                            </div>
+                          )}
+                          
+                          <div className="min-w-0 flex flex-col pr-1">
+                            <span className="text-[9px] uppercase font-black tracking-widest text-emerald-600 dark:text-emerald-400 leading-none">
+                              Mídia Anexada
+                            </span>
+                            <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate max-w-[180px] mt-0.5" title={pendingMediaToSend.name}>
+                              {pendingMediaToSend.name}
+                            </span>
+                          </div>
+                          
+                          <button
+                            type="button"
+                            onClick={() => setPendingMediaToSend(null)}
+                            className="p-1 hover:bg-red-500/10 text-gray-400 hover:text-red-500 rounded-lg transition-colors shrink-0 active:scale-90 ml-1"
+                            title="Remover anexo"
+                          >
+                            <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+                          </button>
+                        </div>
+                      )}
                       {chatMode === 'internal_note' && notePreviewMode ? (
                         <div className="w-full min-h-[36px] bg-transparent pb-0.5 overflow-y-auto max-h-[250px] relative z-10 animate-in fade-in duration-300 select-text">
                           {renderMarkdownPreview(inputText)}
