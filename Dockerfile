@@ -7,7 +7,7 @@ COPY wacalls-go/ ./
 # Tidy modules
 RUN go mod tidy
 # Build static binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o wacalls-server ./cmd/server
+RUN GOMAXPROCS=1 CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o wacalls-server ./cmd/server
 
 # Stage 2: Main Node.js app
 FROM node:20-slim
