@@ -159,7 +159,9 @@ class QueueProcessor {
                             const len = headRes.headers.get('content-length');
                             if (len) {
                                 fileSize = parseInt(len, 10);
-                                if (fileSize > 15 * 1024 * 1024) {
+                                // Aumentado limite para permitir que vídeos grandes de demonstração (até 150MB) sejam exibidos abertos no WhatsApp
+                                const sizeLimit = isVideo ? 150 * 1024 * 1024 : 15 * 1024 * 1024;
+                                if (fileSize > sizeLimit) {
                                     console.log(`[QueueProcessor] Arquivo de mídia é muito grande (${(fileSize / (1024 * 1024)).toFixed(2)}MB). Forçando envio como documento.`);
                                     forceDocument = true;
                                 }
