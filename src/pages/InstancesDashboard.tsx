@@ -790,7 +790,10 @@ export default function InstancesDashboard() {
                  <Trash2 size={32} className="text-red-500" />
                </div>
                <h2 className="text-2xl font-bold dark:text-white mb-2">Excluir Conexão?</h2>
-               <p className="text-gray-500 dark:text-gray-400 mb-8 font-medium">Esta ação removerá a instância <strong className="text-gray-800 dark:text-white">"{deletingInstance.display_name}"</strong> permanentemente do sistema.</p>
+               <p className="text-gray-500 dark:text-gray-400 mb-4 font-medium">Esta ação removerá a caixa <strong className="text-gray-800 dark:text-white">"{deletingInstance.display_name}"</strong> do painel.</p>
+               <div className="bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 p-3 rounded-2xl text-xs leading-relaxed font-semibold mb-6">
+                 ⚠️ <strong>Atenção:</strong> Se você deseja apenas <strong>trocar o número</strong> desta caixa (ex: conectar outro número no Suporte), cancele este modal e use o botão <strong>Desparear</strong> no card. Isso mantém todo o histórico!
+               </div>
                <div className="flex gap-3">
                  <button onClick={() => setDeletingInstance(null)} className="flex-1 bg-gray-100 dark:bg-black/30 hover:bg-gray-200 dark:hover:bg-black/50 text-gray-800 dark:text-white font-semibold py-3.5 rounded-2xl transition-all">Cancelar</button>
                  <button onClick={confirmDelete} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3.5 rounded-2xl transition-all shadow-md">Sim, excluir</button>
