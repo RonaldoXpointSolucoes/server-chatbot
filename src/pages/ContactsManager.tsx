@@ -1007,7 +1007,6 @@ export default function ContactsManager() {
                            {contact.is_blocked ? 'Bloqueado' : contact.bot_status === 'active' ? 'Ativo' : 'Pausado'}
                          </span>
                       </td>
-                    </tr>      </td>
                     </tr>
                   )})
                 )}
