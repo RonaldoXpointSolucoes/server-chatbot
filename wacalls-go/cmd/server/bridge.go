@@ -34,7 +34,7 @@ type Bridge struct {
 func NewBridge(offerSDP string, log *slog.Logger) (*Bridge, string, error) {
 	settingEngine := webrtc.SettingEngine{}
 	if resolvedPublicIP != "" {
-		settingEngine.SetNAT1ExternalIPs([]string{resolvedPublicIP}, webrtc.ICECandidateTypeHost)
+		settingEngine.SetNAT1To1IPs([]string{resolvedPublicIP}, webrtc.ICECandidateTypeHost)
 	}
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
 
