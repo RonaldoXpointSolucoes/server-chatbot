@@ -57,14 +57,24 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const theme = useChatStore(state => state.theme);
   const reopenedTicketToast = useChatStore(state => state.reopenedTicketToast);
   const setReopenedTicketToast = useChatStore(state => state.setReopenedTicketToast);
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
-    conversations: true,
-    checklists: true,
-    apps: false,
-    channels: true,
-    labels: false,
-    settings: false,
-    appsDelivery: true
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
+    const saved = localStorage.getItem('sidebar_expanded_sections');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        // ignore
+      }
+    }
+    return {
+      conversations: true,
+      checklists: true,
+      apps: false,
+      channels: true,
+      labels: false,
+      settings: false,
+      appsDelivery: true
+    };
   });
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,7 +90,11 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
 
 
   const toggleSection = (section: string) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+    setExpandedSections(prev => {
+      const next = { ...prev, [section]: !prev[section] };
+      localStorage.setItem('sidebar_expanded_sections', JSON.stringify(next));
+      return next;
+    });
   };
 
   const handleLogout = (e: React.MouseEvent) => {
