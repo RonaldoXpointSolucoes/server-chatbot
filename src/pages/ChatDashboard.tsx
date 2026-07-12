@@ -6682,7 +6682,7 @@ export default function ChatDashboard() {
                 <form 
                   onSubmit={handleSendHuman} 
                   className={cn(
-                    "min-h-[70px] flex px-4 py-3 gap-3 relative",
+                    "min-h-[70px] flex px-4 py-3 gap-3 relative shrink-0",
                     chatMode === 'internal_note'
                       ? "flex-col items-stretch md:flex-row md:items-end md:gap-3"
                       : "flex-row items-end gap-3"
