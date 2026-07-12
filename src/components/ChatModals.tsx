@@ -2676,17 +2676,63 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
         </div>
 
         {/* Info Blocks */}
-        <div className="flex flex-col gap-1">
-          <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef] leading-tight break-words">
-            {contact.fantasy_name || contact.name || contact.custom_name || 'Empresa'}
-          </h2>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef] leading-tight break-words">
+              {contact.fantasy_name || contact.name || contact.custom_name || 'Empresa'}
+            </h2>
+            
+            {/* Tipo de Contato Badge */}
+            {(() => {
+              if (contact.document_type === 'cnpj') {
+                return (
+                  <span 
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 select-none shadow-sm"
+                    title="Este contato representa a própria empresa (Matriz/Filial)"
+                  >
+                    🏢 CNPJ (Empresa)
+                  </span>
+                );
+              }
+              if (contact.document_type === 'cpf') {
+                return (
+                  <span 
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 select-none shadow-sm"
+                    title="Pessoa Física"
+                  >
+                    👤 CPF
+                  </span>
+                );
+              }
+              return (
+                <span 
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-gray-500/10 border border-gray-500/20 text-gray-600 dark:text-gray-400 select-none shadow-sm"
+                  title="Contato regular ou colaborador vinculado"
+                >
+                  📞 Contato
+                </span>
+              );
+            })()}
+          </div>
+
+          {contact.document_type === 'cnpj' && (
+            <p className="text-[10.5px] text-emerald-600 dark:text-emerald-400 font-semibold leading-none flex items-center gap-1">
+              • Contato principal da própria empresa
+            </p>
+          )}
+          {contact.document_type !== 'cnpj' && contact.document_type !== 'cpf' && (
+            <p className="text-[10.5px] text-gray-500 dark:text-gray-400 font-medium leading-none flex items-center gap-1">
+              • Colaborador ou contato comum
+            </p>
+          )}
+
           {(contact.fantasy_name && contact.name) && (
-            <p className="text-[13px] text-gray-500 dark:text-[#8696a0] leading-snug break-words">
+            <p className="text-[13px] text-gray-500 dark:text-[#8696a0] leading-snug break-words mt-0.5">
               {contact.name}
             </p>
           )}
           {(!contact.fantasy_name && contact.custom_name && contact.name) && (
-            <p className="text-[13px] text-gray-500 dark:text-[#8696a0] leading-snug break-words">
+            <p className="text-[13px] text-gray-500 dark:text-[#8696a0] leading-snug break-words mt-0.5">
               {contact.name}
             </p>
           )}
