@@ -27,6 +27,9 @@ func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(log)
 
+	// Inicia a descoberta dinâmica de IP público para mapeamento NAT 1:1 do WebRTC
+	resolvePublicIP(log)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

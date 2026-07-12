@@ -21,9 +21,11 @@ export const openCall = async (
   callId: string,
   micDeviceId: string | null,
 ): Promise<OpenCall> => {
+  console.log(`[WaCalls/WebRTC] 📞 Iniciando openCall para chamada '${callId}'. Solicitando acesso ao microfone...`);
   const micStream = await navigator.mediaDevices.getUserMedia({
     audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
   });
+  console.log("[WaCalls/WebRTC] ✔ Acesso ao microfone concedido.");
 
   const pc = new RTCPeerConnection({
     iceServers: [
@@ -32,9 +34,24 @@ export const openCall = async (
     ]
   });
 
+  console.log("[WaCalls/WebRTC] Criando Data Channel 'pcm' para áudio bidirecional raw...");
   const dc = pc.createDataChannel(PCM_CHANNEL_LABEL, { ordered: true });
   dc.binaryType = "arraybuffer";
 
+  // Rastrear estados do Data Channel
+  dc.onopen = () => console.log("[WaCalls/WebRTC] 🟢 Data Channel 'pcm' aberto com sucesso e pronto para tráfego PCM!");
+  dc.onclose = () => console.warn("[WaCalls/WebRTC] 🔴 Data Channel 'pcm' fechado.");
+  dc.onerror = (err) => console.error("[WaCalls/WebRTC] ✖ Erro no Data Channel:", err);
+
+  // Rastrear estados do ICE Connection e PeerConnection
+  pc.oniceconnectionstatechange = () => {
+    console.log(`[WaCalls/WebRTC] ICE Connection State: ${pc.iceConnectionState}`);
+  };
+  pc.onconnectionstatechange = () => {
+    console.log(`[WaCalls/WebRTC] Peer Connection State: ${pc.connectionState}`);
+  };
+
+  console.log("[WaCalls/WebRTC] Configurando AudioContext de 16kHz...");
   const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
   await ctx.audioWorklet.addModule(CAPTURE_WORKLET_URL);
   await ctx.audioWorklet.addModule(PLAYBACK_WORKLET_URL);
@@ -56,8 +73,11 @@ export const openCall = async (
     playbackNode.port.postMessage(int16LEToFloat32(e.data));
   };
 
+  console.log("[WaCalls/WebRTC] Gerando SDP Offer...");
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
+  
+  console.log("[WaCalls/WebRTC] Iniciando ICE Candidates Gathering...");
   await new Promise<void>((resolve) => {
     if (pc.iceGatheringState === "complete") resolve();
     else
@@ -65,6 +85,7 @@ export const openCall = async (
         if (pc.iceGatheringState === "complete") resolve();
       });
   });
+  console.log("[WaCalls/WebRTC] ICE Gathering concluído. Enviando SDP Offer para o backend...");
 
   const response = await fetch(`${API_URL}/api/v1/wacalls/sessions/${sid}/calls/${callId}/webrtc`, {
     method: 'POST',
@@ -79,13 +100,16 @@ export const openCall = async (
   }
 
   const { sdp_answer } = await response.json();
+  console.log("[WaCalls/WebRTC] SDP Answer recebido. Aplicando Remote Description...");
   await pc.setRemoteDescription({ type: "answer", sdp: sdp_answer });
+  console.log("[WaCalls/WebRTC] Remote Description aplicado. Aguardando conexão de mídia...");
 
   return {
     pc,
     micStream,
     remoteStream: streamDest.stream,
     close: () => {
+      console.log(`[WaCalls/WebRTC] 🚪 Fechando conexão WebRTC para chamada '${callId}'...`);
       try {
         micStream.getTracks().forEach((t) => t.stop());
       } catch {}

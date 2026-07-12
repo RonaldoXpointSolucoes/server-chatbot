@@ -48,6 +48,7 @@ export default function WaCallsWidget() {
   const [showSettings, setShowSettings] = useState(false);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [callDuration, setCallDuration] = useState(0);
+  const [webrtcState, setWebrtcState] = useState<string>("new");
 
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ringtoneRef = useRef<HTMLAudioElement | null>(null);
@@ -95,6 +96,29 @@ export default function WaCallsWidget() {
       }
     };
   }, [activeCall?.status]);
+
+  // Monitora a conexão WebRTC da chamada ativa
+  useEffect(() => {
+    if (!activeCall) {
+      setWebrtcState("new");
+      return;
+    }
+    const conn = ownConnections.get(activeCall.callId);
+    if (!conn || !conn.pc) return;
+
+    const pc = conn.pc;
+    setWebrtcState(pc.connectionState);
+
+    const handleStateChange = () => {
+      setWebrtcState(pc.connectionState);
+      console.log(`[WaCalls UI WebRTC State]: ${pc.connectionState} (ICE: ${pc.iceConnectionState})`);
+    };
+
+    pc.addEventListener("connectionstatechange", handleStateChange);
+    return () => {
+      pc.removeEventListener("connectionstatechange", handleStateChange);
+    };
+  }, [activeCall, ownConnections]);
 
   // Toca o ringtone se houver chamada recebida
   useEffect(() => {
@@ -302,18 +326,35 @@ export default function WaCallsWidget() {
                   {formatPeer(activeCall.peer)}
                 </h3>
                 
-                <div className="flex items-center gap-1.5 mt-2 mb-6 px-3 py-1 rounded-full bg-gray-100/80 dark:bg-[#202c33]/70 border border-gray-200/20">
-                  <Clock className="w-3.5 h-3.5 text-[#00a884] animate-pulse" />
-                  <span className="text-xs text-gray-700 dark:text-gray-300 font-mono font-bold">
-                    {activeCall.status === "connected" ? (
-                      formatDuration(callDuration)
-                    ) : (
-                      <span className="animate-pulse flex items-center gap-1">
-                        <Loader2 className="w-3 h-3 animate-spin text-[#00a884]" />
-                        {activeCall.status === "starting" ? "Iniciando..." : "Chamando..."}
+                <div className="flex flex-col items-center gap-1 mt-2 mb-6 select-none">
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-gray-100/80 dark:bg-[#202c33]/70 border border-gray-200/20">
+                    <Clock className="w-3.5 h-3.5 text-[#00a884] animate-pulse" />
+                    <span className="text-xs text-gray-700 dark:text-gray-300 font-mono font-bold">
+                      {activeCall.status === "connected" ? (
+                        formatDuration(callDuration)
+                      ) : (
+                        <span className="animate-pulse flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin text-[#00a884]" />
+                          {activeCall.status === "starting" ? "Iniciando..." : "Chamando..."}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  
+                  {activeCall.status === "connected" && (
+                    <div className="text-[10px] uppercase font-extrabold tracking-wider text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-1">
+                      Mídia Local:{" "}
+                      <span className={
+                        webrtcState === 'connected' ? 'text-emerald-500' :
+                        webrtcState === 'connecting' || webrtcState === 'checking' ? 'text-amber-500 animate-pulse' :
+                        'text-rose-500'
+                      }>
+                        {webrtcState === 'connected' ? '🟢 Conectado' : 
+                         webrtcState === 'connecting' || webrtcState === 'checking' ? '🟡 Conectando...' : 
+                         webrtcState === 'failed' ? '🔴 Falha de Rede' : `🟡 ${webrtcState}`}
                       </span>
-                    )}
-                  </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Ações de Chamada Ativa */}

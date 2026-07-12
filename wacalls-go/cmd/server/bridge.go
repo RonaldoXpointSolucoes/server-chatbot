@@ -1,8 +1,12 @@
 package main
 
 import (
+	"io"
 	"log/slog"
+	"net/http"
+	"strings"
 	"sync/atomic"
+	"time"
 
 	"wacalls/internal/voip/media"
 
@@ -28,7 +32,13 @@ type Bridge struct {
 }
 
 func NewBridge(offerSDP string, log *slog.Logger) (*Bridge, string, error) {
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{
+	settingEngine := webrtc.SettingEngine{}
+	if resolvedPublicIP != "" {
+		settingEngine.SetNAT1ExternalIPs([]string{resolvedPublicIP}, webrtc.ICECandidateTypeHost)
+	}
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
+
+	pc, err := api.NewPeerConnection(webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
 				URLs: []string{
@@ -56,7 +66,7 @@ func NewBridge(offerSDP string, log *slog.Logger) (*Bridge, string, error) {
 	})
 
 	pc.OnICEConnectionStateChange(func(s webrtc.ICEConnectionState) {
-		log.Debug("browser ice state", "state", s.String())
+		log.Info("browser ice state change", "state", s.String())
 		if s == webrtc.ICEConnectionStateFailed || s == webrtc.ICEConnectionStateClosed {
 			if br.OnTerminalICE != nil {
 				br.OnTerminalICE()
@@ -97,4 +107,36 @@ func (b *Bridge) Close() {
 	if b.pc != nil {
 		_ = b.pc.Close()
 	}
+}
+
+var resolvedPublicIP string
+
+func resolvePublicIP(log *slog.Logger) {
+	go func() {
+		// Tenta múltiplos endpoints conhecidos para robustez
+		endpoints := []string{
+			"https://api.ipify.org",
+			"https://ifconfig.me/ip",
+			"https://ident.me",
+			"https://icanhazip.com",
+		}
+		for _, url := range endpoints {
+			client := http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Get(url)
+			if err == nil {
+				defer resp.Body.Close()
+				body, err := io.ReadAll(resp.Body)
+				if err == nil {
+					ip := strings.TrimSpace(string(body))
+					if len(ip) >= 7 && len(ip) <= 15 {
+						resolvedPublicIP = ip
+						log.Info("resolved server public IP for WebRTC NAT 1:1 mapping", "ip", ip)
+						return
+					}
+				}
+			}
+			time.Sleep(1 * time.Second)
+		}
+		log.Warn("could not resolve server public IP dynamically; WebRTC will fallback to local candidate interfaces")
+	}()
 }
