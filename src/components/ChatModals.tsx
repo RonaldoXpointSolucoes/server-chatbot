@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AlertCircle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
@@ -2250,11 +2250,26 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [allAvailableCompanies, setAllAvailableCompanies] = useState<any[]>([]);
 
+  const companySelectRef = useRef<HTMLDivElement>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [searchCompanyQuery, setSearchCompanyQuery] = useState('');
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (companySelectRef.current && !companySelectRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   useEffect(() => {
     if (contact) {
       setCnpjInput(contact.document_number || '');
       setSelectedCompanyId('');
       setSelectedGroupId('');
+      setSearchCompanyQuery('');
       setEditingCnpj(false);
     }
   }, [contact, isOpen]);
@@ -2743,22 +2758,87 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                   </div>
                   {editingCnpj ? (
                     <div className="flex flex-col gap-2 w-full pr-2">
-                      <div className="flex flex-col gap-1">
+                      <div className="flex flex-col gap-1 relative" ref={companySelectRef}>
                         <span className="text-[9px] uppercase font-bold text-gray-400">Associar a uma Empresa</span>
-                        <select
-                          value={selectedCompanyId}
-                          onChange={e => setSelectedCompanyId(e.target.value)}
-                          className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none"
-                        >
-                          <option value="">Selecione uma Empresa...</option>
-                          {allAvailableCompanies
-                            .filter(c => c.id !== contact.id && !(contact.company_ids || []).includes(c.id))
-                            .map(c => (
-                              <option key={c.id} value={c.id}>
-                                {c.fantasy_name || c.name} {c.document_number ? `(${formatDocument(c.document_number)})` : ''}
-                              </option>
-                            ))}
-                        </select>
+                        
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="Buscar por Nome, Fantasia ou CNPJ..."
+                            value={searchCompanyQuery}
+                            onChange={(e) => {
+                              setSearchCompanyQuery(e.target.value);
+                              setDropdownOpen(true);
+                            }}
+                            onFocus={() => setDropdownOpen(true)}
+                            className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/10 rounded-lg pl-2.5 pr-8 py-1.5 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          />
+                          {searchCompanyQuery && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSearchCompanyQuery('');
+                                setSelectedCompanyId('');
+                              }}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-0.5 rounded-full"
+                              title="Limpar seleção"
+                            >
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
+
+                        {dropdownOpen && (
+                          <div className="absolute left-0 right-0 top-full mt-1 max-h-60 overflow-y-auto bg-white dark:bg-[#1a2329] border border-gray-200 dark:border-white/10 rounded-xl shadow-xl z-50 divide-y divide-gray-100 dark:divide-white/5 animate-in fade-in slide-in-from-top-1 duration-150 custom-scrollbar">
+                            {(() => {
+                              const searchLower = searchCompanyQuery.toLowerCase().replace(/\D/g, '');
+                              const searchLowerText = searchCompanyQuery.toLowerCase();
+                              const filtered = allAvailableCompanies
+                                .filter(c => c.id !== contact.id && !(contact.company_ids || []).includes(c.id))
+                                .filter(c => {
+                                  const nameMatch = (c.name || '').toLowerCase().includes(searchLowerText);
+                                  const fantasyMatch = (c.fantasy_name || '').toLowerCase().includes(searchLowerText);
+                                  const docMatch = (c.document_number || '').includes(searchLower);
+                                  return nameMatch || fantasyMatch || docMatch;
+                                });
+
+                              return filtered.length > 0 ? (
+                                filtered.map(c => (
+                                  <button
+                                    key={c.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedCompanyId(c.id);
+                                      setSearchCompanyQuery(c.fantasy_name || c.name);
+                                      setDropdownOpen(false);
+                                    }}
+                                    className="w-full text-left px-3 py-2 hover:bg-emerald-500/5 dark:hover:bg-emerald-500/10 flex items-center justify-between gap-3 group transition-colors"
+                                  >
+                                    <div className="flex flex-col min-w-0 flex-1">
+                                      <span className="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate group-hover:text-emerald-500 transition-colors">
+                                        {c.fantasy_name || c.name}
+                                      </span>
+                                      {c.fantasy_name && c.name && (
+                                        <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate mt-0.5">
+                                          {c.name}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {c.document_number && (
+                                      <span className="shrink-0 font-mono text-[9px] font-bold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-white/5 border border-gray-200/50 dark:border-white/5 px-1.5 py-0.5 rounded-md">
+                                        {formatDocument(c.document_number)}
+                                      </span>
+                                    )}
+                                  </button>
+                                ))
+                              ) : (
+                                <div className="px-3 py-4 text-center text-xs text-gray-400 dark:text-gray-500 italic">
+                                  Nenhuma empresa encontrada
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
                       </div>
                       
                       <div className="flex flex-col gap-1">
