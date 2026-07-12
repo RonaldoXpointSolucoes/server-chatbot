@@ -5799,7 +5799,7 @@ export default function ChatDashboard() {
                   
                   {/* Premium Company Info Button or Phone with Copy Option */}
                   <div className="flex items-center gap-2 mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300 flex-nowrap whitespace-nowrap">
-                    (activeChat.fantasy_name || activeChat.document_number || activeChat.document_type === 'cnpj' || (Array.isArray(activeChat.company_ids) && activeChat.company_ids.length > 0) || (Array.isArray(activeChat.tags) && activeChat.tags.length > 0)) ? (
+                    {(activeChat.fantasy_name || activeChat.document_number || activeChat.document_type === 'cnpj' || (Array.isArray(activeChat.company_ids) && activeChat.company_ids.length > 0) || (Array.isArray(activeChat.tags) && activeChat.tags.length > 0)) ? (
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
