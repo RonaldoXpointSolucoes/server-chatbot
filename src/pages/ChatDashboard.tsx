@@ -5792,13 +5792,13 @@ export default function ChatDashboard() {
                       e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone))}&background=random&color=fff`;
                     }}
                   />
-                <div className="flex flex-col justify-center">
+                <div className="flex flex-col justify-center min-w-0">
                   <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
-                    <span className="truncate max-w-[200px] sm:max-w-md">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
+                    <span className="truncate max-w-[120px] sm:max-w-[180px] md:max-w-[220px] lg:max-w-[150px] xl:max-w-[320px]">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
                   </h2>
                   
                   {/* Premium Company Info Button or Phone with Copy Option */}
-                  <div className="flex items-center gap-2 mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300 flex-wrap">
+                  <div className="flex items-center gap-2 mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300 flex-nowrap whitespace-nowrap">
                     {(activeChat.fantasy_name || activeChat.document_number) ? (
                       <button 
                         onClick={(e) => {
@@ -5881,7 +5881,7 @@ export default function ChatDashboard() {
                     <button 
                     onClick={() => setShowPauseMenu(!showPauseMenu)}
                     className={cn(
-                      "flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-xs font-semibold border shadow-sm hover:scale-105 active:scale-95 whitespace-nowrap",
+                      "flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-3 rounded-full transition-all duration-300 text-xs font-semibold border shadow-sm hover:scale-105 active:scale-95 whitespace-nowrap",
                       !activeChat.ai_paused 
                         ? "bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.1)]"
                         : "bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-400"
@@ -5897,8 +5897,8 @@ export default function ChatDashboard() {
                         </span>
                       )}
                     </div>
-                    <span>{!activeChat.ai_paused ? "I.A Ativa" : "I.A Pausada"}</span>
-                    <ChevronDown size={12} className={cn("transition-transform duration-200", showPauseMenu && "rotate-180")} />
+                    <span className="hidden xl:inline">{!activeChat.ai_paused ? "I.A Ativa" : "I.A Pausada"}</span>
+                    <ChevronDown size={12} className={cn("transition-transform duration-200 hidden xl:inline", showPauseMenu && "rotate-180")} />
                   </button>
 
                   <AnimatePresence>
@@ -5972,7 +5972,7 @@ export default function ChatDashboard() {
                 ) : (
                   <div className="relative">
                     <button 
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-300 text-xs font-semibold border shadow-sm whitespace-nowrap bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400 hover:scale-105 active:scale-95"
+                      className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-3 rounded-full transition-all duration-300 text-xs font-semibold border shadow-sm whitespace-nowrap bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400 hover:scale-105 active:scale-95"
                       title="O Robô de I.A está desativado globalmente para a empresa. Ative-o na barra lateral esquerda."
                       onClick={() => alert("O Robô de I.A está desativado globalmente para a empresa. Para utilizá-lo, ligue a chave 'Robô I.A' na barra lateral esquerda.")}
                     >
@@ -5983,7 +5983,7 @@ export default function ChatDashboard() {
                           <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-rose-500"></span>
                         </span>
                       </div>
-                      <span>I.A Inativa (Global)</span>
+                      <span className="hidden xl:inline">I.A Inativa (Global)</span>
                     </button>
                   </div>
                 )}
@@ -5993,22 +5993,22 @@ export default function ChatDashboard() {
                     onClick={() => {
                       reopenConversation(activeChat.id);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-full transition-all duration-300 text-xs font-semibold border border-blue-200 dark:border-blue-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95 whitespace-nowrap"
+                    className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-3 bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-full transition-all duration-300 text-xs font-semibold border border-blue-200 dark:border-blue-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95 whitespace-nowrap"
                     title="Reabrir Conversa"
                   >
                     <RotateCcw size={14} className="animate-spin-once" />
-                    <span>Reabrir Conversa</span>
+                    <span className="hidden xl:inline">Reabrir Conversa</span>
                   </button>
                 ) : (
                   <button 
                     onClick={() => {
                       handleResolveConversation(activeChat.id);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-all duration-300 text-xs font-semibold border border-emerald-200 dark:border-emerald-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95 whitespace-nowrap"
+                    className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-3 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-all duration-300 text-xs font-semibold border border-emerald-200 dark:border-emerald-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95 whitespace-nowrap"
                     title="Resolver Conversa"
                   >
                     <CheckCircle2 size={14} />
-                    <span>Resolver</span>
+                    <span className="hidden xl:inline">Resolver</span>
                   </button>
                 )}
 

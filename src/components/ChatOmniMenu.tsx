@@ -33,22 +33,22 @@ export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
       <div className="relative">
         <button 
           onClick={() => setMenuOpen(menuOpen === 'agent' ? null : 'agent')}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold text-slate-600 dark:text-slate-300 bg-slate-100/50 dark:bg-slate-800/50 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-all border border-transparent whitespace-nowrap"
+          className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-2.5 rounded-full text-xs font-semibold text-slate-600 dark:text-slate-300 bg-slate-100/50 dark:bg-slate-800/50 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-all border border-transparent whitespace-nowrap"
         >
           {currentAgent ? (
             <>
-              <div className="w-5 h-5 rounded-full bg-indigo-500 text-white flex items-center justify-center text-[10px] uppercase font-bold overflow-hidden shadow-sm">
+              <div className="w-5 h-5 rounded-full bg-indigo-500 text-white flex items-center justify-center text-[10px] uppercase font-bold overflow-hidden shadow-sm shrink-0">
                  {currentAgent.full_name?.substring(0, 2) || <User size={12}/>}
               </div>
-              <span className="max-w-[70px] truncate">{currentAgent.full_name?.split(' ')[0]}</span>
+              <span className="hidden xl:inline max-w-[70px] truncate">{currentAgent.full_name?.split(' ')[0]}</span>
             </>
           ) : (
             <>
-              <UserPlus size={14} />
-              <span>Atribuir</span>
+              <UserPlus size={14} className="shrink-0" />
+              <span className="hidden xl:inline">Atribuir</span>
             </>
           )}
-          <ChevronDown size={14} className="opacity-50" />
+          <ChevronDown size={14} className="opacity-50 hidden xl:inline" />
         </button>
 
         {menuOpen === 'agent' && (

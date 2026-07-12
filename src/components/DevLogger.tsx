@@ -1332,7 +1332,7 @@ export default function DevLogger() {
       {!isVisible && (
         <button 
            onClick={(e) => { e.stopPropagation(); toggleVisibility(); }}
-           className={`fixed top-4 right-4 z-[9999] text-white p-3 rounded-full shadow-xl transition-all ${engineStatus === 'online' ? 'bg-emerald-600 hover:bg-emerald-500 hover:shadow-emerald-500/20' : 'bg-red-600 hover:bg-red-500 animate-pulse hover:shadow-red-500/20'} cursor-pointer`}
+           className={`fixed top-20 right-4 z-[9999] text-white p-3 rounded-full shadow-xl transition-all ${engineStatus === 'online' ? 'bg-emerald-600 hover:bg-emerald-500 hover:shadow-emerald-500/20' : 'bg-red-600 hover:bg-red-500 animate-pulse hover:shadow-red-500/20'} cursor-pointer`}
            title="Abrir DevLogger"
         >
           <Terminal size={20} />
