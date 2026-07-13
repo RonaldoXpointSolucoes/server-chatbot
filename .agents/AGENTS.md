@@ -4,7 +4,10 @@
 
 Sempre que o usuário digitar `deploy!`, ou solicitar um deploy, o agente **OBRIGATORIAMENTE** deve executar as seguintes ações:
 
-1. **Incremento de Versão**: Incrementar a versão no arquivo `package.json` (geralmente alterando o número `patch` da versão, ex: de `3.4.2` para `3.4.3`). Se a ferramenta `npm version patch` estiver disponível, use-a.
+1. **Incremento de Versão (Dígito Único)**: Incrementar a versão no arquivo `package.json` e `server/package.json`. Cada componente (`X.Y.Z`) só pode ir de `0` a `9` (nunca use dois dígitos, ex: evitar `.10`, `.22`). O valor máximo é `9`.
+   - Se a versão atual for `X.Y.patch` onde `patch` < 9, incremente para `X.Y.(patch+1)` (ex: de `4.4.8` para `4.4.9`).
+   - Se for `X.Y.9`, incremente o minor e zere o patch: `X.(Y+1).0` (ex: de `4.4.9` o próximo deve ser obrigatoriamente `4.5.0`).
+   - Se for `X.9.9`, incremente o major: `(X+1).0.0` (ex: de `4.9.9` para `5.0.0`).
 2. **Registro de Data/Hora de Build**: Se houver variáveis de ambiente como `VITE_PACKAGE_BUILD_DATE` (ou similar) no `.env`, atualize-a para a data/hora atual para que o frontend reflita o momento do deploy.
 3. **Execução do Comando de Deploy**: Rodar o comando do projeto para deploy (ex: `npm run deploy`).
 4. **Relatório**: Ao final, relatar claramente qual foi a versão gerada e o status do deploy no chat.
