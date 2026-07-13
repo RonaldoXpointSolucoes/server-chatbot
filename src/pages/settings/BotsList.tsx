@@ -895,6 +895,9 @@ export default function BotsList() {
       if (!error) {
         setBots(bots.filter(b => b.id !== id));
         await useChatStore.getState().logOperation('DELETE', 'bots', id, botBefore, null);
+        window.dispatchEvent(new CustomEvent('toast', { 
+            detail: { message: 'Robô removido com sucesso!', type: 'success' } 
+        }));
       } else {
         alert("Erro ao excluir robô: " + error.message);
       }
@@ -916,6 +919,9 @@ export default function BotsList() {
         if (data) {
           setBots(bots.map(b => b.id === botToEdit.id ? data : b));
           await useChatStore.getState().logOperation('UPDATE', 'bots', botToEdit.id, botBefore, data);
+          window.dispatchEvent(new CustomEvent('toast', { 
+              detail: { message: `Robô "${data.name}" atualizado com sucesso!`, type: 'success' } 
+          }));
         }
       } else {
         const { data, error } = await supabase
@@ -928,6 +934,13 @@ export default function BotsList() {
         if (data) {
           setBots([data, ...bots]);
           await useChatStore.getState().logOperation('INSERT', 'bots', data.id, null, data);
+          const cat = getBotCategory(data);
+          window.dispatchEvent(new CustomEvent('toast', { 
+              detail: { 
+                  message: `Robô "${data.name}" criado com sucesso na coluna "${cat}"! (Role a tela para o lado para ver)`, 
+                  type: 'success' 
+              } 
+          }));
         }
       }
       return true;
