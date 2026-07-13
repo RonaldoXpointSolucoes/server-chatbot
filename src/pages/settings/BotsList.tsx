@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, 
   ChevronRight, 
+  ChevronLeft,
   Bot, 
   User,
   Sparkles, 
@@ -257,6 +258,20 @@ export default function BotsList() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingIntervalRef = useRef<any>(null);
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const scrollLeft = () => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollBy({ left: -394, behavior: 'smooth' });
+    }
+  };
+
+  const scrollRight = () => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollBy({ left: 394, behavior: 'smooth' });
+    }
+  };
 
   // Helper para salvar rascunho de treinamento em memória para não perder
   const saveTrainingDraft = (
@@ -1656,37 +1671,56 @@ Instruções importantes:
                   </div>
                 </div>
               ) : (
-                <div className="flex gap-6 overflow-x-auto pb-6 styled-scrollbar select-none w-full">
-                  {BOT_CATEGORIES.map(category => {
-                    const botsInCategory = filteredBots.filter(bot => getBotCategory(bot) === category);
-                    return (
-                      <div key={category} className="w-[370px] shrink-0 flex flex-col bg-[#141519]/70 border border-white/5 p-5 rounded-[2.5rem] backdrop-blur-xl shadow-2xl h-[calc(100vh-320px)] overflow-hidden animate-in fade-in slide-in-from-right-4 duration-500">
-                        {/* Header da Coluna */}
-                        <div className="flex items-center justify-between mb-5 px-1">
-                          <div className="flex items-center gap-2.5">
-                            <span className={cn(
-                              "w-2.5 h-2.5 rounded-full",
-                              category === 'Atendimento e Triagem' && "bg-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.5)]",
-                              category === 'Vendas e Orçamentos' && "bg-purple-400 shadow-[0_0_10px_rgba(192,132,252,0.5)]",
-                              category === 'Suporte e Operacional' && "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.5)]",
-                              category === 'Agendamentos e Reservas' && "bg-pink-400 shadow-[0_0_10px_rgba(244,114,182,0.5)]",
-                              category === 'Encantamento e Pós-Venda' && "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]"
-                            )} />
-                            <h4 className="text-xs font-bold text-white/95 tracking-wide uppercase">{category}</h4>
-                          </div>
-                          <span className="bg-white/5 border border-white/10 px-2.5 py-0.5 rounded-full text-xs text-white/50 font-bold">
-                            {botsInCategory.length}
-                          </span>
-                        </div>
+                <div className="relative w-full group/scroll">
+                  {/* Botões de navegação lateral para scroll horizontal */}
+                  <button 
+                    type="button"
+                    onClick={scrollLeft}
+                    className="absolute -left-4 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-black/80 hover:bg-indigo-600 border border-white/10 hover:border-indigo-500/30 text-white/70 hover:text-white flex items-center justify-center backdrop-blur-md transition-all shadow-2xl opacity-0 group-hover/scroll:opacity-100 active:scale-95 duration-300"
+                    title="Rolar para esquerda"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
 
-                  <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4 styled-scrollbar pb-4">
-                          {botsInCategory.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-12 text-center border border-white/5 rounded-3xl h-44">
-                              <Bot className="w-8 h-8 text-white/10 mb-2" />
-                              <p className="text-xs text-white/30 font-medium">Nenhum agente ativo</p>
+                  <button 
+                    type="button"
+                    onClick={scrollRight}
+                    className="absolute -right-4 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-black/80 hover:bg-indigo-600 border border-white/10 hover:border-indigo-500/30 text-white/70 hover:text-white flex items-center justify-center backdrop-blur-md transition-all shadow-2xl opacity-0 group-hover/scroll:opacity-100 active:scale-95 duration-300"
+                    title="Rolar para direita"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+
+                  <div 
+                    ref={scrollContainerRef}
+                    className="flex gap-6 overflow-x-auto pb-6 styled-scrollbar select-none w-full scroll-smooth"
+                  >
+                    {BOT_CATEGORIES.map(category => {
+                      const botsInCategory = filteredBots.filter(bot => getBotCategory(bot) === category);
+                      if (botsInCategory.length === 0) return null; // Esconder colunas vazias
+                      
+                      return (
+                        <div key={category} className="w-[370px] shrink-0 flex flex-col bg-[#141519]/70 border border-white/5 p-5 rounded-[2.5rem] backdrop-blur-xl shadow-2xl h-[calc(100vh-320px)] overflow-hidden animate-in fade-in slide-in-from-right-4 duration-500">
+                          {/* Header da Coluna */}
+                          <div className="flex items-center justify-between mb-5 px-1">
+                            <div className="flex items-center gap-2.5">
+                              <span className={cn(
+                                "w-2.5 h-2.5 rounded-full",
+                                category === 'Atendimento e Triagem' && "bg-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.5)]",
+                                category === 'Vendas e Orçamentos' && "bg-purple-400 shadow-[0_0_10px_rgba(192,132,252,0.5)]",
+                                category === 'Suporte e Operacional' && "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.5)]",
+                                category === 'Agendamentos e Reservas' && "bg-pink-400 shadow-[0_0_10px_rgba(244,114,182,0.5)]",
+                                category === 'Encantamento e Pós-Venda' && "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]"
+                              )} />
+                              <h4 className="text-xs font-bold text-white/95 tracking-wide uppercase">{category}</h4>
                             </div>
-                          ) : (
-                            botsInCategory.map((bot) => {
+                            <span className="bg-white/5 border border-white/10 px-2.5 py-0.5 rounded-full text-xs text-white/50 font-bold">
+                              {botsInCategory.length}
+                            </span>
+                          </div>
+
+                          <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4 styled-scrollbar pb-4">
+                            {botsInCategory.map((bot) => {
                               const isDefault = isBotDefault(bot);
                               return (
                                 <div 
@@ -1750,7 +1784,7 @@ Instruções importantes:
                                     </span>
                                   </div>
 
-                                   <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                                     <button 
                                       onClick={() => handleOpenTraining(bot)}
                                       className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-400 hover:text-amber-300 transition-all shadow-sm text-xs font-bold flex items-center gap-1"
@@ -1773,12 +1807,12 @@ Instruções importantes:
                                   </div>
                                 </div>
                               );
-                            })
-                          )}
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>

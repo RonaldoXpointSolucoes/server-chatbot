@@ -756,7 +756,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       if (onlyMine && agentId) {
-        query = query.eq('assigned_to', agentId);
+        query = query.ilike('assigned_to', `%${agentId}%`);
       }
 
       const { data: convsToResolve, error } = await query;
@@ -1324,6 +1324,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
         state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
     }
 
+    // Auto-atribuição do agente quando envia mensagem
+    try {
+        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+        if (currentUserEmail) {
+            const agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+            if (agent) {
+                const assignedIds = contact.assigned_to ? contact.assigned_to.split(',') : [];
+                if (!assignedIds.includes(agent.id)) {
+                    const newAssigned = [...assignedIds, agent.id].join(',');
+                    state.updateConversationField(contactId, { assigned_to: newAssigned });
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('Erro ao auto-atribuir agente:', e);
+    }
+
     try {
       // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato
       const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
@@ -1655,6 +1672,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
         state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
     }
 
+    // Auto-atribuição do agente quando envia mensagem
+    try {
+        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+        if (currentUserEmail) {
+            const agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+            if (agent) {
+                const assignedIds = contact.assigned_to ? contact.assigned_to.split(',') : [];
+                if (!assignedIds.includes(agent.id)) {
+                    const newAssigned = [...assignedIds, agent.id].join(',');
+                    state.updateConversationField(contactId, { assigned_to: newAssigned });
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('Erro ao auto-atribuir agente:', e);
+    }
+
     try {
       const formData = new FormData();
       formData.append('media', file);
@@ -1809,6 +1843,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (state.globalAiEnabled && contact.bot_status !== 'paused') {
         const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
         state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
+    }
+
+    // Auto-atribuição do agente quando envia mensagem
+    try {
+        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+        if (currentUserEmail) {
+            const agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+            if (agent) {
+                const assignedIds = contact.assigned_to ? contact.assigned_to.split(',') : [];
+                if (!assignedIds.includes(agent.id)) {
+                    const newAssigned = [...assignedIds, agent.id].join(',');
+                    state.updateConversationField(contactId, { assigned_to: newAssigned });
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('Erro ao auto-atribuir agente:', e);
     }
 
     try {

@@ -25,7 +25,8 @@ export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
 
   if (!contact) return null;
 
-  const currentAgent = agents.find(a => a.id === contact.assigned_to);
+  const assignedIds = contact.assigned_to ? contact.assigned_to.split(',') : [];
+  const assignedAgents = agents.filter(a => assignedIds.includes(a.id));
 
   return (
     <div className="flex items-center gap-1 sm:gap-2 mr-2" ref={menuRef}>
@@ -35,12 +36,21 @@ export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
           onClick={() => setMenuOpen(menuOpen === 'agent' ? null : 'agent')}
           className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-2.5 rounded-full text-xs font-semibold text-slate-600 dark:text-slate-300 bg-slate-100/50 dark:bg-slate-800/50 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-all border border-transparent whitespace-nowrap"
         >
-          {currentAgent ? (
+          {assignedAgents.length > 0 ? (
             <>
-              <div className="w-5 h-5 rounded-full bg-indigo-500 text-white flex items-center justify-center text-[10px] uppercase font-bold overflow-hidden shadow-sm shrink-0">
-                 {currentAgent.full_name?.substring(0, 2) || <User size={12}/>}
+              <div className="flex -space-x-1.5 overflow-hidden">
+                {assignedAgents.slice(0, 3).map(agent => (
+                  <div key={agent.id} className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white flex items-center justify-center text-[9px] uppercase font-bold overflow-hidden shadow-sm shrink-0 border border-white dark:border-[#233138]" title={agent.full_name}>
+                     {agent.full_name?.substring(0, 2) || <User size={10}/>}
+                  </div>
+                ))}
               </div>
-              <span className="hidden xl:inline max-w-[70px] truncate">{currentAgent.full_name?.split(' ')[0]}</span>
+              {assignedAgents.length > 3 && (
+                <span className="text-[10px] font-bold text-indigo-500 bg-indigo-500/10 px-1 py-0.5 rounded ml-0.5">+{assignedAgents.length - 3}</span>
+              )}
+              <span className="hidden xl:inline max-w-[80px] truncate ml-1">
+                {assignedAgents.map(a => a.full_name?.split(' ')[0]).join(', ')}
+              </span>
             </>
           ) : (
             <>
@@ -58,32 +68,43 @@ export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
              </div>
              
              <button 
-                onClick={() => { updateConversationField(contactId, { assigned_to: null }); setMenuOpen(null); }}
+                onClick={() => { updateConversationField(contactId, { assigned_to: null }); }}
                 className="w-full text-left px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center justify-between transition-colors"
              >
                 <div className="flex items-center gap-2">
-                  <XCircle size={16} className="text-gray-400" />
-                  <span className="text-sm text-gray-700 dark:text-slate-300 italic">Sem Atribuição</span>
+                   <XCircle size={16} className="text-gray-400" />
+                   <span className="text-sm text-gray-700 dark:text-slate-300 italic">Sem Atribuição</span>
                 </div>
-                {currentAgent === undefined && <Check size={14} className="text-[#00a884]"/>}
+                {assignedIds.length === 0 && <Check size={14} className="text-[#00a884]"/>}
              </button>
 
              <div className="max-h-60 overflow-y-auto mt-1 custom-scrollbar">
-               {agents.map(a => (
-                 <button 
-                   key={a.id} 
-                   onClick={() => { updateConversationField(contactId, { assigned_to: a.id }); setMenuOpen(null); }}
-                   className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center justify-between transition-colors group"
-                 >
-                   <div className="flex items-center gap-3">
-                     <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
-                       {a.full_name?.substring(0, 2).toUpperCase() || 'AG'}
+               {agents.map(a => {
+                 const isAssigned = assignedIds.includes(a.id);
+                 return (
+                   <button 
+                     key={a.id} 
+                     onClick={() => {
+                       let newAssigned;
+                       if (isAssigned) {
+                         newAssigned = assignedIds.filter(id => id !== a.id).join(',');
+                       } else {
+                         newAssigned = [...assignedIds, a.id].join(',');
+                       }
+                       updateConversationField(contactId, { assigned_to: newAssigned || null });
+                     }}
+                     className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center justify-between transition-colors group"
+                   >
+                     <div className="flex items-center gap-3">
+                       <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
+                         {a.full_name?.substring(0, 2).toUpperCase() || 'AG'}
+                       </div>
+                       <span className="text-sm text-gray-700 dark:text-[#d1d7db] group-hover:text-indigo-500 transition-colors font-medium">{a.full_name}</span>
                      </div>
-                     <span className="text-sm text-gray-700 dark:text-[#d1d7db] group-hover:text-indigo-500 transition-colors font-medium">{a.full_name}</span>
-                   </div>
-                   {currentAgent?.id === a.id && <Check size={16} className="text-indigo-500"/>}
-                 </button>
-               ))}
+                     {isAssigned && <Check size={16} className="text-indigo-500"/>}
+                   </button>
+                 );
+               })}
              </div>
 
              <div className="px-3 pb-2 pt-3 mt-2 border-t border-gray-100 dark:border-slate-700/50">

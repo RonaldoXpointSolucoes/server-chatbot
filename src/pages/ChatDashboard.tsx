@@ -1483,7 +1483,7 @@ export default function ChatDashboard() {
            if (filterType === 'mine') {
                const currentUserEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
                const currentAgent = agents.find(a => a.email === currentUserEmail);
-               if (!currentAgent || c.assigned_to !== currentAgent.id) return false;
+               if (!currentAgent || !c.assigned_to?.split(',').includes(currentAgent.id)) return false;
            }
        }
        
@@ -5474,7 +5474,9 @@ export default function ChatDashboard() {
                                {contact.assigned_to && (
                                  <span className="shrink-0 px-1.5 py-[2px] bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-500/20 text-[8px] font-extrabold uppercase rounded-md flex items-center gap-1 shadow-sm">
                                    <User size={8} />
-                                   <span className="max-w-[60px] truncate">{agents.find(a => a.id === contact.assigned_to)?.full_name?.split(' ')[0] || 'Agente'}</span>
+                                   <span className="max-w-[120px] truncate">
+                                     {agents.filter(a => contact.assigned_to?.split(',').includes(a.id)).map(a => a.full_name?.split(' ')[0]).join(', ') || 'Agente'}
+                                   </span>
                                  </span>
                                )}
                                {contact.conv_labels && contact.conv_labels.length > 0 && (
@@ -5673,7 +5675,11 @@ export default function ChatDashboard() {
                                   if (email) {
                                     const me = agents.find(a => a.email === email);
                                     if (me) {
-                                      await useChatStore.getState().updateConversationField(contact.id, { assigned_to: me.id });
+                                      const assignedIds = contact.assigned_to ? contact.assigned_to.split(',') : [];
+                                      if (!assignedIds.includes(me.id)) {
+                                        const newAssigned = [...assignedIds, me.id].join(',');
+                                        await useChatStore.getState().updateConversationField(contact.id, { assigned_to: newAssigned });
+                                      }
                                     }
                                   }
                                   setActiveDropdown(null); 

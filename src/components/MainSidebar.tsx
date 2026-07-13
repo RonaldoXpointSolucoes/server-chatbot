@@ -162,7 +162,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const instancesStatus = useChatStore(state => state.instancesStatus);
   
   const currentAgent = agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
-  const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to === currentAgent.id && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
+  const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to?.split(',').includes(currentAgent.id) && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
   const unreadCountGlobal = contacts.filter(c => c.unread > 0 && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length;
   
   const myTasksCount = React.useMemo(() => {
