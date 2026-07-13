@@ -204,11 +204,19 @@ class EventProcessor {
             if (msgId) {
                 const safeInstanceId = instanceId || 'null_instance';
                 const cacheKey = `${safeInstanceId}_${msgId}`;
-                if (this.processedMessagesCache.has(cacheKey)) {
+                
+                // Ignora stubs de falha de descriptografia (ex: Message absent from node) na validação do cache,
+                // permitindo que o retry natural do WhatsApp/Baileys seja processado com sucesso.
+                const isDecryptionFailureStub = msg.messageStubType && !msg.message;
+                
+                if (!isDecryptionFailureStub && this.processedMessagesCache.has(cacheKey)) {
                     console.log(`[EventProcessor] Mensagem Duplicada Detectada em Cache de Memória (Ignorando). ID: ${msgId}`);
                     continue;
                 }
-                this.processedMessagesCache.set(cacheKey, Date.now());
+                
+                if (!isDecryptionFailureStub) {
+                    this.processedMessagesCache.set(cacheKey, Date.now());
+                }
             }
 
             try {
