@@ -901,33 +901,40 @@ export default function BotsList() {
     }
   };
 
-  const handleSaveBot = async (botData: any) => {
-    if (botToEdit) {
-      const botBefore = bots.find(b => b.id === botToEdit.id);
-      const { data, error } = await supabase
-        .from('bots')
-        .update(botData)
-        .eq('id', botToEdit.id)
-        .select()
-        .single();
-        
-      if (!error && data) {
-        setBots(bots.map(b => b.id === botToEdit.id ? data : b));
-        await useChatStore.getState().logOperation('UPDATE', 'bots', botToEdit.id, botBefore, data);
+  const handleSaveBot = async (botData: any): Promise<boolean> => {
+    try {
+      if (botToEdit) {
+        const botBefore = bots.find(b => b.id === botToEdit.id);
+        const { data, error } = await supabase
+          .from('bots')
+          .update(botData)
+          .eq('id', botToEdit.id)
+          .select()
+          .single();
+          
+        if (error) throw error;
+        if (data) {
+          setBots(bots.map(b => b.id === botToEdit.id ? data : b));
+          await useChatStore.getState().logOperation('UPDATE', 'bots', botToEdit.id, botBefore, data);
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('bots')
+          .insert([{ ...botData, tenant_id: tenantId }])
+          .select()
+          .single();
+          
+        if (error) throw error;
+        if (data) {
+          setBots([data, ...bots]);
+          await useChatStore.getState().logOperation('INSERT', 'bots', data.id, null, data);
+        }
       }
-    } else {
-      const { data, error } = await supabase
-        .from('bots')
-        .insert([{ ...botData, tenant_id: tenantId }])
-        .select()
-        .single();
-        
-      if (!error && data) {
-        setBots([data, ...bots]);
-        await useChatStore.getState().logOperation('INSERT', 'bots', data.id, null, data);
-      } else if (error) {
-         console.error("Error creating bot:", error);
-      }
+      return true;
+    } catch (error: any) {
+      console.error("Error saving bot:", error);
+      alert("Erro ao salvar robô: " + (error.message || "Erro de banco de dados desconhecido"));
+      return false;
     }
   };
 

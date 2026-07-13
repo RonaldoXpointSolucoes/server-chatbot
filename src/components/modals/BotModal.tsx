@@ -9,7 +9,7 @@ import { supabase } from '../../services/supabase';
 interface BotModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave?: (bot: any) => void;
+  onSave?: (bot: any) => Promise<boolean> | boolean | void;
   botToEdit?: any | null;
   availableBots?: any[];
   initialTemplate?: BotTemplate | null;
@@ -587,7 +587,7 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         }
       }
 
-      onSave({
+      const success = await onSave({
         name,
         description,
         systemPrompt,
@@ -613,6 +613,10 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         pedido_json_payload: parsedPedidoPayload,
         enabled_endpoints: enabledEndpoints,
       });
+
+      if (success === false) {
+        return; // Prevents modal closing on error so user can review
+      }
     }
     onClose();
   };
