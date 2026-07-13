@@ -1725,7 +1725,7 @@ Instruções importantes:
                               return (
                                 <div 
                                   key={bot.id}
-                                  className="group relative bg-[#1c1d22]/50 hover:bg-[#1c1d22]/90 border border-white/[0.04] hover:border-indigo-500/35 rounded-3xl p-5 flex flex-col transition-all duration-300 shadow-sm hover:shadow-[0_10px_25px_-10px_rgba(99,102,241,0.15)] cursor-pointer overflow-hidden"
+                                  className="group relative bg-[#1c1d22]/50 hover:bg-[#1c1d22]/90 border border-white/[0.04] hover:border-indigo-500/35 rounded-3xl p-5 flex flex-col transition-all duration-300 shadow-sm hover:shadow-[0_10px_25px_-10px_rgba(99,102,241,0.15)] cursor-pointer"
                                   onClick={() => handleEditClick(bot)}
                                 >
                                   {/* Watermark do número do robô na sequência da sugestão */}
