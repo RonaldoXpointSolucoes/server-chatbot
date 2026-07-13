@@ -1055,8 +1055,8 @@ class EventProcessor {
 
                       try {
                           const { data: companyData } = await supabase.from('companies').select('global_ai_enabled').eq('id', b.tenantId).single();
-                          // Se o IA estiver desativado globalmente e NÃO for um teste, aborta o processamento.
-                          if (companyData && companyData.global_ai_enabled === false && b.convStatus !== 'teste_robo' && !isTestAllowed) {
+                          // Se o IA estiver desativado globalmente e NÃO for o simulador admin (teste_robo), aborta o processamento.
+                          if (companyData && companyData.global_ai_enabled === false && b.convStatus !== 'teste_robo') {
                               console.log(`[BatchProcessor] IA e Automações Globais estão DESATIVADAS para o tenant ${b.tenantId}`);
                               return;
                           }
