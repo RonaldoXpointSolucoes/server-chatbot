@@ -2155,19 +2155,36 @@ export default function ChatDashboard() {
       }
       
       if (existingContact) {
-         useChatStore.setState(state => {
-           const exists = state.contacts.find(c => c.id === existingContact.id);
-           if (exists) return state;
-           return { 
-             contacts: [{
-               ...existingContact,
-               instance_id: properInstance || existingContact.instance_id,
-               messages: [],
-               unread: 0,
-               custom_name: existingContact.custom_name || existingContact.name,
-             }, ...state.contacts] 
-           };
-         });
+         // Garante que a conversa exista e esteja no status 'open' para o novo chat iniciado manualmente
+         let { data: existingConv } = await supabase
+           .from('conversations')
+           .select('*')
+           .eq('tenant_id', tenantId)
+           .eq('contact_id', existingContact.id)
+           .maybeSingle();
+
+         if (!existingConv) {
+           await supabase.from('conversations').insert({
+             tenant_id: tenantId,
+             contact_id: existingContact.id,
+             instance_id: properInstance || null,
+             status: 'open',
+             unread_count: 0,
+             last_message_preview: 'Conversa iniciada',
+             last_message_at: new Date().toISOString(),
+             updated_at: new Date().toISOString(),
+             priority: 'medium',
+             ai_paused: true
+           });
+         } else if (existingConv.status === 'resolved' || existingConv.status === 'closed') {
+           await supabase
+             .from('conversations')
+             .update({ status: 'open', updated_at: new Date().toISOString() })
+             .eq('id', existingConv.id);
+         }
+
+         // Atualiza a base de dados do store para refletir a nova conversa no menu esquerdo
+         await useChatStore.getState().fetchInitialData();
 
          setActiveChat(existingContact.id);
          const targetInstance = properInstance || existingContact.instance_id;

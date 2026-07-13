@@ -1812,6 +1812,10 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             if (modelName === 'gemini-1.5-pro' || modelName === 'gemini-1.5-flash') {
                 modelName = 'gemini-2.5-flash';
             }
+            // Força o fallback caso o modelo não seja do ecossistema Gemini (ex: gpt-4o, claude-3)
+            if (!modelName.toLowerCase().startsWith('gemini')) {
+                modelName = 'gemini-2.5-flash';
+            }
             // Filtra declarações de funções com base nos endpoints habilitados no robô
             const endpointToolsMap = {
                 Consultar_cep: 'cep',
