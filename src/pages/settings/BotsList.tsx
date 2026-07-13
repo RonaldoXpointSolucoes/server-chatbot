@@ -1552,31 +1552,75 @@ Instruções importantes:
 
                   {/* Templates recomendados */}
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 auto-rows-max w-full mb-10">
-                      {BOT_TEMPLATES.filter(t => t.industry === selectedOnboardingIndustry).map((template, idx) => (
-                        <div key={template.id} className="relative p-6 bg-[#18181b]/60 hover:bg-[#1a1b1e]/90 backdrop-blur-2xl border border-white/10 hover:border-indigo-500/40 rounded-3xl transition-all duration-300 group flex flex-col gap-4 overflow-hidden hover:shadow-[0_15px_40px_-10px_rgba(99,102,241,0.2)] hover:-translate-y-1">
-                            <div className="absolute top-0 right-0 p-4 opacity-10 font-black text-6xl italic pointer-events-none text-white transition-transform group-hover:scale-110">
-                               #{idx + 1}
-                            </div>
-                            <div>
-                              <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-md mb-3 inline-block">
-                                {template.category}
-                              </span>
-                              <h4 className="text-xl font-bold text-white/90 group-hover:text-indigo-400 transition-colors">
-                                 {template.name}
-                              </h4>
-                              <p className="text-sm font-medium text-white/50 mt-2 leading-relaxed min-h-[60px]">{template.description}</p>
-                            </div>
-                            
-                            <button 
-                              type="button"
-                              onClick={() => handleCreateFromOnboarding(template)}
-                              className="mt-auto relative z-10 w-full py-3.5 bg-white/5 hover:bg-indigo-500 text-white text-sm font-bold rounded-2xl transition-all border border-white/10 hover:border-transparent shadow-sm flex items-center justify-center gap-2 group-hover:shadow-[0_10px_20px_-10px_rgba(99,102,241,0.5)]"
-                            >
-                              <Sparkles className="w-4 h-4 text-indigo-400 group-hover:text-white transition-colors" />
-                              Criar Este Robô
-                            </button>
-                        </div>
-                      ))}
+                      {BOT_TEMPLATES.filter(t => t.industry === selectedOnboardingIndustry).map((template, idx) => {
+                        const isOrquestrador = template.name.includes('(Orquestrador)');
+                        
+                        // Badge color resolver
+                        let categoryStyles = "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
+                        if (template.category === 'Atendimento e Triagem') {
+                          categoryStyles = "text-indigo-400 bg-indigo-500/10 border-indigo-500/20";
+                        } else if (template.category === 'Vendas e Orçamentos') {
+                          categoryStyles = "text-amber-400 bg-amber-500/10 border-amber-500/20";
+                        } else if (template.category === 'Suporte e Operacional') {
+                          categoryStyles = "text-blue-400 bg-blue-500/10 border-blue-500/20";
+                        } else if (template.category === 'Agendamentos e Reservas') {
+                          categoryStyles = "text-purple-400 bg-purple-500/10 border-purple-500/20";
+                        } else if (template.category === 'Encantamento e Pós-Venda') {
+                          categoryStyles = "text-pink-400 bg-pink-500/10 border-pink-500/20";
+                        }
+
+                        return (
+                          <div 
+                            key={template.id} 
+                            className={cn(
+                              "relative p-6 backdrop-blur-2xl rounded-3xl transition-all duration-300 group flex flex-col gap-4 overflow-hidden border",
+                              isOrquestrador 
+                                ? "bg-gradient-to-br from-[#1b1928]/80 to-[#0e0f14]/90 border-indigo-500/35 hover:border-indigo-400/60 shadow-[0_4px_30px_rgba(99,102,241,0.06)] hover:shadow-[0_15px_45px_-10px_rgba(99,102,241,0.22)] hover:-translate-y-1.5"
+                                : "bg-[#18181b]/60 hover:bg-[#1a1b1e]/90 border-white/10 hover:border-indigo-500/40 hover:shadow-[0_15px_40px_-10px_rgba(99,102,241,0.15)] hover:-translate-y-1"
+                            )}
+                          >
+                              {/* Ambient neon radial glow inside Orquestrador cards */}
+                              {isOrquestrador && (
+                                <div className="absolute -top-12 -left-12 w-32 h-32 bg-indigo-500/10 rounded-full blur-[40px] pointer-events-none group-hover:scale-150 transition-transform duration-500" />
+                              )}
+
+                              <div className="absolute top-0 right-0 p-4 opacity-[0.06] font-black text-6xl italic pointer-events-none text-white transition-transform group-hover:scale-110">
+                                 #{idx + 1}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-1.5 flex-wrap mb-3">
+                                  <span className={cn("text-[9px] uppercase font-extrabold px-2.5 py-1 rounded-md border inline-block leading-none tracking-wider", categoryStyles)}>
+                                    {template.category}
+                                  </span>
+                                  {isOrquestrador && (
+                                    <span className="text-[9px] uppercase font-black text-indigo-200 bg-indigo-600/30 border border-indigo-400/30 px-2 py-1 rounded-md leading-none tracking-widest animate-pulse">
+                                      🧠 CORE / CÉREBRO
+                                    </span>
+                                  )}
+                                </div>
+                                <h4 className="text-xl font-bold text-white/90 group-hover:text-indigo-400 transition-colors flex items-center gap-2">
+                                   {isOrquestrador && <BrainCircuit className="w-5 h-5 text-indigo-400 shrink-0" />}
+                                   {template.name}
+                                </h4>
+                                <p className="text-sm font-medium text-white/50 mt-2 leading-relaxed min-h-[60px]">{template.description}</p>
+                              </div>
+                              
+                              <button 
+                                type="button"
+                                onClick={() => handleCreateFromOnboarding(template)}
+                                className={cn(
+                                  "mt-auto relative z-10 w-full py-3.5 text-xs font-black uppercase tracking-wider rounded-2xl transition-all border shadow-sm flex items-center justify-center gap-2 active:scale-[0.98]",
+                                  isOrquestrador
+                                    ? "bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white border-indigo-400/20 hover:border-transparent shadow-indigo-500/20 hover:shadow-indigo-500/35"
+                                    : "bg-white/5 hover:bg-indigo-500 text-white border-white/10 hover:border-transparent group-hover:shadow-[0_10px_20px_-10px_rgba(99,102,241,0.4)]"
+                                )}
+                              >
+                                <Sparkles className={cn("w-4 h-4 transition-colors", isOrquestrador ? "text-indigo-200" : "text-indigo-400 group-hover:text-white")} />
+                                Criar Este Robô
+                              </button>
+                          </div>
+                        );
+                      })}
                   </div>
                 </div>
               ) : (
