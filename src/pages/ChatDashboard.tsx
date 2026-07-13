@@ -1431,8 +1431,8 @@ export default function ChatDashboard() {
            }
        }
 
-       // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - MANTIDO DURANTE PESQUISA A PEDIDO DO USUÁRIO
-       if (activeChannelFilter) {
+       // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa
+       if (activeChannelFilter && !searchTerm) {
            const instanceIdFromId = c.id.includes('_') ? c.id.split('_')[1] : c.instance_id;
            if (instanceIdFromId) {
                if (instanceIdFromId !== activeChannelFilter && instanceIdFromId !== activeChannelName) return false;
@@ -2120,7 +2120,9 @@ export default function ChatDashboard() {
     let cleanPhone = phoneNumber.replace(/\D/g, '');
     if (!cleanPhone) return;
     
-    if (cleanPhone.length >= 10 && cleanPhone.length <= 11 && !cleanPhone.startsWith('55')) {
+    if (cleanPhone.length <= 11) {
+      cleanPhone = '55' + cleanPhone;
+    } else if (cleanPhone.length > 11 && !cleanPhone.startsWith('55')) {
       cleanPhone = '55' + cleanPhone;
     }
     
@@ -4505,8 +4507,12 @@ export default function ChatDashboard() {
         }}
         onStartNewNumber={async (phone, instanceId) => {
           let cleanPhone = phone.replace(/\D/g, '');
-          if (cleanPhone && !cleanPhone.startsWith('55')) {
-            cleanPhone = '55' + cleanPhone;
+          if (cleanPhone) {
+            if (cleanPhone.length <= 11) {
+              cleanPhone = '55' + cleanPhone;
+            } else if (cleanPhone.length > 11 && !cleanPhone.startsWith('55')) {
+              cleanPhone = '55' + cleanPhone;
+            }
           }
           
           const jid = `${cleanPhone}@s.whatsapp.net`;

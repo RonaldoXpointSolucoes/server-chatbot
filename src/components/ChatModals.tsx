@@ -423,8 +423,12 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                       contactData?.whatsapp_jid?.endsWith('@g.us') || 
                       finalPhone.length > 12;
 
-      if (!isGroup && finalPhone && !finalPhone.startsWith('55')) {
-        finalPhone = '55' + finalPhone;
+      if (!isGroup && finalPhone) {
+        if (finalPhone.length <= 11) {
+          finalPhone = '55' + finalPhone;
+        } else if (finalPhone.length > 11 && !finalPhone.startsWith('55')) {
+          finalPhone = '55' + finalPhone;
+        }
       }
 
       const finalPayload = {

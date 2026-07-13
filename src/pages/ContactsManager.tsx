@@ -274,9 +274,12 @@ export default function ContactsManager() {
     // Remove anything that isn't a digit for phone mapping
     let cleanPhone = payload.phone?.replace(/\D/g, '') || '';
     
-    // Regra: se existir telefone e não começar com 55, adiciona o 55
-    if (cleanPhone && !cleanPhone.startsWith('55')) {
-      cleanPhone = '55' + cleanPhone;
+    if (cleanPhone) {
+      if (cleanPhone.length <= 11) {
+        cleanPhone = '55' + cleanPhone;
+      } else if (cleanPhone.length > 11 && !cleanPhone.startsWith('55')) {
+        cleanPhone = '55' + cleanPhone;
+      }
     }
 
     if (!cleanPhone) {
