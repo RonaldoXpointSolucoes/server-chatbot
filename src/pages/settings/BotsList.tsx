@@ -210,6 +210,18 @@ const trainingDraftsMemory: Record<string, {
   destination: 'prompt' | 'rag' | 'both';
 }> = {};
 
+const getBotTemplateNumber = (botName: string) => {
+  const template = BOT_TEMPLATES.find(t => t.name === botName);
+  if (template) {
+    const templatesInIndustry = BOT_TEMPLATES.filter(t => t.industry === template.industry);
+    const idx = templatesInIndustry.findIndex(t => t.id === template.id);
+    if (idx !== -1) {
+      return `#${idx + 1}`;
+    }
+  }
+  return null;
+};
+
 export default function BotsList() {
   const [activeTab, setActiveTab] = useState<'bots' | 'comercio' | 'simulador'>('bots');
   const [searchTerm, setSearchTerm] = useState('');
@@ -1647,8 +1659,7 @@ Instruções importantes:
                           </span>
                         </div>
 
-                        {/* Lista de Bots na Coluna */}
-                        <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4 styled-scrollbar pb-4">
+                  <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4 styled-scrollbar pb-4">
                           {botsInCategory.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-12 text-center border border-white/5 rounded-3xl h-44">
                               <Bot className="w-8 h-8 text-white/10 mb-2" />
@@ -1660,9 +1671,16 @@ Instruções importantes:
                               return (
                                 <div 
                                   key={bot.id}
-                                  className="group relative bg-[#1c1d22]/50 hover:bg-[#1c1d22]/90 border border-white/[0.04] hover:border-indigo-500/35 rounded-3xl p-5 flex flex-col transition-all duration-300 shadow-sm hover:shadow-[0_10px_25px_-10px_rgba(99,102,241,0.15)] cursor-pointer"
+                                  className="group relative bg-[#1c1d22]/50 hover:bg-[#1c1d22]/90 border border-white/[0.04] hover:border-indigo-500/35 rounded-3xl p-5 flex flex-col transition-all duration-300 shadow-sm hover:shadow-[0_10px_25px_-10px_rgba(99,102,241,0.15)] cursor-pointer overflow-hidden"
                                   onClick={() => handleEditClick(bot)}
                                 >
+                                  {/* Watermark do número do robô na sequência da sugestão */}
+                                  {getBotTemplateNumber(bot.name) && (
+                                    <div className="absolute top-0 right-0 p-4 opacity-[0.05] font-black text-6xl italic pointer-events-none text-white transition-transform group-hover:scale-110">
+                                      {getBotTemplateNumber(bot.name)}
+                                    </div>
+                                  )}
+
                                   <div className="flex justify-between items-start gap-3 mb-4">
                                     <div className="flex items-center gap-3">
                                       <div className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/5 flex items-center justify-center group-hover:border-indigo-500/20 group-hover:shadow-[0_0_15px_rgba(99,102,241,0.15)] transition-all">
