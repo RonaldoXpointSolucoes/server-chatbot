@@ -64,9 +64,18 @@ const app = express();
 const PORT = process.env.PORT || 9000;
 
 process.on('uncaughtException', (err) => {
+    // Silencia erros inofensivos do undici/fetch ao abortar conexões (TypeError: terminated)
+    if (err && (err.message === 'terminated' || err.message === 'fetch failed' || err.stack?.includes('onAborted') || err.stack?.includes('undici'))) {
+        console.warn('[Fetch/Undici] Conexão cancelada ou abortada pelo cliente/servidor (TypeError: terminated).');
+        return;
+    }
     console.error('Uncaught Exception:', err);
 });
 process.on('unhandledRejection', (reason, promise) => {
+    if (reason && (reason.message === 'terminated' || reason.message === 'fetch failed' || reason.stack?.includes('onAborted') || reason.stack?.includes('undici'))) {
+        console.warn('[Fetch/Undici] Rejeição de conexão cancelada ou abortada pelo cliente/servidor (TypeError: terminated).');
+        return;
+    }
     console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
