@@ -358,6 +358,7 @@ export default function AccountSettings() {
   const [isCepExpanded, setIsCepExpanded] = useState(false);
   const [isClienteExpanded, setIsClienteExpanded] = useState(false);
   const [isPedidoExpanded, setIsPedidoExpanded] = useState(false);
+  const [isVariaveisExpanded, setIsVariaveisExpanded] = useState(false);
 
   // Estados para Consulta de CEP
   const [cepJsonUrl, setCepJsonUrl] = useState(CEP_DEFAULT_URL);
@@ -1274,18 +1275,29 @@ export default function AccountSettings() {
           )}
 
           {/* Seção Variáveis Globais da Empresa */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden p-8 animate-in fade-in zoom-in-95 duration-500">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-500">
-                <Settings2 size={20} />
+          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+            <button
+              type="button"
+              onClick={() => setIsVariaveisExpanded(!isVariaveisExpanded)}
+              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-500">
+                  <Settings2 size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Variáveis Globais da Empresa (Luna IA)</h2>
+                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure os dados da sua empresa que serão inseridos de forma dinâmica nos prompts da Luna.</p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Variáveis Globais da Empresa (Luna IA)</h2>
-                <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure os dados da sua empresa que serão inseridos de forma dinâmica nos prompts da Luna.</p>
+              <div className="text-gray-400 dark:text-gray-500 pr-2">
+                {isVariaveisExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
               </div>
-            </div>
+            </button>
 
-            <div className="space-y-6 max-w-2xl">
+            {isVariaveisExpanded && (
+              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="space-y-6 max-w-2xl">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
@@ -1431,6 +1443,8 @@ export default function AccountSettings() {
                 </div>
               </div>
             </div>
+            </div>
+            )}
           </div>
 
           {/* Seção Horário de Funcionamento (Configurador Semanal) - Agora colapsável */}
