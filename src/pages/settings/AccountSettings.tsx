@@ -50,6 +50,7 @@ const STATUS_PEDIDO_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/server/nuvem/BnPedi
 const PAGAMENTO_PIX_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v1/pagamentos/PixCardapioService/IniciarTransacao`;
 const CADASTRO_CLIENTE_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/UsuarioService/CreateUserWithAuthentication`;
 const TAXA_ENTREGA_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/UsuarioService/GetTaxaEntrega`;
+const GEOLOC_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/usuario_2.0/EstabelecimentoService/GetLatLon`;
 
 const GASTROFOOD_DEFAULT_TOKEN = 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE1OTgyNzA4NTksImV4cCI6MTg5MzQxMzI1OX0.mhHkRKeJgvfHmKDe4cZFKLAJKUBVplIlB5GJVBMkjQw';
 
@@ -65,6 +66,7 @@ const DEFAULT_CLIENTE_PAYLOAD = `{
 
 const DEFAULT_PAGAMENTO_PIX_PAYLOAD = `{
   "APaymentData": {},
+  "AIdEstab": "6D0187D9-E905-4479-AB15-B908F0222607",
   "AIdPedido": "B7D7ADDD-AC17-4F63-994B-072BE6CE48D4"
 }`;
 
@@ -81,6 +83,10 @@ const DEFAULT_TAXA_ENTREGA_PAYLOAD = `{
   "GuidEstab": "ABA16AA8-8C23-44AF-A3D1-77DB4FF4E636",
   "AEndereco": {},
   "AOrigem": "R. Isabel de Freitas Sassi 196, Jardim Santa Terezinha, Taboão da Serra - SP"
+}`;
+
+const DEFAULT_GEOLOC_PAYLOAD = `{
+  "AEnderecoCompleto": "Rua nestor de andrade, 60, Jardim Beatriz, Taboão da Serra - SP"
 }`;
 
 const DEFAULT_PEDIDO_PAYLOAD = `{
@@ -427,6 +433,15 @@ export default function AccountSettings() {
   const [taxaEntregaResult, setTaxaEntregaResult] = useState<any>(null);
   const [taxaEntregaError, setTaxaEntregaError] = useState('');
   const [isTaxaEntregaExpanded, setIsTaxaEntregaExpanded] = useState(false);
+
+  // Estados para Geolocalização
+  const [geolocJsonUrl, setGeolocJsonUrl] = useState(GEOLOC_DEFAULT_URL);
+  const [geolocJsonToken, setGeolocJsonToken] = useState(GASTROFOOD_DEFAULT_TOKEN);
+  const [geolocJsonPayload, setGeolocJsonPayload] = useState(DEFAULT_GEOLOC_PAYLOAD);
+  const [geolocLoading, setGeolocLoading] = useState(false);
+  const [geolocResult, setGeolocResult] = useState<any>(null);
+  const [geolocError, setGeolocError] = useState('');
+  const [isGeolocExpanded, setIsGeolocExpanded] = useState(false);
 
   const handleTestGeneric = async (
     url: string,
@@ -882,6 +897,10 @@ export default function AccountSettings() {
       setTaxaEntregaJsonUrl(settings.taxa_entrega_json_url || TAXA_ENTREGA_DEFAULT_URL);
       setTaxaEntregaJsonToken(settings.taxa_entrega_json_token || GASTROFOOD_DEFAULT_TOKEN);
       setTaxaEntregaJsonPayload(settings.taxa_entrega_json_payload || DEFAULT_TAXA_ENTREGA_PAYLOAD);
+
+      setGeolocJsonUrl(settings.geoloc_json_url || GEOLOC_DEFAULT_URL);
+      setGeolocJsonToken(settings.geoloc_json_token || GASTROFOOD_DEFAULT_TOKEN);
+      setGeolocJsonPayload(settings.geoloc_json_payload || DEFAULT_GEOLOC_PAYLOAD);
       
       if (settings.horarios_estrutura) {
         setDiasHorarios(settings.horarios_estrutura);
@@ -931,7 +950,10 @@ export default function AccountSettings() {
         cadastro_cliente_json_payload: cadastroClienteJsonPayload,
         taxa_entrega_json_url: taxaEntregaJsonUrl,
         taxa_entrega_json_token: taxaEntregaJsonToken,
-        taxa_entrega_json_payload: taxaEntregaJsonPayload
+        taxa_entrega_json_payload: taxaEntregaJsonPayload,
+        geoloc_json_url: geolocJsonUrl,
+        geoloc_json_token: geolocJsonToken,
+        geoloc_json_payload: geolocJsonPayload
       });
       console.log("Save concluído!");
       setSuccess(true);
@@ -2808,6 +2830,113 @@ export default function AccountSettings() {
                       </div>
                       <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
                         {JSON.stringify(taxaEntregaResult.data, null, 2)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Seção Geolocalização (Lat/Lon) gFood - Colapsável */}
+          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+            <button
+              type="button"
+              onClick={() => setIsGeolocExpanded(!isGeolocExpanded)}
+              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-500">
+                  <MapPin size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Geolocalização (Lat/Lon) gFood</h2>
+                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a consulta de coordenadas geográficas (latitude/longitude) de endereços no Gastrofood.</p>
+                </div>
+              </div>
+              <div className="text-gray-400 dark:text-gray-500 pr-2">
+                {isGeolocExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+              </div>
+            </button>
+
+            {isGeolocExpanded && (
+              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="space-y-6 max-w-2xl">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        URL do Endpoint
+                      </label>
+                      <input 
+                        type="url"
+                        value={geolocJsonUrl}
+                        onChange={(e) => setGeolocJsonUrl(e.target.value)}
+                        placeholder="https://..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                        Token de Autorização
+                      </label>
+                      <input 
+                        type="text"
+                        value={geolocJsonToken}
+                        onChange={(e) => setGeolocJsonToken(e.target.value)}
+                        placeholder="Bearer ..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                      Corpo da Requisição (JSON Payload)
+                    </label>
+                    <textarea 
+                      value={geolocJsonPayload}
+                      onChange={(e) => setGeolocJsonPayload(e.target.value)}
+                      placeholder="Corpo da Requisição (JSON)"
+                      rows={6}
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="pt-4 flex flex-wrap items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => handleTestGeneric(geolocJsonUrl, geolocJsonToken, geolocJsonPayload, setGeolocLoading, setGeolocResult, setGeolocError, 'POST')}
+                      disabled={geolocLoading || !geolocJsonUrl}
+                      className="px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-semibold rounded-xl shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {geolocLoading ? 'Testando...' : 'Testar Requisição'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanAndFormatJson(geolocJsonPayload, setGeolocJsonPayload, setGeolocError)}
+                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <Sparkles size={14} />
+                      Organizar e Validar JSON
+                    </button>
+                  </div>
+
+                  {geolocError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro no teste:</strong> {geolocError}
+                    </div>
+                  )}
+
+                  {geolocResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado da Consulta:</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500">
+                          Status: {geolocResult.status}
+                        </span>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
+                        {JSON.stringify(geolocResult.data, null, 2)}
                       </div>
                     </div>
                   )}

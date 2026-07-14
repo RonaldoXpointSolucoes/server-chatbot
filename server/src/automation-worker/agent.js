@@ -1955,7 +1955,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 },
                 {
                     name: "Buscar_status_pedido",
-                    description: "Busca o status atual de um pedido no Gastrofood utilizando o ID do pedido.",
+                    description: "Busca o status atual de um pedido no Gastrofood. Retorna o campo 'Status': se for 1, o pagamento via PIX ainda está aguardando pagamento; se for 9, o pedido foi cancelado por demora no pagamento; se for qualquer outro número, o pagamento foi concluído com sucesso.",
                     parameters: {
                         type: "OBJECT",
                         properties: {
@@ -2632,13 +2632,13 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     logGastrofoodCall({
                                         direction: 'request',
                                         action: 'Consultar Status',
-                                        method: 'GET',
+                                        method: 'POST',
                                         url: requestUrl,
                                         payload: null
                                     });
 
                                     const response = await fetch(requestUrl, {
-                                        method: 'GET',
+                                        method: 'POST',
                                         headers
                                     });
 
@@ -2647,7 +2647,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                         logGastrofoodCall({
                                             direction: 'response',
                                             action: 'Consultar Status',
-                                            method: 'GET',
+                                            method: 'POST',
                                             url: requestUrl,
                                             status: response.status,
                                             response: resData
@@ -2677,7 +2677,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                         logGastrofoodCall({
                                             direction: 'error',
                                             action: 'Consultar Status',
-                                            method: 'GET',
+                                            method: 'POST',
                                             url: requestUrl,
                                             status: response.status,
                                             error: errText
@@ -2689,7 +2689,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     logGastrofoodCall({
                                         direction: 'error',
                                         action: 'Consultar Status',
-                                        method: 'GET',
+                                        method: 'POST',
                                         url: requestUrl,
                                         error: errStat.message
                                     });
