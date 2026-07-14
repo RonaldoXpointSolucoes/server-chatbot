@@ -4791,14 +4791,11 @@ export default function ChatDashboard() {
                 A conexão com o WhatsApp oscilou e o sistema está reconectando automaticamente em segundo plano. Por favor, aguarde alguns instantes.
              </p>
              <div className="flex items-center gap-2 mt-1">
-                 <button onClick={() => handleQuickReconnect(activeChannelFilter)} disabled={reconnectingStatus[activeChannelFilter]} className="text-xs bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-800/50 text-white py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
-                    {reconnectingStatus[activeChannelFilter] ? 'Reconectando...' : 'Forçar Conexão'}
-                 </button>
-                 <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="text-xs bg-yellow-100 dark:bg-yellow-900/40 hover:bg-yellow-200 dark:hover:bg-yellow-800/40 text-yellow-700 dark:text-yellow-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
-                    Novo QR (Manual)
+                 <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
+                    <Power size={12} /> Reconectar
                  </button>
                  <button onClick={() => handleOpenLog48(activeChannelFilter)} className="text-xs bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/40 text-blue-700 dark:text-blue-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
-                    <History size={12} /> Log 48s
+                    <History size={12} /> Log
                  </button>
               </div>
           </div>
@@ -4818,14 +4815,11 @@ export default function ChatDashboard() {
                 A instância {activeChannelFilter} está offline. Verifique o aparelho ou tente reconectar.
              </p>
              <div className="flex items-center gap-2 mt-1">
-                 <button onClick={() => handleQuickReconnect(activeChannelFilter)} disabled={reconnectingStatus[activeChannelFilter]} className="text-xs bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-800/50 text-white py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
-                    {reconnectingStatus[activeChannelFilter] ? 'Reconectando...' : 'Tentar Reconectar'}
-                 </button>
-                 <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="text-xs bg-orange-100 dark:bg-orange-900/40 hover:bg-orange-200 dark:hover:bg-orange-800/40 text-orange-700 dark:text-orange-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit">
-                    Novo QR Code
+                 <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
+                    <Power size={12} /> Reconectar
                  </button>
                  <button onClick={() => handleOpenLog48(activeChannelFilter)} className="text-xs bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/40 text-blue-700 dark:text-blue-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
-                    <History size={12} /> Log 48s
+                    <History size={12} /> Log
                  </button>
               </div>
           </div>
