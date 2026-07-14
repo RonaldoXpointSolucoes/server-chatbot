@@ -1083,33 +1083,6 @@ class EventProcessor {
                               botData = botsData.find(bot => bot.channels && bot.channels.includes(b.instanceId)) || botsData[0];
                           }
 
-                          // Se a caixa de entrada tiver o robô de autoatendimento ativado e não tiver bot específico vinculado,
-                          // faz fallback para o bot ativo do tenant para que o atendimento ocorra.
-                          if (!botData && instanceConfig.bot_active !== false) {
-                               // Filtra os bots ativos associados ao canal atual
-                               const channelBots = botsData.filter(bot => bot.status === 'active' && bot.channels && bot.channels.includes(b.instanceId));
-                               if (channelBots.length > 0) {
-                                   if (channelBots.length > 1) {
-                                       console.log(`[EventProcessor] Fallback Múltiplos bots (${channelBots.length}) no canal ${b.instanceId}. Roteando por assunto...`);
-                                       botData = await AutomationWorker.routeMessageToBot(channelBots, b.textMessage, b.tenantId, b.conversationId);
-                                   } else {
-                                       botData = channelBots[0];
-                                   }
-                                   if (botData) {
-                                       botData = { ...botData, autoReply: true };
-                                       console.log(`[EventProcessor] Fallback Canal: Utilizando o bot '${botData.name}' para a caixa de entrada ${b.instanceId}.`);
-                                   }
-                               }
-
-                               if (!botData) {
-                                   const activeBot = botsData.find(bot => bot.status === 'active') || botsData[0];
-                                   if (activeBot) {
-                                       botData = { ...activeBot, autoReply: true };
-                                       console.log(`[EventProcessor] Fallback Geral: Utilizando o bot '${activeBot.name}' para a caixa de entrada ${b.instanceId} via ativação direta.`);
-                                   }
-                               }
-                           }
-
                            if (!botData) {
                                console.warn(`[EventProcessor] Nenhum bot ativo ou elegível encontrado para a caixa de entrada ${b.instanceId}. Silenciando robô.`);
                            }
