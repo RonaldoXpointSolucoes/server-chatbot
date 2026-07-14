@@ -3515,9 +3515,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
         
         const { data: msgs } = await supabase.from('messages')
-               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload, conversations!inner(contact_id)')
+               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                .eq('tenant_id', tenant.id)
-               .eq('conversations.contact_id', getRealContactId(contactId))
+               .eq('conversation_id', conv.id)
                .order('timestamp', { ascending: false })
                .limit(100);
                
@@ -3577,9 +3577,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                         // Atualiza a vista atual caso algo não tenha vindo pelo realtime ou pra forçar atualização
                         const { data: fetchNewMsgs, error: fetchErr } = await supabase.from('messages')
-                           .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload, conversations!inner(contact_id)')
+                           .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                            .eq('tenant_id', tenant.id)
-                           .eq('conversations.contact_id', getRealContactId(contactId))
+                           .eq('conversation_id', conv.id)
                            .order('timestamp', { ascending: false })
                            .limit(newLimit);
                            
