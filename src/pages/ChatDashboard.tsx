@@ -5363,6 +5363,9 @@ export default function ChatDashboard() {
               // Verifica se a ultima msg foi mandada por voce testando sender
               const isMe = lastMsg && (lastMsg.sender === 'bot' || lastMsg.sender === 'human');
               const instColor = contact.instance_id ? instanceColorsMap[contact.instance_id] : undefined;
+              const instanceIdFromId = contact.id.includes('_') ? contact.id.split('_')[1] : contact.instance_id;
+              const resolvedContactInstanceUuid = instanceIdFromId ? (instanceCache.getId(instanceIdFromId) || instanceIdFromId) : null;
+              const contactInstanceName = resolvedContactInstanceUuid ? (instanceCache.getName(resolvedContactInstanceUuid) || resolvedContactInstanceUuid) : null;
 
               const lastMsgText = (() => {
                 if (!lastMsg) return contact.last_message_preview || '';
@@ -5462,6 +5465,13 @@ export default function ChatDashboard() {
                                )}
                              </div>
                            </span>
+                           {contactInstanceName && (
+                             <div className="flex items-center gap-1 select-none shrink-0 mt-0.5 mb-0.5">
+                               <span className="text-[9px] px-1.5 py-[1px] bg-emerald-50 dark:bg-emerald-500/10 text-emerald-650 dark:text-emerald-450 border border-emerald-500/15 font-bold uppercase rounded-md tracking-wider">
+                                 Caixa: {contactInstanceName}
+                                </span>
+                             </div>
+                           )}
   
                            {/* Labels and Assigned Agent on a new line */}
                            {(contact.assigned_to || (contact.conv_labels && contact.conv_labels.length > 0)) && (
