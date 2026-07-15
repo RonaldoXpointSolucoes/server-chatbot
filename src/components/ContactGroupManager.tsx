@@ -142,9 +142,16 @@ export function ContactGroupManager({ isOpen, onClose }: Props) {
   const filteredCompanies = companies.filter(c => {
     const term = companySearch.toLowerCase().trim();
     if (!term) return true;
-    const nameMatch = c.name?.toLowerCase().includes(term);
-    const fantasyMatch = c.fantasy_name?.toLowerCase().includes(term);
-    const docMatch = c.document_number?.replace(/\D/g, '').includes(term.replace(/\D/g, ''));
+    
+    const nameMatch = c.name ? c.name.toLowerCase().includes(term) : false;
+    const fantasyMatch = c.fantasy_name ? c.fantasy_name.toLowerCase().includes(term) : false;
+    
+    // Evita corresponder a todos os documentos (string vazia) quando o usuário digita buscas textuais sem dígitos
+    const cleanTermOnlyDigits = term.replace(/\D/g, '');
+    const docMatch = (cleanTermOnlyDigits && c.document_number) 
+      ? c.document_number.replace(/\D/g, '').includes(cleanTermOnlyDigits) 
+      : false;
+      
     return nameMatch || fantasyMatch || docMatch;
   });
 
