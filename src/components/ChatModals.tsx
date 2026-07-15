@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { AlertCircle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -3926,6 +3926,379 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+interface ClosedTicketsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps) {
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [dateFilter, setDateFilter] = useState('all'); // all, today, week, month
+  const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
+
+  const fetchClosedTickets = async () => {
+    setLoading(true);
+    try {
+      const { supabase } = await import('../services/supabase');
+      const { data, error } = await supabase
+        .from('chat_tickets')
+        .select('*')
+        .eq('status', 'resolved')
+        .order('closed_at', { ascending: false });
+
+      if (error) throw error;
+
+      const { data: contactsData } = await supabase
+        .from('chat_contacts')
+        .select('id, name, custom_name, push_name, phone');
+      
+      const contactsMap = new Map<string, any>();
+      if (contactsData) {
+        contactsData.forEach(c => contactsMap.set(c.id, c));
+      }
+
+      const mapped = (data || []).map(t => {
+        const c = contactsMap.get(t.contact_id);
+        const contactName = c 
+          ? (c.custom_name || c.name || c.push_name || c.phone || 'Cliente')
+          : 'Cliente';
+        
+        const start = new Date(t.opened_at);
+        const end = t.closed_at ? new Date(t.closed_at) : new Date();
+        const diffMs = end.getTime() - start.getTime();
+        const diffHrs = Math.floor(diffMs / 3600000);
+        const diffMins = Math.floor((diffMs % 3600000) / 60000);
+        const duration = diffHrs > 0 ? `${diffHrs}h ${diffMins}m` : `${diffMins} min`;
+
+        return {
+          ...t,
+          contactName,
+          duration
+        };
+      });
+
+      setTickets(mapped);
+    } catch (err) {
+      console.error('Erro ao buscar tickets fechados:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchClosedTickets();
+      setSelectedTicket(null);
+    }
+  }, [isOpen]);
+
+  const filteredTickets = useMemo(() => {
+    return tickets.filter(t => {
+      const term = search.toLowerCase();
+      const matchSearch = !term || 
+        t.contactName.toLowerCase().includes(term) ||
+        (t.problem_description || '').toLowerCase().includes(term) ||
+        (t.metadata?.summary || '').toLowerCase().includes(term) ||
+        (t.resolution_summary || '').toLowerCase().includes(term) ||
+        (t.metadata?.operators || []).some((op: any) => op.name.toLowerCase().includes(term));
+
+      if (!matchSearch) return false;
+
+      if (dateFilter === 'all') return true;
+
+      const closedDate = new Date(t.closed_at);
+      const now = new Date();
+
+      if (dateFilter === 'today') {
+        return closedDate.toDateString() === now.toDateString();
+      }
+
+      if (dateFilter === 'week') {
+        const diffTime = Math.abs(now.getTime() - closedDate.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays <= 7;
+      }
+
+      if (dateFilter === 'month') {
+        return closedDate.getMonth() === now.getMonth() && closedDate.getFullYear() === now.getFullYear();
+      }
+
+      return true;
+    });
+  }, [tickets, search, dateFilter]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
+      
+      <div className="relative w-full max-w-4xl h-[85vh] bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col gap-4.5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2.5 bg-gradient-to-tr from-emerald-500 to-teal-500 rounded-2xl text-white shadow-sm shrink-0">
+              <FolderCheck size={20} />
+            </div>
+            <div className="flex flex-col text-left">
+              <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                Tickets Fechados
+              </h3>
+              <p className="text-[10px] font-bold text-gray-400">
+                Auditoria de atendimentos e base de conhecimento resolvida
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-550 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Filters Panel */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+            <input
+              type="text"
+              placeholder="Buscar por cliente, atendente, problema ou resumo..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full text-xs pl-9 pr-3 py-2.5 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 font-medium font-sans"
+            />
+          </div>
+          
+          <div className="flex gap-1.5 bg-slate-100 dark:bg-black/30 p-1 rounded-2xl border border-black/5 dark:border-white/5 select-none shrink-0 h-[38px] items-center">
+            {[
+              { id: 'all', label: 'Todos' },
+              { id: 'today', label: 'Hoje' },
+              { id: 'week', label: 'Últimos 7 dias' },
+              { id: 'month', label: 'Mês Atual' }
+            ].map(btn => (
+              <button
+                key={btn.id}
+                onClick={() => setDateFilter(btn.id)}
+                type="button"
+                className={cn(
+                  "px-3.5 py-1.5 rounded-xl text-[10px] font-bold transition-all",
+                  dateFilter === btn.id 
+                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold" 
+                    : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                )}
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Main Body */}
+        <div className="flex-1 flex gap-4 min-h-0">
+          
+          {/* Tickets List */}
+          <div className={cn("flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2.5 pr-1.5 min-w-0 transition-all duration-300", selectedTicket && "hidden md:flex md:w-1/2 md:flex-grow-0")}>
+            {loading ? (
+              <div className="flex-1 flex items-center justify-center flex-col gap-2 text-gray-400">
+                <Loader2 className="animate-spin" size={24} />
+                <span className="text-xs font-semibold">Carregando tickets...</span>
+              </div>
+            ) : filteredTickets.length > 0 ? (
+              filteredTickets.map(t => {
+                const totalMsg = t.metadata?.total_messages || 0;
+                const operators = t.metadata?.operators || [];
+                const checklistItems = t.metadata?.checklist || [];
+                const resolvedCount = checklistItems.filter((i: any) => i.resolved).length;
+                
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => setSelectedTicket(t)}
+                    className={cn(
+                      "group p-4 rounded-2xl border text-left cursor-pointer transition-all duration-200 bg-slate-50/30 hover:bg-slate-50 dark:bg-black/10 dark:hover:bg-black/20 hover:scale-[1.005] shadow-sm flex flex-col gap-2.5",
+                      selectedTicket?.id === t.id 
+                        ? "border-emerald-500/50 dark:border-emerald-500/30 ring-1 ring-emerald-500/30 dark:ring-emerald-500/10" 
+                        : "border-black/5 dark:border-white/5"
+                    )}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black text-gray-900 dark:text-white truncate max-w-[60%]">
+                        {t.contactName}
+                      </span>
+                      <span className="text-[9px] font-bold text-gray-400 shrink-0">
+                        {new Date(t.closed_at).toLocaleDateString('pt-BR')} {new Date(t.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      {t.problem_description && (
+                        <div className="text-[10px] text-gray-400 font-extrabold uppercase flex items-center gap-1">
+                          <span>Problema:</span>
+                          <span className="text-gray-700 dark:text-gray-200 normal-case font-semibold line-clamp-1">{t.problem_description}</span>
+                        </div>
+                      )}
+                      {t.metadata?.summary && (
+                        <div className="text-[10px] text-gray-400 font-extrabold uppercase flex items-center gap-1">
+                          <span>Resumo:</span>
+                          <span className="text-gray-700 dark:text-gray-200 normal-case font-medium line-clamp-1">{t.metadata.summary}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-2 border-t border-black/[0.03] dark:border-white/[0.03] flex items-center justify-between flex-wrap gap-2 text-[9px] font-bold text-gray-400 select-none">
+                      <div className="flex items-center gap-2.5">
+                        <span>Duração: <strong className="text-gray-700 dark:text-gray-300">{t.duration}</strong></span>
+                        <span>•</span>
+                        <span>Mensagens: <strong className="text-gray-700 dark:text-gray-300">{totalMsg}</strong></span>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        {checklistItems.length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md">
+                            Checklist: {resolvedCount}/{checklistItems.length} Resolvidos
+                          </span>
+                        )}
+                        {operators.length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-md truncate max-w-[120px]">
+                            {operators.map((op: any) => op.name).join(', ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="flex-1 flex items-center justify-center flex-col gap-1.5 text-gray-400">
+                <span className="text-xs font-semibold">Nenhum ticket fechado encontrado</span>
+              </div>
+            )}
+          </div>
+
+          {/* Ticket Details Panel (Side Drawer / Details Page) */}
+          {selectedTicket && (
+            <div className="w-full md:w-1/2 border border-black/5 dark:border-white/5 bg-slate-50/50 dark:bg-black/20 rounded-[24px] p-5 flex flex-col gap-4 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
+              
+              {/* Header Details */}
+              <div className="flex items-center justify-between border-b border-black/[0.04] dark:border-white/[0.04] pb-3">
+                <div className="flex flex-col">
+                  <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-wider">
+                    Detalhes do Ticket #{selectedTicket.id}
+                  </h4>
+                  <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 mt-0.5">
+                    Cliente: {selectedTicket.contactName}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setSelectedTicket(null)}
+                  className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              {/* Timing Metadata Info */}
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <div className="p-2.5 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5 flex flex-col">
+                  <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider mb-0.5">Início</span>
+                  <span className="font-semibold text-gray-700 dark:text-gray-200">
+                    {new Date(selectedTicket.opened_at).toLocaleDateString('pt-BR')} {new Date(selectedTicket.opened_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div className="p-2.5 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5 flex flex-col">
+                  <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider mb-0.5">Fim</span>
+                  <span className="font-semibold text-gray-700 dark:text-gray-200">
+                    {new Date(selectedTicket.closed_at).toLocaleDateString('pt-BR')} {new Date(selectedTicket.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div className="p-2.5 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5 flex flex-col">
+                  <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider mb-0.5">Duração</span>
+                  <span className="font-semibold text-gray-700 dark:text-gray-200">{selectedTicket.duration}</span>
+                </div>
+                <div className="p-2.5 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5 flex flex-col">
+                  <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider mb-0.5">Mensagens</span>
+                  <span className="font-semibold text-gray-700 dark:text-gray-200">{selectedTicket.metadata?.total_messages || 0} trocadas</span>
+                </div>
+              </div>
+
+              {/* Description */}
+              {selectedTicket.problem_description && (
+                <div className="flex flex-col gap-1 bg-white dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5">
+                  <span className="text-[9px] uppercase font-black text-gray-400 tracking-wider">Descrição do Problema</span>
+                  <p className="text-xs text-gray-700 dark:text-gray-200 font-medium leading-relaxed">
+                    {selectedTicket.problem_description}
+                  </p>
+                </div>
+              )}
+
+              {/* Summary */}
+              {selectedTicket.metadata?.summary && (
+                <div className="flex flex-col gap-1 bg-blue-500/5 p-3 rounded-xl border border-blue-500/10">
+                  <span className="text-[9px] uppercase font-black text-blue-600 dark:text-blue-400 tracking-wider">Resumo</span>
+                  <p className="text-xs text-gray-700 dark:text-gray-200 font-medium leading-relaxed">
+                    {selectedTicket.metadata.summary}
+                  </p>
+                </div>
+              )}
+
+              {/* Checklist */}
+              {selectedTicket.metadata?.checklist && Array.isArray(selectedTicket.metadata.checklist) && selectedTicket.metadata.checklist.length > 0 && (
+                <div className="flex flex-col gap-2 bg-slate-100/50 dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5">
+                  <span className="text-[9px] uppercase font-black text-gray-400 tracking-wider">Checklist de Problemas</span>
+                  <div className="flex flex-col gap-1.5">
+                    {selectedTicket.metadata.checklist.map((item: any, idx: number) => (
+                      <div key={idx} className="flex items-center justify-between text-xs bg-white dark:bg-black/40 p-2 rounded-lg border border-black/[0.03] dark:border-white/5">
+                        <span className="text-gray-700 dark:text-gray-200 font-medium pr-2 text-left">• {item.text}</span>
+                        <span className={cn(
+                          "px-2 py-0.5 rounded text-[8px] font-black uppercase shrink-0",
+                          item.resolved 
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
+                            : "bg-red-500/10 text-red-600 dark:text-red-400"
+                        )}>
+                          {item.resolved ? "Resolvido" : "Pendente"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Resolution Summary */}
+              {selectedTicket.resolution_summary && (
+                <div className="flex flex-col gap-1.5 bg-emerald-500/5 p-3 rounded-xl border border-emerald-500/10">
+                  <span className="text-[9px] uppercase font-black text-emerald-600 dark:text-emerald-400 tracking-wider">Resolução Completa</span>
+                  <p className="text-xs text-gray-750 dark:text-gray-200 font-semibold leading-relaxed whitespace-pre-wrap">
+                    {selectedTicket.resolution_summary}
+                  </p>
+                </div>
+              )}
+
+              {/* Operators List */}
+              {selectedTicket.metadata?.operators && selectedTicket.metadata.operators.length > 0 && (
+                <div className="flex flex-col gap-1.5 bg-white dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5">
+                  <span className="text-[9px] uppercase font-black text-gray-400 tracking-wider">Participação de Atendentes</span>
+                  <div className="flex flex-col gap-1">
+                    {selectedTicket.metadata.operators.map((op: any, idx: number) => (
+                      <div key={idx} className="flex justify-between text-xs text-gray-600 dark:text-gray-300 font-medium">
+                        <span>{op.name}</span>
+                        <span className="font-bold text-gray-800 dark:text-white">{op.percentage}% ({op.count} msgs)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+
+        </div>
+
       </div>
     </div>
   );

@@ -6,7 +6,7 @@ import { useWaCallsStore } from '../store/useWaCallsStore';
 import { Phone } from 'lucide-react';
 import { playNotificationSound } from '../utils/AudioEngine';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal, CompanyDetailsModal, SnoozedListModal, ResolveTicketModal } from '../components/ChatModals';
+import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal, CompanyDetailsModal, SnoozedListModal, ResolveTicketModal, ClosedTicketsModal } from '../components/ChatModals';
 import ImageEditorModal from '../components/ImageEditorModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { AgentSettingsModal } from '../components/AgentSettingsModal';
@@ -1207,7 +1207,8 @@ export default function ChatDashboard() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
   const [isSnoozedListOpen, setIsSnoozedListOpen] = useState(false);
-  const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen || isSnoozedListOpen;
+  const [isClosedTicketsOpen, setIsClosedTicketsOpen] = useState(false);
+  const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen || isSnoozedListOpen || isClosedTicketsOpen;
   const [inputText, setInputText] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
@@ -3638,6 +3639,11 @@ export default function ChatDashboard() {
         }}
       />
 
+      <ClosedTicketsModal
+        isOpen={isClosedTicketsOpen}
+        onClose={() => setIsClosedTicketsOpen(false)}
+      />
+
       <RenameModal 
         isOpen={!!contactToEdit} 
         onClose={() => setContactToEdit(null)} 
@@ -5029,7 +5035,7 @@ export default function ChatDashboard() {
                       <CheckSquare size={13} className="text-violet-600 dark:text-violet-400" />
                       Fechar todos os tickets
                     </button>
-                    <button 
+                     <button 
                       onClick={() => {
                         setIsSnoozedListOpen(true);
                         setActiveDropdown(null);
@@ -5038,6 +5044,16 @@ export default function ChatDashboard() {
                     >
                       <CalendarClock size={13} className="text-amber-500" />
                       Conversas Adiadas
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setIsClosedTicketsOpen(true);
+                        setActiveDropdown(null);
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-violet-500/10 transition-colors flex items-center gap-2 border-t border-gray-100 dark:border-[#304046]"
+                    >
+                      <FolderCheck size={13} className="text-emerald-500" />
+                      Ver tickets fechados
                     </button>
                   </div>
                 )}
