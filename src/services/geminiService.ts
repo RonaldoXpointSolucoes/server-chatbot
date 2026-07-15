@@ -544,6 +544,81 @@ ${historyText}`;
       throw e;
     }
   }
+
+  async generateCrmBoardConfig(description: string): Promise<{ name: string, description: string, stages: any[] }> {
+    if (!this.isConfigured()) {
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
+    }
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+    const prompt = `Você é uma Inteligência Artificial especialista em gestão comercial, CRM e processos operacionais (Kanban).
+Sua missão é ler a seguinte descrição do processo fornecido pelo usuário e gerar a estrutura perfeita de um Quadro Kanban de CRM com suas respectivas etapas (colunas).
+
+Descrição do processo:
+"${description}"
+
+Você deve retornar obrigatoriamente um objeto JSON com as seguintes propriedades:
+1. "name": Um título curto e atraente para o quadro (ex: "Processo Seletivo", "Funil de Vendas", "Produção de Pizzas").
+2. "description": Uma breve descrição de 1 linha sobre a finalidade desse funil.
+3. "stages": Um array contendo entre 3 e 6 etapas ordenadas logicamente. Cada etapa deve ser um objeto com:
+   - "id": Um identificador string único em letras minúsculas sem espaços (ex: "novo", "analise", "entrevista").
+   - "label": O título legível da etapa (ex: "Novo Lead", "Em Análise", "Entrevista").
+   - "subtitle": Uma legenda super curta explicando a ação dessa etapa (ex: "Contato inicial", "Verificando documentos").
+   - "color": Uma classe do Tailwind CSS para a cor da coluna (escolha entre: "bg-blue-500", "bg-yellow-500", "bg-emerald-500", "bg-purple-500", "bg-rose-500", "bg-indigo-500").
+
+REGRAS DE RETORNO CRÍTICAS:
+1. Retorne EXATAMENTE e APENAS o JSON.
+2. NUNCA coloque blocos de marcação markdown (\`\`\`json ou \`\`\`) na resposta. Retorne apenas o JSON cru para fazermos JSON.parse de imediato.`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text().trim();
+    try {
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      return JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Erro no parse do JSON de criação mágica:", text);
+      throw new Error("Falha ao analisar a resposta da IA. Tente descrever o funil de forma diferente.");
+    }
+  }
+
+  async qualifyCrmLead(historyText: string, additionalNotes?: string): Promise<{ customerName: string, mainInterest: string, businessType: string, priority: number, summaryHTML: string }> {
+    if (!this.isConfigured()) {
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
+    }
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+    const prompt = `Analise a seguinte conversa do WhatsApp e notas adicionais de atendimento comercial.
+Sua missão é extrair as intenções de compra, prioridade e gerar um resumo comercial rico formatado em HTML.
+
+--- DADOS DA CONVERSA ---
+${historyText}
+
+--- NOTAS ADICIONAIS ---
+${additionalNotes || 'Nenhuma nota adicional.'}
+
+Você deve retornar obrigatoriamente um objeto JSON com as seguintes propriedades:
+{
+  "customerName": "Nome completo extraído do cliente (vazio se não encontrado)",
+  "mainInterest": "O produto/serviço que ele tem interesse. Escolha entre: 'Sistema', 'Totem', 'Desenvolvimento', 'Revenda', 'Outros'",
+  "businessType": "O tipo de empresa dele. Escolha entre: 'Gastronomia', 'Revendedor', 'Pesquisa Iniciante', 'Outros'",
+  "priority": 1 (baixo), 2 (médio) ou 3 (alto) com base no nível de engajamento e prontidão de compra,
+  "summaryHTML": "Um resumo comercial rico com marcadores e parágrafos contendo a dor do cliente, proposta de valor e combinados finais."
+}
+
+REGRAS DE RETORNO CRÍTICAS:
+1. Retorne EXATAMENTE e APENAS o JSON.
+2. NUNCA coloque blocos de marcação markdown (\`\`\`json ou \`\`\`) na resposta.`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text().trim();
+    try {
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      return JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Erro no parse do JSON de qualificação:", text);
+      throw new Error("Falha ao analisar o histórico do lead com a IA.");
+    }
+  }
 }
 
 export const geminiService = new GeminiService();

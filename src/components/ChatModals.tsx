@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus } from 'lucide-react';
+import { AlertCircle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -2260,6 +2260,69 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [allAvailableCompanies, setAllAvailableCompanies] = useState<any[]>([]);
 
+  // Ticket Management States
+  const activeTicket = useChatStore(s => s.activeTicket);
+  const contactTickets = useChatStore(s => s.contactTickets);
+  const updateActiveTicketDescription = useChatStore(s => s.updateActiveTicketDescription);
+  const openTicketForContact = useChatStore(s => s.openTicketForContact);
+  
+  const [activeTicketDesc, setActiveTicketDesc] = useState('');
+  const [isSavingDesc, setIsSavingDesc] = useState(false);
+  const [showPastTickets, setShowPastTickets] = useState(false);
+
+  useEffect(() => {
+    if (activeTicket) {
+      setActiveTicketDesc(activeTicket.problem_description || '');
+    } else {
+      setActiveTicketDesc('');
+    }
+  }, [activeTicket]);
+
+  const pastTickets = React.useMemo(() => {
+    return contactTickets.filter(t => t.status === 'resolved');
+  }, [contactTickets]);
+
+  const activeTicketStats = React.useMemo(() => {
+    if (!activeTicket || !contact?.messages) return { total_messages: 0, total_human_messages: 0, operators: [] };
+    
+    const start = new Date(activeTicket.opened_at);
+    
+    const ticketMsgs = contact.messages.filter(m => {
+      const ts = new Date(m.timestamp || m.created_at);
+      return ts >= start;
+    });
+
+    const humanMessages = ticketMsgs.filter(m => m.sender === 'human' || m.sender_type === 'human');
+    const stats: Record<string, number> = {};
+    let totalHuman = 0;
+
+    humanMessages.forEach(m => {
+      const text = m.text || m.text_content || '';
+      const match = text.match(/^\*([^*:]+):\*/);
+      if (match) {
+        const name = match[1].trim();
+        stats[name] = (stats[name] || 0) + 1;
+        totalHuman++;
+      } else {
+        const fallbackName = m.payload?.agent_name || m.created_by_name || 'Agente';
+        stats[fallbackName] = (stats[fallbackName] || 0) + 1;
+        totalHuman++;
+      }
+    });
+
+    const operators = Object.entries(stats).map(([name, count]) => ({
+      name,
+      count,
+      percentage: totalHuman > 0 ? Math.round((count / totalHuman) * 100) : 0
+    })).sort((a, b) => b.count - a.count);
+
+    return {
+      total_messages: ticketMsgs.length,
+      total_human_messages: totalHuman,
+      operators
+    };
+  }, [activeTicket, contact?.messages]);
+
   const companySelectRef = useRef<HTMLDivElement>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchCompanyQuery, setSearchCompanyQuery] = useState('');
@@ -2861,6 +2924,197 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
           </div>
         )}
 
+        {/* Histórico de Tickets */}
+        <div className="flex flex-col gap-2.5 bg-gradient-to-br from-teal-500/5 to-emerald-500/5 border border-emerald-500/10 rounded-3xl p-4.5">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400">
+              <CalendarClock size={16} />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[10px] uppercase font-black tracking-wider text-emerald-600 dark:text-emerald-400">
+                Atendimentos & Tickets
+              </span>
+              <span className="text-xs font-bold text-gray-500 dark:text-[#8696a0]">
+                Controle de sessões de suporte
+              </span>
+            </div>
+            
+            {!activeTicket && (
+              <button
+                onClick={() => openTicketForContact(contact.id)}
+                className="ml-auto flex items-center gap-1 py-1 px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-bold transition-all"
+              >
+                <Plus size={10} />
+                <span>Novo Ticket</span>
+              </button>
+            )}
+          </div>
+
+          {activeTicket ? (
+            <div className="flex flex-col gap-3 p-3.5 rounded-2xl bg-white/60 dark:bg-black/30 border border-emerald-500/20">
+              {/* Active Ticket Header */}
+              <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-2">
+                <div className="flex flex-col">
+                  <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400">
+                    TICKET EM ABERTO: #{activeTicket.id}
+                  </span>
+                  <span className="text-[9px] font-mono text-gray-400 mt-0.5">
+                    Início: {new Date(activeTicket.opened_at).toLocaleString('pt-BR')}
+                  </span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider bg-emerald-500/20 text-emerald-600 uppercase">
+                  Em Andamento
+                </span>
+              </div>
+
+              {/* Editable Problem Description */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
+                  Descrição do Problema:
+                </label>
+                <div className="flex items-start gap-1">
+                  <textarea
+                    value={activeTicketDesc}
+                    onChange={(e) => setActiveTicketDesc(e.target.value)}
+                    placeholder="Descreva o motivo do contato..."
+                    className="w-full text-xs p-2.5 bg-white dark:bg-[#111b21] border border-black/10 dark:border-white/10 rounded-xl focus:outline-none focus:border-emerald-500 resize-none h-[64px]"
+                  />
+                  {activeTicketDesc !== (activeTicket.problem_description || '') && (
+                    <button
+                      onClick={async () => {
+                        setIsSavingDesc(true);
+                        await updateActiveTicketDescription(activeTicket.id, activeTicketDesc);
+                        setIsSavingDesc(false);
+                      }}
+                      disabled={isSavingDesc}
+                      className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-all"
+                      title="Salvar"
+                    >
+                      {isSavingDesc ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Real-time statistics */}
+              <div className="pt-2 border-t border-black/5 dark:border-white/5 flex flex-col gap-1.5">
+                <span className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
+                  Resumo Parcial das Mensagens:
+                </span>
+                <div className="flex items-center justify-between text-[11px] font-semibold text-gray-600 dark:text-gray-300">
+                  <span>Total de Mensagens:</span>
+                  <span className="font-bold text-gray-800 dark:text-white">{activeTicketStats.total_messages}</span>
+                </div>
+                {activeTicketStats.operators.length > 0 ? (
+                  <div className="flex flex-col gap-1 mt-1">
+                    <span className="text-[9px] uppercase font-black tracking-wider text-gray-400">
+                      Participação dos Atendentes:
+                    </span>
+                    {activeTicketStats.operators.map(op => (
+                      <div key={op.name} className="flex flex-col gap-0.5">
+                        <div className="flex justify-between text-[10px] font-semibold text-gray-550 dark:text-gray-300">
+                          <span>{op.name}</span>
+                          <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
+                        </div>
+                        <div className="h-1 w-full bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
+                          <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${op.percentage}%` }}></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-[10px] text-gray-400 italic">Nenhuma mensagem dos atendentes registrada.</span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-4 bg-black/[0.02] dark:bg-white/[0.02] border border-dashed border-black/10 dark:border-white/10 rounded-2xl">
+              <span className="text-xs text-gray-400 italic">Não há ticket aberto para este cliente.</span>
+            </div>
+          )}
+
+          {/* Histórico Anterior */}
+          {pastTickets.length > 0 && (
+            <div className="mt-2 flex flex-col gap-2">
+              <button
+                onClick={() => setShowPastTickets(!showPastTickets)}
+                className="flex items-center gap-1.5 text-[11px] font-black text-gray-500 hover:text-emerald-500 transition-colors uppercase"
+              >
+                <span>Histórico de Chamados ({pastTickets.length})</span>
+                <ChevronDown size={14} className={cn("transition-transform duration-200", showPastTickets && "rotate-180")} />
+              </button>
+
+              {showPastTickets && (
+                <div className="flex flex-col gap-2 max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
+                  {pastTickets.map(t => {
+                    const start = new Date(t.opened_at);
+                    const end = t.closed_at ? new Date(t.closed_at) : null;
+                    const ops = t.metadata?.operators || [];
+                    
+                    return (
+                      <div key={t.id} className="flex flex-col p-3 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 text-[11px] gap-2">
+                        <div className="flex justify-between items-center border-b border-black/5 dark:border-white/5 pb-1.5">
+                          <span className="font-bold text-gray-800 dark:text-white">Ticket #{t.id}</span>
+                          <span className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-white/5 text-[9px] font-black text-gray-500 uppercase">
+                            Resolvido
+                          </span>
+                        </div>
+
+                        <div className="flex flex-col gap-1 text-[10px] text-gray-600 dark:text-gray-300">
+                          <div>
+                            <span className="font-extrabold uppercase text-gray-400 mr-1">Início:</span>
+                            {start.toLocaleDateString()} {start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                          {end && (
+                            <div>
+                              <span className="font-extrabold uppercase text-gray-400 mr-1">Fim:</span>
+                              {end.toLocaleDateString()} {end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          )}
+                        </div>
+
+                        {t.problem_description && (
+                          <div className="bg-white/40 dark:bg-black/10 p-2 rounded-xl border border-black/[0.02] dark:border-white/[0.02]">
+                            <span className="font-extrabold uppercase text-[9px] text-gray-400 block mb-0.5">Descrição:</span>
+                            <p className="text-gray-750 dark:text-gray-200 leading-normal font-medium whitespace-pre-wrap">{t.problem_description}</p>
+                          </div>
+                        )}
+
+                        {t.resolution_summary && (
+                          <div className="bg-emerald-500/5 p-2 rounded-xl border border-emerald-500/10">
+                            <span className="font-extrabold uppercase text-[9px] text-emerald-600 dark:text-emerald-400 block mb-0.5">Resolução:</span>
+                            <p className="text-gray-750 dark:text-gray-255 leading-normal font-semibold whitespace-pre-wrap">{t.resolution_summary}</p>
+                          </div>
+                        )}
+
+                        {t.metadata?.total_messages !== undefined && (
+                          <div className="pt-1.5 border-t border-black/5 dark:border-white/5 flex flex-col gap-1 text-[10px]">
+                            <div className="flex justify-between font-semibold">
+                              <span>Total de Mensagens:</span>
+                              <span className="font-bold text-gray-800 dark:text-white">{t.metadata.total_messages}</span>
+                            </div>
+                            {ops.length > 0 && (
+                              <div className="flex flex-col gap-1 mt-1">
+                                <span className="text-[9px] uppercase font-black text-gray-400">Atendentes:</span>
+                                {ops.map((op: any) => (
+                                  <div key={op.name} className="flex justify-between text-gray-500 dark:text-gray-405">
+                                    <span>{op.name}</span>
+                                    <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-col gap-2">
           <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-600 dark:text-emerald-500">Ficha Cadastral</p>
           <div className="flex flex-col gap-3 bg-[#f0f2f5]/80 dark:bg-black/20 p-4 rounded-2xl border border-black/5 dark:border-white/5">
@@ -3185,3 +3439,160 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
     </div>
   );
 }
+
+interface ResolveTicketModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  activeTicket: any;
+  onConfirm: (problemDesc: string, resolution: string, reactivateAi: boolean) => Promise<void>;
+}
+
+export function ResolveTicketModal({ isOpen, onClose, activeTicket, onConfirm }: ResolveTicketModalProps) {
+  const [problemDesc, setProblemDesc] = useState('');
+  const [resolution, setResolution] = useState('');
+  const [reactivateAi, setReactivateAi] = useState(true);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (activeTicket) {
+      setProblemDesc(activeTicket.problem_description || '');
+    } else {
+      setProblemDesc('');
+    }
+    setResolution('');
+  }, [activeTicket, isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resolution.trim()) {
+      alert('Por favor, informe como o atendimento foi resolvido.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await onConfirm(problemDesc, resolution, reactivateAi);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
+      
+      <div className="relative w-full max-w-md bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col gap-5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2.5 bg-gradient-to-tr from-emerald-500 to-teal-500 rounded-2xl text-white shadow-sm shrink-0">
+              <CalendarClock size={20} />
+            </div>
+            <div className="flex flex-col">
+              <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider">
+                Encerrar Atendimento
+              </h3>
+              <p className="text-[10px] font-bold text-gray-400">
+                {activeTicket ? `Resolvendo Ticket #${activeTicket.id}` : 'Resolvendo conversa'}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-550 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] uppercase font-black tracking-wider text-gray-450">
+              Descrição do Problema
+            </label>
+            <textarea
+              value={problemDesc}
+              onChange={(e) => setProblemDesc(e.target.value)}
+              placeholder="Descreva o motivo do chamado (opcional)..."
+              className="w-full text-xs p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[72px]"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] uppercase font-black tracking-wider text-gray-455 flex items-center gap-1">
+              <span>Resolução / Solução Aplicada</span>
+              <span className="text-red-500 text-[12px] font-bold">*</span>
+            </label>
+            <textarea
+              value={resolution}
+              onChange={(e) => setResolution(e.target.value)}
+              placeholder="Escreva como o problem foi solucionado..."
+              className="w-full text-xs p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-emerald-500/30 dark:border-emerald-500/20 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[90px]"
+              required
+            />
+          </div>
+
+          {/* Reactivate AI Toggle */}
+          <div className="flex items-center justify-between p-3.5 bg-gradient-to-r from-emerald-500/5 to-teal-500/5 border border-emerald-500/10 rounded-2xl">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400 shrink-0">
+                <BrainCircuit size={16} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[11px] font-bold text-gray-800 dark:text-white leading-none">
+                  Reativar Inteligência Luna
+                </span>
+                <span className="text-[9px] text-gray-400 mt-1 leading-normal">
+                  Permite que a IA volte a responder o cliente automaticamente.
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReactivateAi(!reactivateAi)}
+              className={cn(
+                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                reactivateAi ? "bg-[#00a884]" : "bg-gray-300 dark:bg-gray-700"
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                  reactivateAi ? "translate-x-4" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-1/2 py-3 px-4 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-750 dark:text-gray-250 rounded-2xl font-bold transition-all text-xs"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-1/2 py-3 px-4 bg-gradient-to-tr from-emerald-500 to-teal-500 text-white rounded-2xl font-bold shadow-lg shadow-emerald-500/25 transition-all text-xs flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+            >
+              {loading ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <>
+                  <Check size={16} />
+                  <span>Encerrar Ticket</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+

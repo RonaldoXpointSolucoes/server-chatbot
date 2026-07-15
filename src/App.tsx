@@ -4,6 +4,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import ChatDashboard from './pages/ChatDashboard';
 import ContactsManager from './pages/ContactsManager';
 import CrmDashboard from './pages/CrmDashboard';
+import CrmKanban from './pages/CrmKanban';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminLogin from './pages/AdminLogin';
 import ClientLogin from './pages/ClientLogin';
@@ -78,6 +79,7 @@ export default function App() {
             <Route path="/chat" element={<ErrorBoundary><ChatDashboard /></ErrorBoundary>} />
             <Route path="/contacts" element={<ErrorBoundary><ContactsManager /></ErrorBoundary>} />
             <Route path="/crm" element={<ErrorBoundary><CrmDashboard /></ErrorBoundary>} />
+            <Route path="/crm/kanban/:id" element={<ErrorBoundary><CrmKanban /></ErrorBoundary>} />
             <Route path="/instances" element={<InstancesDashboard />} />
             <Route path="/instances/:id/settings" element={<InstanceSettings />} />
             <Route path="/knowledge" element={<ErrorBoundary><KnowledgeBase /></ErrorBoundary>} />

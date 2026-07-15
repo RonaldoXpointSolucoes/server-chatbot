@@ -41,13 +41,15 @@ import {
   Store,
   X,
   QrCode,
-  ClipboardList
+  ClipboardList,
+  Target
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 import { createPortal } from 'react-dom';
 import { formatPhoneNumber } from '../utils/format';
+import KanbanBoardCreator from './KanbanBoardCreator';
 
 const SidebarContext = React.createContext<{ onClose?: () => void }>({});
 
@@ -69,6 +71,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     }
     return {
       conversations: true,
+      crm: true,
       checklists: true,
       apps: false,
       channels: true,
@@ -79,6 +82,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   });
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isBoardCreatorOpen, setIsBoardCreatorOpen] = useState(false);
 
   const isSearch = searchQuery.trim().length > 0;
   const q = searchQuery.toLowerCase();
@@ -161,6 +165,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const agents = useChatStore(state => state.agents);
   const tenantLabels = useChatStore(state => state.tenantLabels);
   const instancesStatus = useChatStore(state => state.instancesStatus);
+  const crmBoards = useChatStore(state => state.crmBoards) || [];
   
   const currentAgent = agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
   const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to?.split(',').includes(currentAgent.id) && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
@@ -192,6 +197,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   useEffect(() => {
     onClose?.();
   }, [location.pathname, onClose]);
+
+  useEffect(() => {
+    if (tenantId) {
+      useChatStore.getState().fetchCrmBoards();
+    }
+  }, [tenantId]);
 
   useEffect(() => {
     if (!tenantId) return;
@@ -773,12 +784,36 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               }} 
             />
             <NavItem icon={<Contact size={16} />} title="Contatos" onClick={() => navigate('/contacts')} />
+          <CollapsibleSection 
+            title="CRM" 
+            icon={<ClipboardList size={16} className="text-amber-500" />} 
+            isOpen={expandedSections.crm} 
+            onToggle={() => toggleSection('crm')}
+          >
             <NavItem 
-              icon={<ClipboardList size={16} className="text-amber-500" />} 
-              title="CRM" 
+              icon={<LayoutDashboard size={16} className="text-amber-500" />} 
+              title="Painel Estratégico" 
+              isSub
               onClick={() => navigate('/crm')}
               isActive={window.location.pathname === '/crm'} 
             />
+             {crmBoards.map(board => (
+              <NavItem 
+                key={board.id}
+                icon={<Target size={16} className="text-indigo-400" />} 
+                title={board.name} 
+                isSub
+                onClick={() => navigate(`/crm/kanban/${board.id}`)}
+                isActive={window.location.pathname === `/crm/kanban/${board.id}`} 
+              />
+            ))}
+            <NavItem 
+              icon={<Plus size={16} className="text-amber-500" />} 
+              title="➕ Criar Novo Quadro" 
+              isSub
+              onClick={() => setIsBoardCreatorOpen(true)}
+            />
+          </CollapsibleSection>
 
             <NavItem 
               title="Agenda Interna" 
@@ -1112,6 +1147,14 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           background: ${theme === 'dark' ? '#3b4a54' : '#94a3b8'};
         }
       `}</style>
+      <KanbanBoardCreator 
+        isOpen={isBoardCreatorOpen} 
+        onClose={() => setIsBoardCreatorOpen(false)} 
+        onCreated={() => {
+          setIsBoardCreatorOpen(false);
+          useChatStore.getState().fetchCrmBoards();
+        }}
+      />
       </div>
     </SidebarContext.Provider>
   );

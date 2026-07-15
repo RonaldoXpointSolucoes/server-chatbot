@@ -21,13 +21,14 @@ Sempre que o usuário digitar `deploy!`, ou solicitar um deploy, o agente **OBRI
 
 ## Regras de Atualização do Servidor (Node.js) vs. Frontend
 
-1. **ALTERAÇÃO ESTREITAMENTE VISUAL / FRONTEND**: Se a mudança for de visual, comportamento de tela, estilo (CSS/Tailwind) ou ajustes em componentes de React na raiz/src (fora do diretório `/server`), o servidor Node.js **NÃO** deve ser atualizado, versionado ou reiniciado. Evite modificar arquivos dentro do diretório `/server` para que o Coolify não ative builds redundantes do motor.
-2. **QUANDO ATUALIZAR O SERVIDOR NODE**: O backend só deve ser alterado e sofrer deploy se houver mudanças reais de lógica no diretório `/server/`, tais como:
+1. **ALTERAÇÃO ESTREITAMENTE VISUAL / FRONTEND / SUPABASE**: Se a mudança envolver visual, comportamento de tela, estilo (CSS/Tailwind), ajustes em componentes React ou integrações diretas da aplicação com o Supabase (fora do diretório `/server`), o servidor Node.js **NÃO** deve ser atualizado, versionado ou reiniciado. Todos os desenvolvimentos que não envolvam diretamente lógica do backend Node.js (que está no Coolify) **não devem** de forma alguma atualizar o servidor Node, versioná-lo no `/server/package.json`, ou disparar deploy do backend no Coolify. Evite modificar arquivos dentro do diretório `/server` para que o Coolify não ative builds redundantes do motor.
+2. **ARQUITETURA CLIENT-SIDE FIRST (APP + SUPABASE)**: Para novos recursos, fluxos de dados, CRM/Kanban, checklists ou tarefas, a lógica de negócio e as comunicações devem ser mantidas diretamente entre a aplicação cliente (React+Vite) e o banco de dados Supabase (utilizando o Supabase JS SDK, consultas diretas, tabelas e políticas RLS). O uso do servidor backend Node.js (Coolify) deve ser mantido no **mínimo absoluto possível**, reservando-o estritamente para APIs específicas, processamento offline ou regras exclusivas (como Baileys, RAG pesado ou integrações ERP).
+3. **QUANDO ATUALIZAR O SERVIDOR NODE**: O backend só deve ser alterado e sofrer deploy se houver mudanças reais de lógica no diretório `/server/`, tais como:
    * Modificações no `SessionManager`, `EventProcessor`, `FlowEngine` ou biblioteca `baileys-core`.
-   * Criação de tabelas, triggers Postgres, scripts de banco de dados ou arquivos SQL de migração.
-   * Mudanças nas APIs de roteamento Express ou integrações externas (Gemini AI, Gastrofood API, etc.).
+   * Criação de triggers Postgres complexos que dependam de chamadas HTTP específicas do Node ou scripts de inicialização do servidor.
+   * Mudanças nas APIs de roteamento Express ou integrações que exijam segurança de chaves em backend (ex: webhook do Gastrofood).
    * Atualizações de dependências no arquivo `/server/package.json`.
-3. **INDICAÇÃO DE DEPLOY**: Ao efetuar commits puramente visuais, faça o commit com mensagens que deixem claro que a mudança é exclusiva do frontend (ex: `feat(ui): ...` ou `fix(ui): ...`) e apenas efetue o deploy do frontend (Vercel).
+4. **INDICAÇÃO DE DEPLOY**: Ao efetuar commits puramente visuais ou de integrações diretas do Supabase, faça o commit com mensagens que deixem claro que a mudança é exclusiva do frontend (ex: `feat(ui): ...` ou `fix(ui): ...`) e apenas efetue o deploy do frontend (Vercel).
 
 ## Regras de Execução de Comandos Assíncronos e Deploys
 

@@ -6,7 +6,7 @@ import { useWaCallsStore } from '../store/useWaCallsStore';
 import { Phone } from 'lucide-react';
 import { playNotificationSound } from '../utils/AudioEngine';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal, CompanyDetailsModal, SnoozedListModal } from '../components/ChatModals';
+import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal, ForwardMessageModal, SnoozeModal, AssociatedCompaniesModal, CompanyDetailsModal, SnoozedListModal, ResolveTicketModal } from '../components/ChatModals';
 import ImageEditorModal from '../components/ImageEditorModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { AgentSettingsModal } from '../components/AgentSettingsModal';
@@ -515,6 +515,61 @@ export default function ChatDashboard() {
 
   const [editingMessage, setEditingMessage] = useState<{ id: string, text: string } | null>(null);
   const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
+  const [resolvingTicketContactId, setResolvingTicketContactId] = useState<string | null>(null);
+  const activeTicket = useChatStore(s => s.activeTicket);
+
+  const calculateFinalStats = async (contactId: string) => {
+    const activeTicket = useChatStore.getState().activeTicket;
+    if (!activeTicket) return {};
+
+    const contact = contacts.find(c => c.id === contactId);
+    if (!contact) return {};
+    
+    try {
+      const { data: msgs } = await supabase
+        .from('messages')
+        .select('text_content, sender_type, timestamp, raw_payload')
+        .eq('conversation_id', contact.conv_id || '')
+        .gte('timestamp', activeTicket.opened_at);
+
+      if (!msgs || msgs.length === 0) {
+        return { total_messages: 0, total_human_messages: 0, operators: [] };
+      }
+
+      const humanMessages = msgs.filter(m => m.sender_type === 'human');
+      const stats: Record<string, number> = {};
+      let totalHuman = 0;
+
+      humanMessages.forEach(m => {
+        const text = m.text_content || '';
+        const match = text.match(/^\*([^*:]+):\*/);
+        if (match) {
+          const name = match[1].trim();
+          stats[name] = (stats[name] || 0) + 1;
+          totalHuman++;
+        } else {
+          const fallbackName = m.raw_payload?.agent_name || 'Agente';
+          stats[fallbackName] = (stats[fallbackName] || 0) + 1;
+          totalHuman++;
+        }
+      });
+
+      const operators = Object.entries(stats).map(([name, count]) => ({
+        name,
+        count,
+        percentage: totalHuman > 0 ? Math.round((count / totalHuman) * 100) : 0
+      })).sort((a, b) => b.count - a.count);
+
+      return {
+        total_messages: msgs.length,
+        total_human_messages: totalHuman,
+        operators
+      };
+    } catch (e) {
+      console.error('Erro ao calcular estatísticas finais do ticket:', e);
+      return {};
+    }
+  };
 
   // Garante que o chat ativo seja marcado como lido automaticamente ao ser aberto ou ao receber novas mensagens apenas se a tela/aba estiver com foco
   useEffect(() => {
@@ -2113,7 +2168,7 @@ export default function ChatDashboard() {
       }
     }
     
-    await executeResolve(contactId, true);
+    setResolvingTicketContactId(contactId);
   };
 
   const handleStartChatWithSearchedNumber = async (phoneNumber: string) => {
@@ -2188,12 +2243,20 @@ export default function ChatDashboard() {
          // Atualiza a base de dados do store para refletir a nova conversa no menu esquerdo
          await useChatStore.getState().fetchInitialData();
 
-         setActiveChat(existingContact.id);
+         const targetInstanceId = properInstance || existingContact.instance_id || 'default';
+         const targetCompositeId = `${existingContact.id}_${targetInstanceId}`;
+
+         setActiveChat(targetCompositeId);
          const targetInstance = properInstance || existingContact.instance_id;
          if (targetInstance) {
-           useChatStore.getState().loadHistoricalMessages(existingContact.id, targetInstance);
+           useChatStore.getState().loadHistoricalMessages(targetCompositeId, targetInstance);
          }
          setSearchTerm('');
+
+         // Força o foco do cursor no campo de texto de envio de mensagens
+         setTimeout(() => {
+           textareaRef.current?.focus();
+         }, 350);
       }
     } catch (err) {
       console.error('Erro no fluxo de iniciar novo chat com número pesquisado:', err);
@@ -3538,6 +3601,23 @@ export default function ChatDashboard() {
       )}
 
       {/* Nossos Novos Modais Premium */}
+      <ResolveTicketModal
+        isOpen={!!resolvingTicketContactId}
+        onClose={() => setResolvingTicketContactId(null)}
+        activeTicket={activeTicket}
+        onConfirm={async (problemDesc, resolution, reactivateAi) => {
+          if (resolvingTicketContactId) {
+            const stats = await calculateFinalStats(resolvingTicketContactId);
+            const currentActiveTicket = useChatStore.getState().activeTicket;
+            if (currentActiveTicket) {
+              await useChatStore.getState().resolveActiveTicket(currentActiveTicket.id, problemDesc, resolution, stats);
+            }
+            await executeResolve(resolvingTicketContactId, reactivateAi);
+          }
+          setResolvingTicketContactId(null);
+        }}
+      />
+
       <RenameModal 
         isOpen={!!contactToEdit} 
         onClose={() => setContactToEdit(null)} 
@@ -4850,12 +4930,14 @@ export default function ChatDashboard() {
                 )}></span>
               </span>
               <span className="text-[11px] font-bold text-gray-600 dark:text-[#d1d7db] truncate">
-                {systemHealth === 'green' ? "Operando" :
-                 systemHealth === 'yellow' ? (
-                   whatsappStatusMemo.total > 0 && whatsappStatusMemo.connectedCount < whatsappStatusMemo.total
-                     ? `Atenção (${whatsappStatusMemo.percentage}%)`
-                     : "Atenção"
-                 ) : "Offline"}
+                {activeChannelFilter ? (activeChannelName || activeChannelFilter) : (
+                  systemHealth === 'green' ? "Operando" :
+                  systemHealth === 'yellow' ? (
+                    whatsappStatusMemo.total > 0 && whatsappStatusMemo.connectedCount < whatsappStatusMemo.total
+                      ? `Atenção (${whatsappStatusMemo.percentage}%)`
+                      : "Atenção"
+                  ) : "Offline"
+                )}
               </span>
             </div>
             <ChevronDown 
@@ -5465,13 +5547,6 @@ export default function ChatDashboard() {
                                )}
                              </div>
                            </span>
-                           {contactInstanceName && (
-                             <div className="flex items-center gap-1 select-none shrink-0 mt-0.5 mb-0.5">
-                               <span className="text-[9px] px-1.5 py-[1px] bg-emerald-50 dark:bg-emerald-500/10 text-emerald-650 dark:text-emerald-450 border border-emerald-500/15 font-bold uppercase rounded-md tracking-wider">
-                                 Caixa: {contactInstanceName}
-                                </span>
-                             </div>
-                           )}
   
                            {/* Labels and Assigned Agent on a new line */}
                            {(contact.assigned_to || (contact.conv_labels && contact.conv_labels.length > 0)) && (

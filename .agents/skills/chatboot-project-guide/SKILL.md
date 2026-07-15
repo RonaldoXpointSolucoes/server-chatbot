@@ -48,7 +48,9 @@ Essas regras são imutáveis e devem ser seguidas sem exceções para evitar que
 > Nunca inicie o servidor de backend localmente na máquina (`npm run dev` ou `node src/index.js` dentro da pasta `/server`). A execução local causa problemas de concorrência graves com o banco de dados Supabase e conflitos de sessão do WhatsApp (código 409), derrubando a produção.
 
 - **Comunicação Exclusiva com Produção**: O arquivo `.env` do front-end em execução local deve sempre manter a variável `VITE_WHATSAPP_ENGINE_URL` apontada para a URL do motor em produção na nuvem (Coolify).
-- **Deploy de Backend Antes de Testar**: Alterações feitas no código do backend/servidor de produção devem obrigatoriamente ser deployadas antes de orientar o usuário a testar as funcionalidades.
+- **Alterações Visuais / Supabase**: Se a mudança envolver visual, comportamento de tela, estilo (CSS/Tailwind), ajustes em componentes React ou integrações diretas da aplicação com o Supabase (fora do diretório `/server`), o servidor Node.js **NÃO** deve ser atualizado, versionado ou reiniciado, evitando deploys extras desnecessários no Coolify.
+- **Arquitetura Client-Side First (App + Supabase)**: Desenvolva novos recursos conectando a aplicação React diretamente com o Supabase (JS SDK, tabelas, políticas RLS), usando o servidor Node.js de backend o mínimo possível para manter a base de APIs e regras exclusivas (como Baileys, Gastrofood, RAG) do motor isoladas.
+- **Deploy de Backend Antes de Testar**: Alterações feitas no código real do backend/servidor de produção devem obrigatoriamente ser deployadas antes de orientar o usuário a testar as funcionalidades.
 
 ### Fluxo de Deploy (`deploy!`)
 Sempre que o comando ou expressão `deploy!` for solicitada, execute sequencialmente:

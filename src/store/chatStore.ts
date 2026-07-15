@@ -56,6 +56,24 @@ export type ContactType = ContactRow & {
   isManuallyUnread?: boolean;
 };
 
+export interface ChatTicket {
+  id: number;
+  tenant_id: string;
+  contact_id: string;
+  opened_at: string;
+  closed_at: string | null;
+  status: 'open' | 'resolved';
+  problem_description: string | null;
+  resolution_summary: string | null;
+  metadata: {
+    total_messages?: number;
+    total_human_messages?: number;
+    operators?: Array<{ name: string; count: number; percentage: number }>;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AppointmentType {
   id: string;
   tenant_id: string;
@@ -256,6 +274,8 @@ interface ChatState {
   updateTenantInstance: (newInstance: string) => Promise<void>;
   updateTenantSettings: (newSettings: any) => Promise<void>; // Novo campo
   fetchInitialData: () => Promise<void>;
+  crmBoards: any[];
+  fetchCrmBoards: () => Promise<void>;
   subscribeToNewMessages: (force?: boolean) => void;
   // Historical Sync
   syncEvolutionContacts: (instanceName: string) => Promise<void>;
@@ -328,6 +348,15 @@ interface ChatState {
   setTicketMode: (active: boolean) => void;
   reopenConversation: (contactId: string) => Promise<void>;
   resolveConversation: (contactId: string, reactivateAi?: boolean) => Promise<void>;
+  
+  // Detalhes de Tickets e Histórico
+  activeTicket: ChatTicket | null;
+  contactTickets: ChatTicket[];
+  loadTicketsForContact: (contactId: string) => Promise<void>;
+  openTicketForContact: (contactId: string, problemDescription?: string) => Promise<ChatTicket | null>;
+  updateActiveTicketDescription: (ticketId: number, description: string) => Promise<void>;
+  resolveActiveTicket: (ticketId: number, problemDescription: string, resolutionSummary: string, metadata: any) => Promise<void>;
+
   lastBatchResolvedConversations: { conversationId: string, contactId: string, previousStatus: string, assignedTo: string | null, instanceId?: string | null }[] | null;
   resolveAllConversations: (onlyMine?: boolean) => Promise<{ success: boolean, count: number }>;
   undoLastBatchResolve: () => Promise<boolean>;
@@ -604,6 +633,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   connectedInstanceName: null,
   tenantInfo: null,
   agents: [],
+  crmBoards: [],
   modalReason: null,
   isSubscribed: false,
   isSyncingHistory: {},
@@ -622,6 +652,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   theme: (typeof window !== 'undefined' ? localStorage.getItem('theme') as 'light' | 'dark' : 'light') || 'light',
   ticketMode: typeof window !== 'undefined' ? localStorage.getItem('chatboot_ticket_mode') === 'true' : false,
   lastBatchResolvedConversations: null,
+  activeTicket: null,
+  contactTickets: [],
   reopenedTicketToast: null,
   setReopenedTicketToast: (toast) => set({ reopenedTicketToast: toast }),
   historySyncError: null,
@@ -658,6 +690,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       contacts: [],
       activeChatId: null,
+      activeTicket: null,
+      contactTickets: [],
       evolutionConnected: false,
       instancesStatus: {},
       realtimeStatus: 'disconnected',
@@ -1250,15 +1284,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
         localStorage.removeItem('activeChannelName');
     }
     
-    // Limpa os contatos momentaneamente para forçar o loading state da UI e evitar misturas
-    set({ contacts: [], activeChannelFilter: id, activeChannelName: name || null, activeChatId: null });
+    // Mantém os contatos atuais exibidos durante o carregamento dos novos contatos para transição suave
+    set({ activeChannelFilter: id, activeChannelName: name || null, activeChatId: null });
     
-    // Recarrega os contatos baseados no novo filtro de canal
-    setTimeout(() => {
-        get().fetchInitialData();
-    }, 50);
+    // Recarrega os contatos baseados no novo filtro de canal de imediato
+    get().fetchInitialData();
   },
-  setActiveChat: (id) => set({ activeChatId: id }),
+  setActiveChat: (id) => {
+    set({ activeChatId: id });
+    if (id) {
+      get().loadTicketsForContact(id);
+    } else {
+      set({ activeTicket: null, contactTickets: [] });
+    }
+  },
 
   sendHumanMessage: async (contactId, text, instanceName) => {
     console.log("[sendHumanMessage] Called with:", { contactId, text, instanceName });
@@ -2915,6 +2954,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           get().fetchTenantLabels(),
           get().fetchQuickReplies(),
           get().fetchAppointments(),
+          get().fetchCrmBoards(),
           (async () => {
             try {
               const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
@@ -4024,6 +4064,183 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } catch (e) {
       console.error('Erro ao atualizar campo da conversa:', e);
+    }
+  },
+
+  fetchCrmBoards: async () => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    try {
+      const { data, error } = await supabase
+        .from('crm_boards')
+        .select('*')
+        .eq('tenant_id', tenant.id)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      
+      if (!data || data.length === 0) {
+        const defaultBoard = {
+          tenant_id: tenant.id,
+          name: 'Funil de Vendas',
+          config: {
+            description: 'Funil comercial padrão para captação de clientes',
+            features: {
+              agenda: true,
+              aiSummary: true,
+              probability: true,
+              associateCompany: false,
+              chatwootInboxId: null
+            },
+            stages: [
+              { id: 'new', label: 'Novo Lead', subtitle: 'Primeiro contato', color: 'bg-blue-500' },
+              { id: 'qualified', label: 'Qualificado', subtitle: 'Informações coletadas', color: 'bg-yellow-500' },
+              { id: 'scheduled', label: 'Agendado', subtitle: 'Reunião agendada', color: 'bg-emerald-500' },
+              { id: 'won', label: 'Ganho', subtitle: 'Negócio fechado', color: 'bg-purple-500' }
+            ]
+          }
+        };
+        const { data: inserted, error: insertErr } = await supabase
+          .from('crm_boards')
+          .insert([defaultBoard])
+          .select()
+          .single();
+        if (!insertErr && inserted) {
+          set({ crmBoards: [inserted] });
+        }
+      } else {
+        set({ crmBoards: data });
+      }
+    } catch (err) {
+      console.error('Erro ao buscar quadros de CRM:', err);
+    }
+  },
+
+  loadTicketsForContact: async (contactId) => {
+    const tenantInfo = get().tenantInfo;
+    if (!tenantInfo) return;
+    const realContactId = getRealContactId(contactId);
+
+    try {
+      const { data: tickets, error } = await supabase
+        .from('chat_tickets')
+        .select('*')
+        .eq('contact_id', realContactId)
+        .eq('tenant_id', tenantInfo.id)
+        .order('opened_at', { ascending: false });
+
+      if (error) throw error;
+
+      const active = tickets?.find(t => t.status === 'open') || null;
+      set({ 
+        contactTickets: tickets || [], 
+        activeTicket: active 
+      });
+
+      // Se o contato está ativo (não resolvido/bloqueado) e não tem ticket ativo, abre um automaticamente
+      const contact = get().contacts.find(c => c.id === contactId);
+      if (contact && contact.conv_status !== 'resolved' && contact.conv_status !== 'closed' && !active) {
+        await get().openTicketForContact(contactId);
+      }
+    } catch (e) {
+      console.error('Erro ao carregar tickets:', e);
+    }
+  },
+
+  openTicketForContact: async (contactId, problemDescription = '') => {
+    const tenantInfo = get().tenantInfo;
+    if (!tenantInfo) return null;
+    const realContactId = getRealContactId(contactId);
+
+    try {
+      const { data: newTicket, error } = await supabase
+        .from('chat_tickets')
+        .insert({
+          tenant_id: tenantInfo.id,
+          contact_id: realContactId,
+          status: 'open',
+          problem_description: problemDescription || null,
+          metadata: {}
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Update state
+      set((state) => ({
+        activeTicket: newTicket,
+        contactTickets: [newTicket, ...state.contactTickets]
+      }));
+
+      return newTicket;
+    } catch (e) {
+      console.error('Erro ao abrir ticket:', e);
+      return null;
+    }
+  },
+
+  updateActiveTicketDescription: async (ticketId, description) => {
+    try {
+      const { error } = await supabase
+        .from('chat_tickets')
+        .update({ problem_description: description })
+        .eq('id', ticketId);
+
+      if (error) throw error;
+
+      set((state) => {
+        const updatedTickets = state.contactTickets.map(t => 
+          t.id === ticketId ? { ...t, problem_description: description } : t
+        );
+        const updatedActive = state.activeTicket && state.activeTicket.id === ticketId 
+          ? { ...state.activeTicket, problem_description: description }
+          : state.activeTicket;
+
+        return {
+          contactTickets: updatedTickets,
+          activeTicket: updatedActive
+        };
+      });
+    } catch (e) {
+      console.error('Erro ao atualizar descrição do ticket:', e);
+    }
+  },
+
+  resolveActiveTicket: async (ticketId, problemDescription, resolutionSummary, metadata) => {
+    try {
+      const { error } = await supabase
+        .from('chat_tickets')
+        .update({ 
+          status: 'resolved',
+          closed_at: new Date().toISOString(),
+          problem_description: problemDescription,
+          resolution_summary: resolutionSummary,
+          metadata: metadata
+        })
+        .eq('id', ticketId);
+
+      if (error) throw error;
+
+      set((state) => {
+        const updatedTickets = state.contactTickets.map(t => 
+          t.id === ticketId ? { 
+            ...t, 
+            status: 'resolved' as const, 
+            closed_at: new Date().toISOString(),
+            problem_description: problemDescription,
+            resolution_summary: resolutionSummary,
+            metadata: metadata
+          } : t
+        );
+        const updatedActive = state.activeTicket && state.activeTicket.id === ticketId ? null : state.activeTicket;
+
+        return {
+          contactTickets: updatedTickets,
+          activeTicket: updatedActive
+        };
+      });
+    } catch (e) {
+      console.error('Erro ao resolver ticket:', e);
     }
   },
 
