@@ -647,10 +647,10 @@ Sua missão é analisar o histórico de conversação de atendimento a seguir e 
 --- HISTÓRICO DE MENSAGENS DO TICKET ---
 ${historyText}
 
-Você deve gerar obrigatoriamente um objeto JSON em português contendo exatamente estas duas propriedades, formatando-as com parágrafos (\n\n) e tópicos com marcadores claros (como hífens "- ") para organizar a informação com riqueza de detalhes e excelente leitura:
+Você deve gerar obrigatoriamente um objeto JSON em português contendo exatamente estas duas propriedades:
 {
-  "problem_description": "Descreva em detalhes qual foi a queixa, solicitação ou dúvida inicial apresentada pelo cliente. Organize com tópicos se necessário.",
-  "resolution_summary": "Descreva de forma cronológica, rica e detalhada o desenrolar do atendimento, o que foi explicado ou solucionado, e a participação dos atendentes. Use marcadores (bullet points) para listar as etapas de solução."
+  "problem_description": "Escreva um resumo extremamente SIMPLIFICADO, CURTO e DIRETO do motivo do contato (máximo de 12 palavras, em apenas uma frase curta e objetiva, ex: 'Dúvida sobre vencimento de fatura' ou 'Solicitação de suporte para instalação do totem'). Caso não haja histórico de mensagens, retorne 'Sem histórico de mensagens'.",
+  "resolution_summary": "Descreva de forma cronológica, rica e detalhada o desenrolar do atendimento, o que foi explicado ou solucionado, e a participação dos atendentes. Use parágrafos (\\n\\n) e marcadores (bullet points com hífens '- ') para listar as etapas de solução de forma muito organizada e legível."
 }
 
 REGRAS DE RETORNO CRÍTICAS:

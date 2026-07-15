@@ -3677,7 +3677,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
                 placeholder={analyzing ? "Luna IA analisando a conversa..." : "Descreva o motivo do chamado (opcional)..."}
                 disabled={analyzing}
                 className={cn(
-                  "w-full text-xs p-3.5 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[100px] font-medium leading-relaxed font-sans scrollbar-thin",
+                  "w-full text-xs px-3.5 py-2.5 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[54px] font-medium leading-normal font-sans scrollbar-thin",
                   analyzing && "opacity-60 animate-pulse"
                 )}
               />
@@ -3705,7 +3705,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
                 placeholder={analyzing ? "Luna IA gerando a solução detalhada..." : "Escreva como o problema foi solucionado..."}
                 disabled={analyzing}
                 className={cn(
-                  "w-full text-xs p-3.5 bg-black/[0.02] dark:bg-white/[0.02] border border-emerald-500/30 dark:border-emerald-500/20 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[140px] font-semibold leading-relaxed font-sans scrollbar-thin",
+                  "w-full text-xs p-3.5 bg-black/[0.02] dark:bg-white/[0.02] border border-emerald-500/30 dark:border-emerald-500/20 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[175px] font-semibold leading-relaxed font-sans scrollbar-thin",
                   analyzing && "opacity-60 animate-pulse"
                 )}
                 required
