@@ -3483,6 +3483,53 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
 
+  // Calculate session statistics and duration in real time
+  const ticketStats = React.useMemo(() => {
+    if (!activeTicket || !contact?.messages) {
+      return { total_messages: 0, total_human_messages: 0, operators: [], duration: '' };
+    }
+    const start = new Date(activeTicket.opened_at);
+    const ticketMsgs = contact.messages.filter((m: any) => {
+      const ts = new Date(m.timestamp || m.created_at);
+      return ts >= start;
+    });
+
+    const humanMessages = ticketMsgs.filter((m: any) => m.sender === 'human' || m.sender_type === 'human');
+    const stats: Record<string, number> = {};
+    let totalHuman = 0;
+    humanMessages.forEach((m: any) => {
+      const text = m.text || m.text_content || '';
+      const match = text.match(/^\*([^*:]+):\*/);
+      if (match) {
+        const name = match[1].trim();
+        stats[name] = (stats[name] || 0) + 1;
+        totalHuman++;
+      } else {
+        const fallbackName = m.payload?.agent_name || m.created_by_name || 'Agente';
+        stats[fallbackName] = (stats[fallbackName] || 0) + 1;
+        totalHuman++;
+      }
+    });
+
+    const operators = Object.entries(stats).map(([name, count]) => ({
+      name,
+      count,
+      percentage: totalHuman > 0 ? Math.round((count / totalHuman) * 100) : 0
+    })).sort((a, b) => b.count - a.count);
+
+    const diffMs = new Date().getTime() - start.getTime();
+    const diffHrs = Math.floor(diffMs / 3600000);
+    const diffMins = Math.floor((diffMs % 3600000) / 60000);
+    const duration = diffHrs > 0 ? `${diffHrs}h ${diffMins}m` : `${diffMins} min`;
+
+    return {
+      total_messages: ticketMsgs.length,
+      total_human_messages: totalHuman,
+      operators,
+      duration
+    };
+  }, [activeTicket, contact, isOpen]);
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -3503,43 +3550,20 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
         return ts >= start;
       });
 
-      // Calculate operator participation stats for prompt context
-      const humanMessages = ticketMsgs.filter((m: any) => m.sender === 'human' || m.sender_type === 'human');
-      const stats: Record<string, number> = {};
-      let totalHuman = 0;
-      humanMessages.forEach((m: any) => {
-        const text = m.text || m.text_content || '';
-        const match = text.match(/^\*([^*:]+):\*/);
-        if (match) {
-          const name = match[1].trim();
-          stats[name] = (stats[name] || 0) + 1;
-          totalHuman++;
-        } else {
-          const fallbackName = m.payload?.agent_name || m.created_by_name || 'Agente';
-          stats[fallbackName] = (stats[fallbackName] || 0) + 1;
-          totalHuman++;
-        }
-      });
-      const operators = Object.entries(stats).map(([name, count]) => ({
-        name,
-        count,
-        percentage: totalHuman > 0 ? Math.round((count / totalHuman) * 100) : 0
-      })).sort((a, b) => b.count - a.count);
-
-      const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
-      const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
-      const operatorName = currentUserName || currentUserEmail || 'Atendente';
-
       const formattedMsgs = ticketMsgs.map((m: any) => ({
         sender: (m.sender === 'human' || m.sender_type === 'human') ? 'human' : 'client',
         text: m.text || m.text_content || '',
         timestamp: new Date(m.timestamp || m.created_at).toLocaleString('pt-BR')
       }));
 
+      const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+      const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
+      const operatorName = currentUserName || currentUserEmail || 'Atendente';
+
       geminiService.generateTicketAnalysis({
         opened_at: new Date(activeTicket.opened_at).toLocaleString('pt-BR'),
         closed_at: new Date().toLocaleString('pt-BR'),
-        operators,
+        operators: ticketStats.operators,
         closed_by: operatorName,
         messages: formattedMsgs
       }).then((result) => {
@@ -3551,7 +3575,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
         setAnalyzing(false);
       });
     }
-  }, [activeTicket, isOpen, contact]);
+  }, [activeTicket, isOpen, contact, ticketStats.operators]);
 
   if (!isOpen) return null;
 
@@ -3575,7 +3599,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
       
-      <div className="relative w-full max-w-md bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col gap-5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
+      <div className="relative w-full max-w-lg bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col gap-4.5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
         
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -3598,11 +3622,53 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
           </button>
         </div>
 
+        {/* Metadados Preenchidos Automaticamente */}
+        {activeTicket && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-white/5 p-3 rounded-2xl text-[11px] shadow-inner">
+            <div className="flex flex-col p-2 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5">
+              <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider">Abertura</span>
+              <span className="font-semibold text-gray-700 dark:text-gray-200 mt-0.5 truncate">
+                {new Date(activeTicket.opened_at).toLocaleDateString('pt-BR')} {new Date(activeTicket.opened_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+            
+            <div className="flex flex-col p-2 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5">
+              <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider">Duração</span>
+              <span className="font-semibold text-gray-700 dark:text-gray-200 mt-0.5">
+                {ticketStats.duration}
+              </span>
+            </div>
+
+            <div className="flex flex-col p-2 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5">
+              <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider">Mensagens</span>
+              <span className="font-semibold text-gray-700 dark:text-gray-200 mt-0.5">
+                {ticketStats.total_messages} trocadas
+              </span>
+            </div>
+
+            <div className="flex flex-col p-2 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5">
+              <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider">Atendentes</span>
+              <div className="flex flex-wrap gap-1 mt-1 max-h-[24px] overflow-y-auto custom-scrollbar">
+                {ticketStats.operators.length > 0 ? (
+                  ticketStats.operators.map(op => (
+                    <span key={op.name} className="px-1.5 py-0.5 bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-md font-bold text-[8px] truncate">
+                      {op.name} ({op.percentage}%)
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-gray-400 italic text-[9px]">Nenhum</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] uppercase font-black tracking-wider text-gray-450">
-              Descrição do Problema
+            <label className="text-[10px] uppercase font-black tracking-wider text-gray-450 flex items-center gap-1.5">
+              <span>Descrição do Problema</span>
+              <span className="text-[8px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black tracking-normal">Preenchido com IA</span>
             </label>
             <div className="relative">
               <textarea
@@ -3611,7 +3677,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
                 placeholder={analyzing ? "Luna IA analisando a conversa..." : "Descreva o motivo do chamado (opcional)..."}
                 disabled={analyzing}
                 className={cn(
-                  "w-full text-xs p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[72px]",
+                  "w-full text-xs p-3.5 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[100px] font-medium leading-relaxed font-sans scrollbar-thin",
                   analyzing && "opacity-60 animate-pulse"
                 )}
               />
@@ -3627,9 +3693,10 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] uppercase font-black tracking-wider text-gray-455 flex items-center gap-1">
+            <label className="text-[10px] uppercase font-black tracking-wider text-gray-455 flex items-center gap-1.5">
               <span>Resolução / Solução Aplicada</span>
               <span className="text-red-500 text-[12px] font-bold">*</span>
+              <span className="text-[8px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black tracking-normal">Preenchido com IA</span>
             </label>
             <div className="relative">
               <textarea
@@ -3638,7 +3705,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
                 placeholder={analyzing ? "Luna IA gerando a solução detalhada..." : "Escreva como o problema foi solucionado..."}
                 disabled={analyzing}
                 className={cn(
-                  "w-full text-xs p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-emerald-500/30 dark:border-emerald-500/20 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[90px]",
+                  "w-full text-xs p-3.5 bg-black/[0.02] dark:bg-white/[0.02] border border-emerald-500/30 dark:border-emerald-500/20 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[140px] font-semibold leading-relaxed font-sans scrollbar-thin",
                   analyzing && "opacity-60 animate-pulse"
                 )}
                 required
@@ -3660,7 +3727,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
               <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400 shrink-0">
                 <BrainCircuit size={16} />
               </div>
-              <div className="flex flex-col">
+              <div className="flex flex-col text-left">
                 <span className="text-[11px] font-bold text-gray-800 dark:text-white leading-none">
                   Reativar Inteligência Luna
                 </span>
@@ -3687,18 +3754,18 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
           </div>
 
           {/* Action buttons */}
-          <div className="flex items-center gap-2 mt-2">
+          <div className="flex items-center gap-2 mt-1">
             <button
               type="button"
               onClick={onClose}
-              className="w-1/2 py-3 px-4 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-755 dark:text-gray-250 rounded-2xl font-bold transition-all text-xs"
+              className="w-1/2 py-3.5 px-4 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-755 dark:text-gray-250 rounded-2xl font-bold transition-all text-xs"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={loading || analyzing}
-              className="w-1/2 py-3 px-4 bg-gradient-to-tr from-emerald-500 to-teal-500 text-white rounded-2xl font-bold shadow-lg shadow-emerald-500/25 transition-all text-xs flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+              className="w-1/2 py-3.5 px-4 bg-gradient-to-tr from-emerald-500 to-teal-500 text-white rounded-2xl font-bold shadow-lg shadow-emerald-500/25 transition-all text-xs flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
             >
               {loading ? (
                 <Loader2 size={16} className="animate-spin" />
