@@ -2166,9 +2166,27 @@ export default function ChatDashboard() {
         setCompanyDetailsOpen(companyWithMissingCnpj);
         return;
       }
+      // Check if instance has ticket_mode enabled
+      const instId = contact.instance_id || useChatStore.getState().tenantInfo?.evolution_api_instance;
+      if (instId) {
+        try {
+          const { data: instData } = await supabase
+            .from('whatsapp_instances')
+            .select('ticket_mode')
+            .eq('id', instId)
+            .maybeSingle();
+
+          if (instData?.ticket_mode) {
+            setResolvingTicketContactId(contactId);
+            return;
+          }
+        } catch (e) {
+          console.error('Erro ao verificar ticket_mode da instância:', e);
+        }
+      }
     }
     
-    setResolvingTicketContactId(contactId);
+    await executeResolve(contactId, true);
   };
 
   const handleStartChatWithSearchedNumber = async (phoneNumber: string) => {

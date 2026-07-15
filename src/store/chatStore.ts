@@ -4120,7 +4120,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!tenantInfo) return;
     const realContactId = getRealContactId(contactId);
 
+    const contact = get().contacts.find(c => c.id === contactId);
+    if (!contact) return;
+
+    const instId = contact.instance_id || tenantInfo.evolution_api_instance;
+    if (!instId) {
+      set({ contactTickets: [], activeTicket: null });
+      return;
+    }
+
     try {
+      const { data: instData } = await supabase
+        .from('whatsapp_instances')
+        .select('ticket_mode')
+        .eq('id', instId)
+        .maybeSingle();
+
+      if (!instData?.ticket_mode) {
+        set({ contactTickets: [], activeTicket: null });
+        return;
+      }
+
       const { data: tickets, error } = await supabase
         .from('chat_tickets')
         .select('*')
@@ -4137,8 +4157,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
 
       // Se o contato está ativo (não resolvido/bloqueado) e não tem ticket ativo, abre um automaticamente
-      const contact = get().contacts.find(c => c.id === contactId);
-      if (contact && contact.conv_status !== 'resolved' && contact.conv_status !== 'closed' && !active) {
+      if (contact.conv_status !== 'resolved' && contact.conv_status !== 'closed' && !active) {
         await get().openTicketForContact(contactId);
       }
     } catch (e) {

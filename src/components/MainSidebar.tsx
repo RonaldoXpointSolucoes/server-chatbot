@@ -190,7 +190,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const [instanceContextMenu, setInstanceContextMenu] = useState<{ id: string, name: string, x: number, y: number } | null>(null);
   const [myConversationsMenu, setMyConversationsMenu] = useState<{ x: number, y: number } | null>(null);
 
-  const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
+  const tenantInfo = useChatStore(state => state.tenantInfo);
+  const tenantIdFromStore = tenantInfo?.id;
   const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
   const [instances, setInstances] = useState<any[]>([]);
 
@@ -535,7 +536,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         </div>
         <div className={cn("flex-1 min-w-0 ml-3 transition-all duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto group-hover/sidebar:!block")}>
           <h2 className="font-semibold text-[#111b21] dark:text-[#e9edef] truncate text-[15px] tracking-tight group-hover:text-emerald-600 dark:group-hover:text-white transition-colors">
-            {currentCompanyContext?.name || 'Carregando...'}
+            {tenantInfo?.name || currentCompanyContext?.name || 'Carregando...'}
           </h2>
         </div>
         {(userCompanies.length > 1 || currentUserRole === 'admin') && (
@@ -666,8 +667,9 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               <NavItem title="Todas as conversas" isActive={filterType !== 'mine' && filterType !== 'blocked'} onClick={() => {
                 setActiveChannelFilter(null, null);
                 setFilterType('all');
-                useChatStore.getState().fetchInitialData();
-                navigate('/chat');
+                if (window.location.pathname !== '/chat') {
+                  navigate('/chat');
+                }
               }} />
             )}
             
@@ -741,8 +743,9 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                           onClick={() => {
                             useChatStore.getState().setActiveChannelFilter(inst.id, inst.display_name);
                             useChatStore.getState().setFilterType('all');
-                            useChatStore.getState().fetchInitialData();
-                            navigate('/chat');
+                            if (window.location.pathname !== '/chat') {
+                              navigate('/chat');
+                            }
                           }}
                         />
                         {unreadCount > 0 && (

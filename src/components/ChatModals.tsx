@@ -2269,6 +2269,31 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
   const [activeTicketDesc, setActiveTicketDesc] = useState('');
   const [isSavingDesc, setIsSavingDesc] = useState(false);
   const [showPastTickets, setShowPastTickets] = useState(false);
+  const [instanceTicketMode, setInstanceTicketMode] = useState(false);
+
+  useEffect(() => {
+    if (!contact) {
+      setInstanceTicketMode(false);
+      return;
+    }
+    const instId = contact.instance_id || useChatStore.getState().tenantInfo?.evolution_api_instance;
+    if (!instId) {
+      setInstanceTicketMode(false);
+      return;
+    }
+
+    supabase
+      .from('whatsapp_instances')
+      .select('ticket_mode')
+      .eq('id', instId)
+      .maybeSingle()
+      .then(({ data }) => {
+        setInstanceTicketMode(!!data?.ticket_mode);
+      })
+      .catch(() => {
+        setInstanceTicketMode(false);
+      });
+  }, [contact, isOpen]);
 
   useEffect(() => {
     if (activeTicket) {
@@ -2924,196 +2949,198 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
           </div>
         )}
 
-        {/* Histórico de Tickets */}
-        <div className="flex flex-col gap-2.5 bg-gradient-to-br from-teal-500/5 to-emerald-500/5 border border-emerald-500/10 rounded-3xl p-4.5">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400">
-              <CalendarClock size={16} />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[10px] uppercase font-black tracking-wider text-emerald-600 dark:text-emerald-400">
-                Atendimentos & Tickets
-              </span>
-              <span className="text-xs font-bold text-gray-500 dark:text-[#8696a0]">
-                Controle de sessões de suporte
-              </span>
-            </div>
-            
-            {!activeTicket && (
-              <button
-                onClick={() => openTicketForContact(contact.id)}
-                className="ml-auto flex items-center gap-1 py-1 px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-bold transition-all"
-              >
-                <Plus size={10} />
-                <span>Novo Ticket</span>
-              </button>
-            )}
-          </div>
-
-          {activeTicket ? (
-            <div className="flex flex-col gap-3 p-3.5 rounded-2xl bg-white/60 dark:bg-black/30 border border-emerald-500/20">
-              {/* Active Ticket Header */}
-              <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-2">
-                <div className="flex flex-col">
-                  <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400">
-                    TICKET EM ABERTO: #{activeTicket.id}
-                  </span>
-                  <span className="text-[9px] font-mono text-gray-400 mt-0.5">
-                    Início: {new Date(activeTicket.opened_at).toLocaleString('pt-BR')}
-                  </span>
-                </div>
-                <span className="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider bg-emerald-500/20 text-emerald-600 uppercase">
-                  Em Andamento
+        {instanceTicketMode && (
+          <div className="flex flex-col gap-2.5 bg-gradient-to-br from-teal-500/5 to-emerald-500/5 border border-emerald-500/10 rounded-3xl p-4.5">
+            {/* Histórico de Tickets */}
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400">
+                <CalendarClock size={16} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] uppercase font-black tracking-wider text-emerald-600 dark:text-emerald-400">
+                  Atendimentos & Tickets
+                </span>
+                <span className="text-xs font-bold text-gray-500 dark:text-[#8696a0]">
+                  Controle de sessões de suporte
                 </span>
               </div>
+              
+              {!activeTicket && (
+                <button
+                  onClick={() => openTicketForContact(contact.id)}
+                  className="ml-auto flex items-center gap-1 py-1 px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-bold transition-all"
+                >
+                  <Plus size={10} />
+                  <span>Novo Ticket</span>
+                </button>
+              )}
+            </div>
 
-              {/* Editable Problem Description */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
-                  Descrição do Problema:
-                </label>
-                <div className="flex items-start gap-1">
-                  <textarea
-                    value={activeTicketDesc}
-                    onChange={(e) => setActiveTicketDesc(e.target.value)}
-                    placeholder="Descreva o motivo do contato..."
-                    className="w-full text-xs p-2.5 bg-white dark:bg-[#111b21] border border-black/10 dark:border-white/10 rounded-xl focus:outline-none focus:border-emerald-500 resize-none h-[64px]"
-                  />
-                  {activeTicketDesc !== (activeTicket.problem_description || '') && (
-                    <button
-                      onClick={async () => {
-                        setIsSavingDesc(true);
-                        await updateActiveTicketDescription(activeTicket.id, activeTicketDesc);
-                        setIsSavingDesc(false);
-                      }}
-                      disabled={isSavingDesc}
-                      className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-all"
-                      title="Salvar"
-                    >
-                      {isSavingDesc ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                    </button>
+            {activeTicket ? (
+              <div className="flex flex-col gap-3 p-3.5 rounded-2xl bg-white/60 dark:bg-black/30 border border-emerald-500/20">
+                {/* Active Ticket Header */}
+                <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-2">
+                  <div className="flex flex-col">
+                    <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400">
+                      TICKET EM ABERTO: #{activeTicket.id}
+                    </span>
+                    <span className="text-[9px] font-mono text-gray-400 mt-0.5">
+                      Início: {new Date(activeTicket.opened_at).toLocaleString('pt-BR')}
+                    </span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider bg-emerald-500/20 text-emerald-600 uppercase">
+                    Em Andamento
+                  </span>
+                </div>
+
+                {/* Editable Problem Description */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
+                    Descrição do Problema:
+                  </label>
+                  <div className="flex items-start gap-1">
+                    <textarea
+                      value={activeTicketDesc}
+                      onChange={(e) => setActiveTicketDesc(e.target.value)}
+                      placeholder="Descreva o motivo do contato..."
+                      className="w-full text-xs p-2.5 bg-white dark:bg-[#111b21] border border-black/10 dark:border-white/10 rounded-xl focus:outline-none focus:border-emerald-500 resize-none h-[64px]"
+                    />
+                    {activeTicketDesc !== (activeTicket.problem_description || '') && (
+                      <button
+                        onClick={async () => {
+                          setIsSavingDesc(true);
+                          await updateActiveTicketDescription(activeTicket.id, activeTicketDesc);
+                          setIsSavingDesc(false);
+                        }}
+                        disabled={isSavingDesc}
+                        className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-all"
+                        title="Salvar"
+                      >
+                        {isSavingDesc ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Real-time statistics */}
+                <div className="pt-2 border-t border-black/5 dark:border-white/5 flex flex-col gap-1.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
+                    Resumo Parcial das Mensagens:
+                  </span>
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-gray-600 dark:text-gray-300">
+                    <span>Total de Mensagens:</span>
+                    <span className="font-bold text-gray-800 dark:text-white">{activeTicketStats.total_messages}</span>
+                  </div>
+                  {activeTicketStats.operators.length > 0 ? (
+                    <div className="flex flex-col gap-1 mt-1">
+                      <span className="text-[9px] uppercase font-black tracking-wider text-gray-400">
+                        Participação dos Atendentes:
+                      </span>
+                      {activeTicketStats.operators.map(op => (
+                        <div key={op.name} className="flex flex-col gap-0.5">
+                          <div className="flex justify-between text-[10px] font-semibold text-gray-550 dark:text-gray-300">
+                            <span>{op.name}</span>
+                            <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
+                          </div>
+                          <div className="h-1 w-full bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${op.percentage}%` }}></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-gray-400 italic">Nenhuma mensagem dos atendentes registrada.</span>
                   )}
                 </div>
               </div>
-
-              {/* Real-time statistics */}
-              <div className="pt-2 border-t border-black/5 dark:border-white/5 flex flex-col gap-1.5">
-                <span className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
-                  Resumo Parcial das Mensagens:
-                </span>
-                <div className="flex items-center justify-between text-[11px] font-semibold text-gray-600 dark:text-gray-300">
-                  <span>Total de Mensagens:</span>
-                  <span className="font-bold text-gray-800 dark:text-white">{activeTicketStats.total_messages}</span>
-                </div>
-                {activeTicketStats.operators.length > 0 ? (
-                  <div className="flex flex-col gap-1 mt-1">
-                    <span className="text-[9px] uppercase font-black tracking-wider text-gray-400">
-                      Participação dos Atendentes:
-                    </span>
-                    {activeTicketStats.operators.map(op => (
-                      <div key={op.name} className="flex flex-col gap-0.5">
-                        <div className="flex justify-between text-[10px] font-semibold text-gray-550 dark:text-gray-300">
-                          <span>{op.name}</span>
-                          <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
-                        </div>
-                        <div className="h-1 w-full bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
-                          <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${op.percentage}%` }}></div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="text-[10px] text-gray-400 italic">Nenhuma mensagem dos atendentes registrada.</span>
-                )}
+            ) : (
+              <div className="text-center py-4 bg-black/[0.02] dark:bg-white/[0.02] border border-dashed border-black/10 dark:border-white/10 rounded-2xl">
+                <span className="text-xs text-gray-400 italic">Não há ticket aberto para este cliente.</span>
               </div>
-            </div>
-          ) : (
-            <div className="text-center py-4 bg-black/[0.02] dark:bg-white/[0.02] border border-dashed border-black/10 dark:border-white/10 rounded-2xl">
-              <span className="text-xs text-gray-400 italic">Não há ticket aberto para este cliente.</span>
-            </div>
-          )}
+            )}
 
-          {/* Histórico Anterior */}
-          {pastTickets.length > 0 && (
-            <div className="mt-2 flex flex-col gap-2">
-              <button
-                onClick={() => setShowPastTickets(!showPastTickets)}
-                className="flex items-center gap-1.5 text-[11px] font-black text-gray-500 hover:text-emerald-500 transition-colors uppercase"
-              >
-                <span>Histórico de Chamados ({pastTickets.length})</span>
-                <ChevronDown size={14} className={cn("transition-transform duration-200", showPastTickets && "rotate-180")} />
-              </button>
+            {/* Histórico Anterior */}
+            {pastTickets.length > 0 && (
+              <div className="mt-2 flex flex-col gap-2">
+                <button
+                  onClick={() => setShowPastTickets(!showPastTickets)}
+                  className="flex items-center gap-1.5 text-[11px] font-black text-gray-500 hover:text-emerald-500 transition-colors uppercase"
+                >
+                  <span>Histórico de Chamados ({pastTickets.length})</span>
+                  <ChevronDown size={14} className={cn("transition-transform duration-200", showPastTickets && "rotate-180")} />
+                </button>
 
-              {showPastTickets && (
-                <div className="flex flex-col gap-2 max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
-                  {pastTickets.map(t => {
-                    const start = new Date(t.opened_at);
-                    const end = t.closed_at ? new Date(t.closed_at) : null;
-                    const ops = t.metadata?.operators || [];
-                    
-                    return (
-                      <div key={t.id} className="flex flex-col p-3 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 text-[11px] gap-2">
-                        <div className="flex justify-between items-center border-b border-black/5 dark:border-white/5 pb-1.5">
-                          <span className="font-bold text-gray-800 dark:text-white">Ticket #{t.id}</span>
-                          <span className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-white/5 text-[9px] font-black text-gray-500 uppercase">
-                            Resolvido
-                          </span>
-                        </div>
-
-                        <div className="flex flex-col gap-1 text-[10px] text-gray-600 dark:text-gray-300">
-                          <div>
-                            <span className="font-extrabold uppercase text-gray-400 mr-1">Início:</span>
-                            {start.toLocaleDateString()} {start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {showPastTickets && (
+                  <div className="flex flex-col gap-2 max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
+                    {pastTickets.map(t => {
+                      const start = new Date(t.opened_at);
+                      const end = t.closed_at ? new Date(t.closed_at) : null;
+                      const ops = t.metadata?.operators || [];
+                      
+                      return (
+                        <div key={t.id} className="flex flex-col p-3 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 text-[11px] gap-2">
+                          <div className="flex justify-between items-center border-b border-black/5 dark:border-white/5 pb-1.5">
+                            <span className="font-bold text-gray-800 dark:text-white">Ticket #{t.id}</span>
+                            <span className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-white/5 text-[9px] font-black text-gray-500 uppercase">
+                              Resolvido
+                            </span>
                           </div>
-                          {end && (
+
+                          <div className="flex flex-col gap-1 text-[10px] text-gray-600 dark:text-gray-300">
                             <div>
-                              <span className="font-extrabold uppercase text-gray-400 mr-1">Fim:</span>
-                              {end.toLocaleDateString()} {end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              <span className="font-extrabold uppercase text-gray-400 mr-1">Início:</span>
+                              {start.toLocaleDateString()} {start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </div>
-                          )}
-                        </div>
-
-                        {t.problem_description && (
-                          <div className="bg-white/40 dark:bg-black/10 p-2 rounded-xl border border-black/[0.02] dark:border-white/[0.02]">
-                            <span className="font-extrabold uppercase text-[9px] text-gray-400 block mb-0.5">Descrição:</span>
-                            <p className="text-gray-750 dark:text-gray-200 leading-normal font-medium whitespace-pre-wrap">{t.problem_description}</p>
-                          </div>
-                        )}
-
-                        {t.resolution_summary && (
-                          <div className="bg-emerald-500/5 p-2 rounded-xl border border-emerald-500/10">
-                            <span className="font-extrabold uppercase text-[9px] text-emerald-600 dark:text-emerald-400 block mb-0.5">Resolução:</span>
-                            <p className="text-gray-750 dark:text-gray-255 leading-normal font-semibold whitespace-pre-wrap">{t.resolution_summary}</p>
-                          </div>
-                        )}
-
-                        {t.metadata?.total_messages !== undefined && (
-                          <div className="pt-1.5 border-t border-black/5 dark:border-white/5 flex flex-col gap-1 text-[10px]">
-                            <div className="flex justify-between font-semibold">
-                              <span>Total de Mensagens:</span>
-                              <span className="font-bold text-gray-800 dark:text-white">{t.metadata.total_messages}</span>
-                            </div>
-                            {ops.length > 0 && (
-                              <div className="flex flex-col gap-1 mt-1">
-                                <span className="text-[9px] uppercase font-black text-gray-400">Atendentes:</span>
-                                {ops.map((op: any) => (
-                                  <div key={op.name} className="flex justify-between text-gray-500 dark:text-gray-405">
-                                    <span>{op.name}</span>
-                                    <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
-                                  </div>
-                                ))}
+                            {end && (
+                              <div>
+                                <span className="font-extrabold uppercase text-gray-400 mr-1">Fim:</span>
+                                {end.toLocaleDateString()} {end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </div>
                             )}
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+
+                          {t.problem_description && (
+                            <div className="bg-white/40 dark:bg-black/10 p-2 rounded-xl border border-black/[0.02] dark:border-white/[0.02]">
+                              <span className="font-extrabold uppercase text-[9px] text-gray-400 block mb-0.5">Descrição:</span>
+                              <p className="text-gray-750 dark:text-gray-200 leading-normal font-medium whitespace-pre-wrap">{t.problem_description}</p>
+                            </div>
+                          )}
+
+                          {t.resolution_summary && (
+                            <div className="bg-emerald-500/5 p-2 rounded-xl border border-emerald-500/10">
+                              <span className="font-extrabold uppercase text-[9px] text-emerald-600 dark:text-emerald-400 block mb-0.5">Resolução:</span>
+                              <p className="text-gray-750 dark:text-gray-255 leading-normal font-semibold whitespace-pre-wrap">{t.resolution_summary}</p>
+                            </div>
+                          )}
+
+                          {t.metadata?.total_messages !== undefined && (
+                            <div className="pt-1.5 border-t border-black/5 dark:border-white/5 flex flex-col gap-1 text-[10px]">
+                              <div className="flex justify-between font-semibold">
+                                <span>Total de Mensagens:</span>
+                                <span className="font-bold text-gray-800 dark:text-white">{t.metadata.total_messages}</span>
+                              </div>
+                              {ops.length > 0 && (
+                                <div className="flex flex-col gap-1 mt-1">
+                                  <span className="text-[9px] uppercase font-black text-gray-400">Atendentes:</span>
+                                  {ops.map((op: any) => (
+                                    <div key={op.name} className="flex justify-between text-gray-500 dark:text-gray-405">
+                                      <span>{op.name}</span>
+                                      <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-col gap-2">
           <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-600 dark:text-emerald-500">Ficha Cadastral</p>
