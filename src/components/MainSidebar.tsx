@@ -47,6 +47,7 @@ import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 import { createPortal } from 'react-dom';
+import { formatPhoneNumber } from '../utils/format';
 
 const SidebarContext = React.createContext<{ onClose?: () => void }>({});
 
@@ -246,7 +247,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     const fetchInstances = async () => {
         try {
           const { data, error } = await supabase.from('whatsapp_instances')
-            .select('id, display_name, status, color')
+            .select('id, display_name, status, color, phone_number')
             .eq('tenant_id', tenantId)
             .order('created_at', { ascending: false });
             
@@ -698,21 +699,28 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                             </div>
                           } 
                           title={
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span className={cn(
-                                "truncate transition-colors font-medium", 
-                                !isConnected && !isConnecting ? "text-gray-400 dark:text-gray-600" : isConnecting ? "text-yellow-600 dark:text-yellow-500/80" : ""
-                              )}>
-                                {inst.display_name || 'Sem nome'}
-                              </span>
-                              {!isConnected && !isConnecting && (
-                                <span className="text-[9px] font-semibold text-gray-500 dark:text-gray-400 bg-gray-500/10 border border-gray-500/15 px-1 py-0.5 rounded tracking-wide shrink-0">
-                                  offline
+                            <div className="flex flex-col min-w-0 py-0.5 leading-normal">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className={cn(
+                                  "truncate transition-colors font-medium text-[13px] leading-tight", 
+                                  !isConnected && !isConnecting ? "text-gray-400 dark:text-gray-600" : isConnecting ? "text-yellow-600 dark:text-yellow-500/80" : "text-gray-800 dark:text-[#e9edef]"
+                                )}>
+                                  {inst.display_name || 'Sem nome'}
                                 </span>
-                              )}
-                              {isConnecting && (
-                                <span className="text-[9px] font-semibold text-yellow-600 dark:text-yellow-500 bg-yellow-500/10 border border-yellow-500/20 px-1 py-0.5 rounded tracking-wide shrink-0 animate-pulse">
-                                  conectando
+                                {!isConnected && !isConnecting && (
+                                  <span className="text-[9px] font-semibold text-gray-500 dark:text-gray-400 bg-gray-500/10 border border-gray-500/15 px-1 py-0.5 rounded tracking-wide shrink-0">
+                                    offline
+                                  </span>
+                                )}
+                                {isConnecting && (
+                                  <span className="text-[9px] font-semibold text-yellow-600 dark:text-yellow-500 bg-yellow-500/10 border border-yellow-500/20 px-1 py-0.5 rounded tracking-wide shrink-0 animate-pulse">
+                                    conectando
+                                  </span>
+                                )}
+                              </div>
+                              {inst.phone_number && (
+                                <span className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 tracking-tight font-mono truncate select-all">
+                                  {formatPhoneNumber(inst.phone_number)}
                                 </span>
                               )}
                             </div>
@@ -1160,7 +1168,8 @@ function NavItem({
           )} />
         )}
         <span className={cn(
-          "truncate tracking-tight flex-1 transition-all duration-200", 
+          "tracking-tight flex-1 transition-all duration-200", 
+          typeof title === 'string' && "truncate",
           isActive ? "text-[#111b21] dark:text-[#e9edef] font-semibold" : "text-[#54656f] dark:text-[#aebac1] group-hover:text-[#111b21] dark:group-hover:text-[#d1d7db]",
           isSub && !icon ? "text-[13px]" : "text-[14px]",
           "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto"
