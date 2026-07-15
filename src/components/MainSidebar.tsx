@@ -387,17 +387,64 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       })
       .subscribe();
 
+    const userPermissionsChannelName = `user_permissions_realtime_${tenantId}`;
+    const existingPermsChannel = supabase.getChannels().find(c => c.topic === `realtime:${userPermissionsChannelName}`);
+    if (existingPermsChannel) {
+      supabase.removeChannel(existingPermsChannel);
+    }
+
+    const permsChannel = supabase.channel(userPermissionsChannelName)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tenant_users', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
+         const storage = getActiveStorage();
+         const userEmail = storage ? storage.getItem('current_user_email') : null;
+         
+         if (userEmail && payload.new && payload.new.email && payload.new.email.toLowerCase() === userEmail.toLowerCase()) {
+             const newAllowedInstances = payload.new.allowed_instances || [];
+             const newAllowedCompanies = payload.new.allowed_companies || [];
+             
+             // Compare with current values in storage
+             const oldAllowedInstancesStr = storage.getItem('allowed_instances') || '[]';
+             const oldAllowedCompaniesStr = storage.getItem('allowed_companies') || '[]';
+             let oldAllowedInstances = [];
+             let oldAllowedCompanies = [];
+             try { oldAllowedInstances = JSON.parse(oldAllowedInstancesStr); } catch(e) {}
+             try { oldAllowedCompanies = JSON.parse(oldAllowedCompaniesStr); } catch(e) {}
+             
+             const instancesChanged = JSON.stringify(newAllowedInstances.sort()) !== JSON.stringify(oldAllowedInstances.sort());
+             const companiesChanged = JSON.stringify(newAllowedCompanies.sort()) !== JSON.stringify(oldAllowedCompanies.sort());
+             
+             if (instancesChanged || companiesChanged) {
+                 storage.setItem('allowed_instances', JSON.stringify(newAllowedInstances));
+                 storage.setItem('allowed_companies', JSON.stringify(newAllowedCompanies));
+                 
+                 // If currently selected channel filter is not allowed anymore, clear it
+                 const activeFilter = localStorage.getItem('activeChannelFilter') || sessionStorage.getItem('activeChannelFilter');
+                 if (activeFilter && newAllowedInstances.length > 0 && !newAllowedInstances.includes(activeFilter)) {
+                     localStorage.removeItem('activeChannelFilter');
+                     localStorage.removeItem('activeChannelName');
+                     sessionStorage.removeItem('activeChannelFilter');
+                     sessionStorage.removeItem('activeChannelName');
+                 }
+                 
+                 // Force refresh to update CRM and sidebar UI in real-time
+                 window.location.reload();
+             }
+         }
+      })
+      .subscribe();
+
     const companyChannel = supabase.channel(`public:companies:id=${tenantId}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'companies', filter: `id=eq.${tenantId}` }, (payload) => {
-         console.log("Realtime event for company received:", payload);
-         if (payload.new && typeof payload.new.global_ai_enabled !== 'undefined') {
-             setGlobalAiEnabled(payload.new.global_ai_enabled);
-         }
+          console.log("Realtime event for company received:", payload);
+          if (payload.new && typeof payload.new.global_ai_enabled !== 'undefined') {
+              setGlobalAiEnabled(payload.new.global_ai_enabled);
+          }
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(permsChannel);
       supabase.removeChannel(companyChannel);
     };
   }, [tenantId]);

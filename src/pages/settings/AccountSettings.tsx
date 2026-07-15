@@ -2451,41 +2451,14 @@ export default function AccountSettings() {
             {isStatusPedidoExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        URL do Endpoint
-                      </label>
-                      <input 
-                        type="url"
-                        value={statusPedidoJsonUrl}
-                        onChange={(e) => setStatusPedidoJsonUrl(e.target.value)}
-                        placeholder="https://..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Token de Autorização
-                      </label>
-                      <input 
-                        type="text"
-                        value={statusPedidoJsonToken}
-                        onChange={(e) => setStatusPedidoJsonToken(e.target.value)}
-                        placeholder="Bearer ..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                      />
-                    </div>
-                  </div>
-
                   <p className="text-xs text-gray-500 dark:text-[#8696a0] leading-relaxed">
-                    Este endpoint utiliza o método <strong>GET</strong>. Para testar outro pedido, altere o ID dentro de <code>BnPedido(ID_DO_PEDIDO)</code> na URL acima.
+                    Este endpoint utiliza o método <strong>POST</strong>. O teste será realizado utilizando os parâmetros padrões configurados no código.
                   </p>
 
                   <div className="pt-4 flex flex-wrap items-center gap-4">
                     <button
                       type="button"
-                      onClick={() => handleTestGeneric(statusPedidoJsonUrl, statusPedidoJsonToken, '', setStatusPedidoLoading, setStatusPedidoResult, setStatusPedidoError, 'GET')}
+                      onClick={() => handleTestGeneric(statusPedidoJsonUrl, statusPedidoJsonToken, '', setStatusPedidoLoading, setStatusPedidoResult, setStatusPedidoError, 'POST')}
                       disabled={statusPedidoLoading || !statusPedidoJsonUrl}
                       className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-white font-semibold rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -2541,32 +2514,6 @@ export default function AccountSettings() {
             {isPagamentoPixExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        URL do Endpoint
-                      </label>
-                      <input 
-                        type="url"
-                        value={pagamentoPixJsonUrl}
-                        onChange={(e) => setPagamentoPixJsonUrl(e.target.value)}
-                        placeholder="https://..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Token de Autorização
-                      </label>
-                      <input 
-                        type="text"
-                        value={pagamentoPixJsonToken}
-                        onChange={(e) => setPagamentoPixJsonToken(e.target.value)}
-                        placeholder="Bearer ..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                      />
-                    </div>
-                  </div>
 
                   <div>
                     <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
@@ -2648,32 +2595,6 @@ export default function AccountSettings() {
             {isCadastroClienteExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        URL do Endpoint
-                      </label>
-                      <input 
-                        type="url"
-                        value={cadastroClienteJsonUrl}
-                        onChange={(e) => setCadastroClienteJsonUrl(e.target.value)}
-                        placeholder="https://..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Token de Autorização
-                      </label>
-                      <input 
-                        type="text"
-                        value={cadastroClienteJsonToken}
-                        onChange={(e) => setCadastroClienteJsonToken(e.target.value)}
-                        placeholder="Bearer ..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                      />
-                    </div>
-                  </div>
 
                   <div>
                     <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
@@ -2755,32 +2676,6 @@ export default function AccountSettings() {
             {isTaxaEntregaExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        URL do Endpoint
-                      </label>
-                      <input 
-                        type="url"
-                        value={taxaEntregaJsonUrl}
-                        onChange={(e) => setTaxaEntregaJsonUrl(e.target.value)}
-                        placeholder="https://..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Token de Autorização
-                      </label>
-                      <input 
-                        type="text"
-                        value={taxaEntregaJsonToken}
-                        onChange={(e) => setTaxaEntregaJsonToken(e.target.value)}
-                        placeholder="Bearer ..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                      />
-                    </div>
-                  </div>
 
                   <div>
                     <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
@@ -2862,32 +2757,6 @@ export default function AccountSettings() {
             {isGeolocExpanded && (
               <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        URL do Endpoint
-                      </label>
-                      <input 
-                        type="url"
-                        value={geolocJsonUrl}
-                        onChange={(e) => setGeolocJsonUrl(e.target.value)}
-                        placeholder="https://..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                        Token de Autorização
-                      </label>
-                      <input 
-                        type="text"
-                        value={geolocJsonToken}
-                        onChange={(e) => setGeolocJsonToken(e.target.value)}
-                        placeholder="Bearer ..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                      />
-                    </div>
-                  </div>
 
                   <div>
                     <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
