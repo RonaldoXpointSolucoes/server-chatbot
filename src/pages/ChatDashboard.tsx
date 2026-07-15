@@ -2223,7 +2223,8 @@ export default function ChatDashboard() {
   const activeChat = contacts.find(c => c.id === activeChatId);
   const wacallSessions = useWaCallsStore((s) => s.sessions) || [];
   const chatInstanceId = activeChat ? (getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName) : null;
-  const chatInstanceNameResolved = chatInstanceId ? (instanceCache.getName(chatInstanceId) || chatInstanceId) : null;
+  const resolvedInstanceUuid = chatInstanceId ? (instanceCache.getId(chatInstanceId) || chatInstanceId) : null;
+  const chatInstanceNameResolved = resolvedInstanceUuid ? (instanceCache.getName(resolvedInstanceUuid) || resolvedInstanceUuid) : null;
   const isCurrentBoxVoipReady = chatInstanceNameResolved 
     ? wacallSessions.some(s => s && (s.id === chatInstanceNameResolved || s.id === chatInstanceId) && s.paired) 
     : false;
@@ -4812,7 +4813,7 @@ export default function ChatDashboard() {
                 Atenção: Instância Offline
              </div>
              <p className="text-xs text-orange-700/80 dark:text-orange-300/80 leading-tight">
-                A instância {activeChannelFilter} está offline. Verifique o aparelho ou tente reconectar.
+                A instância "{activeChannelName || activeChannelFilter}" está offline. Verifique o aparelho ou tente reconectar.
              </p>
              <div className="flex items-center gap-2 mt-1">
                  <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
@@ -6656,20 +6657,22 @@ export default function ChatDashboard() {
                 )}
                 
                 {/* Offline Banner Above Input */}
-                {activeChat && activeChat.instance_id && instancesStatus[activeChat.instance_id] && 
-                 instancesStatus[activeChat.instance_id] !== 'connected' && 
-                 instancesStatus[activeChat.instance_id] !== 'connected_local' && (
-                  instancesStatus[activeChat.instance_id] === 'connecting' ? (
+                {resolvedInstanceUuid && instancesStatus[resolvedInstanceUuid] && 
+                 instancesStatus[resolvedInstanceUuid] !== 'connected' && 
+                 instancesStatus[resolvedInstanceUuid] !== 'connected_local' && (
+                  instancesStatus[resolvedInstanceUuid] === 'connecting' ? (
                     <div className="bg-yellow-50/90 dark:bg-[#251f11]/90 backdrop-blur-md border-t border-yellow-200 dark:border-yellow-900/50 p-2.5 flex items-center justify-between z-20 shadow-inner">
                       <div className="flex items-center gap-2.5 text-yellow-600 dark:text-[#f3cd82] mr-2">
                         <div className="bg-yellow-500/10 p-1.5 rounded-lg border border-yellow-500/20">
                           <Loader2 size={16} className="animate-spin text-yellow-500" />
                         </div>
-                        <span className="text-[12px] font-medium tracking-wide">A conexão está sendo restabelecida automaticamente em segundo plano.</span>
+                        <span className="text-[12px] font-medium tracking-wide">
+                          A conexão da instância "{chatInstanceNameResolved}" está sendo restabelecida automaticamente em segundo plano.
+                        </span>
                       </div>
                       <button 
                         type="button"
-                        onClick={() => useChatStore.getState().openQRModal(activeChat.instance_id)}
+                        onClick={() => useChatStore.getState().openQRModal(resolvedInstanceUuid)}
                         className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-1.5 rounded-lg text-[11px] font-bold uppercase shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 shrink-0"
                       >
                         <Power size={14} />
@@ -6682,11 +6685,13 @@ export default function ChatDashboard() {
                         <div className="bg-red-500/10 p-1.5 rounded-lg border border-red-500/20">
                           <ShieldAlert size={16} className="animate-pulse" />
                         </div>
-                        <span className="text-[12px] font-medium tracking-wide">Instância offline. Conecte-a para enviar mensagens.</span>
+                        <span className="text-[12px] font-medium tracking-wide">
+                          Instância "{chatInstanceNameResolved}" offline. Conecte-a para enviar mensagens.
+                        </span>
                       </div>
                       <button 
                         type="button"
-                        onClick={() => useChatStore.getState().openQRModal(activeChat.instance_id)}
+                        onClick={() => useChatStore.getState().openQRModal(resolvedInstanceUuid)}
                         className="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-[11px] font-bold uppercase shadow-sm transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5"
                       >
                         <Power size={14} />
