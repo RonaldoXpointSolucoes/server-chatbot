@@ -3623,6 +3623,7 @@ export default function ChatDashboard() {
         isOpen={!!resolvingTicketContactId}
         onClose={() => setResolvingTicketContactId(null)}
         activeTicket={activeTicket}
+        contact={activeChat}
         onConfirm={async (problemDesc, resolution, reactivateAi) => {
           if (resolvingTicketContactId) {
             const stats = await calculateFinalStats(resolvingTicketContactId);

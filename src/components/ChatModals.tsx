@@ -3,6 +3,7 @@ import { AlertCircle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapP
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
+import { geminiService } from '../services/geminiService';
 
 interface BaseModalProps {
   isOpen: boolean;
@@ -3471,23 +3472,86 @@ interface ResolveTicketModalProps {
   isOpen: boolean;
   onClose: () => void;
   activeTicket: any;
+  contact?: any;
   onConfirm: (problemDesc: string, resolution: string, reactivateAi: boolean) => Promise<void>;
 }
 
-export function ResolveTicketModal({ isOpen, onClose, activeTicket, onConfirm }: ResolveTicketModalProps) {
+export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onConfirm }: ResolveTicketModalProps) {
   const [problemDesc, setProblemDesc] = useState('');
   const [resolution, setResolution] = useState('');
   const [reactivateAi, setReactivateAi] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
 
   useEffect(() => {
+    if (!isOpen) return;
+
     if (activeTicket) {
       setProblemDesc(activeTicket.problem_description || '');
     } else {
       setProblemDesc('');
     }
     setResolution('');
-  }, [activeTicket, isOpen]);
+
+    // Trigger Gemini AI ticket auto-analysis
+    if (geminiService.isConfigured() && activeTicket && contact?.messages) {
+      setAnalyzing(true);
+      
+      const start = new Date(activeTicket.opened_at);
+      const ticketMsgs = contact.messages.filter((m: any) => {
+        const ts = new Date(m.timestamp || m.created_at);
+        return ts >= start;
+      });
+
+      // Calculate operator participation stats for prompt context
+      const humanMessages = ticketMsgs.filter((m: any) => m.sender === 'human' || m.sender_type === 'human');
+      const stats: Record<string, number> = {};
+      let totalHuman = 0;
+      humanMessages.forEach((m: any) => {
+        const text = m.text || m.text_content || '';
+        const match = text.match(/^\*([^*:]+):\*/);
+        if (match) {
+          const name = match[1].trim();
+          stats[name] = (stats[name] || 0) + 1;
+          totalHuman++;
+        } else {
+          const fallbackName = m.payload?.agent_name || m.created_by_name || 'Agente';
+          stats[fallbackName] = (stats[fallbackName] || 0) + 1;
+          totalHuman++;
+        }
+      });
+      const operators = Object.entries(stats).map(([name, count]) => ({
+        name,
+        count,
+        percentage: totalHuman > 0 ? Math.round((count / totalHuman) * 100) : 0
+      })).sort((a, b) => b.count - a.count);
+
+      const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+      const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
+      const operatorName = currentUserName || currentUserEmail || 'Atendente';
+
+      const formattedMsgs = ticketMsgs.map((m: any) => ({
+        sender: (m.sender === 'human' || m.sender_type === 'human') ? 'human' : 'client',
+        text: m.text || m.text_content || '',
+        timestamp: new Date(m.timestamp || m.created_at).toLocaleString('pt-BR')
+      }));
+
+      geminiService.generateTicketAnalysis({
+        opened_at: new Date(activeTicket.opened_at).toLocaleString('pt-BR'),
+        closed_at: new Date().toLocaleString('pt-BR'),
+        operators,
+        closed_by: operatorName,
+        messages: formattedMsgs
+      }).then((result) => {
+        if (result.problem_description) setProblemDesc(result.problem_description);
+        if (result.resolution_summary) setResolution(result.resolution_summary);
+      }).catch((err) => {
+        console.error("Erro na análise automática do ticket:", err);
+      }).finally(() => {
+        setAnalyzing(false);
+      });
+    }
+  }, [activeTicket, isOpen, contact]);
 
   if (!isOpen) return null;
 
@@ -3520,11 +3584,12 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, onConfirm }:
               <CalendarClock size={20} />
             </div>
             <div className="flex flex-col">
-              <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider">
+              <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
                 Encerrar Atendimento
               </h3>
-              <p className="text-[10px] font-bold text-gray-400">
+              <p className="text-[10px] font-bold text-gray-400 flex items-center gap-1">
                 {activeTicket ? `Resolvendo Ticket #${activeTicket.id}` : 'Resolvendo conversa'}
+                {analyzing && <span className="text-[9px] text-emerald-500 font-extrabold uppercase animate-pulse ml-1">(Luna IA Analisando...)</span>}
               </p>
             </div>
           </div>
@@ -3539,12 +3604,26 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, onConfirm }:
             <label className="text-[10px] uppercase font-black tracking-wider text-gray-450">
               Descrição do Problema
             </label>
-            <textarea
-              value={problemDesc}
-              onChange={(e) => setProblemDesc(e.target.value)}
-              placeholder="Descreva o motivo do chamado (opcional)..."
-              className="w-full text-xs p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[72px]"
-            />
+            <div className="relative">
+              <textarea
+                value={problemDesc}
+                onChange={(e) => setProblemDesc(e.target.value)}
+                placeholder={analyzing ? "Luna IA analisando a conversa..." : "Descreva o motivo do chamado (opcional)..."}
+                disabled={analyzing}
+                className={cn(
+                  "w-full text-xs p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[72px]",
+                  analyzing && "opacity-60 animate-pulse"
+                )}
+              />
+              {analyzing && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-2xl">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>IA Analisando...</span>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -3552,13 +3631,27 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, onConfirm }:
               <span>Resolução / Solução Aplicada</span>
               <span className="text-red-500 text-[12px] font-bold">*</span>
             </label>
-            <textarea
-              value={resolution}
-              onChange={(e) => setResolution(e.target.value)}
-              placeholder="Escreva como o problem foi solucionado..."
-              className="w-full text-xs p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-emerald-500/30 dark:border-emerald-500/20 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[90px]"
-              required
-            />
+            <div className="relative">
+              <textarea
+                value={resolution}
+                onChange={(e) => setResolution(e.target.value)}
+                placeholder={analyzing ? "Luna IA gerando a solução detalhada..." : "Escreva como o problema foi solucionado..."}
+                disabled={analyzing}
+                className={cn(
+                  "w-full text-xs p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-emerald-500/30 dark:border-emerald-500/20 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[90px]",
+                  analyzing && "opacity-60 animate-pulse"
+                )}
+                required
+              />
+              {analyzing && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-2xl">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>IA Resumindo...</span>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Reactivate AI Toggle */}
@@ -3598,13 +3691,13 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, onConfirm }:
             <button
               type="button"
               onClick={onClose}
-              className="w-1/2 py-3 px-4 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-750 dark:text-gray-250 rounded-2xl font-bold transition-all text-xs"
+              className="w-1/2 py-3 px-4 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-755 dark:text-gray-250 rounded-2xl font-bold transition-all text-xs"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || analyzing}
               className="w-1/2 py-3 px-4 bg-gradient-to-tr from-emerald-500 to-teal-500 text-white rounded-2xl font-bold shadow-lg shadow-emerald-500/25 transition-all text-xs flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
             >
               {loading ? (

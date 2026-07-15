@@ -619,6 +619,58 @@ REGRAS DE RETORNO CRÍTICAS:
       throw new Error("Falha ao analisar o histórico do lead com a IA.");
     }
   }
+
+  async generateTicketAnalysis(params: {
+    opened_at: string;
+    closed_at: string;
+    operators: { name: string, count: number, percentage: number }[];
+    closed_by: string;
+    messages: { sender: string, text: string, timestamp: string }[];
+  }): Promise<{ problem_description: string, resolution_summary: string }> {
+    if (!this.isConfigured()) {
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
+    }
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+    
+    const opsText = params.operators.map(op => `${op.name} (${op.percentage}% de participação, ${op.count} msgs)`).join(', ');
+    const historyText = params.messages.slice(-65).map(m => `[${m.timestamp}] ${m.sender === 'human' ? 'Atendente' : 'Cliente'}: ${m.text}`).join('\n');
+
+    const prompt = `Você é um analista de suporte especialista em auditoria e controle de qualidade de chamados (tickets).
+Sua missão é analisar o histórico de conversação de atendimento a seguir e preencher a descrição do problema e o resumo detalhado da solução com a maior riqueza de detalhes possível.
+
+--- METADADOS DO CHAMADO ---
+- Horário de Abertura: ${params.opened_at}
+- Horário de Encerramento (Agora): ${params.closed_at}
+- Atendentes Participantes do Chamado: ${opsText || 'Nenhum atendente humano registrado'}
+- Encerrado por (Operador logado): ${params.closed_by}
+
+--- HISTÓRICO DE MENSAGENS DO TICKET ---
+${historyText}
+
+Você deve gerar obrigatoriamente um objeto JSON contendo exatamente estas duas propriedades:
+{
+  "problem_description": "Descreva em detalhes qual foi a queixa, solicitação ou dúvida inicial apresentada pelo cliente.",
+  "resolution_summary": "Descreva de forma rica e detalhada o desenrolar do atendimento, o que foi explicado/solucionado, e os atendentes que participaram."
+}
+
+REGRAS DE RETORNO CRÍTICAS:
+1. Retorne EXATAMENTE e APENAS o JSON.
+2. NUNCA coloque blocos de marcação markdown (\`\`\`json ou \`\`\`) na resposta.`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text().trim();
+    try {
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      return JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Erro ao analisar ticket com Gemini:", text, e);
+      return {
+        problem_description: "Análise do problema gerada devido a uma falha de parse.",
+        resolution_summary: `Chamado finalizado pelo atendente ${params.closed_by}. Participantes: ${opsText}.`
+      };
+    }
+  }
 }
 
 export const geminiService = new GeminiService();
