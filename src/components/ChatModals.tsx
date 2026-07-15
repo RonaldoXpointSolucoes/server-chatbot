@@ -2792,10 +2792,78 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
               {contact.name}
             </p>
           )}
-          <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-600 dark:text-emerald-500 mt-2">Ficha Cadastral</p>
-        </div>
+                  </div>
 
-        <div className="flex flex-col gap-3 bg-[#f0f2f5]/80 dark:bg-black/20 p-4 rounded-2xl border border-black/5 dark:border-white/5">
+        {/* Group Companies */}
+        {matchingGroups.length > 0 && groupCompanies.length > 0 && (
+          <div className="flex flex-col animate-in fade-in duration-500 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/20 rounded-3xl p-4.5 shadow-[0_4px_25px_rgba(99,102,241,0.08)]">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="p-2 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-xl text-white shadow-sm shrink-0">
+                <Building2 size={16} />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-[10px] uppercase font-black tracking-wider text-indigo-650 dark:text-indigo-400">
+                  Grupo Empresarial
+                </span>
+                <span className="text-xs font-extrabold text-[#111b21] dark:text-[#e9edef] mt-0.5 truncate">
+                  {matchingGroups.map(g => g.name).join(', ')}
+                </span>
+              </div>
+            </div>
+            
+            <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
+              {groupCompanies.map(c => (
+                <div key={c.id} className="flex flex-col p-3.5 rounded-2xl bg-white/40 dark:bg-black/20 hover:bg-white/60 dark:hover:bg-black/30 border border-black/[0.03] dark:border-white/[0.03] hover:border-indigo-500/15 dark:hover:border-indigo-500/15 transition-all">
+                  <span className="text-[12px] font-bold text-[#111b21] dark:text-[#e9edef] truncate" title={c.fantasy_name || c.name}>
+                    {c.fantasy_name || c.name}
+                  </span>
+                  {(c.fantasy_name && c.name) && (
+                    <span className="text-[10px] text-gray-555 dark:text-[#8696a0] truncate" title={c.name}>
+                      {c.name}
+                    </span>
+                  )}
+                  <span className="text-[10px] font-mono text-gray-400 mt-1.5 flex justify-between items-center">
+                    {c.document_number ? formatDocument(c.document_number) : 'CNPJ indisponível'}
+                    
+                    {c.document_number && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigator.clipboard.writeText(c.document_number);
+                        }}
+                        className="opacity-60 hover:opacity-100 hover:text-[#00a884] transition-colors p-0.5"
+                        title="Copiar CNPJ"
+                      >
+                        <Copy size={12} />
+                      </button>
+                    )}
+                  </span>
+
+                  {c.document_number && (
+                    <div className="mt-2.5 pt-2.5 border-t border-black/5 dark:border-white/5">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const cleanCnpj = c.document_number.replace(/\D/g, '');
+                          window.open(`https://mensalidadedatadivas.vercel.app/?e=${cleanCnpj}`, '_blank');
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-[#00a884]/15 hover:bg-[#00a884]/25 active:scale-[0.98] text-[#00a884] dark:text-[#00c99e] rounded-xl font-bold text-[10px] transition-all duration-200"
+                      >
+                        <CircleDollarSign size={13} />
+                        <span>Ver Faturamento</span>
+                        <ExternalLink size={11} className="opacity-70 ml-auto" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2">
+          <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-600 dark:text-emerald-500">Ficha Cadastral</p>
+          <div className="flex flex-col gap-3 bg-[#f0f2f5]/80 dark:bg-black/20 p-4 rounded-2xl border border-black/5 dark:border-white/5">
           {/* CNPJ */}
           {/* CNPJ ou Associação de Empresa / Grupo */}
           {contact.document_type === 'cnpj' ? (
@@ -3085,8 +3153,9 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
             )}
           </div>
         </div>
+      </div>
 
-        {/* Action Button */}
+      {/* Action Button */}
         <div className="mt-2 flex flex-col gap-2">
           <button 
             onClick={() => window.open(`https://mensalidadedatadivas.vercel.app/?e=${rawCnpj || ''}`, '_blank')}
@@ -3111,72 +3180,6 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
           )}
         </div>
 
-        {/* Group Companies */}
-        {matchingGroups.length > 0 && groupCompanies.length > 0 && (
-          <div className="flex flex-col mt-2 pt-4 border-t border-black/5 dark:border-white/5 animate-in fade-in duration-500">
-            <div className="flex flex-col mb-3">
-              <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-600 dark:text-emerald-500 mb-1">
-                Grupo Empresarial
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {matchingGroups.map(g => (
-                  <span key={g.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white shadow-sm" style={{ backgroundColor: g.color || '#3b82f6' }}>
-                    <Building size={10} />
-                    {g.name}
-                  </span>
-                ))}
-              </div>
-            </div>
-            
-            <div className="flex flex-col gap-2 max-h-[180px] overflow-y-auto custom-scrollbar pr-1">
-              {groupCompanies.map(c => (
-                <div key={c.id} className="flex flex-col p-3 rounded-xl bg-[#f0f2f5]/50 dark:bg-[#202c33]/50 border border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
-                  <span className="text-[12px] font-bold text-[#111b21] dark:text-[#e9edef] truncate" title={c.fantasy_name || c.name}>
-                    {c.fantasy_name || c.name}
-                  </span>
-                  {(c.fantasy_name && c.name) && (
-                    <span className="text-[10px] text-gray-500 dark:text-[#8696a0] truncate" title={c.name}>
-                      {c.name}
-                    </span>
-                  )}
-                  <span className="text-[10px] font-mono text-gray-400 mt-1 flex justify-between items-center">
-                    {c.document_number ? formatDocument(c.document_number) : 'CNPJ indisponível'}
-                    
-                    {c.document_number && (
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigator.clipboard.writeText(c.document_number);
-                        }}
-                        className="opacity-60 hover:opacity-100 hover:text-[#00a884] transition-colors p-0.5"
-                        title="Copiar CNPJ"
-                      >
-                        <Copy size={12} />
-                      </button>
-                    )}
-                  </span>
-
-                  {c.document_number && (
-                    <div className="mt-2 pt-2 border-t border-black/5 dark:border-white/5">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const cleanCnpj = c.document_number.replace(/\D/g, '');
-                          window.open(`https://mensalidadedatadivas.vercel.app/?e=${cleanCnpj}`, '_blank');
-                        }}
-                        className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-[#00a884]/15 hover:bg-[#00a884]/25 active:scale-[0.98] text-[#00a884] dark:text-[#00c99e] rounded-lg font-semibold text-[10px] transition-all duration-200"
-                      >
-                        <CircleDollarSign size={12} />
-                        <span>Ver Faturamento</span>
-                        <ExternalLink size={10} className="opacity-70 ml-auto" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
       </div>
     </div>
