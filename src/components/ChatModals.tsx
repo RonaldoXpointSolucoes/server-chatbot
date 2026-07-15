@@ -3148,13 +3148,30 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                           e.stopPropagation();
                           navigator.clipboard.writeText(c.document_number);
                         }}
-                        className="opacity-60 hover:opacity-100 hover:text-emerald-500 transition-colors"
+                        className="opacity-60 hover:opacity-100 hover:text-[#00a884] transition-colors p-0.5"
                         title="Copiar CNPJ"
                       >
                         <Copy size={12} />
                       </button>
                     )}
                   </span>
+
+                  {c.document_number && (
+                    <div className="mt-2 pt-2 border-t border-black/5 dark:border-white/5">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const cleanCnpj = c.document_number.replace(/\D/g, '');
+                          window.open(`https://mensalidadedatadivas.vercel.app/?e=${cleanCnpj}`, '_blank');
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-[#00a884]/15 hover:bg-[#00a884]/25 active:scale-[0.98] text-[#00a884] dark:text-[#00c99e] rounded-lg font-semibold text-[10px] transition-all duration-200"
+                      >
+                        <CircleDollarSign size={12} />
+                        <span>Ver Faturamento</span>
+                        <ExternalLink size={10} className="opacity-70 ml-auto" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
