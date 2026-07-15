@@ -3624,9 +3624,10 @@ export default function ChatDashboard() {
         onClose={() => setResolvingTicketContactId(null)}
         activeTicket={activeTicket}
         contact={activeChat}
-        onConfirm={async (problemDesc, resolution, reactivateAi) => {
+        onConfirm={async (problemDesc, resolution, reactivateAi, summaryText) => {
           if (resolvingTicketContactId) {
-            const stats = await calculateFinalStats(resolvingTicketContactId);
+            const baseStats = await calculateFinalStats(resolvingTicketContactId);
+            const stats = { ...baseStats, summary: summaryText };
             const currentActiveTicket = useChatStore.getState().activeTicket;
             if (currentActiveTicket) {
               await useChatStore.getState().resolveActiveTicket(currentActiveTicket.id, problemDesc, resolution, stats);

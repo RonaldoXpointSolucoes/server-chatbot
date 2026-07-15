@@ -3107,6 +3107,13 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                             </div>
                           )}
 
+                          {t.metadata?.summary && (
+                            <div className="bg-blue-500/5 p-2 rounded-xl border border-blue-500/10">
+                              <span className="font-extrabold uppercase text-[9px] text-blue-600 dark:text-blue-450 block mb-0.5">Resumo:</span>
+                              <p className="text-gray-750 dark:text-gray-200 leading-normal font-medium whitespace-pre-wrap">{t.metadata.summary}</p>
+                            </div>
+                          )}
+
                           {t.resolution_summary && (
                             <div className="bg-emerald-500/5 p-2 rounded-xl border border-emerald-500/10">
                               <span className="font-extrabold uppercase text-[9px] text-emerald-600 dark:text-emerald-400 block mb-0.5">Resolução:</span>
@@ -3473,15 +3480,17 @@ interface ResolveTicketModalProps {
   onClose: () => void;
   activeTicket: any;
   contact?: any;
-  onConfirm: (problemDesc: string, resolution: string, reactivateAi: boolean) => Promise<void>;
+  onConfirm: (problemDesc: string, resolution: string, reactivateAi: boolean, summary: string) => Promise<void>;
 }
 
 export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onConfirm }: ResolveTicketModalProps) {
   const [problemDesc, setProblemDesc] = useState('');
+  const [summary, setSummary] = useState('');
   const [resolution, setResolution] = useState('');
   const [reactivateAi, setReactivateAi] = useState(true);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [isResolutionExpanded, setIsResolutionExpanded] = useState(false);
 
   // Calculate session statistics and duration in real time
   const ticketStats = React.useMemo(() => {
@@ -3494,7 +3503,10 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
       return ts >= start;
     });
 
-    const humanMessages = ticketMsgs.filter((m: any) => m.sender === 'human' || m.sender_type === 'human');
+    const humanMessages = ticketMsgs.filter((m: any) => 
+      m.sender === 'human' || m.sender_type === 'human' || 
+      m.sender === 'me' || m.sender_type === 'me'
+    );
     const stats: Record<string, number> = {};
     let totalHuman = 0;
     humanMessages.forEach((m: any) => {
@@ -3505,7 +3517,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
         stats[name] = (stats[name] || 0) + 1;
         totalHuman++;
       } else {
-        const fallbackName = m.payload?.agent_name || m.created_by_name || 'Agente';
+        const fallbackName = m.created_by_name || 'Agente';
         stats[fallbackName] = (stats[fallbackName] || 0) + 1;
         totalHuman++;
       }
@@ -3535,10 +3547,13 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
 
     if (activeTicket) {
       setProblemDesc(activeTicket.problem_description || '');
+      setSummary(activeTicket.metadata?.summary || '');
     } else {
       setProblemDesc('');
+      setSummary('');
     }
     setResolution('');
+    setIsResolutionExpanded(false);
 
     // Trigger Gemini AI ticket auto-analysis
     if (geminiService.isConfigured() && activeTicket && contact?.messages) {
@@ -3551,7 +3566,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
       });
 
       const formattedMsgs = ticketMsgs.map((m: any) => ({
-        sender: (m.sender === 'human' || m.sender_type === 'human') ? 'human' : 'client',
+        sender: (m.sender === 'human' || m.sender_type === 'human' || m.sender === 'me' || m.sender_type === 'me') ? 'human' : 'client',
         text: m.text || m.text_content || '',
         timestamp: new Date(m.timestamp || m.created_at).toLocaleString('pt-BR')
       }));
@@ -3568,6 +3583,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
         messages: formattedMsgs
       }).then((result) => {
         if (result.problem_description) setProblemDesc(result.problem_description);
+        if (result.summary) setSummary(result.summary);
         if (result.resolution_summary) setResolution(result.resolution_summary);
       }).catch((err) => {
         console.error("Erro na análise automática do ticket:", err);
@@ -3587,7 +3603,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
     }
     setLoading(true);
     try {
-      await onConfirm(problemDesc, resolution, reactivateAi);
+      await onConfirm(problemDesc, resolution, reactivateAi, summary);
     } catch (err) {
       console.error(err);
     } finally {
@@ -3624,7 +3640,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
 
         {/* Metadados Preenchidos Automaticamente */}
         {activeTicket && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-white/5 p-3 rounded-2xl text-[11px] shadow-inner">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-white/5 p-3 rounded-2xl text-[11px] shadow-inner text-left">
             <div className="flex flex-col p-2 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5">
               <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider">Abertura</span>
               <span className="font-semibold text-gray-700 dark:text-gray-200 mt-0.5 truncate">
@@ -3664,7 +3680,8 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
         )}
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4 text-left">
+          {/* Descrição do Problema */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] uppercase font-black tracking-wider text-gray-450 flex items-center gap-1.5">
               <span>Descrição do Problema</span>
@@ -3692,23 +3709,22 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
             </div>
           </div>
 
+          {/* Resumo */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] uppercase font-black tracking-wider text-gray-455 flex items-center gap-1.5">
-              <span>Resolução / Solução Aplicada</span>
-              <span className="text-red-500 text-[12px] font-bold">*</span>
+            <label className="text-[10px] uppercase font-black tracking-wider text-gray-450 flex items-center gap-1.5">
+              <span>Resumo</span>
               <span className="text-[8px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black tracking-normal">Preenchido com IA</span>
             </label>
             <div className="relative">
               <textarea
-                value={resolution}
-                onChange={(e) => setResolution(e.target.value)}
-                placeholder={analyzing ? "Luna IA gerando a solução detalhada..." : "Escreva como o problema foi solucionado..."}
+                value={summary}
+                onChange={(e) => setSummary(e.target.value)}
+                placeholder={analyzing ? "Luna IA gerando o resumo..." : "Resumo rápido do chamado..."}
                 disabled={analyzing}
                 className={cn(
-                  "w-full text-xs p-3.5 bg-black/[0.02] dark:bg-white/[0.02] border border-emerald-500/30 dark:border-emerald-500/20 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[175px] font-semibold leading-relaxed font-sans scrollbar-thin",
+                  "w-full text-xs p-3.5 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[72px] font-medium leading-relaxed font-sans scrollbar-thin",
                   analyzing && "opacity-60 animate-pulse"
                 )}
-                required
               />
               {analyzing && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-2xl">
@@ -3719,6 +3735,52 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Resolução / Solução Aplicada (Menu Suspenso/Colapsável) */}
+          <div className="flex flex-col gap-1.5 border border-black/5 dark:border-white/5 rounded-2xl overflow-hidden bg-black/[0.01] dark:bg-white/[0.01]">
+            <button
+              type="button"
+              onClick={() => setIsResolutionExpanded(!isResolutionExpanded)}
+              className="flex items-center justify-between p-3.5 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors text-left"
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] uppercase font-black tracking-wider text-gray-455">
+                  Resolução / Solução Aplicada
+                </span>
+                <span className="text-red-500 text-[12px] font-bold">*</span>
+                <span className="text-[8px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black tracking-normal">
+                  Preenchido com IA
+                </span>
+              </div>
+              <ChevronDown size={16} className={cn("text-gray-400 transition-transform duration-200", isResolutionExpanded && "rotate-180")} />
+            </button>
+            
+            {isResolutionExpanded && (
+              <div className="px-3.5 pb-3.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                <div className="relative">
+                  <textarea
+                    value={resolution}
+                    onChange={(e) => setResolution(e.target.value)}
+                    placeholder={analyzing ? "Luna IA gerando a solução detalhada..." : "Escreva como o problema foi solucionado..."}
+                    disabled={analyzing}
+                    className={cn(
+                      "w-full text-xs p-3.5 bg-black/[0.02] dark:bg-white/[0.02] border border-emerald-500/30 dark:border-emerald-500/20 rounded-2xl focus:outline-none focus:border-emerald-500 resize-none h-[175px] font-semibold leading-relaxed font-sans scrollbar-thin",
+                      analyzing && "opacity-60 animate-pulse"
+                    )}
+                    required
+                  />
+                  {analyzing && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-2xl">
+                      <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>IA Resumindo...</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Reactivate AI Toggle */}
