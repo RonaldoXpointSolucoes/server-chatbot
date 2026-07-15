@@ -626,7 +626,7 @@ REGRAS DE RETORNO CRÍTICAS:
     operators: { name: string, count: number, percentage: number }[];
     closed_by: string;
     messages: { sender: string, text: string, timestamp: string }[];
-  }): Promise<{ problem_description: string, summary: string, resolution_summary: string }> {
+  }): Promise<{ problem_description: string, summary: string, problems_checklist: Array<{ text: string, resolved: boolean }>, resolution_summary: string }> {
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
@@ -636,7 +636,7 @@ REGRAS DE RETORNO CRÍTICAS:
     const historyText = params.messages.slice(-65).map(m => `[${m.timestamp}] ${m.sender === 'human' ? 'Atendente' : 'Cliente'}: ${m.text}`).join('\n');
 
     const prompt = `Você é um analista de suporte especialista em auditoria e controle de qualidade de chamados (tickets).
-Sua missão é analisar o histórico de conversação de atendimento a seguir e preencher a descrição do problema, o resumo da solução e o relato detalhado da solução com a maior riqueza de detalhes possível.
+Sua missão é analisar o histórico de conversação de atendimento a seguir e preencher a descrição do problema, o resumo da solução, a lista cronológica de problemas discutidos e o relato detalhado da solução.
 
 --- METADADOS DO CHAMADO ---
 - Horário de Abertura: ${params.opened_at}
@@ -647,10 +647,16 @@ Sua missão é analisar o histórico de conversação de atendimento a seguir e 
 --- HISTÓRICO DE MENSAGENS DO TICKET ---
 ${historyText}
 
-Você deve gerar obrigatoriamente um objeto JSON em português contendo exatamente estas três propriedades:
+Você deve gerar obrigatoriamente um objeto JSON em português contendo exatamente estas quatro propriedades:
 {
-  "problem_description": "Escreva um resumo extremamente simplificado, focado UNICAMENTE na falha ou solicitação, sem termos como 'usuário', 'cliente' ou 'atendente' (máximo de 8 palavras, ex: 'Sem acesso para imprimir relatório de fechamento de caixa' ou 'Problema de conexão com impressora'). Não use saudações ou palavras de preenchimento.",
+  "problem_description": "Escreva um resumo extremamente simplificado, focado UNICAMENTE na falha ou solicitação principal, sem termos como 'usuário', 'cliente' ou 'atendente' (máximo de 8 palavras, ex: 'Sem acesso para imprimir relatório de fechamento de caixa' ou 'Problema de conexão com impressora'). Não use saudações ou palavras de preenchimento.",
   "summary": "Um resumo ultra-conciso (máximo de 25 palavras, 1 ou 2 frases curtas) de como a questão foi resolvida, focando na ação resolutiva final.",
+  "problems_checklist": [
+    {
+      "text": "Escreva o problema ou dúvida de forma simplificada e direta (máximo de 8 palavras, ex: 'Sem acesso para imprimir relatório'). Organize rigorosamente na mesma ordem em que o cliente citou os problemas na conversa.",
+      "resolved": true
+    }
+  ],
   "resolution_summary": "Descreva de forma cronológica, rica e detalhada o desenrolar do atendimento, o que foi explicado ou solucionado, e a participação dos atendentes. Use parágrafos (\\n\\n) e marcadores (bullet points com hífens '- ') para listar as etapas de solução de forma muito organizada e legível."
 }
 
@@ -667,6 +673,7 @@ REGRAS DE RETORNO CRÍTICAS:
       return {
         problem_description: parsed.problem_description || "Sem descrição",
         summary: parsed.summary || "Sem resumo",
+        problems_checklist: parsed.problems_checklist || [],
         resolution_summary: parsed.resolution_summary || "Sem detalhes"
       };
     } catch (e) {
@@ -674,6 +681,7 @@ REGRAS DE RETORNO CRÍTICAS:
       return {
         problem_description: "Erro no processamento do problema.",
         summary: "Erro ao gerar resumo da solução.",
+        problems_checklist: [],
         resolution_summary: `Chamado finalizado pelo atendente ${params.closed_by}. Participantes: ${opsText}.`
       };
     }

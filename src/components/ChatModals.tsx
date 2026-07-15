@@ -3480,7 +3480,7 @@ interface ResolveTicketModalProps {
   onClose: () => void;
   activeTicket: any;
   contact?: any;
-  onConfirm: (problemDesc: string, resolution: string, reactivateAi: boolean, summary: string) => Promise<void>;
+  onConfirm: (problemDesc: string, resolution: string, reactivateAi: boolean, summary: string, checklist: Array<{ text: string, resolved: boolean }>) => Promise<void>;
 }
 
 export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onConfirm }: ResolveTicketModalProps) {
@@ -3491,6 +3491,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [isResolutionExpanded, setIsResolutionExpanded] = useState(false);
+  const [checklist, setChecklist] = useState<Array<{ text: string, resolved: boolean }>>([]);
 
   // Calculate session statistics and duration in real time
   const ticketStats = React.useMemo(() => {
@@ -3503,20 +3504,34 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
       return ts >= start;
     });
 
-    const humanMessages = ticketMsgs.filter((m: any) => 
-      m.sender === 'human' || m.sender_type === 'human' || 
-      m.sender === 'me' || m.sender_type === 'me'
-    );
     const stats: Record<string, number> = {};
     let totalHuman = 0;
-    humanMessages.forEach((m: any) => {
-      const text = m.text || m.text_content || '';
-      const match = text.match(/^\*([^*:]+):\*/);
-      if (match) {
-        const name = match[1].trim();
-        stats[name] = (stats[name] || 0) + 1;
-        totalHuman++;
+
+    ticketMsgs.forEach((m: any) => {
+      const text = (m.text || m.text_content || '').trim();
+      if (!text) return;
+
+      let foundAgentName = '';
+      
+      // Match explicit markdown signature like *Name:*
+      const matchAsterisk = text.match(/^\*([^*:\n]+):\*/);
+      if (matchAsterisk) {
+        foundAgentName = matchAsterisk[1].trim();
       } else {
+        // Match raw newline-based signatures (e.g. Marcos Calixto\nA não ser...)
+        const lines = text.split('\n');
+        const firstLine = lines[0].trim();
+        const cleanFirstLine = firstLine.replace(/:$/, '').trim();
+        const isNamePattern = /^[A-Z\u00C0-\u00FF][a-z\u00E0-\u00FC]+(?:\s+[A-Z\u00C0-\u00FF][a-z\u00E0-\u00FC]+){0,2}$/.test(cleanFirstLine);
+        if (lines.length > 1 && isNamePattern && cleanFirstLine.length >= 3 && cleanFirstLine.length <= 25) {
+          foundAgentName = cleanFirstLine;
+        }
+      }
+
+      if (foundAgentName) {
+        stats[foundAgentName] = (stats[foundAgentName] || 0) + 1;
+        totalHuman++;
+      } else if (m.sender === 'human' || m.sender_type === 'human' || m.sender === 'me' || m.sender_type === 'me') {
         const fallbackName = m.created_by_name || 'Agente';
         stats[fallbackName] = (stats[fallbackName] || 0) + 1;
         totalHuman++;
@@ -3548,9 +3563,11 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
     if (activeTicket) {
       setProblemDesc(activeTicket.problem_description || '');
       setSummary(activeTicket.metadata?.summary || '');
+      setChecklist(activeTicket.metadata?.checklist || []);
     } else {
       setProblemDesc('');
       setSummary('');
+      setChecklist([]);
     }
     setResolution('');
     setIsResolutionExpanded(false);
@@ -3565,11 +3582,31 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
         return ts >= start;
       });
 
-      const formattedMsgs = ticketMsgs.map((m: any) => ({
-        sender: (m.sender === 'human' || m.sender_type === 'human' || m.sender === 'me' || m.sender_type === 'me') ? 'human' : 'client',
-        text: m.text || m.text_content || '',
-        timestamp: new Date(m.timestamp || m.created_at).toLocaleString('pt-BR')
-      }));
+      const formattedMsgs = ticketMsgs.map((m: any) => {
+        const text = (m.text || m.text_content || '').trim();
+        let isHuman = m.sender === 'human' || m.sender_type === 'human' || m.sender === 'me' || m.sender_type === 'me';
+        
+        if (!isHuman && text) {
+          const matchAsterisk = text.match(/^\*([^*:\n]+):\*/);
+          if (matchAsterisk) {
+            isHuman = true;
+          } else {
+            const lines = text.split('\n');
+            const firstLine = lines[0].trim();
+            const cleanFirstLine = firstLine.replace(/:$/, '').trim();
+            const isNamePattern = /^[A-Z\u00C0-\u00FF][a-z\u00E0-\u00FC]+(?:\s+[A-Z\u00C0-\u00FF][a-z\u00E0-\u00FC]+){0,2}$/.test(cleanFirstLine);
+            if (lines.length > 1 && isNamePattern && cleanFirstLine.length >= 3 && cleanFirstLine.length <= 25) {
+              isHuman = true;
+            }
+          }
+        }
+
+        return {
+          sender: isHuman ? 'human' : 'client',
+          text: text,
+          timestamp: new Date(m.timestamp || m.created_at).toLocaleString('pt-BR')
+        };
+      });
 
       const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
       const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
@@ -3584,6 +3621,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
       }).then((result) => {
         if (result.problem_description) setProblemDesc(result.problem_description);
         if (result.summary) setSummary(result.summary);
+        if (result.problems_checklist) setChecklist(result.problems_checklist);
         if (result.resolution_summary) setResolution(result.resolution_summary);
       }).catch((err) => {
         console.error("Erro na análise automática do ticket:", err);
@@ -3603,7 +3641,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
     }
     setLoading(true);
     try {
-      await onConfirm(problemDesc, resolution, reactivateAi, summary);
+      await onConfirm(problemDesc, resolution, reactivateAi, summary, checklist);
     } catch (err) {
       console.error(err);
     } finally {
@@ -3735,6 +3773,54 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Checklist de Problemas Abordados */}
+          <div className="flex flex-col gap-2 bg-slate-50/30 dark:bg-white/5 border border-slate-100 dark:border-white/5 p-3.5 rounded-2xl">
+            <label className="text-[10px] uppercase font-black tracking-wider text-gray-450 flex items-center gap-1.5 justify-between">
+              <span>Problemas Abordados & Checklist</span>
+              <span className="text-[8px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black tracking-normal">Preenchido com IA</span>
+            </label>
+            
+            {analyzing ? (
+              <div className="py-4 text-center text-xs text-gray-400 italic">Identificando problemas no histórico...</div>
+            ) : checklist.length > 0 ? (
+              <div className="flex flex-col gap-2 max-h-[140px] overflow-y-auto custom-scrollbar pr-1">
+                {checklist.map((item, idx) => (
+                  <div key={idx} className="flex items-center justify-between gap-3 bg-white dark:bg-black/20 p-2.5 rounded-xl border border-black/5 dark:border-white/5 hover:border-emerald-500/20 transition-all text-left">
+                    <input
+                      type="text"
+                      value={item.text}
+                      onChange={(e) => {
+                        const newChecklist = [...checklist];
+                        newChecklist[idx].text = e.target.value;
+                        setChecklist(newChecklist);
+                      }}
+                      className="bg-transparent border-none text-xs text-gray-700 dark:text-gray-200 font-medium focus:outline-none focus:ring-0 p-0 flex-grow"
+                    />
+                    
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newChecklist = [...checklist];
+                        newChecklist[idx].resolved = !newChecklist[idx].resolved;
+                        setChecklist(newChecklist);
+                      }}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-[9px] font-black uppercase transition-all duration-200 border shrink-0",
+                        item.resolved 
+                          ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20" 
+                          : "bg-red-500/10 border-red-500/25 text-red-600 dark:text-red-400 hover:bg-red-500/20"
+                      )}
+                    >
+                      {item.resolved ? "Resolvido" : "Pendente"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-2 text-center text-xs text-gray-400 italic">Nenhum problema identificado automaticamente.</div>
+            )}
           </div>
 
           {/* Resolução / Solução Aplicada (Menu Suspenso/Colapsável) */}

@@ -4227,6 +4227,117 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   resolveActiveTicket: async (ticketId, problemDescription, resolutionSummary, metadata) => {
     try {
+      // Obter o ticket atual para calcular a duração e obter o tenant_id
+      const { data: ticket, error: fetchErr } = await supabase
+        .from('chat_tickets')
+        .select('*')
+        .eq('id', ticketId)
+        .single();
+
+      if (fetchErr) throw fetchErr;
+
+      // Sincronizar problemas resolvidos do checklist com a base unificada ticket_problems_master
+      const checklist = metadata?.checklist || [];
+      if (checklist.length > 0 && ticket) {
+        const openedAt = new Date(ticket.opened_at);
+        const ticketDurationMs = new Date().getTime() - openedAt.getTime();
+        const tenantId = ticket.tenant_id;
+
+        // Buscar todos os problemas mestre existentes desse tenant
+        const { data: masterProblems } = await supabase
+          .from('ticket_problems_master')
+          .select('*');
+
+        const normalizedMasterProblems = masterProblems || [];
+
+        // Função de similaridade híbrida (Jaccard de palavras + Sørensen-Dice de bigramas)
+        const getSimilarityScore = (s1: string, s2: string): number => {
+          const norm1 = s1.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 2);
+          const norm2 = s2.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 2);
+          
+          if (norm1.length === 0 || norm2.length === 0) return 0.0;
+
+          const set1 = new Set(norm1);
+          const set2 = new Set(norm2);
+          
+          let intersection = 0;
+          set2.forEach(w => {
+            if (set1.has(w)) intersection++;
+          });
+          
+          const wordSimilarity = intersection / Math.max(set1.size, set2.size);
+          
+          const clean1 = s1.toLowerCase().replace(/[^\w\s]/g, '').trim();
+          const clean2 = s2.toLowerCase().replace(/[^\w\s]/g, '').trim();
+          if (clean1 === clean2) return 1.0;
+          if (clean1.length < 2 || clean2.length < 2) return 0.0;
+
+          const bigrams1 = new Set<string>();
+          for (let i = 0; i < clean1.length - 1; i++) {
+            bigrams1.add(clean1.substring(i, i + 2));
+          }
+          const bigrams2 = new Set<string>();
+          for (let i = 0; i < clean2.length - 1; i++) {
+            bigrams2.add(clean2.substring(i, i + 2));
+          }
+
+          let bigramIntersection = 0;
+          bigrams2.forEach(b => {
+            if (bigrams1.has(b)) bigramIntersection++;
+          });
+
+          const bigramSimilarity = (2.0 * bigramIntersection) / (bigrams1.size + bigrams2.size);
+          
+          return 0.4 * wordSimilarity + 0.6 * bigramSimilarity;
+        };
+
+        for (const item of checklist) {
+          if (!item.text || !item.resolved) continue;
+
+          let matchedProblem: any = null;
+          let bestScore = 0;
+
+          for (const mp of normalizedMasterProblems) {
+            const score = getSimilarityScore(item.text, mp.problem_title);
+            if (score >= 0.70 && score > bestScore) {
+              bestScore = score;
+              matchedProblem = mp;
+            }
+          }
+
+          if (matchedProblem) {
+            // Incrementar frequência e somar tempo de resolução
+            const newFreq = (matchedProblem.frequency || 0) + 1;
+            const newTime = Number(matchedProblem.total_resolution_time_ms || 0) + ticketDurationMs;
+
+            await supabase
+              .from('ticket_problems_master')
+              .update({
+                frequency: newFreq,
+                total_resolution_time_ms: newTime,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', matchedProblem.id);
+          } else {
+            // Inserir novo problema mestre único
+            const { data: newRow, error: insertErr } = await supabase
+              .from('ticket_problems_master')
+              .insert({
+                tenant_id: tenantId,
+                problem_title: item.text.trim(),
+                frequency: 1,
+                total_resolution_time_ms: ticketDurationMs
+              })
+              .select()
+              .single();
+
+            if (!insertErr && newRow) {
+              normalizedMasterProblems.push(newRow);
+            }
+          }
+        }
+      }
+
       const { error } = await supabase
         .from('chat_tickets')
         .update({ 
