@@ -4002,7 +4002,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       if (contactIds.length > 0) {
         const { data: cData, error: cErr } = await supabase
           .from('contacts')
-          .select('id, name, custom_name, fantasy_name, phone, company_ids')
+          .select('id, name, custom_name, fantasy_name, phone, company_ids, profile_picture_url')
           .in('id', contactIds);
         if (!cErr && cData) {
           contactsData = cData;
@@ -4071,6 +4071,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         
         let companyFantasyName = c?.fantasy_name || '';
         let companyName = c?.name || '';
+        const profile_picture_url = c?.profile_picture_url || '';
 
         if (c?.company_ids && c.company_ids.length > 0) {
           const assocComp = companiesMap.get(c.company_ids[0]);
@@ -4097,6 +4098,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           contactName,
           companyFantasyName,
           companyName,
+          profile_picture_url,
           operatorName,
           duration
         };
@@ -4372,52 +4374,78 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 key={t.id}
                                 onClick={() => setSelectedTicket(t)}
                                 className={cn(
-                                  "group p-3.5 rounded-2xl border text-left cursor-pointer transition-all duration-200 bg-white hover:bg-slate-50/50 dark:bg-[#1f2c34]/50 dark:hover:bg-[#1f2c34] hover:scale-[1.01] hover:shadow-md flex flex-col gap-2.5 relative border-black/[0.05] dark:border-white/[0.05]",
+                                  "group p-4 rounded-[22px] border text-left cursor-pointer transition-all duration-300 bg-white hover:bg-slate-50/70 dark:bg-[#182229]/65 dark:hover:bg-[#182229] hover:scale-[1.015] hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] flex flex-col gap-3 relative border-black/[0.04] dark:border-white/[0.04]",
                                   selectedTicket?.id === t.id && "border-emerald-500/50 dark:border-emerald-500/30 ring-1 ring-emerald-500/30 dark:ring-emerald-500/10 shadow-sm"
                                 )}
                               >
                                 {/* Top: Company + Date */}
-                                <div className="flex items-start justify-between gap-2 border-b border-black/[0.02] dark:border-white/[0.02] pb-1.5">
-                                  <div className="flex flex-col gap-0.5 min-w-0">
-                                    <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-md truncate max-w-full uppercase tracking-wider inline-block">
+                                <div className="flex items-start justify-between gap-3 border-b border-black/[0.03] dark:border-white/[0.03] pb-2">
+                                  <div className="flex flex-col gap-1 min-w-0">
+                                    <span className="text-[9.5px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 dark:bg-emerald-500/15 px-2 py-0.5 rounded-lg truncate max-w-full uppercase tracking-wider inline-block">
                                       🏢 {t.companyFantasyName || 'Empresa Própria'}
                                     </span>
                                     {t.companyName && t.companyName.toLowerCase() !== t.companyFantasyName?.toLowerCase() && (
-                                      <span className="text-[8px] font-semibold text-gray-400 dark:text-gray-500 pl-1.5 truncate max-w-[150px] md:max-w-[200px]">
+                                      <span className="text-[8.5px] font-medium text-gray-400 dark:text-gray-500 pl-2 truncate max-w-[150px] md:max-w-[200px]">
                                         {t.companyName}
                                       </span>
                                     )}
                                   </div>
-                                  <span className="text-[8px] font-bold text-gray-400 shrink-0 mt-0.5">
-                                    {formatTimeSafe(t.closed_at)}
-                                  </span>
+                                  <div className="flex flex-col items-end text-right shrink-0 mt-0.5 text-[8px] font-black text-gray-400 dark:text-gray-500 gap-0.5">
+                                    <span className="flex items-center gap-1 font-semibold text-[#8696a0] dark:text-[#aebac1]">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
+                                      {formatTimeSafe(t.opened_at)}
+                                    </span>
+                                    <span className="flex items-center gap-1 font-semibold text-emerald-500 dark:text-emerald-400">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                                      {formatTimeSafe(t.closed_at)}
+                                    </span>
+                                  </div>
                                 </div>
 
                                 {/* Middle: Avatar + Info */}
-                                <div className="flex items-center gap-2.5">
-                                  <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-600 text-white font-black text-[11px] flex items-center justify-center shrink-0 shadow-inner">
-                                    {initial}
+                                <div className="flex items-center gap-3">
+                                  <div className="relative shrink-0">
+                                    {t.profile_picture_url ? (
+                                      <img 
+                                        src={t.profile_picture_url} 
+                                        alt={t.contactName} 
+                                        className="w-8 h-8 rounded-full object-cover border border-black/5 dark:border-white/10 shadow-sm"
+                                        onError={(e) => {
+                                          e.currentTarget.style.display = 'none';
+                                          if (e.currentTarget.nextElementSibling) {
+                                            e.currentTarget.nextElementSibling.classList.remove('hidden');
+                                            e.currentTarget.nextElementSibling.classList.add('flex');
+                                          }
+                                        }}
+                                      />
+                                    ) : null}
+                                    <div className={cn(
+                                      "w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-600 text-white font-black text-[12px] flex items-center justify-center shadow-inner",
+                                      t.profile_picture_url ? "hidden" : "flex"
+                                    )}>
+                                      {initial}
+                                    </div>
                                   </div>
                                   <div className="flex flex-col min-w-0 text-left">
-                                    <span className="text-[11px] font-black text-gray-900 dark:text-white truncate">
+                                    <span className="text-[11.5px] font-black text-gray-900 dark:text-[#e9edef] truncate">
                                       {t.contactName}
                                     </span>
-                                    <span className="text-[9px] text-gray-400 font-bold flex items-center gap-1">
-                                      👤 Atendente: <strong className="text-gray-600 dark:text-gray-300 font-extrabold">{t.operatorName}</strong>
+                                    <span className="text-[9.5px] text-gray-400 dark:text-gray-500 font-bold flex items-center gap-1">
+                                      👤 Atendente: <strong className="text-gray-600 dark:text-gray-300 font-black">{t.operatorName}</strong>
                                     </span>
                                   </div>
                                 </div>
 
                                 {/* Problem description */}
                                 {t.problem_description && (
-                                  <p className="text-[10px] text-gray-650 dark:text-gray-300 leading-normal line-clamp-2 bg-slate-50/50 dark:bg-black/10 p-2 rounded-xl border border-black/[0.02] dark:border-white/[0.02]">
+                                  <p className="text-[10px] text-gray-650 dark:text-gray-300 leading-normal line-clamp-2 bg-slate-50/50 dark:bg-black/10 p-2.5 rounded-[14px] border border-black/[0.02] dark:border-white/[0.02]">
                                     <span className="font-extrabold text-[8px] text-gray-400 uppercase tracking-wide mr-1 select-none">Problema:</span>
                                     {t.problem_description}
                                   </p>
                                 )}
 
                                 {/* Bottom Statistics Footer */}
-                                <div className="pt-2 border-t border-black/[0.03] dark:border-white/[0.03] flex items-center justify-between flex-wrap gap-1.5 text-[8.5px] font-extrabold text-gray-400 select-none">
+                                <div className="pt-2 border-t border-black/[0.03] dark:border-white/[0.03] flex items-center justify-between flex-wrap gap-2 text-[8.5px] font-extrabold text-gray-400 select-none">
                                   <div className="flex items-center gap-2">
                                     <span className="flex items-center gap-0.5">⏱️ <span className="font-semibold text-gray-600 dark:text-gray-300">{t.duration}</span></span>
                                     <span>•</span>
@@ -4426,13 +4454,18 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                   
                                   <div className="flex items-center gap-1.5">
                                     {(t.metadata?.error_log || t.problem_description === "Erro no processamento do problema." || t.metadata?.summary === "Erro ao gerar resumo da solução.") && (
-                                      <span className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md text-[8px] font-black animate-pulse flex items-center gap-0.5 shrink-0">
+                                      <span className="px-2 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md text-[8px] font-black animate-pulse flex items-center gap-0.5 shrink-0">
                                         ⚠️ Falha I.A.
                                       </span>
                                     )}
                                     {checklistItems.length > 0 && (
-                                      <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md">
-                                        Checklist: {resolvedCount}/{checklistItems.length}
+                                      <span className={cn(
+                                        "px-2 py-0.5 rounded-md text-[8px] font-black flex items-center gap-0.5 shrink-0 transition-colors",
+                                        resolvedCount === checklistItems.length
+                                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                          : "bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                                      )}>
+                                        ✓ {resolvedCount}/{checklistItems.length} Checklist
                                       </span>
                                     )}
                                   </div>
