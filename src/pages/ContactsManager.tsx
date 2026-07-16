@@ -319,7 +319,8 @@ export default function ContactsManager() {
        secondary_activities: payload.secondary_activities,
        company_ids: payload.company_ids,
        tags: payload.tags,
-       id_gastro_food: payload.id_gastro_food || null
+       id_gastro_food: payload.id_gastro_food || null,
+       exclude_reports: payload.exclude_reports || false
     };
 
     if (defaultJid) {

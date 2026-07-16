@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -3585,7 +3585,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
     setErrorLog(null);
 
     // Trigger Gemini AI ticket auto-analysis
-    if (geminiService.isConfigured() && activeTicket && contact?.messages) {
+    if (geminiService.isConfigured() && activeTicket && contact?.messages && !contact?.exclude_reports) {
       setAnalyzing(true);
       
       const start = new Date(activeTicket.opened_at);
@@ -3735,11 +3735,24 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 text-left">
+          {contact?.exclude_reports && (
+            <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 p-3 rounded-2xl text-[10px] leading-relaxed font-sans shrink-0 flex items-center gap-2">
+              <AlertCircle size={14} className="shrink-0 text-rose-500" />
+              <span className="font-extrabold uppercase tracking-wide">
+                Este contato está configurado para não gerar relatórios nem análises de I.A.
+              </span>
+            </div>
+          )}
+
           {/* Descrição do Problema */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] uppercase font-black tracking-wider text-gray-450 flex items-center gap-1.5">
               <span>Descrição do Problema</span>
-              <span className="text-[8px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black tracking-normal">Preenchido com IA</span>
+              {contact?.exclude_reports ? (
+                <span className="text-[8px] bg-rose-500/15 text-rose-600 dark:text-rose-455 px-1.5 py-0.5 rounded font-black tracking-normal uppercase">I.A. Inativa (Ignorado)</span>
+              ) : (
+                <span className="text-[8px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black tracking-normal">Preenchido com IA</span>
+              )}
             </label>
             <div className="relative">
               <textarea
@@ -3767,7 +3780,11 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] uppercase font-black tracking-wider text-gray-450 flex items-center gap-1.5">
               <span>Resumo</span>
-              <span className="text-[8px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black tracking-normal">Preenchido com IA</span>
+              {contact?.exclude_reports ? (
+                <span className="text-[8px] bg-rose-500/15 text-rose-600 dark:text-rose-455 px-1.5 py-0.5 rounded font-black tracking-normal uppercase">I.A. Inativa (Ignorado)</span>
+              ) : (
+                <span className="text-[8px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black tracking-normal">Preenchido com IA</span>
+              )}
             </label>
             <div className="relative">
               <textarea
@@ -3795,7 +3812,11 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
           <div className="flex flex-col gap-2 bg-slate-50/30 dark:bg-white/5 border border-slate-100 dark:border-white/5 p-3.5 rounded-2xl">
             <label className="text-[10px] uppercase font-black tracking-wider text-gray-450 flex items-center gap-1.5 justify-between">
               <span>Problemas Abordados & Checklist</span>
-              <span className="text-[8px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black tracking-normal">Preenchido com IA</span>
+              {contact?.exclude_reports ? (
+                <span className="text-[8px] bg-rose-500/15 text-rose-600 dark:text-rose-455 px-1.5 py-0.5 rounded font-black tracking-normal uppercase">I.A. Inativa (Ignorado)</span>
+              ) : (
+                <span className="text-[8px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-black tracking-normal">Preenchido com IA</span>
+              )}
             </label>
             
             {analyzing ? (
@@ -3947,6 +3968,340 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
   );
 }
 
+interface ClosedTicketsDashboardProps {
+  tickets: any[];
+}
+
+export function ClosedTicketsDashboard({ tickets }: ClosedTicketsDashboardProps) {
+  // 1. Productivity metrics
+  const totalTickets = tickets.length;
+  
+  // Average messages per ticket
+  let totalMessagesCount = 0;
+  tickets.forEach(t => {
+    totalMessagesCount += t.metadata?.total_messages || 0;
+  });
+  const avgMessages = totalTickets > 0 ? Math.round(totalMessagesCount / totalTickets) : 0;
+
+  // AI Failure count
+  const aiFailures = tickets.filter(t => 
+    t.metadata?.error_log || 
+    t.problem_description === "Erro no processamento do problem." || 
+    t.metadata?.summary === "Erro ao gerar resumo da solução."
+  ).length;
+  const aiFailureRate = totalTickets > 0 ? Math.round((aiFailures / totalTickets) * 100) : 0;
+
+  // Reopened tickets count
+  const contactTicketCounts = new Map<string, number>();
+  let reopenedCount = 0;
+  tickets.forEach(t => {
+    if (t.contact_id) {
+      const cnt = contactTicketCounts.get(t.contact_id) || 0;
+      if (cnt > 0) reopenedCount++;
+      contactTicketCounts.set(t.contact_id, cnt + 1);
+    }
+  });
+
+  // 2. Mean Time to Resolution (MTTR)
+  let totalMins = 0;
+  tickets.forEach(t => {
+    const start = new Date(t.opened_at);
+    const end = t.closed_at ? new Date(t.closed_at) : new Date();
+    totalMins += (end.getTime() - start.getTime()) / 60000;
+  });
+  const avgDurationMins = totalTickets > 0 ? Math.round(totalMins / totalTickets) : 0;
+  const formatMins = (mins: number) => {
+    if (mins < 60) return `${mins} min`;
+    const hrs = Math.floor(mins / 60);
+    const remainingMins = mins % 60;
+    return `${hrs}h ${remainingMins}m`;
+  };
+
+  // Checklist Effectiveness
+  let totalChecklistItems = 0;
+  let completedChecklistItems = 0;
+  tickets.forEach(t => {
+    const list = t.metadata?.checklist || [];
+    totalChecklistItems += list.length;
+    completedChecklistItems += list.filter((item: any) => item.resolved).length;
+  });
+  const checklistEffectiveness = totalChecklistItems > 0 ? Math.round((completedChecklistItems / totalChecklistItems) * 100) : 100;
+
+  // 3. 80/20 Problem analysis
+  const problemCounts = new Map<string, number>();
+  tickets.forEach(t => {
+    const desc = t.problem_description || 'Não informado / Sem descrição';
+    problemCounts.set(desc, (problemCounts.get(desc) || 0) + 1);
+  });
+  const sortedProblems = Array.from(problemCounts.entries())
+    .map(([desc, count]) => ({ desc, count, percentage: Math.round((count / (totalTickets || 1)) * 100) }))
+    .sort((a, b) => b.count - a.count);
+
+  // 4. Angry / Unsatisfied Customers detection
+  const angryKeywords = ['irritado', 'insatisfeito', 'demora', 'reclamar', 'péssimo', 'ruim', 'urgente', 'esperando', 'atrasado', 'bravo', 'nervoso', 'queixa', 'reclamou', 'estornar', 'cancelamento', 'cancelar'];
+  const unsatisfiedTickets = tickets.filter(t => {
+    const text = `${t.problem_description || ''} ${t.metadata?.summary || ''} ${t.resolution_summary || ''}`.toLowerCase();
+    return angryKeywords.some(kw => text.includes(kw));
+  }).map(t => {
+    const text = `${t.problem_description || ''} ${t.metadata?.summary || ''} ${t.resolution_summary || ''}`.toLowerCase();
+    const matchedKeyword = angryKeywords.find(kw => text.includes(kw)) || 'insatisfeito';
+    return {
+      ...t,
+      reason: matchedKeyword.toUpperCase()
+    };
+  });
+
+  // 5. Operator Performance Table
+  const operatorStats = new Map<string, { count: number, totalMins: number, totalChecklist: number, completedChecklist: number }>();
+  tickets.forEach(t => {
+    const op = t.operatorName || 'Desconhecido';
+    const start = new Date(t.opened_at);
+    const end = t.closed_at ? new Date(t.closed_at) : new Date();
+    const mins = (end.getTime() - start.getTime()) / 60000;
+    const list = t.metadata?.checklist || [];
+    
+    const current = operatorStats.get(op) || { count: 0, totalMins: 0, totalChecklist: 0, completedChecklist: 0 };
+    current.count += 1;
+    current.totalMins += mins;
+    current.totalChecklist += list.length;
+    current.completedChecklist += list.filter((item: any) => item.resolved).length;
+    operatorStats.set(op, current);
+  });
+  const operatorsList = Array.from(operatorStats.entries()).map(([name, data]) => {
+    const avgOpMins = Math.round(data.totalMins / data.count);
+    const opEffectiveness = data.totalChecklist > 0 ? Math.round((data.completedChecklist / data.totalChecklist) * 100) : 100;
+    return {
+      name,
+      count: data.count,
+      avgMins: avgOpMins,
+      effectiveness: opEffectiveness
+    };
+  }).sort((a, b) => b.count - a.count);
+
+  if (totalTickets === 0) {
+    return (
+      <div className="flex-grow flex items-center justify-center flex-col gap-2 text-gray-400 py-20 bg-slate-50/50 dark:bg-black/10 rounded-[24px]">
+        <Activity size={24} className="animate-pulse" />
+        <span className="text-xs font-bold">Sem dados suficientes para gerar insights analíticos</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-grow overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-4 text-left h-full pb-8">
+      
+      {/* 4 Cards Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 shrink-0">
+        
+        {/* Card 1: Produtividade */}
+        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-4.5 flex flex-col justify-between shadow-sm relative overflow-hidden group">
+          <div className="flex justify-between items-start">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Produtividade</span>
+              <span className="text-2xl font-black text-gray-900 dark:text-white mt-1">{totalTickets}</span>
+            </div>
+            <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400">
+              <Activity size={18} />
+            </div>
+          </div>
+          <div className="text-[10px] text-gray-400 mt-4.5 font-bold flex items-center gap-1.5">
+            <span className="text-emerald-500 font-extrabold flex items-center">⚡ {avgMessages}</span> msgs médias por chamado
+          </div>
+        </div>
+
+        {/* Card 2: Tempo de Resposta (MTTR) */}
+        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-4.5 flex flex-col justify-between shadow-sm relative overflow-hidden">
+          <div className="flex justify-between items-start">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Tempo Médio (TMR)</span>
+              <span className="text-2xl font-black text-gray-900 dark:text-white mt-1">{formatMins(avgDurationMins)}</span>
+            </div>
+            <div className="p-2 bg-sky-500/10 rounded-xl text-sky-600 dark:text-sky-400">
+              <Clock size={18} />
+            </div>
+          </div>
+          <div className="text-[10px] text-gray-400 mt-4.5 font-bold flex items-center gap-1.5">
+            <span className="text-sky-500 font-extrabold">✓ {checklistEffectiveness}%</span> de eficácia (checklist)
+          </div>
+        </div>
+
+        {/* Card 3: Qualidade & Falhas */}
+        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-4.5 flex flex-col justify-between shadow-sm relative overflow-hidden">
+          <div className="flex justify-between items-start">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Erros & Reaberturas</span>
+              <span className="text-2xl font-black text-gray-900 dark:text-white mt-1">{reopenedCount}</span>
+            </div>
+            <div className="p-2 bg-amber-500/10 rounded-xl text-amber-600 dark:text-amber-400">
+              <AlertTriangle size={18} />
+            </div>
+          </div>
+          <div className="text-[10px] text-gray-400 mt-4.5 font-bold flex items-center gap-1.5">
+            <span className="text-rose-500 font-extrabold">⚠️ {aiFailureRate}%</span> taxa de falhas de processamento I.A.
+          </div>
+        </div>
+
+        {/* Card 4: Sentimento do Cliente */}
+        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-4.5 flex flex-col justify-between shadow-sm relative overflow-hidden">
+          <div className="flex justify-between items-start">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Clientes Insatisfeitos</span>
+              <span className="text-2xl font-black text-rose-600 mt-1">{unsatisfiedTickets.length}</span>
+            </div>
+            <div className="p-2 bg-rose-500/10 rounded-xl text-rose-650 dark:text-rose-400">
+              {unsatisfiedTickets.length > 0 ? <Frown size={18} className="animate-bounce" /> : <Smile size={18} />}
+            </div>
+          </div>
+          <div className="text-[10px] text-gray-400 mt-4.5 font-bold flex items-center gap-1.5">
+            {unsatisfiedTickets.length > 0 ? (
+              <span className="text-rose-500 font-extrabold flex items-center gap-0.5 animate-pulse">⚠️ Alerta Máximo ativo</span>
+            ) : (
+              <span className="text-emerald-500 font-extrabold flex items-center gap-0.5">🟢 Satisfação sob controle</span>
+            )}
+          </div>
+        </div>
+
+      </div>
+
+      {/* Main Analysis Body: Columns split */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4.5 items-start">
+        
+        {/* Left: 80/20 recurrency + Agent table (8 cols) */}
+        <div className="lg:col-span-8 flex flex-col gap-4">
+          
+          {/* Section: 80/20 Problem analysis */}
+          <div className="bg-slate-50/50 dark:bg-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-5 flex flex-col gap-4">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={16} className="text-emerald-500" />
+              <div className="flex flex-col">
+                <span className="text-[11px] uppercase font-black text-gray-400 tracking-wider">Análise Pareto (Regra 80/20)</span>
+                <span className="text-[9.5px] font-bold text-gray-500">As causas recorrentes mais comuns no período selecionado</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {sortedProblems.slice(0, 4).map((p, idx) => (
+                <div key={idx} className="flex flex-col gap-1.5">
+                  <div className="flex justify-between items-center text-xs font-semibold">
+                    <span className="text-gray-700 dark:text-gray-250 truncate max-w-[80%] pr-2 font-medium">
+                      {idx + 1}. {p.desc}
+                    </span>
+                    <span className="text-[10.5px] font-bold text-gray-900 dark:text-white shrink-0 bg-black/5 dark:bg-white/5 px-2 py-0.5 rounded-lg">
+                      {p.count} ({p.percentage}%)
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
+                    <div 
+                      className={cn(
+                        "h-full rounded-full transition-all duration-500",
+                        idx === 0 ? "bg-emerald-500" : idx === 1 ? "bg-teal-500" : idx === 2 ? "bg-sky-500" : "bg-indigo-500"
+                      )} 
+                      style={{ width: `${p.percentage}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section: Operator Desempenho */}
+          <div className="bg-slate-50/50 dark:bg-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-5 flex flex-col gap-3">
+            <div className="flex items-center gap-2 mb-1.5">
+              <Users size={16} className="text-sky-500" />
+              <div className="flex flex-col">
+                <span className="text-[11px] uppercase font-black text-gray-400 tracking-wider">Desempenho por Atendente</span>
+                <span className="text-[9.5px] font-bold text-gray-500">Métricas individuais de atendimento do time de suporte</span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto w-full">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-black/10 dark:border-white/10 text-gray-400 font-extrabold text-[9px] uppercase tracking-wider">
+                    <th className="pb-2.5">Atendente</th>
+                    <th className="pb-2.5 text-center">Resolvidos</th>
+                    <th className="pb-2.5 text-center">TMR (MTTR)</th>
+                    <th className="pb-2.5 text-right">Eficácia Checklist</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-black/5 dark:divide-white/5 text-gray-700 dark:text-gray-300 font-semibold">
+                  {operatorsList.map((op, idx) => (
+                    <tr key={idx} className="hover:bg-black/[0.01] dark:hover:bg-white/[0.01]">
+                      <td className="py-2.5 font-bold text-gray-900 dark:text-[#e9edef]">{op.name}</td>
+                      <td className="py-2.5 text-center">{op.count}</td>
+                      <td className="py-2.5 text-center font-mono">{formatMins(op.avgMins)}</td>
+                      <td className="py-2.5 text-right">
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-lg text-[9.5px] font-black",
+                          op.effectiveness >= 80 
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
+                            : op.effectiveness >= 50
+                              ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+                              : "bg-rose-500/10 text-rose-600 dark:text-rose-455"
+                        )}>
+                          {op.effectiveness}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Right: Critical alerts & Sentiment reports (4 cols) */}
+        <div className="lg:col-span-4 flex flex-col gap-4">
+          
+          {/* Clientes em Alerta de Insatisfação */}
+          <div className="bg-slate-50/50 dark:bg-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-5 flex flex-col gap-3 min-h-[385px] overflow-hidden">
+            <div className="flex items-center gap-2 mb-1 shrink-0">
+              <Frown size={16} className="text-rose-500 animate-pulse" />
+              <div className="flex flex-col">
+                <span className="text-[11px] uppercase font-black text-gray-400 tracking-wider">Atenção Máxima (I.A. Alerts)</span>
+                <span className="text-[9.5px] font-bold text-gray-500">Casos com sinais de insatisfação detectados</span>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2.5 pr-0.5">
+              {unsatisfiedTickets.length > 0 ? (
+                unsatisfiedTickets.map((t, idx) => (
+                  <div key={idx} className="p-3 bg-rose-500/5 hover:bg-rose-500/10 border border-rose-500/10 rounded-2xl flex flex-col gap-1.5 transition-all">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[11px] font-black text-gray-900 dark:text-white truncate max-w-[65%]">
+                        {t.contactName}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-700 dark:text-rose-400 text-[8px] font-black tracking-wide shrink-0">
+                        {t.reason}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-650 dark:text-gray-300 leading-normal line-clamp-2 italic">
+                      "{t.problem_description || 'Sem descrição cadastrada'}"
+                    </p>
+                    <div className="flex justify-between items-center text-[8.5px] font-black text-gray-455 border-t border-rose-500/5 pt-1.5 mt-0.5">
+                      <span>👤 {t.operatorName}</span>
+                      <span>⏱️ {formatMins(Math.round(((new Date(t.closed_at).getTime() - new Date(t.opened_at).getTime()) / 60000)))}</span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-gray-400/60 dark:text-gray-500/50 border border-dashed border-black/10 dark:border-white/10 rounded-2xl gap-1.5">
+                  <Smile size={24} className="text-emerald-500/60" />
+                  <span className="text-[10px] font-bold">Nenhum cliente insatisfeito detectado</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
+
 interface ClosedTicketsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -3960,6 +4315,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
   const [activeKanbanTab, setActiveKanbanTab] = useState<'rapido' | 'medio' | 'complexo'>('rapido');
+  const [activeView, setActiveView] = useState<'kanban' | 'dashboard'>('kanban');
 
   const daysList = useMemo(() => {
     const list = [];
@@ -4002,7 +4358,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       if (contactIds.length > 0) {
         const { data: cData, error: cErr } = await supabase
           .from('contacts')
-          .select('id, name, custom_name, fantasy_name, phone, company_ids, profile_picture_url')
+          .select('id, name, custom_name, fantasy_name, phone, company_ids, profile_picture_url, exclude_reports')
           .in('id', contactIds);
         if (!cErr && cData) {
           contactsData = cData;
@@ -4065,6 +4421,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       const mapped = (data || []).map(t => {
         const c = contactsMap.get(t.contact_id);
+        if (c?.exclude_reports) return null;
+
         const contactName = c 
           ? (c.custom_name || c.name || c.phone || 'Cliente')
           : 'Cliente';
@@ -4099,10 +4457,11 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           companyFantasyName,
           companyName,
           profile_picture_url,
+          exclude_reports: c?.exclude_reports || false,
           operatorName,
           duration
         };
-      });
+      }).filter(Boolean);
 
       setTickets(mapped);
     } catch (err) {
@@ -4208,7 +4567,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 animate-in fade-in duration-200">
             <div className="p-2.5 bg-gradient-to-tr from-emerald-500 to-teal-500 rounded-2xl text-white shadow-sm shrink-0">
               <FolderCheck size={20} />
             </div>
@@ -4221,6 +4580,35 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               </p>
             </div>
           </div>
+          
+          {/* View switcher */}
+          <div className="flex gap-1 bg-slate-100 dark:bg-black/25 p-1 rounded-xl border border-black/5 dark:border-white/5 select-none shrink-0 h-[34px] items-center ml-auto mr-4">
+            <button
+              onClick={() => setActiveView('kanban')}
+              type="button"
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
+                activeView === 'kanban'
+                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold"
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-900"
+              )}
+            >
+              <span>Mosaico</span>
+            </button>
+            <button
+              onClick={() => setActiveView('dashboard')}
+              type="button"
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
+                activeView === 'dashboard'
+                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold"
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-900"
+              )}
+            >
+              <span>Insights I.A.</span>
+            </button>
+          </div>
+
           <button onClick={onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-550 transition-colors">
             <X size={16} />
           </button>
@@ -4296,35 +4684,40 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         </div>
 
         {/* Kanban Tab Selector for Mobile / Tablet */}
-        <div className={cn(
-          "gap-1.5 bg-slate-100 dark:bg-black/30 p-1.5 rounded-2xl border border-black/5 dark:border-white/5 select-none shrink-0 h-[38px] items-center",
-          selectedTicket ? "flex xl:hidden" : "flex md:hidden"
-        )}>
-          {columns.map(col => (
-            <button
-              key={col.id}
-              onClick={() => setActiveKanbanTab(col.id)}
-              type="button"
-              className={cn(
-                "flex-1 py-1.5 rounded-xl text-[10px] font-black transition-all flex items-center justify-center gap-1.5",
-                activeKanbanTab === col.id 
-                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold" 
-                  : "text-gray-500 dark:text-gray-400 hover:text-gray-900"
-              )}
-            >
-              <span>{col.title}</span>
-              <span className="px-1.5 py-0.2 text-[8px] font-black rounded bg-black/5 dark:bg-white/5 shrink-0">
-                {col.tickets.length}
-              </span>
-            </button>
-          ))}
-        </div>
+        {activeView === 'kanban' && (
+          <div className={cn(
+            "gap-1.5 bg-slate-100 dark:bg-black/30 p-1.5 rounded-2xl border border-black/5 dark:border-white/5 select-none shrink-0 h-[38px] items-center",
+            selectedTicket ? "flex xl:hidden" : "flex md:hidden"
+          )}>
+            {columns.map(col => (
+              <button
+                key={col.id}
+                onClick={() => setActiveKanbanTab(col.id)}
+                type="button"
+                className={cn(
+                  "flex-1 py-1.5 rounded-xl text-[10px] font-black transition-all flex items-center justify-center gap-1.5",
+                  activeKanbanTab === col.id 
+                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold" 
+                    : "text-gray-500 dark:text-gray-400 hover:text-gray-900"
+                )}
+              >
+                <span>{col.title}</span>
+                <span className="px-1.5 py-0.2 text-[8px] font-black rounded bg-black/5 dark:bg-white/5 shrink-0">
+                  {col.tickets.length}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Main Body */}
         <div className="flex-1 flex gap-4 min-h-0">
           
-          {/* Kanban Board columns container */}
-          <div className={cn("flex-grow overflow-hidden flex gap-4 min-w-0 transition-all duration-300 h-full", selectedTicket && "hidden md:flex md:w-[45%] md:flex-grow-0 xl:w-[60%]")}>
+          {activeView === 'dashboard' ? (
+            <ClosedTicketsDashboard tickets={filteredTickets} />
+          ) : (
+            /* Kanban Board columns container */
+            <div className={cn("flex-grow overflow-hidden flex gap-4 min-w-0 transition-all duration-300 h-full", selectedTicket && "hidden md:flex md:w-[45%] md:flex-grow-0 xl:w-[60%]")}>
             {loading ? (
               <div className="flex-1 flex items-center justify-center flex-col gap-2 text-gray-400">
                 <Loader2 className="animate-spin" size={24} />
@@ -4485,6 +4878,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               </div>
             )}
           </div>
+          )}
 
           {/* Ticket Details Panel */}
           {selectedTicket && (
