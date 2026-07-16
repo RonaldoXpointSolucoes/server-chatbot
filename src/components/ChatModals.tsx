@@ -4560,7 +4560,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         colBorder: 'border-amber-500/25 dark:border-amber-500/15',
         badgeBg: 'bg-white/20 text-white dark:bg-white/10 dark:text-amber-200',
         companyBadgeClass: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/15',
-        cardHoverBorder: 'hover:border-amber-500/30 dark:hover:border-amber-500/20'
+        cardHoverBorder: 'hover:border-amber-500/30 dark:hover:border-amber-500/20',
+        cardLeftBorder: 'border-l-[3.5px] border-l-amber-500',
+        avatarGradient: 'from-amber-400 to-orange-500'
       },
       { 
         id: 'medio', 
@@ -4571,7 +4573,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         colBorder: 'border-sky-500/25 dark:border-sky-500/15',
         badgeBg: 'bg-white/20 text-white dark:bg-white/10 dark:text-sky-200',
         companyBadgeClass: 'text-sky-600 dark:text-sky-400 bg-sky-500/10 dark:bg-sky-500/15',
-        cardHoverBorder: 'hover:border-sky-500/30 dark:hover:border-sky-500/20'
+        cardHoverBorder: 'hover:border-sky-500/30 dark:hover:border-sky-500/20',
+        cardLeftBorder: 'border-l-[3.5px] border-l-sky-500',
+        avatarGradient: 'from-sky-400 to-blue-500'
       },
       { 
         id: 'complexo', 
@@ -4582,7 +4586,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         colBorder: 'border-rose-500/25 dark:border-rose-500/15',
         badgeBg: 'bg-white/20 text-white dark:bg-white/10 dark:text-rose-200',
         companyBadgeClass: 'text-rose-600 dark:text-rose-455 bg-rose-500/10 dark:bg-rose-500/15',
-        cardHoverBorder: 'hover:border-rose-500/30 dark:hover:border-rose-500/20'
+        cardHoverBorder: 'hover:border-rose-500/30 dark:hover:border-rose-500/20',
+        cardLeftBorder: 'border-l-[3.5px] border-l-rose-500',
+        avatarGradient: 'from-rose-400 to-red-500'
       }
     ] as const;
   }, [filteredTickets]);
@@ -4796,7 +4802,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 className={cn(
                                   "group p-4 rounded-[22px] border text-left cursor-pointer transition-all duration-300 bg-white hover:bg-slate-50/70 dark:bg-[#182229]/65 dark:hover:bg-[#182229] hover:scale-[1.015] hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] flex flex-col gap-3 relative border-black/[0.04] dark:border-white/[0.04]",
                                   selectedTicket?.id === t.id && "border-emerald-500/50 dark:border-emerald-500/30 ring-1 ring-emerald-500/30 dark:ring-emerald-500/10 shadow-sm",
-                                  col.cardHoverBorder
+                                  col.cardHoverBorder,
+                                  col.cardLeftBorder
                                 )}
                               >
                                 {/* Top: Company + Date */}
@@ -4841,7 +4848,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                       />
                                     ) : null}
                                     <div className={cn(
-                                      "w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-600 text-white font-black text-[12px] flex items-center justify-center shadow-inner",
+                                      "w-8 h-8 rounded-full bg-gradient-to-tr text-white font-black text-[12px] flex items-center justify-center shadow-inner",
+                                      col.avatarGradient,
                                       t.profile_picture_url ? "hidden" : "flex"
                                     )}>
                                       {initial}
@@ -4852,7 +4860,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                       {t.contactName}
                                     </span>
                                     <span className="text-[9.5px] text-gray-400 dark:text-gray-500 font-bold flex items-center gap-1">
-                                      👤 Atendente: <strong className="text-gray-600 dark:text-gray-300 font-black">{t.operatorName}</strong>
+                                      <User size={10} className="text-gray-400 dark:text-gray-500 shrink-0" /> Atendente: <strong className="text-gray-600 dark:text-gray-300 font-black">{t.operatorName}</strong>
                                     </span>
                                   </div>
                                 </div>
@@ -4860,7 +4868,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 {/* Problem description */}
                                 {t.problem_description && (
                                   <p className="text-[10px] text-gray-650 dark:text-gray-300 leading-normal line-clamp-2 bg-slate-50/50 dark:bg-black/10 p-2.5 rounded-[14px] border border-black/[0.02] dark:border-white/[0.02]">
-                                    <span className="font-extrabold text-[8px] text-gray-400 uppercase tracking-wide mr-1 select-none">Problema:</span>
+                                    <span className="font-extrabold text-[8px] text-gray-400 uppercase tracking-wide mr-1 select-none text-left block mb-0.5">Problema:</span>
                                     {t.problem_description}
                                   </p>
                                 )}
@@ -4868,25 +4876,25 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 {/* Bottom Statistics Footer */}
                                 <div className="pt-2 border-t border-black/[0.03] dark:border-white/[0.03] flex items-center justify-between flex-wrap gap-2 text-[8.5px] font-extrabold text-gray-400 select-none">
                                   <div className="flex items-center gap-2">
-                                    <span className="flex items-center gap-0.5">⏱️ <span className="font-semibold text-gray-600 dark:text-gray-300">{t.duration}</span></span>
+                                    <span className="flex items-center gap-1"><Clock size={10} className="text-gray-400 dark:text-gray-500" /> <span className="font-semibold text-gray-600 dark:text-gray-300">{t.duration}</span></span>
                                     <span>•</span>
-                                    <span className="flex items-center gap-0.5">💬 <span className="font-semibold text-gray-600 dark:text-gray-300">{totalMsg}</span></span>
+                                    <span className="flex items-center gap-1"><MessageSquare size={10} className="text-gray-400 dark:text-gray-500" /> <span className="font-semibold text-gray-600 dark:text-gray-300">{totalMsg}</span></span>
                                   </div>
                                   
                                   <div className="flex items-center gap-1.5">
                                     {(t.metadata?.error_log || t.problem_description === "Erro no processamento do problema." || t.metadata?.summary === "Erro ao gerar resumo da solução.") && (
-                                      <span className="px-2 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md text-[8px] font-black animate-pulse flex items-center gap-0.5 shrink-0">
-                                        ⚠️ Falha I.A.
+                                      <span className="px-2 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md text-[8px] font-black animate-pulse flex items-center gap-1 shrink-0">
+                                        <AlertTriangle size={9} /> Falha I.A.
                                       </span>
                                     )}
                                     {checklistItems.length > 0 && (
                                       <span className={cn(
-                                        "px-2 py-0.5 rounded-md text-[8px] font-black flex items-center gap-0.5 shrink-0 transition-colors",
+                                        "px-2 py-0.5 rounded-md text-[8px] font-black flex items-center gap-1 shrink-0 transition-colors",
                                         resolvedCount === checklistItems.length
                                           ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                                           : "bg-blue-500/10 text-blue-600 dark:text-blue-400"
                                       )}>
-                                        ✓ {resolvedCount}/{checklistItems.length} Checklist
+                                        <CheckCircle2 size={9} /> {resolvedCount}/{checklistItems.length} Checklist
                                       </span>
                                     )}
                                   </div>

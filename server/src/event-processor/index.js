@@ -824,7 +824,7 @@ class EventProcessor {
                              page_count: mediaMeta.pageCount, is_voice_note: mediaMeta.ptt || false
                          };
                      } catch(err) {
-                         console.warn(`[BatchProcessor] Aviso: Mídia expirada/inacessível para JID ${b.jid}. (Normal em History Sync) -> ${err.message}`);
+                         console.log(`[BatchProcessor] Aviso: Mídia expirada/inacessível para JID ${b.jid}. (Normal em History Sync) -> ${err.message}`);
                      }
                  }
              }));
