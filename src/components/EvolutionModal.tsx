@@ -1371,6 +1371,47 @@ export default function EvolutionModal({
                     </button>
                   </div>
 
+                  {targetInstObj?.ticket_mode && (
+                    <div className="w-full mt-2 flex items-center justify-between bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-white/5 p-4 rounded-2xl animate-in slide-in-from-top-1 duration-200">
+                      <div className="flex flex-col text-left">
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                          Ocultar Preenchimento de Ticket
+                        </span>
+                        <span className="text-[9px] text-slate-400 dark:text-slate-500 mt-1 leading-normal">
+                          Executa e preenche automaticamente o ticket por IA em segundo plano, sem abrir o modal ao resolver a conversa.
+                        </span>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const nextVal = !targetInstObj?.hide_ticket_modal;
+                          const cId =
+                            localStorage.getItem("current_tenant_id") ||
+                            sessionStorage.getItem("current_tenant_id");
+                          if (!cId) return;
+                          const tInstanceId = targetInstObj
+                            ? targetInstObj.id
+                            : useChatStore.getState().connectedInstanceName;
+                          if (!tInstanceId) return;
+
+                          const { error } = await supabase
+                            .from("whatsapp_instances")
+                            .update({ hide_ticket_modal: nextVal })
+                            .eq("id", tInstanceId)
+                            .eq("tenant_id", cId);
+
+                          if (!error) {
+                            fetchExistingInstances();
+                          }
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${targetInstObj?.hide_ticket_modal ? "bg-emerald-500" : "bg-gray-305 dark:bg-gray-700"}`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${targetInstObj?.hide_ticket_modal ? "translate-x-4" : "translate-x-0"}`}
+                        />
+                      </button>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 gap-2 w-full mt-4">
                     <button
                       onClick={async () => {

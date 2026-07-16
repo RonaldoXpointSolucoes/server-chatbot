@@ -2283,17 +2283,21 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
       return;
     }
 
-    supabase
-      .from('whatsapp_instances')
-      .select('ticket_mode')
-      .eq('id', instId)
-      .maybeSingle()
-      .then(({ data }) => {
-        setInstanceTicketMode(!!data?.ticket_mode);
-      })
-      .catch(() => {
-        setInstanceTicketMode(false);
-      });
+    import('../services/supabase').then(({ supabase }) => {
+      supabase
+        .from('whatsapp_instances')
+        .select('ticket_mode')
+        .eq('id', instId)
+        .maybeSingle()
+        .then(({ data }) => {
+          setInstanceTicketMode(!!data?.ticket_mode);
+        })
+        .catch(() => {
+          setInstanceTicketMode(false);
+        });
+    }).catch(() => {
+      setInstanceTicketMode(false);
+    });
   }, [contact, isOpen]);
 
   useEffect(() => {
@@ -3942,6 +3946,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('all'); // all, today, week, month
   const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
+  const [activeKanbanTab, setActiveKanbanTab] = useState<'rapido' | 'medio' | 'complexo'>('rapido');
 
   const fetchClosedTickets = async () => {
     setLoading(true);
@@ -3956,8 +3961,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       if (error) throw error;
 
       const { data: contactsData } = await supabase
-        .from('chat_contacts')
-        .select('id, name, custom_name, push_name, phone');
+        .from('contacts')
+        .select('id, name, custom_name, fantasy_name, phone');
       
       const contactsMap = new Map<string, any>();
       if (contactsData) {
@@ -3967,8 +3972,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       const mapped = (data || []).map(t => {
         const c = contactsMap.get(t.contact_id);
         const contactName = c 
-          ? (c.custom_name || c.name || c.push_name || c.phone || 'Cliente')
+          ? (c.custom_name || c.name || c.phone || 'Cliente')
           : 'Cliente';
+        const companyFantasyName = c?.fantasy_name || '';
+        const operatorName = t.metadata?.closed_by || (t.metadata?.operators && t.metadata.operators[0]?.name) || 'Atendente';
         
         const start = new Date(t.opened_at);
         const end = t.closed_at ? new Date(t.closed_at) : new Date();
@@ -3980,6 +3987,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         return {
           ...t,
           contactName,
+          companyFantasyName,
+          operatorName,
           duration
         };
       });
@@ -4004,6 +4013,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       const term = search.toLowerCase();
       const matchSearch = !term || 
         t.contactName.toLowerCase().includes(term) ||
+        (t.companyFantasyName || '').toLowerCase().includes(term) ||
+        (t.operatorName || '').toLowerCase().includes(term) ||
         (t.problem_description || '').toLowerCase().includes(term) ||
         (t.metadata?.summary || '').toLowerCase().includes(term) ||
         (t.resolution_summary || '').toLowerCase().includes(term) ||
@@ -4033,6 +4044,32 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       return true;
     });
   }, [tickets, search, dateFilter]);
+
+  const columns = useMemo(() => {
+    const rapido: any[] = [];
+    const medio: any[] = [];
+    const complexo: any[] = [];
+
+    filteredTickets.forEach(t => {
+      const start = new Date(t.opened_at);
+      const end = t.closed_at ? new Date(t.closed_at) : new Date();
+      const diffMins = Math.floor((end.getTime() - start.getTime()) / 60000);
+
+      if (diffMins < 15) {
+        rapido.push(t);
+      } else if (diffMins <= 120) {
+        medio.push(t);
+      } else {
+        complexo.push(t);
+      }
+    });
+
+    return [
+      { id: 'rapido', title: '⚡ Rápido', subtitle: '< 15 min', tickets: rapido, colorClass: 'text-amber-600 bg-amber-500/10 border-amber-500/20 dark:text-amber-400', headerBg: 'border-t-2 border-t-amber-500' },
+      { id: 'medio', title: '🕒 Médio', subtitle: '15 min - 2h', tickets: medio, colorClass: 'text-sky-600 bg-sky-500/10 border-sky-500/20 dark:text-sky-400', headerBg: 'border-t-2 border-t-sky-500' },
+      { id: 'complexo', title: '🔥 Complexo', subtitle: '> 2h', tickets: complexo, colorClass: 'text-rose-600 bg-rose-500/10 border-rose-500/20 dark:text-rose-400', headerBg: 'border-t-2 border-t-rose-500' }
+    ] as const;
+  }, [filteredTickets]);
 
   if (!isOpen) return null;
 
@@ -4099,105 +4136,172 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           </div>
         </div>
 
+        {/* Kanban Tab Selector for Mobile */}
+        <div className="flex md:hidden gap-1.5 bg-slate-100 dark:bg-black/30 p-1.5 rounded-2xl border border-black/5 dark:border-white/5 select-none shrink-0 h-[38px] items-center">
+          {columns.map(col => (
+            <button
+              key={col.id}
+              onClick={() => setActiveKanbanTab(col.id)}
+              type="button"
+              className={cn(
+                "flex-1 py-1.5 rounded-xl text-[10px] font-black transition-all flex items-center justify-center gap-1.5",
+                activeKanbanTab === col.id 
+                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold" 
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-900"
+              )}
+            >
+              <span>{col.title}</span>
+              <span className="px-1.5 py-0.2 text-[8px] font-black rounded bg-black/5 dark:bg-white/5 shrink-0">
+                {col.tickets.length}
+              </span>
+            </button>
+          ))}
+        </div>
+
         {/* Main Body */}
         <div className="flex-1 flex gap-4 min-h-0">
           
-          {/* Tickets List */}
-          <div className={cn("flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2.5 pr-1.5 min-w-0 transition-all duration-300", selectedTicket && "hidden md:flex md:w-1/2 md:flex-grow-0")}>
+          {/* Kanban Board columns container */}
+          <div className={cn("flex-grow overflow-hidden flex gap-4 min-w-0 transition-all duration-300 h-full", selectedTicket && "hidden lg:flex lg:w-1/2 lg:flex-grow-0")}>
             {loading ? (
               <div className="flex-1 flex items-center justify-center flex-col gap-2 text-gray-400">
                 <Loader2 className="animate-spin" size={24} />
                 <span className="text-xs font-semibold">Carregando tickets...</span>
               </div>
-            ) : filteredTickets.length > 0 ? (
-              filteredTickets.map(t => {
-                const totalMsg = t.metadata?.total_messages || 0;
-                const operators = t.metadata?.operators || [];
-                const checklistItems = t.metadata?.checklist || [];
-                const resolvedCount = checklistItems.filter((i: any) => i.resolved).length;
-                
-                return (
-                  <div
-                    key={t.id}
-                    onClick={() => setSelectedTicket(t)}
-                    className={cn(
-                      "group p-4 rounded-2xl border text-left cursor-pointer transition-all duration-200 bg-slate-50/30 hover:bg-slate-50 dark:bg-black/10 dark:hover:bg-black/20 hover:scale-[1.005] shadow-sm flex flex-col gap-2.5",
-                      selectedTicket?.id === t.id 
-                        ? "border-emerald-500/50 dark:border-emerald-500/30 ring-1 ring-emerald-500/30 dark:ring-emerald-500/10" 
-                        : "border-black/5 dark:border-white/5"
-                    )}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-black text-gray-900 dark:text-white truncate max-w-[60%]">
-                        {t.contactName}
-                      </span>
-                      <span className="text-[9px] font-bold text-gray-400 shrink-0">
-                        {new Date(t.closed_at).toLocaleDateString('pt-BR')} {new Date(t.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      {t.problem_description && (
-                        <div className="text-[10px] text-gray-400 font-extrabold uppercase flex items-center gap-1">
-                          <span>Problema:</span>
-                          <span className="text-gray-700 dark:text-gray-200 normal-case font-semibold line-clamp-1">{t.problem_description}</span>
-                        </div>
-                      )}
-                      {t.metadata?.summary && (
-                        <div className="text-[10px] text-gray-400 font-extrabold uppercase flex items-center gap-1">
-                          <span>Resumo:</span>
-                          <span className="text-gray-700 dark:text-gray-200 normal-case font-medium line-clamp-1">{t.metadata.summary}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="pt-2 border-t border-black/[0.03] dark:border-white/[0.03] flex items-center justify-between flex-wrap gap-2 text-[9px] font-bold text-gray-400 select-none">
-                      <div className="flex items-center gap-2.5">
-                        <span>Duração: <strong className="text-gray-700 dark:text-gray-300">{t.duration}</strong></span>
-                        <span>•</span>
-                        <span>Mensagens: <strong className="text-gray-700 dark:text-gray-300">{totalMsg}</strong></span>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        {checklistItems.length > 0 && (
-                          <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md">
-                            Checklist: {resolvedCount}/{checklistItems.length} Resolvidos
-                          </span>
-                        )}
-                        {operators.length > 0 && (
-                          <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-md truncate max-w-[120px]">
-                            {operators.map((op: any) => op.name).join(', ')}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
             ) : (
-              <div className="flex-1 flex items-center justify-center flex-col gap-1.5 text-gray-400">
-                <span className="text-xs font-semibold">Nenhum ticket fechado encontrado</span>
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
+                {columns.map(col => {
+                  const isVisible = activeKanbanTab === col.id;
+                  
+                  return (
+                    <div 
+                      key={col.id}
+                      className={cn(
+                        "flex flex-col h-full bg-slate-50/20 dark:bg-black/15 border border-black/5 dark:border-white/5 rounded-[24px] overflow-hidden transition-all duration-200",
+                        !isVisible ? "hidden md:flex" : "flex"
+                      )}
+                    >
+                      {/* Column Header */}
+                      <div className={cn("px-4 py-3 bg-slate-100/50 dark:bg-black/30 border-b border-black/[0.04] dark:border-white/[0.04] flex items-center justify-between shrink-0", col.headerBg)}>
+                        <div className="flex flex-col items-start text-left">
+                          <span className="text-xs font-black text-gray-800 dark:text-white flex items-center gap-1.5">
+                            {col.title}
+                          </span>
+                          <span className="text-[8px] font-bold text-gray-400 tracking-wide uppercase">
+                            {col.subtitle}
+                          </span>
+                        </div>
+                        <span className={cn("px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider", col.colorClass)}>
+                          {col.tickets.length}
+                        </span>
+                      </div>
+
+                      {/* Column Content */}
+                      <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-3">
+                        {col.tickets.length > 0 ? (
+                          col.tickets.map(t => {
+                            const totalMsg = t.metadata?.total_messages || 0;
+                            const checklistItems = t.metadata?.checklist || [];
+                            const resolvedCount = checklistItems.filter((i: any) => i.resolved).length;
+                            const initial = t.contactName.charAt(0).toUpperCase();
+
+                            return (
+                              <div
+                                key={t.id}
+                                onClick={() => setSelectedTicket(t)}
+                                className={cn(
+                                  "group p-3.5 rounded-2xl border text-left cursor-pointer transition-all duration-200 bg-white hover:bg-slate-50/50 dark:bg-[#1f2c34]/50 dark:hover:bg-[#1f2c34] hover:scale-[1.01] hover:shadow-md flex flex-col gap-2.5 relative border-black/[0.05] dark:border-white/[0.05]",
+                                  selectedTicket?.id === t.id && "border-emerald-500/50 dark:border-emerald-500/30 ring-1 ring-emerald-500/30 dark:ring-emerald-500/10 shadow-sm"
+                                )}
+                              >
+                                {/* Top: Company + Date */}
+                                <div className="flex items-center justify-between gap-2 border-b border-black/[0.02] dark:border-white/[0.02] pb-1.5">
+                                  <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-md truncate max-w-[65%] uppercase tracking-wider">
+                                    🏢 {t.companyFantasyName || 'Empresa Própria'}
+                                  </span>
+                                  <span className="text-[8px] font-bold text-gray-400 shrink-0">
+                                    {new Date(t.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+
+                                {/* Middle: Avatar + Info */}
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-600 text-white font-black text-[11px] flex items-center justify-center shrink-0 shadow-inner">
+                                    {initial}
+                                  </div>
+                                  <div className="flex flex-col min-w-0 text-left">
+                                    <span className="text-[11px] font-black text-gray-900 dark:text-white truncate">
+                                      {t.contactName}
+                                    </span>
+                                    <span className="text-[9px] text-gray-400 font-bold flex items-center gap-1">
+                                      👤 Atendente: <strong className="text-gray-600 dark:text-gray-300 font-extrabold">{t.operatorName}</strong>
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Problem description */}
+                                {t.problem_description && (
+                                  <p className="text-[10px] text-gray-650 dark:text-gray-300 leading-normal line-clamp-2 bg-slate-50/50 dark:bg-black/10 p-2 rounded-xl border border-black/[0.02] dark:border-white/[0.02]">
+                                    <span className="font-extrabold text-[8px] text-gray-400 uppercase tracking-wide mr-1 select-none">Problema:</span>
+                                    {t.problem_description}
+                                  </p>
+                                )}
+
+                                {/* Bottom Statistics Footer */}
+                                <div className="pt-2 border-t border-black/[0.03] dark:border-white/[0.03] flex items-center justify-between flex-wrap gap-1.5 text-[8.5px] font-extrabold text-gray-400 select-none">
+                                  <div className="flex items-center gap-2">
+                                    <span className="flex items-center gap-0.5">⏱️ <span className="font-semibold text-gray-600 dark:text-gray-300">{t.duration}</span></span>
+                                    <span>•</span>
+                                    <span className="flex items-center gap-0.5">💬 <span className="font-semibold text-gray-600 dark:text-gray-300">{totalMsg}</span></span>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-1.5">
+                                    {checklistItems.length > 0 && (
+                                      <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md">
+                                        Checklist: {resolvedCount}/{checklistItems.length}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="flex-1 flex items-center justify-center flex-col gap-1 p-8 text-gray-400/60 dark:text-gray-500/50 border-2 border-dashed border-black/5 dark:border-white/5 rounded-2xl">
+                            <span className="text-[10px] font-bold">Nenhum ticket nesta coluna</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
 
-          {/* Ticket Details Panel (Side Drawer / Details Page) */}
+          {/* Ticket Details Panel */}
           {selectedTicket && (
             <div className="w-full md:w-1/2 border border-black/5 dark:border-white/5 bg-slate-50/50 dark:bg-black/20 rounded-[24px] p-5 flex flex-col gap-4 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
               
               {/* Header Details */}
-              <div className="flex items-center justify-between border-b border-black/[0.04] dark:border-white/[0.04] pb-3">
-                <div className="flex flex-col">
+              <div className="flex items-center justify-between border-b border-black/[0.04] dark:border-white/[0.04] pb-3 shrink-0">
+                <div className="flex flex-col gap-0.5">
                   <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-wider">
                     Detalhes do Ticket #{selectedTicket.id}
                   </h4>
-                  <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 mt-0.5">
-                    Cliente: {selectedTicket.contactName}
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
+                    🏢 Empresa: {selectedTicket.companyFantasyName || 'Empresa Própria'}
+                  </span>
+                  <span className="text-[9.5px] font-bold text-gray-600 dark:text-gray-300">
+                    👤 Cliente: {selectedTicket.contactName}
+                  </span>
+                  <span className="text-[9.5px] font-bold text-gray-500 dark:text-gray-400">
+                    🧑‍💻 Atendente: {selectedTicket.operatorName}
                   </span>
                 </div>
                 <button
                   onClick={() => setSelectedTicket(null)}
-                  className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-400 hover:text-gray-600 transition-colors"
+                  className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-455 hover:text-gray-650 transition-colors shrink-0 align-top self-start"
                 >
                   <X size={14} />
                 </button>

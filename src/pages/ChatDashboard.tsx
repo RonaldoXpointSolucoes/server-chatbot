@@ -2173,13 +2173,85 @@ export default function ChatDashboard() {
         try {
           const { data: instData } = await supabase
             .from('whatsapp_instances')
-            .select('ticket_mode')
+            .select('ticket_mode, hide_ticket_modal')
             .eq('id', instId)
             .maybeSingle();
 
           if (instData?.ticket_mode) {
-            setResolvingTicketContactId(contactId);
-            return;
+            if (instData?.hide_ticket_modal) {
+              const currentActiveTicket = useChatStore.getState().activeTicket;
+              
+              // Executa a resolução na interface imediatamente
+              await executeResolve(contactId, true);
+
+              if (currentActiveTicket) {
+                // Roda a análise de IA e gravação do ticket em background
+                (async () => {
+                  try {
+                    const stats = await calculateFinalStats(contactId);
+                    
+                    const start = new Date(currentActiveTicket.opened_at);
+                    const { data: ticketMsgs } = await supabase
+                      .from('messages')
+                      .select('text_content, sender_type, timestamp, raw_payload')
+                      .eq('conversation_id', contact.conv_id || '')
+                      .gte('timestamp', currentActiveTicket.opened_at);
+
+                    const formattedMsgs = (ticketMsgs || []).map((m: any) => {
+                      const text = (m.text_content || '').trim();
+                      let isHuman = m.sender_type === 'human';
+                      if (!isHuman && text) {
+                        const matchAsterisk = text.match(/^\*([^*:\n]+):\*/);
+                        if (matchAsterisk) {
+                          isHuman = true;
+                        }
+                      }
+                      return {
+                        sender: isHuman ? 'human' : 'client',
+                        text: text,
+                        timestamp: new Date(m.timestamp).toLocaleString('pt-BR')
+                      };
+                    });
+
+                    const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+                    const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
+                    const operatorName = currentUserName || currentUserEmail || 'Atendente';
+
+                    let problemDesc = currentActiveTicket.problem_description || '';
+                    let resolution = 'Resolvido pelo atendente.';
+                    let summaryText = '';
+                    let problemsChecklist: any[] = [];
+
+                    if (geminiService.isConfigured()) {
+                      try {
+                        const result = await geminiService.generateTicketAnalysis({
+                          opened_at: new Date(currentActiveTicket.opened_at).toLocaleString('pt-BR'),
+                          closed_at: new Date().toLocaleString('pt-BR'),
+                          operators: stats.operators || [],
+                          closed_by: operatorName,
+                          messages: formattedMsgs
+                        });
+                        if (result.problem_description) problemDesc = result.problem_description;
+                        if (result.summary) summaryText = result.summary;
+                        if (result.problems_checklist) problemsChecklist = result.problems_checklist;
+                        if (result.resolution_summary) resolution = result.resolution_summary;
+                      } catch (geminiErr) {
+                        console.error('Erro na análise silenciosa do Gemini:', geminiErr);
+                      }
+                    }
+
+                    const finalStats = { ...stats, summary: summaryText, checklist: problemsChecklist };
+                    await useChatStore.getState().resolveActiveTicket(currentActiveTicket.id, problemDesc, resolution, finalStats);
+                  } catch (bgErr) {
+                    console.error('Erro no processamento silencioso do ticket:', bgErr);
+                  }
+                })();
+              }
+              return;
+            } else {
+              setResolvingTicketContactId(contactId);
+              return;
+            }
           }
         } catch (e) {
           console.error('Erro ao verificar ticket_mode da instância:', e);
