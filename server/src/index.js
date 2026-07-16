@@ -312,6 +312,14 @@ async function runMigrations() {
 
 app.listen(PORT, '0.0.0.0', async () => {
     console.log(`[Antigravity V2] Node.js Server online na porta ${PORT}`);
+    
+    const isLocalDev = process.env.IS_LOCAL_DEV === 'true' || process.env.DISABLE_AUTO_START_SESSIONS === 'true';
+    if (isLocalDev) {
+        console.log("[Worker Boot] Ambiente de Desenvolvimento Local Detectado (IS_LOCAL_DEV/DISABLE_AUTO_START_SESSIONS = true).");
+        console.log("[Worker Boot] Registro de release, auto-start de instâncias e todos os serviços de background/realtime foram SUSPENSOS localmente para evitar conflitos de concorrência com o servidor online do Coolify.");
+        return;
+    }
+    
     await runMigrations();
     
     // Registrar o deploy no banco Supabase

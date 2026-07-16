@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck } from 'lucide-react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
 import { useChatStore, instanceCache } from '../store/chatStore';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import { Phone } from 'lucide-react';
@@ -1211,7 +1211,15 @@ export default function ChatDashboard() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
   const [isSnoozedListOpen, setIsSnoozedListOpen] = useState(false);
-  const [isClosedTicketsOpen, setIsClosedTicketsOpen] = useState(false);
+  const location = useLocation();
+  const isClosedTicketsOpen = location.pathname === '/chat/closed-tickets';
+  const setIsClosedTicketsOpen = (open: boolean) => {
+    if (open) {
+      navigate('/chat/closed-tickets');
+    } else {
+      navigate('/chat');
+    }
+  };
   const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen || isSnoozedListOpen || isClosedTicketsOpen;
   const [inputText, setInputText] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
@@ -2225,6 +2233,7 @@ export default function ChatDashboard() {
                     let resolution = 'Resolvido pelo atendente.';
                     let summaryText = '';
                     let problemsChecklist: any[] = [];
+                    let errorLog: string | null = null;
 
                     if (geminiService.isConfigured()) {
                       try {
@@ -2239,16 +2248,21 @@ export default function ChatDashboard() {
                         if (result.summary) summaryText = result.summary;
                         if (result.problems_checklist) problemsChecklist = result.problems_checklist;
                         if (result.resolution_summary) resolution = result.resolution_summary;
-                      } catch (geminiErr) {
+                        if (result.error_log) errorLog = result.error_log;
+                      } catch (geminiErr: any) {
                         console.error('Erro na análise silenciosa do Gemini:', geminiErr);
+                        errorLog = geminiErr?.message || String(geminiErr);
                       }
+                    } else {
+                      errorLog = "Chave de API do Gemini não configurada nas Configurações.";
                     }
 
                     const finalStats = { 
                       ...stats, 
                       summary: summaryText, 
                       checklist: problemsChecklist,
-                      closed_by: operatorName
+                      closed_by: operatorName,
+                      error_log: errorLog
                     };
                     await useChatStore.getState().resolveActiveTicket(currentActiveTicket.id, problemDesc, resolution, finalStats);
                   } catch (bgErr) {
@@ -3706,7 +3720,7 @@ export default function ChatDashboard() {
         onClose={() => setResolvingTicketContactId(null)}
         activeTicket={activeTicket}
         contact={activeChat}
-        onConfirm={async (problemDesc, resolution, reactivateAi, summaryText, problemsChecklist) => {
+        onConfirm={async (problemDesc, resolution, reactivateAi, summaryText, problemsChecklist, errorLog) => {
           if (resolvingTicketContactId) {
             const baseStats = await calculateFinalStats(resolvingTicketContactId);
             const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
@@ -3717,7 +3731,8 @@ export default function ChatDashboard() {
               ...baseStats, 
               summary: summaryText, 
               checklist: problemsChecklist,
-              closed_by: operatorName
+              closed_by: operatorName,
+              error_log: errorLog
             };
             const currentActiveTicket = useChatStore.getState().activeTicket;
             if (currentActiveTicket) {

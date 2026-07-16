@@ -44,20 +44,27 @@ graph TD
 Essas regras são imutáveis e devem ser seguidas sem exceções para evitar quebras nos ambientes ativos:
 
 > [!IMPORTANT]
-> **PROIBIDO INICIAR BACKEND LOCAL**
-> Nunca inicie o servidor de backend localmente na máquina (`npm run dev` ou `node src/index.js` dentro da pasta `/server`). A execução local causa problemas de concorrência graves com o banco de dados Supabase e conflitos de sessão do WhatsApp (código 409), derrubando a produção.
+> **PREVENÇÃO DE CONFLITOS NO BACKEND LOCAL**
+> O backend local pode ser iniciado em ambiente de desenvolvimento, pois implementamos um mecanismo inteligente que detecta a flag `IS_LOCAL_DEV=true` ou `DISABLE_AUTO_START_SESSIONS=true` no arquivo `.env` da raiz e desativa automaticamente todos os serviços de background e triggers realtime concorrentes (como `SnoozeManager`, `QueueProcessor`, sincronização de cardápios, `WaCalls` e assinaturas realtime no Supabase). Isso impede conflitos de sessão 409 com o WhatsApp e execuções duplicadas de rotinas com o servidor de produção no Coolify.
 
 - **Comunicação Exclusiva com Produção**: O arquivo `.env` do front-end em execução local deve sempre manter a variável `VITE_WHATSAPP_ENGINE_URL` apontada para a URL do motor em produção na nuvem (Coolify).
 - **Alterações Visuais / Supabase**: Se a mudança envolver visual, comportamento de tela, estilo (CSS/Tailwind), ajustes em componentes React ou integrações diretas da aplicação com o Supabase (fora do diretório `/server`), o servidor Node.js **NÃO** deve ser atualizado, versionado ou reiniciado, evitando deploys extras desnecessários no Coolify.
 - **Arquitetura Client-Side First (App + Supabase)**: Desenvolva novos recursos conectando a aplicação React diretamente com o Supabase (JS SDK, tabelas, políticas RLS), usando o servidor Node.js de backend o mínimo possível para manter a base de APIs e regras exclusivas (como Baileys, Gastrofood, RAG) do motor isoladas.
-- **Deploy de Backend Antes de Testar**: Alterações feitas no código real do backend/servidor de produção devem obrigatoriamente ser deployadas antes de orientar o usuário a testar as funcionalidades.
+- **Deploy de Backend Antes de Testar**: Alterações feitas no código real do backend/servidor de produção devem ser deployadas antes de orientar o usuário a testar as funcionalidades.
 
-### Fluxo de Deploy (`deploy!`)
-Sempre que o comando ou expressão `deploy!` for solicitada, execute sequencialmente:
-1. **Incremento de Versão**: Rode o script `bump.cjs` no diretório raiz (`node bump.cjs`), o qual incrementará a versão `patch` no `package.json` da raiz e do servidor.
-2. **Registro de Data/Hora de Build**: Atualize a variável `VITE_PACKAGE_BUILD_DATE` no `.env` local com o ISO DateTime atual do fuso horário correto.
-3. **Comando de Deploy**: Execute `npm run deploy` (que roda `npx vercel --prod --force --yes`).
-4. **Relatório de Deploy**: Informe a versão gerada e o status da publicação no canal de comunicação.
+### Fluxos de Deploy (Apenas Sob Demanda Explicita)
+
+Nenhum deploy deve ser executado automaticamente. Eles só ocorrem se o usuário digitar ou solicitar explicitamente:
+
+1. **Comando `Deploy`**:
+   - **Objetivo**: Deploy do frontend na Vercel.
+   - **Ação**: Incrementa o `patch` no `package.json` da raiz seguindo a regra de dígito único `X.Y.Z` (máximo `9`). Atualiza `VITE_PACKAGE_BUILD_DATE` no `.env` e roda `npm run deploy` (Vercel). Relata a nova versão no chat.
+
+2. **Comando `Deploy Server`**:
+   - **Objetivo**: Deploy do backend no Coolify via Git.
+   - **Ação**: Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z` (máximo `9`), realiza o commit e o push das alterações do servidor para o GitHub, que dispara o build automático do Coolify. Relata o status no chat.
+
+3. **Se nenhum comando for fornecido, nenhum deploy será efetuado.**
 
 ---
 

@@ -77,6 +77,7 @@ export default function App() {
         <Route element={<ProtectedRoute role="client" />}>
           <Route element={<MainLayout />}>
             <Route path="/chat" element={<ErrorBoundary><ChatDashboard /></ErrorBoundary>} />
+            <Route path="/chat/closed-tickets" element={<ErrorBoundary><ChatDashboard /></ErrorBoundary>} />
             <Route path="/contacts" element={<ErrorBoundary><ContactsManager /></ErrorBoundary>} />
             <Route path="/crm" element={<ErrorBoundary><CrmDashboard /></ErrorBoundary>} />
             <Route path="/crm/kanban/:id" element={<ErrorBoundary><CrmKanban /></ErrorBoundary>} />

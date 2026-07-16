@@ -793,7 +793,7 @@ export default function ContactsManager() {
            <table className="w-full text-left border-collapse min-w-[900px]">
               <thead>
                 <tr className="border-b border-[#2a3942] bg-[#202c33]/50">
-                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider w-[80px]">Ações</th>
+                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider w-[110px]">Ações</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Identificação</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Celular (ID)</th>
                   <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Email & Docs</th>
@@ -823,7 +823,7 @@ export default function ContactsManager() {
                     
                     return (
                     <tr key={contact.id} className="hover:bg-[#202c33]/50 transition-colors group">
-                      <td className="px-6 py-4 whitespace-nowrap relative w-[80px]">
+                      <td className="px-6 py-4 whitespace-nowrap relative w-[110px]">
                         {/* Barra lateral indicadora no hover */}
                         <div className={cn(
                           "absolute left-0 top-0 bottom-0 w-[3px] scale-y-0 group-hover:scale-y-100 transition-transform duration-200 origin-center shrink-0",
@@ -831,6 +831,17 @@ export default function ContactsManager() {
                         )} />
                         
                         <div className="flex items-center gap-1.5 relative">
+                            <button 
+                               onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenModal(contact);
+                               }} 
+                               className="p-2 hover:bg-[#2a3942] rounded-lg transition-colors flex items-center justify-center text-[#8696a0] hover:text-emerald-500"
+                               title="Editar Contato"
+                            >
+                               <Edit2 size={16} />
+                            </button>
+
                             <button 
                                onClick={(e) => {
                                   e.stopPropagation();
@@ -929,20 +940,21 @@ export default function ContactsManager() {
                           )}
                           <div className="flex flex-col">
                              <div className="flex items-center gap-2">
-                               <span className={`font-semibold text-sm ${contact.document_type === 'cnpj' ? 'text-blue-400 group-hover:text-blue-300' : 'text-[#e9edef] group-hover:text-emerald-400'} transition-colors`}>{contact.custom_name || contact.name}</span>
+                               <span className={`font-semibold text-sm ${contact.document_type === 'cnpj' ? 'text-blue-400 group-hover:text-blue-300' : 'text-[#e9edef] group-hover:text-emerald-400'} transition-colors`}>
+                                 {contact.fantasy_name || contact.custom_name || contact.name}
+                               </span>
                                {contact.document_type === 'cnpj' && !contact.fantasy_name && (
                                   <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-[10px] font-bold text-blue-400">
                                      Empresa
                                   </span>
                                )}
-                               {contact.fantasy_name && (
-                                  <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md ${contact.document_type === 'cnpj' ? 'bg-blue-500/10 border border-blue-500/20 text-blue-400' : 'bg-[#202c33] border-[#2a3942] text-emerald-400'} text-[10px] font-bold`}>
-                                     <Building2 size={10} />
-                                     {contact.fantasy_name}
-                                  </span>
-                                )}
                              </div>
-                             {contact.custom_name && contact.name && contact.custom_name !== contact.name && (
+                             {contact.fantasy_name && (
+                                <span className="text-xs text-[#8696a0] mt-0.5 font-medium flex items-center gap-1">
+                                   🏢 <span className="text-gray-400 font-semibold">{contact.custom_name || contact.name}</span>
+                                </span>
+                             )}
+                             {contact.custom_name && contact.name && contact.custom_name !== contact.name && !contact.fantasy_name && (
                                 <span className="text-xs text-[#8696a0]">Orig: {contact.name}</span>
                              )}
                              
@@ -1116,29 +1128,25 @@ export default function ContactsManager() {
                            </div>
                            
                            <div className="flex flex-col min-w-0">
-                              <span className={cn(
-                                "font-semibold text-sm truncate leading-tight",
-                                contact.document_type === 'cnpj' ? 'text-blue-400' : 'text-[#e9edef]'
-                              )}>
-                                 {contact.custom_name || contact.name}
-                              </span>
-                              {contact.document_type === 'cnpj' && !contact.fantasy_name && (
-                                 <span className="w-max px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 text-[9px] font-black uppercase text-blue-400 rounded-md mt-0.5">
-                                    Empresa
-                                 </span>
-                              )}
-                              
-                              {/* Nome Fantasia */}
-                              {contact.fantasy_name && (
-                                 <span className={cn(
-                                   "flex items-center gap-1 text-[10px] font-bold truncate mt-0.5",
-                                   contact.document_type === 'cnpj' ? 'text-blue-400/80' : 'text-emerald-400/80'
-                                 )}>
-                                    <Building2 size={10} className="shrink-0" />
-                                    {contact.fantasy_name}
-                                 </span>
-                              )}
-                           </div>
+                               <span className={cn(
+                                 "font-semibold text-sm truncate leading-tight",
+                                 contact.document_type === 'cnpj' ? 'text-blue-400' : 'text-[#e9edef]'
+                               )}>
+                                  {contact.fantasy_name || contact.custom_name || contact.name}
+                               </span>
+                               {contact.document_type === 'cnpj' && !contact.fantasy_name && (
+                                  <span className="w-max px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 text-[9px] font-black uppercase text-blue-400 rounded-md mt-0.5">
+                                     Empresa
+                                  </span>
+                               )}
+                               
+                               {/* Razao Social (Nome Original) abaixo em tamanho menor se houver Nome Fantasia */}
+                               {contact.fantasy_name && (
+                                  <span className="text-[11px] text-[#8696a0] font-medium truncate mt-0.5 flex items-center gap-1">
+                                     🏢 <span className="text-gray-400 truncate">{contact.custom_name || contact.name}</span>
+                                  </span>
+                               )}
+                            </div>
                         </div>
 
                         {/* Status Badge */}

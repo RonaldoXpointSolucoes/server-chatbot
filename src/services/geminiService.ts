@@ -3,6 +3,7 @@ import { useChatStore } from "../store/chatStore";
 
 // Ensure there is a way to handle missing keys gracefully in UI
 const fallbackApiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
+const fallbackGcpKey = import.meta.env.VITE_GOOGLE_CLOUD_API_KEY || "";
 
 const formatValueToString = (val: any): string => {
   if (val === null || val === undefined) return '';
@@ -23,36 +24,48 @@ class GeminiService {
       "AIzaSyBS_DkByF6W2bCSue7RJbW4l43E7jqTozc"
     ];
 
+    const isValidKey = (key: string | null | undefined): boolean => {
+      if (!key || key.length < 5) return false;
+      const clean = key.replace(/^['"]|['"]$/g, '').trim();
+      return !LEAKED_KEYS.includes(clean);
+    };
+
     // 1. Check local override
     const localKey = typeof window !== 'undefined' ? localStorage.getItem('user_gemini_api_key') : null;
-    if (localKey && localKey.length > 5) {
-      const cleanKey = localKey.replace(/^['"]|['"]$/g, '').trim();
-      if (LEAKED_KEYS.includes(cleanKey)) {
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('user_gemini_api_key');
-        }
-      } else {
-        return cleanKey;
-      }
+    if (isValidKey(localKey)) {
+      return localKey!.replace(/^['"]|['"]$/g, '').trim();
     }
     
     // 2. Check store / database settings
     try {
       const storeKey = useChatStore.getState().tenantInfo?.settings?.gemini_api_key;
-      if (storeKey && storeKey.length > 5) {
-        const cleanKey = storeKey.replace(/^['"]|['"]$/g, '').trim();
-        if (!LEAKED_KEYS.includes(cleanKey)) {
-          return cleanKey;
-        }
+      if (isValidKey(storeKey)) {
+        return storeKey!.replace(/^['"]|['"]$/g, '').trim();
       }
     } catch (e) {}
 
-    // 3. Fallback to env variable
-    const cleanFallback = fallbackApiKey.replace(/^['"]|['"]$/g, '').trim();
-    if (LEAKED_KEYS.includes(cleanFallback)) {
-      return '';
+    // 3. Fallback to Gemini Env variable if it is standard GCP/Gemini key format (starts with AIza)
+    if (isValidKey(fallbackApiKey)) {
+      const cleanKey = fallbackApiKey.replace(/^['"]|['"]$/g, '').trim();
+      if (cleanKey.startsWith('AIza')) {
+        return cleanKey;
+      }
     }
-    return cleanFallback;
+
+    // 4. Fallback to Google Cloud API key if it's the one starting with AIza
+    if (isValidKey(fallbackGcpKey)) {
+      const cleanGcp = fallbackGcpKey.replace(/^['"]|['"]$/g, '').trim();
+      if (cleanGcp.startsWith('AIza')) {
+        return cleanGcp;
+      }
+    }
+
+    // 5. If no key starts with AIza, use fallbackApiKey if set
+    if (isValidKey(fallbackApiKey)) {
+      return fallbackApiKey.replace(/^['"]|['"]$/g, '').trim();
+    }
+
+    return '';
   }
 
   private getGenAI(): GoogleGenerativeAI {
@@ -676,13 +689,14 @@ REGRAS DE RETORNO CRÍTICAS:
         problems_checklist: parsed.problems_checklist || [],
         resolution_summary: parsed.resolution_summary || "Sem detalhes"
       };
-    } catch (e) {
+    } catch (e: any) {
       console.error("Erro ao analisar ticket com Gemini:", text, e);
       return {
         problem_description: "Erro no processamento do problema.",
         summary: "Erro ao gerar resumo da solução.",
         problems_checklist: [],
-        resolution_summary: `Chamado finalizado pelo atendente ${params.closed_by}. Participantes: ${opsText}.`
+        resolution_summary: `Chamado finalizado pelo atendente ${params.closed_by}. Participantes: ${opsText}.`,
+        error_log: e.message || String(e)
       };
     }
   }

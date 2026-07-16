@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { AlertCircle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -2954,210 +2954,6 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
           </div>
         )}
 
-        {instanceTicketMode && (
-          <div className="flex flex-col gap-2.5 bg-gradient-to-br from-teal-500/5 to-emerald-500/5 border border-emerald-500/10 rounded-3xl p-4.5">
-            {/* Histórico de Tickets */}
-            <div className="flex items-center gap-2 mb-2">
-              <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400">
-                <CalendarClock size={16} />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase font-black tracking-wider text-emerald-600 dark:text-emerald-400">
-                  Atendimentos & Tickets
-                </span>
-                <span className="text-xs font-bold text-gray-500 dark:text-[#8696a0]">
-                  Controle de sessões de suporte
-                </span>
-              </div>
-              
-              {!activeTicket && (
-                <button
-                  onClick={() => openTicketForContact(contact.id)}
-                  className="ml-auto flex items-center gap-1 py-1 px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-bold transition-all"
-                >
-                  <Plus size={10} />
-                  <span>Novo Ticket</span>
-                </button>
-              )}
-            </div>
-
-            {activeTicket ? (
-              <div className="flex flex-col gap-3 p-3.5 rounded-2xl bg-white/60 dark:bg-black/30 border border-emerald-500/20">
-                {/* Active Ticket Header */}
-                <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-2">
-                  <div className="flex flex-col">
-                    <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400">
-                      TICKET EM ABERTO: #{activeTicket.id}
-                    </span>
-                    <span className="text-[9px] font-mono text-gray-400 mt-0.5">
-                      Início: {new Date(activeTicket.opened_at).toLocaleString('pt-BR')}
-                    </span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider bg-emerald-500/20 text-emerald-600 uppercase">
-                    Em Andamento
-                  </span>
-                </div>
-
-                {/* Editable Problem Description */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
-                    Descrição do Problema:
-                  </label>
-                  <div className="flex items-start gap-1">
-                    <textarea
-                      value={activeTicketDesc}
-                      onChange={(e) => setActiveTicketDesc(e.target.value)}
-                      placeholder="Descreva o motivo do contato..."
-                      className="w-full text-xs p-2.5 bg-white dark:bg-[#111b21] border border-black/10 dark:border-white/10 rounded-xl focus:outline-none focus:border-emerald-500 resize-none h-[64px]"
-                    />
-                    {activeTicketDesc !== (activeTicket.problem_description || '') && (
-                      <button
-                        onClick={async () => {
-                          setIsSavingDesc(true);
-                          await updateActiveTicketDescription(activeTicket.id, activeTicketDesc);
-                          setIsSavingDesc(false);
-                        }}
-                        disabled={isSavingDesc}
-                        className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-all"
-                        title="Salvar"
-                      >
-                        {isSavingDesc ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Real-time statistics */}
-                <div className="pt-2 border-t border-black/5 dark:border-white/5 flex flex-col gap-1.5">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
-                    Resumo Parcial das Mensagens:
-                  </span>
-                  <div className="flex items-center justify-between text-[11px] font-semibold text-gray-600 dark:text-gray-300">
-                    <span>Total de Mensagens:</span>
-                    <span className="font-bold text-gray-800 dark:text-white">{activeTicketStats.total_messages}</span>
-                  </div>
-                  {activeTicketStats.operators.length > 0 ? (
-                    <div className="flex flex-col gap-1 mt-1">
-                      <span className="text-[9px] uppercase font-black tracking-wider text-gray-400">
-                        Participação dos Atendentes:
-                      </span>
-                      {activeTicketStats.operators.map(op => (
-                        <div key={op.name} className="flex flex-col gap-0.5">
-                          <div className="flex justify-between text-[10px] font-semibold text-gray-550 dark:text-gray-300">
-                            <span>{op.name}</span>
-                            <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
-                          </div>
-                          <div className="h-1 w-full bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
-                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${op.percentage}%` }}></div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-[10px] text-gray-400 italic">Nenhuma mensagem dos atendentes registrada.</span>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-4 bg-black/[0.02] dark:bg-white/[0.02] border border-dashed border-black/10 dark:border-white/10 rounded-2xl">
-                <span className="text-xs text-gray-400 italic">Não há ticket aberto para este cliente.</span>
-              </div>
-            )}
-
-            {/* Histórico Anterior */}
-            {pastTickets.length > 0 && (
-              <div className="mt-2 flex flex-col gap-2">
-                <button
-                  onClick={() => setShowPastTickets(!showPastTickets)}
-                  className="flex items-center gap-1.5 text-[11px] font-black text-gray-500 hover:text-emerald-500 transition-colors uppercase"
-                >
-                  <span>Histórico de Chamados ({pastTickets.length})</span>
-                  <ChevronDown size={14} className={cn("transition-transform duration-200", showPastTickets && "rotate-180")} />
-                </button>
-
-                {showPastTickets && (
-                  <div className="flex flex-col gap-2 max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
-                    {pastTickets.map(t => {
-                      const start = new Date(t.opened_at);
-                      const end = t.closed_at ? new Date(t.closed_at) : null;
-                      const ops = t.metadata?.operators || [];
-                      const formatDateTimeSafe = (d: Date | null) => {
-                        if (!d || isNaN(d.getTime())) return 'N/A';
-                        return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-                      };
-                      
-                      return (
-                        <div key={t.id} className="flex flex-col p-3 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 text-[11px] gap-2">
-                          <div className="flex justify-between items-center border-b border-black/5 dark:border-white/5 pb-1.5">
-                            <span className="font-bold text-gray-800 dark:text-white">Ticket #{t.id}</span>
-                            <span className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-white/5 text-[9px] font-black text-gray-505 uppercase">
-                              Resolvido
-                            </span>
-                          </div>
-
-                          <div className="flex flex-col gap-1 text-[10px] text-gray-600 dark:text-gray-300">
-                            <div>
-                              <span className="font-extrabold uppercase text-gray-400 mr-1">Início:</span>
-                              {formatDateTimeSafe(start)}
-                            </div>
-                            {end && (
-                              <div>
-                                <span className="font-extrabold uppercase text-gray-400 mr-1">Fim:</span>
-                                {formatDateTimeSafe(end)}
-                              </div>
-                            )}
-                          </div>
-
-                          {t.problem_description && (
-                            <div className="bg-white/40 dark:bg-black/10 p-2 rounded-xl border border-black/[0.02] dark:border-white/[0.02]">
-                              <span className="font-extrabold uppercase text-[9px] text-gray-400 block mb-0.5">Descrição:</span>
-                              <p className="text-gray-750 dark:text-gray-200 leading-normal font-medium whitespace-pre-wrap">{t.problem_description}</p>
-                            </div>
-                          )}
-
-                          {t.metadata?.summary && (
-                            <div className="bg-blue-500/5 p-2 rounded-xl border border-blue-500/10">
-                              <span className="font-extrabold uppercase text-[9px] text-blue-600 dark:text-blue-450 block mb-0.5">Resumo:</span>
-                              <p className="text-gray-750 dark:text-gray-200 leading-normal font-medium whitespace-pre-wrap">{t.metadata.summary}</p>
-                            </div>
-                          )}
-
-                          {t.resolution_summary && (
-                            <div className="bg-emerald-500/5 p-2 rounded-xl border border-emerald-500/10">
-                              <span className="font-extrabold uppercase text-[9px] text-emerald-600 dark:text-emerald-400 block mb-0.5">Resolução:</span>
-                              <p className="text-gray-750 dark:text-gray-255 leading-normal font-semibold whitespace-pre-wrap">{t.resolution_summary}</p>
-                            </div>
-                          )}
-
-                          {t.metadata?.total_messages !== undefined && (
-                            <div className="pt-1.5 border-t border-black/5 dark:border-white/5 flex flex-col gap-1 text-[10px]">
-                              <div className="flex justify-between font-semibold">
-                                <span>Total de Mensagens:</span>
-                                <span className="font-bold text-gray-800 dark:text-white">{t.metadata.total_messages}</span>
-                              </div>
-                              {ops.length > 0 && (
-                                <div className="flex flex-col gap-1 mt-1">
-                                  <span className="text-[9px] uppercase font-black text-gray-400">Atendentes:</span>
-                                  {ops.map((op: any) => (
-                                    <div key={op.name} className="flex justify-between text-gray-500 dark:text-gray-405">
-                                      <span>{op.name}</span>
-                                      <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
         <div className="flex flex-col gap-2">
           <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-600 dark:text-emerald-500">Ficha Cadastral</p>
           <div className="flex flex-col gap-3 bg-[#f0f2f5]/80 dark:bg-black/20 p-4 rounded-2xl border border-black/5 dark:border-white/5">
@@ -3452,6 +3248,212 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
         </div>
       </div>
 
+
+
+        {instanceTicketMode && (
+          <div className="flex flex-col gap-2.5 bg-gradient-to-br from-teal-500/5 to-emerald-500/5 border border-emerald-500/10 rounded-3xl p-4.5">
+            {/* Histórico de Tickets */}
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400">
+                <CalendarClock size={16} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] uppercase font-black tracking-wider text-emerald-600 dark:text-emerald-400">
+                  Atendimentos & Tickets
+                </span>
+                <span className="text-xs font-bold text-gray-500 dark:text-[#8696a0]">
+                  Controle de sessões de suporte
+                </span>
+              </div>
+              
+              {!activeTicket && (
+                <button
+                  onClick={() => openTicketForContact(contact.id)}
+                  className="ml-auto flex items-center gap-1 py-1 px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-bold transition-all"
+                >
+                  <Plus size={10} />
+                  <span>Novo Ticket</span>
+                </button>
+              )}
+            </div>
+
+            {activeTicket ? (
+              <div className="flex flex-col gap-3 p-3.5 rounded-2xl bg-white/60 dark:bg-black/30 border border-emerald-500/20">
+                {/* Active Ticket Header */}
+                <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-2">
+                  <div className="flex flex-col">
+                    <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400">
+                      TICKET EM ABERTO: #{activeTicket.id}
+                    </span>
+                    <span className="text-[9px] font-mono text-gray-400 mt-0.5">
+                      Início: {new Date(activeTicket.opened_at).toLocaleString('pt-BR')}
+                    </span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider bg-emerald-500/20 text-emerald-600 uppercase">
+                    Em Andamento
+                  </span>
+                </div>
+
+                {/* Editable Problem Description */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
+                    Descrição do Problema:
+                  </label>
+                  <div className="flex items-start gap-1">
+                    <textarea
+                      value={activeTicketDesc}
+                      onChange={(e) => setActiveTicketDesc(e.target.value)}
+                      placeholder="Descreva o motivo do contato..."
+                      className="w-full text-xs p-2.5 bg-white dark:bg-[#111b21] border border-black/10 dark:border-white/10 rounded-xl focus:outline-none focus:border-emerald-500 resize-none h-[64px]"
+                    />
+                    {activeTicketDesc !== (activeTicket.problem_description || '') && (
+                      <button
+                        onClick={async () => {
+                          setIsSavingDesc(true);
+                          await updateActiveTicketDescription(activeTicket.id, activeTicketDesc);
+                          setIsSavingDesc(false);
+                        }}
+                        disabled={isSavingDesc}
+                        className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-all"
+                        title="Salvar"
+                      >
+                        {isSavingDesc ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Real-time statistics */}
+                <div className="pt-2 border-t border-black/5 dark:border-white/5 flex flex-col gap-1.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
+                    Resumo Parcial das Mensagens:
+                  </span>
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-gray-600 dark:text-gray-300">
+                    <span>Total de Mensagens:</span>
+                    <span className="font-bold text-gray-800 dark:text-white">{activeTicketStats.total_messages}</span>
+                  </div>
+                  {activeTicketStats.operators.length > 0 ? (
+                    <div className="flex flex-col gap-1 mt-1">
+                      <span className="text-[9px] uppercase font-black tracking-wider text-gray-400">
+                        Participação dos Atendentes:
+                      </span>
+                      {activeTicketStats.operators.map(op => (
+                        <div key={op.name} className="flex flex-col gap-0.5">
+                          <div className="flex justify-between text-[10px] font-semibold text-gray-550 dark:text-gray-300">
+                            <span>{op.name}</span>
+                            <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
+                          </div>
+                          <div className="h-1 w-full bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${op.percentage}%` }}></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-gray-400 italic">Nenhuma mensagem dos atendentes registrada.</span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-4 bg-black/[0.02] dark:bg-white/[0.02] border border-dashed border-black/10 dark:border-white/10 rounded-2xl">
+                <span className="text-xs text-gray-400 italic">Não há ticket aberto para este cliente.</span>
+              </div>
+            )}
+
+            {/* Histórico Anterior */}
+            {pastTickets.length > 0 && (
+              <div className="mt-2 flex flex-col gap-2">
+                <button
+                  onClick={() => setShowPastTickets(!showPastTickets)}
+                  className="flex items-center gap-1.5 text-[11px] font-black text-gray-500 hover:text-emerald-500 transition-colors uppercase"
+                >
+                  <span>Histórico de Chamados ({pastTickets.length})</span>
+                  <ChevronDown size={14} className={cn("transition-transform duration-200", showPastTickets && "rotate-180")} />
+                </button>
+
+                {showPastTickets && (
+                  <div className="flex flex-col gap-2 max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
+                    {pastTickets.map(t => {
+                      const start = new Date(t.opened_at);
+                      const end = t.closed_at ? new Date(t.closed_at) : null;
+                      const ops = t.metadata?.operators || [];
+                      const formatDateTimeSafe = (d: Date | null) => {
+                        if (!d || isNaN(d.getTime())) return 'N/A';
+                        return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                      };
+                      
+                      return (
+                        <div key={t.id} className="flex flex-col p-3 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 text-[11px] gap-2">
+                          <div className="flex justify-between items-center border-b border-black/5 dark:border-white/5 pb-1.5">
+                            <span className="font-bold text-gray-800 dark:text-white">Ticket #{t.id}</span>
+                            <span className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-white/5 text-[9px] font-black text-gray-505 uppercase">
+                              Resolvido
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col gap-1 text-[10px] text-gray-600 dark:text-gray-300">
+                            <div>
+                              <span className="font-extrabold uppercase text-gray-400 mr-1">Início:</span>
+                              {formatDateTimeSafe(start)}
+                            </div>
+                            {end && (
+                              <div>
+                                <span className="font-extrabold uppercase text-gray-400 mr-1">Fim:</span>
+                                {formatDateTimeSafe(end)}
+                              </div>
+                            )}
+                          </div>
+
+                          {t.problem_description && (
+                            <div className="bg-white/40 dark:bg-black/10 p-2 rounded-xl border border-black/[0.02] dark:border-white/[0.02]">
+                              <span className="font-extrabold uppercase text-[9px] text-gray-400 block mb-0.5">Descrição:</span>
+                              <p className="text-gray-750 dark:text-gray-200 leading-normal font-medium whitespace-pre-wrap">{t.problem_description}</p>
+                            </div>
+                          )}
+
+                          {t.metadata?.summary && (
+                            <div className="bg-blue-500/5 p-2 rounded-xl border border-blue-500/10">
+                              <span className="font-extrabold uppercase text-[9px] text-blue-600 dark:text-blue-450 block mb-0.5">Resumo:</span>
+                              <p className="text-gray-750 dark:text-gray-200 leading-normal font-medium whitespace-pre-wrap">{t.metadata.summary}</p>
+                            </div>
+                          )}
+
+                          {t.resolution_summary && (
+                            <div className="bg-emerald-500/5 p-2 rounded-xl border border-emerald-500/10">
+                              <span className="font-extrabold uppercase text-[9px] text-emerald-600 dark:text-emerald-400 block mb-0.5">Resolução:</span>
+                              <p className="text-gray-750 dark:text-gray-255 leading-normal font-semibold whitespace-pre-wrap">{t.resolution_summary}</p>
+                            </div>
+                          )}
+
+                          {t.metadata?.total_messages !== undefined && (
+                            <div className="pt-1.5 border-t border-black/5 dark:border-white/5 flex flex-col gap-1 text-[10px]">
+                              <div className="flex justify-between font-semibold">
+                                <span>Total de Mensagens:</span>
+                                <span className="font-bold text-gray-800 dark:text-white">{t.metadata.total_messages}</span>
+                              </div>
+                              {ops.length > 0 && (
+                                <div className="flex flex-col gap-1 mt-1">
+                                  <span className="text-[9px] uppercase font-black text-gray-400">Atendentes:</span>
+                                  {ops.map((op: any) => (
+                                    <div key={op.name} className="flex justify-between text-gray-500 dark:text-gray-405">
+                                      <span>{op.name}</span>
+                                      <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
       {/* Action Button */}
         <div className="mt-2 flex flex-col gap-2">
           <button 
@@ -3488,7 +3490,7 @@ interface ResolveTicketModalProps {
   onClose: () => void;
   activeTicket: any;
   contact?: any;
-  onConfirm: (problemDesc: string, resolution: string, reactivateAi: boolean, summary: string, checklist: Array<{ text: string, resolved: boolean }>) => Promise<void>;
+  onConfirm: (problemDesc: string, resolution: string, reactivateAi: boolean, summary: string, checklist: Array<{ text: string, resolved: boolean }>, errorLog?: string | null) => Promise<void>;
 }
 
 export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onConfirm }: ResolveTicketModalProps) {
@@ -3500,6 +3502,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
   const [analyzing, setAnalyzing] = useState(false);
   const [isResolutionExpanded, setIsResolutionExpanded] = useState(false);
   const [checklist, setChecklist] = useState<Array<{ text: string, resolved: boolean }>>([]);
+  const [errorLog, setErrorLog] = useState<string | null>(null);
 
   // Calculate session statistics and duration in real time
   const ticketStats = React.useMemo(() => {
@@ -3579,6 +3582,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
     }
     setResolution('');
     setIsResolutionExpanded(false);
+    setErrorLog(null);
 
     // Trigger Gemini AI ticket auto-analysis
     if (geminiService.isConfigured() && activeTicket && contact?.messages) {
@@ -3631,11 +3635,15 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
         if (result.summary) setSummary(result.summary);
         if (result.problems_checklist) setChecklist(result.problems_checklist);
         if (result.resolution_summary) setResolution(result.resolution_summary);
+        if (result.error_log) setErrorLog(result.error_log);
       }).catch((err) => {
         console.error("Erro na análise automática do ticket:", err);
+        setErrorLog(err?.message || String(err));
       }).finally(() => {
         setAnalyzing(false);
       });
+    } else if (!geminiService.isConfigured()) {
+      setErrorLog("Chave de API do Gemini não configurada nas Configurações.");
     }
   }, [activeTicket, isOpen, contact, ticketStats.operators]);
 
@@ -3649,7 +3657,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
     }
     setLoading(true);
     try {
-      await onConfirm(problemDesc, resolution, reactivateAi, summary, checklist);
+      await onConfirm(problemDesc, resolution, reactivateAi, summary, checklist, errorLog);
     } catch (err) {
       console.error(err);
     } finally {
@@ -3948,9 +3956,21 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
-  const [dateFilter, setDateFilter] = useState('all'); // all, today, week, month
+  const [dateFilter, setDateFilter] = useState('today'); // all, today, week, month
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
   const [activeKanbanTab, setActiveKanbanTab] = useState<'rapido' | 'medio' | 'complexo'>('rapido');
+
+  const daysList = useMemo(() => {
+    const list = [];
+    const today = new Date();
+    for (let i = -6; i <= 0; i++) {
+      const d = new Date();
+      d.setDate(today.getDate() + i);
+      list.push(d);
+    }
+    return list;
+  }, []);
 
   const formatTimeSafe = (dateStr: any) => {
     if (!dateStr) return 'N/A';
@@ -3982,12 +4002,31 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       if (contactIds.length > 0) {
         const { data: cData, error: cErr } = await supabase
           .from('contacts')
-          .select('id, name, custom_name, fantasy_name, phone')
+          .select('id, name, custom_name, fantasy_name, phone, company_ids')
           .in('id', contactIds);
         if (!cErr && cData) {
           contactsData = cData;
         }
       }
+
+      // Buscar empresas vinculadas a estes contatos para preencher nome fantasia e razão social corretos
+      const assocCompanyIds = Array.from(
+        new Set(
+          contactsData.flatMap(c => c.company_ids || []).filter(Boolean)
+        )
+      );
+      let companiesData: any[] = [];
+      if (assocCompanyIds.length > 0) {
+        const { data: compData } = await supabase
+          .from('contacts')
+          .select('id, name, fantasy_name')
+          .in('id', assocCompanyIds);
+        if (compData) {
+          companiesData = compData;
+        }
+      }
+      const companiesMap = new Map<string, any>();
+      companiesData.forEach(comp => companiesMap.set(comp.id, comp));
       
       const contactsMap = new Map<string, any>();
       if (contactsData) {
@@ -4029,7 +4068,20 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         const contactName = c 
           ? (c.custom_name || c.name || c.phone || 'Cliente')
           : 'Cliente';
-        const companyFantasyName = c?.fantasy_name || '';
+        
+        let companyFantasyName = c?.fantasy_name || '';
+        let companyName = c?.name || '';
+
+        if (c?.company_ids && c.company_ids.length > 0) {
+          const assocComp = companiesMap.get(c.company_ids[0]);
+          if (assocComp) {
+            companyFantasyName = assocComp.fantasy_name || assocComp.name || '';
+            companyName = assocComp.name || '';
+          }
+        } else if (!companyFantasyName && companyName) {
+          companyFantasyName = companyName;
+        }
+
         const fallbackOp = operatorFallbacks.get(t.contact_id) || 'Atendente';
         const operatorName = t.metadata?.closed_by || (t.metadata?.operators && t.metadata.operators[0]?.name) || fallbackOp;
         
@@ -4064,6 +4116,22 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     }
   }, [isOpen]);
 
+  // Sincronizar aba ativa do Kanban com a coluna correspondente ao ticket selecionado
+  useEffect(() => {
+    if (selectedTicket) {
+      const start = new Date(selectedTicket.opened_at);
+      const end = selectedTicket.closed_at ? new Date(selectedTicket.closed_at) : new Date();
+      const diffMins = Math.floor((end.getTime() - start.getTime()) / 60000);
+      if (diffMins < 15) {
+        setActiveKanbanTab('rapido');
+      } else if (diffMins <= 120) {
+        setActiveKanbanTab('medio');
+      } else {
+        setActiveKanbanTab('complexo');
+      }
+    }
+  }, [selectedTicket]);
+
   const filteredTickets = useMemo(() => {
     return tickets.filter(t => {
       const term = search.toLowerCase();
@@ -4084,7 +4152,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       const now = new Date();
 
       if (dateFilter === 'today') {
-        return closedDate.toDateString() === now.toDateString();
+        return closedDate.toDateString() === selectedDate.toDateString();
       }
 
       if (dateFilter === 'week') {
@@ -4099,7 +4167,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       return true;
     });
-  }, [tickets, search, dateFilter]);
+  }, [tickets, search, dateFilter, selectedDate]);
 
   const columns = useMemo(() => {
     const rapido: any[] = [];
@@ -4133,7 +4201,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
       
-      <div className="relative w-full max-w-4xl h-[85vh] bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col gap-4.5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden">
+      <div className="relative w-full max-w-6xl xl:max-w-7xl h-[85vh] bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col gap-4.5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden">
         
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -4192,8 +4260,43 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           </div>
         </div>
 
-        {/* Kanban Tab Selector for Mobile */}
-        <div className="flex md:hidden gap-1.5 bg-slate-100 dark:bg-black/30 p-1.5 rounded-2xl border border-black/5 dark:border-white/5 select-none shrink-0 h-[38px] items-center">
+        {/* Weekly Day Selector (3 days before / 3 days after today) */}
+        <div className="flex justify-center items-center gap-3.5 bg-slate-50/50 dark:bg-black/10 p-3 rounded-2xl border border-black/5 dark:border-white/5 select-none overflow-x-auto shrink-0">
+          {daysList.map((day, idx) => {
+            const isToday = day.toDateString() === new Date().toDateString();
+            const isSelected = dateFilter === 'today' && day.toDateString() === selectedDate.toDateString();
+            const weekdayLabel = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'][day.getDay()];
+            const dayOfMonth = day.getDate();
+            
+            return (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => {
+                  setSelectedDate(day);
+                  setDateFilter('today');
+                }}
+                className={cn(
+                  "flex flex-col items-center gap-1 py-1.5 w-11 rounded-xl transition-all duration-200 shrink-0",
+                  isSelected
+                    ? "bg-emerald-500 text-white font-extrabold shadow-md shadow-emerald-500/20 scale-105"
+                    : isToday
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20"
+                      : "text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white"
+                )}
+              >
+                <span className="text-[9px] uppercase tracking-wider opacity-60 font-black">{weekdayLabel}</span>
+                <span className="text-xs font-bold">{dayOfMonth}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Kanban Tab Selector for Mobile / Tablet */}
+        <div className={cn(
+          "gap-1.5 bg-slate-100 dark:bg-black/30 p-1.5 rounded-2xl border border-black/5 dark:border-white/5 select-none shrink-0 h-[38px] items-center",
+          selectedTicket ? "flex xl:hidden" : "flex md:hidden"
+        )}>
           {columns.map(col => (
             <button
               key={col.id}
@@ -4218,7 +4321,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         <div className="flex-1 flex gap-4 min-h-0">
           
           {/* Kanban Board columns container */}
-          <div className={cn("flex-grow overflow-hidden flex gap-4 min-w-0 transition-all duration-300 h-full", selectedTicket && "hidden lg:flex lg:w-1/2 lg:flex-grow-0")}>
+          <div className={cn("flex-grow overflow-hidden flex gap-4 min-w-0 transition-all duration-300 h-full", selectedTicket && "hidden md:flex md:w-[45%] md:flex-grow-0 xl:w-[60%]")}>
             {loading ? (
               <div className="flex-1 flex items-center justify-center flex-col gap-2 text-gray-400">
                 <Loader2 className="animate-spin" size={24} />
@@ -4234,7 +4337,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                       key={col.id}
                       className={cn(
                         "flex flex-col h-full bg-slate-50/20 dark:bg-black/15 border border-black/5 dark:border-white/5 rounded-[24px] overflow-hidden transition-all duration-200",
-                        !isVisible ? "hidden md:flex" : "flex"
+                        selectedTicket 
+                          ? (!isVisible ? "hidden xl:flex" : "flex") 
+                          : (!isVisible ? "hidden md:flex" : "flex")
                       )}
                     >
                       {/* Column Header */}
@@ -4271,11 +4376,18 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 )}
                               >
                                 {/* Top: Company + Date */}
-                                <div className="flex items-center justify-between gap-2 border-b border-black/[0.02] dark:border-white/[0.02] pb-1.5">
-                                  <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-md truncate max-w-[65%] uppercase tracking-wider">
-                                    🏢 {t.companyFantasyName || 'Empresa Própria'}
-                                  </span>
-                                  <span className="text-[8px] font-bold text-gray-400 shrink-0">
+                                <div className="flex items-start justify-between gap-2 border-b border-black/[0.02] dark:border-white/[0.02] pb-1.5">
+                                  <div className="flex flex-col gap-0.5 min-w-0">
+                                    <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-md truncate max-w-full uppercase tracking-wider inline-block">
+                                      🏢 {t.companyFantasyName || 'Empresa Própria'}
+                                    </span>
+                                    {t.companyName && t.companyName.toLowerCase() !== t.companyFantasyName?.toLowerCase() && (
+                                      <span className="text-[8px] font-semibold text-gray-400 dark:text-gray-500 pl-1.5 truncate max-w-[150px] md:max-w-[200px]">
+                                        {t.companyName}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-[8px] font-bold text-gray-400 shrink-0 mt-0.5">
                                     {formatTimeSafe(t.closed_at)}
                                   </span>
                                 </div>
@@ -4312,6 +4424,11 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                   </div>
                                   
                                   <div className="flex items-center gap-1.5">
+                                    {(t.metadata?.error_log || t.problem_description === "Erro no processamento do problema." || t.metadata?.summary === "Erro ao gerar resumo da solução.") && (
+                                      <span className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md text-[8px] font-black animate-pulse flex items-center gap-0.5 shrink-0">
+                                        ⚠️ Falha I.A.
+                                      </span>
+                                    )}
                                     {checklistItems.length > 0 && (
                                       <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md">
                                         Checklist: {resolvedCount}/{checklistItems.length}
@@ -4337,7 +4454,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
           {/* Ticket Details Panel */}
           {selectedTicket && (
-            <div className="w-full md:w-1/2 border border-black/5 dark:border-white/5 bg-slate-50/50 dark:bg-black/20 rounded-[24px] p-5 flex flex-col gap-4 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
+            <div className="w-full md:w-[55%] xl:w-[40%] border border-black/5 dark:border-white/5 bg-slate-50/50 dark:bg-black/20 rounded-[24px] p-5 flex flex-col gap-4 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
               
               {/* Header Details */}
               <div className="flex items-center justify-between border-b border-black/[0.04] dark:border-white/[0.04] pb-3 shrink-0">
@@ -4345,8 +4462,13 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                   <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-wider">
                     Detalhes do Ticket #{selectedTicket.id}
                   </h4>
-                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
-                    🏢 Empresa: {selectedTicket.companyFantasyName || 'Empresa Própria'}
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex flex-col gap-0.5">
+                    <span>🏢 {selectedTicket.companyFantasyName || 'Empresa Própria'}</span>
+                    {selectedTicket.companyName && selectedTicket.companyName.toLowerCase() !== selectedTicket.companyFantasyName?.toLowerCase() && (
+                      <span className="text-[8.5px] font-semibold text-gray-400 dark:text-gray-500 pl-4 lowercase first-letter:uppercase">
+                        Empresa: {selectedTicket.companyName}
+                      </span>
+                    )}
                   </span>
                   <span className="text-[9.5px] font-bold text-gray-600 dark:text-gray-300">
                     👤 Cliente: {selectedTicket.contactName}
@@ -4362,6 +4484,19 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                   <X size={14} />
                 </button>
               </div>
+
+              {/* AI Processing Error Log Alert */}
+              {(selectedTicket.metadata?.error_log || selectedTicket.problem_description === "Erro no processamento do problema." || selectedTicket.metadata?.summary === "Erro ao gerar resumo da solução.") && (
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 p-3.5 rounded-xl text-xs flex flex-col gap-1.5 leading-relaxed font-sans shrink-0">
+                  <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px]">
+                    <AlertTriangle size={14} className="text-rose-500 animate-pulse" />
+                    <span>Falha no Processamento da I.A.</span>
+                  </div>
+                  <p className="font-semibold text-gray-800 dark:text-rose-250 select-text">
+                    {selectedTicket.metadata?.error_log || "A chave de API do Gemini pode estar incorreta, ausente ou instável. O chamado foi encerrado manualmente sem o preenchimento automático das anotações."}
+                  </p>
+                </div>
+              )}
 
               {/* Timing Metadata Info */}
               <div className="grid grid-cols-2 gap-2 text-[10px]">
