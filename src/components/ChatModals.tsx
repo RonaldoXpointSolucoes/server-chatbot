@@ -4551,9 +4551,39 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     });
 
     return [
-      { id: 'rapido', title: '⚡ Rápido', subtitle: '< 15 min', tickets: rapido, colorClass: 'text-amber-600 bg-amber-500/10 border-amber-500/20 dark:text-amber-400', headerBg: 'border-t-2 border-t-amber-500' },
-      { id: 'medio', title: '🕒 Médio', subtitle: '15 min - 2h', tickets: medio, colorClass: 'text-sky-600 bg-sky-500/10 border-sky-500/20 dark:text-sky-400', headerBg: 'border-t-2 border-t-sky-500' },
-      { id: 'complexo', title: '🔥 Complexo', subtitle: '> 2h', tickets: complexo, colorClass: 'text-rose-600 bg-rose-500/10 border-rose-500/20 dark:text-rose-400', headerBg: 'border-t-2 border-t-rose-500' }
+      { 
+        id: 'rapido', 
+        title: '⚡ Rápido', 
+        subtitle: '< 15 min', 
+        tickets: rapido, 
+        headerBg: 'bg-amber-550 dark:bg-amber-600/90', 
+        colBorder: 'border-amber-500/25 dark:border-amber-500/15',
+        badgeBg: 'bg-white/20 text-white dark:bg-white/10 dark:text-amber-200',
+        companyBadgeClass: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/15',
+        cardHoverBorder: 'hover:border-amber-500/30 dark:hover:border-amber-500/20'
+      },
+      { 
+        id: 'medio', 
+        title: '🕒 Médio', 
+        subtitle: '15 min - 2h', 
+        tickets: medio, 
+        headerBg: 'bg-sky-550 dark:bg-sky-600/90', 
+        colBorder: 'border-sky-500/25 dark:border-sky-500/15',
+        badgeBg: 'bg-white/20 text-white dark:bg-white/10 dark:text-sky-200',
+        companyBadgeClass: 'text-sky-600 dark:text-sky-400 bg-sky-500/10 dark:bg-sky-500/15',
+        cardHoverBorder: 'hover:border-sky-500/30 dark:hover:border-sky-500/20'
+      },
+      { 
+        id: 'complexo', 
+        title: '🔥 Complexo', 
+        subtitle: '> 2h', 
+        tickets: complexo, 
+        headerBg: 'bg-rose-550 dark:bg-rose-600/90', 
+        colBorder: 'border-rose-500/25 dark:border-rose-500/15',
+        badgeBg: 'bg-white/20 text-white dark:bg-white/10 dark:text-rose-200',
+        companyBadgeClass: 'text-rose-600 dark:text-rose-455 bg-rose-500/10 dark:bg-rose-500/15',
+        cardHoverBorder: 'hover:border-rose-500/30 dark:hover:border-rose-500/20'
+      }
     ] as const;
   }, [filteredTickets]);
 
@@ -4732,29 +4762,26 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     <div 
                       key={col.id}
                       className={cn(
-                        "flex flex-col h-full bg-slate-50/20 dark:bg-black/15 border border-black/5 dark:border-white/5 rounded-[24px] overflow-hidden transition-all duration-200",
+                        "flex flex-col h-full bg-slate-50/20 dark:bg-[#182229]/20 border rounded-[24px] overflow-hidden transition-all duration-200",
+                        col.colBorder,
                         selectedTicket 
                           ? (!isVisible ? "hidden xl:flex" : "flex") 
                           : (!isVisible ? "hidden md:flex" : "flex")
                       )}
                     >
                       {/* Column Header */}
-                      <div className={cn("px-4 py-3 bg-slate-100/50 dark:bg-black/30 border-b border-black/[0.04] dark:border-white/[0.04] flex items-center justify-between shrink-0", col.headerBg)}>
-                        <div className="flex flex-col items-start text-left">
-                          <span className="text-xs font-black text-gray-800 dark:text-white flex items-center gap-1.5">
-                            {col.title}
-                          </span>
-                          <span className="text-[8px] font-bold text-gray-400 tracking-wide uppercase">
-                            {col.subtitle}
+                      <div className={cn("px-4.5 py-4 text-white flex flex-col gap-1 shrink-0 select-none", col.headerBg)}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black uppercase tracking-wider text-white">{col.title}</span>
+                          <span className={cn("px-2 py-0.5 rounded-full text-[9px] font-black shrink-0", col.badgeBg)}>
+                            {col.tickets.length}
                           </span>
                         </div>
-                        <span className={cn("px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider", col.colorClass)}>
-                          {col.tickets.length}
-                        </span>
+                        <span className="text-[8.5px] font-semibold text-white/70 uppercase tracking-wide text-left">{col.subtitle}</span>
                       </div>
 
                       {/* Column Content */}
-                      <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-3">
+                      <div className="flex-1 overflow-y-auto custom-scrollbar p-3.5 flex flex-col gap-3">
                         {col.tickets.length > 0 ? (
                           col.tickets.map(t => {
                             const totalMsg = t.metadata?.total_messages || 0;
@@ -4768,13 +4795,14 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 onClick={() => setSelectedTicket(t)}
                                 className={cn(
                                   "group p-4 rounded-[22px] border text-left cursor-pointer transition-all duration-300 bg-white hover:bg-slate-50/70 dark:bg-[#182229]/65 dark:hover:bg-[#182229] hover:scale-[1.015] hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] flex flex-col gap-3 relative border-black/[0.04] dark:border-white/[0.04]",
-                                  selectedTicket?.id === t.id && "border-emerald-500/50 dark:border-emerald-500/30 ring-1 ring-emerald-500/30 dark:ring-emerald-500/10 shadow-sm"
+                                  selectedTicket?.id === t.id && "border-emerald-500/50 dark:border-emerald-500/30 ring-1 ring-emerald-500/30 dark:ring-emerald-500/10 shadow-sm",
+                                  col.cardHoverBorder
                                 )}
                               >
                                 {/* Top: Company + Date */}
                                 <div className="flex items-start justify-between gap-3 border-b border-black/[0.03] dark:border-white/[0.03] pb-2">
                                   <div className="flex flex-col gap-1 min-w-0">
-                                    <span className="text-[9.5px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 dark:bg-emerald-500/15 px-2 py-0.5 rounded-lg truncate max-w-full uppercase tracking-wider inline-block">
+                                    <span className={cn("text-[9.5px] font-black px-2 py-0.5 rounded-lg truncate max-w-full uppercase tracking-wider inline-block", col.companyBadgeClass)}>
                                       🏢 {t.companyFantasyName || 'Empresa Própria'}
                                     </span>
                                     {t.companyName && t.companyName.toLowerCase() !== t.companyFantasyName?.toLowerCase() && (
@@ -4911,6 +4939,50 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 >
                   <X size={14} />
                 </button>
+              </div>
+
+              {/* Exclude Reports Settings Card */}
+              <div className="p-3.5 bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/15 rounded-2xl flex flex-col gap-2 transition-all shrink-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-wider flex items-center gap-1">
+                      🚫 Excluir de Relatórios & I.A.
+                    </span>
+                    <span className="text-[9.5px] font-semibold text-gray-500 dark:text-gray-400 leading-normal">
+                      Ignorar este contato e seus chamados nas métricas, dashboards e análise de I.A. ao encerrar.
+                    </span>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const newExcl = !selectedTicket.exclude_reports;
+                        const { supabase } = await import('../services/supabase');
+                        const { error } = await supabase
+                          .from('contacts')
+                          .update({ exclude_reports: newExcl })
+                          .eq('id', selectedTicket.contact_id);
+                        
+                        if (!error) {
+                          setSelectedTicket({
+                            ...selectedTicket,
+                            exclude_reports: newExcl
+                          });
+                          fetchClosedTickets();
+                        }
+                      } catch (err) {
+                        console.error(err);
+                      }
+                    }}
+                    className={cn(
+                      "px-2.5 py-1 rounded-xl text-[9px] font-black uppercase transition-all duration-200 shrink-0 border cursor-pointer",
+                      selectedTicket.exclude_reports
+                        ? "bg-rose-500 text-white border-rose-500 hover:bg-rose-600"
+                        : "bg-transparent text-rose-500 border-rose-500/20 hover:bg-rose-500/10"
+                    )}
+                  >
+                    {selectedTicket.exclude_reports ? 'Ignorado' : 'Ignorar'}
+                  </button>
+                </div>
               </div>
 
               {/* AI Processing Error Log Alert */}
