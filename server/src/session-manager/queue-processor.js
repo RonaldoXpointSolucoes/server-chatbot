@@ -296,7 +296,11 @@ class QueueProcessor {
                         })
                         .eq('id', msg.id);
                 } else {
-                    console.error(`[QueueProcessor] Falha ao carregar fila de mensagens:`, err.message);
+                    if (err.message && (err.message.includes('fetch failed') || err.message.includes('timeout') || err.message.includes('Network'))) {
+                        console.warn(`[QueueProcessor] Falha de rede temporária ao carregar fila de mensagens:`, err.message);
+                    } else {
+                        console.error(`[QueueProcessor] Falha ao carregar fila de mensagens:`, err.message);
+                    }
                     break;
                 }
             }

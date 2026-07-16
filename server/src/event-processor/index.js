@@ -1015,7 +1015,7 @@ class EventProcessor {
                       // 1. Verifica se o robô está ativo para esta caixa de entrada (padrão true se undefined)
                       const botActive = instanceConfig.bot_active !== false;
                       if (!botActive) {
-                          console.warn(`[EventProcessor] Robô desativado nas configurações da caixa de entrada (${b.instanceId}). Silenciando robô.`);
+                          console.log(`[EventProcessor] Robô desativado nas configurações da caixa de entrada (${b.instanceId}). Silenciando robô.`);
                           return;
                       }
 
@@ -1084,7 +1084,7 @@ class EventProcessor {
                           }
 
                            if (!botData) {
-                               console.warn(`[EventProcessor] Nenhum bot ativo ou elegível encontrado para a caixa de entrada ${b.instanceId}. Silenciando robô.`);
+                               console.log(`[EventProcessor] Nenhum bot ativo ou elegível encontrado para a caixa de entrada ${b.instanceId}. Silenciando robô.`);
                            }
 
                           if (botData) {
