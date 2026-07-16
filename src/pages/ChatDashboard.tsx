@@ -536,7 +536,11 @@ export default function ChatDashboard() {
         return { total_messages: 0, total_human_messages: 0, operators: [] };
       }
 
-      const humanMessages = msgs.filter(m => m.sender_type === 'human');
+      const humanMessages = msgs.filter(m => {
+        const text = m.text_content || '';
+        const match = text.match(/^\*([^*:]+):\*/);
+        return m.sender_type === 'human' || !!match;
+      });
       const stats: Record<string, number> = {};
       let totalHuman = 0;
 
@@ -2240,7 +2244,12 @@ export default function ChatDashboard() {
                       }
                     }
 
-                    const finalStats = { ...stats, summary: summaryText, checklist: problemsChecklist };
+                    const finalStats = { 
+                      ...stats, 
+                      summary: summaryText, 
+                      checklist: problemsChecklist,
+                      closed_by: operatorName
+                    };
                     await useChatStore.getState().resolveActiveTicket(currentActiveTicket.id, problemDesc, resolution, finalStats);
                   } catch (bgErr) {
                     console.error('Erro no processamento silencioso do ticket:', bgErr);
@@ -3700,7 +3709,16 @@ export default function ChatDashboard() {
         onConfirm={async (problemDesc, resolution, reactivateAi, summaryText, problemsChecklist) => {
           if (resolvingTicketContactId) {
             const baseStats = await calculateFinalStats(resolvingTicketContactId);
-            const stats = { ...baseStats, summary: summaryText, checklist: problemsChecklist };
+            const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+            const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
+            const operatorName = currentUserName || currentUserEmail || 'Atendente';
+            
+            const stats = { 
+              ...baseStats, 
+              summary: summaryText, 
+              checklist: problemsChecklist,
+              closed_by: operatorName
+            };
             const currentActiveTicket = useChatStore.getState().activeTicket;
             if (currentActiveTicket) {
               await useChatStore.getState().resolveActiveTicket(currentActiveTicket.id, problemDesc, resolution, stats);

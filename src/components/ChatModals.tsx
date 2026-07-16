@@ -3081,12 +3081,16 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                       const start = new Date(t.opened_at);
                       const end = t.closed_at ? new Date(t.closed_at) : null;
                       const ops = t.metadata?.operators || [];
+                      const formatDateTimeSafe = (d: Date | null) => {
+                        if (!d || isNaN(d.getTime())) return 'N/A';
+                        return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                      };
                       
                       return (
                         <div key={t.id} className="flex flex-col p-3 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 text-[11px] gap-2">
                           <div className="flex justify-between items-center border-b border-black/5 dark:border-white/5 pb-1.5">
                             <span className="font-bold text-gray-800 dark:text-white">Ticket #{t.id}</span>
-                            <span className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-white/5 text-[9px] font-black text-gray-500 uppercase">
+                            <span className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-white/5 text-[9px] font-black text-gray-505 uppercase">
                               Resolvido
                             </span>
                           </div>
@@ -3094,12 +3098,12 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                           <div className="flex flex-col gap-1 text-[10px] text-gray-600 dark:text-gray-300">
                             <div>
                               <span className="font-extrabold uppercase text-gray-400 mr-1">Início:</span>
-                              {start.toLocaleDateString()} {start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {formatDateTimeSafe(start)}
                             </div>
                             {end && (
                               <div>
                                 <span className="font-extrabold uppercase text-gray-400 mr-1">Fim:</span>
-                                {end.toLocaleDateString()} {end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {formatDateTimeSafe(end)}
                               </div>
                             )}
                           </div>
@@ -3948,6 +3952,18 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
   const [activeKanbanTab, setActiveKanbanTab] = useState<'rapido' | 'medio' | 'complexo'>('rapido');
 
+  const formatTimeSafe = (dateStr: any) => {
+    if (!dateStr) return 'N/A';
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? 'N/A' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatDateSafe = (dateStr: any) => {
+    if (!dateStr) return 'N/A';
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? 'N/A' : `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  };
+
   const fetchClosedTickets = async () => {
     setLoading(true);
     try {
@@ -3960,14 +3976,53 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       if (error) throw error;
 
-      const { data: contactsData } = await supabase
-        .from('contacts')
-        .select('id, name, custom_name, fantasy_name, phone');
+      // Obter contatos específicos para evitar estourar o limite de paginação do Supabase (1000 registros)
+      const contactIds = Array.from(new Set((data || []).map(t => t.contact_id).filter(Boolean)));
+      let contactsData: any[] = [];
+      if (contactIds.length > 0) {
+        const { data: cData, error: cErr } = await supabase
+          .from('contacts')
+          .select('id, name, custom_name, fantasy_name, phone')
+          .in('id', contactIds);
+        if (!cErr && cData) {
+          contactsData = cData;
+        }
+      }
       
       const contactsMap = new Map<string, any>();
       if (contactsData) {
         contactsData.forEach(c => contactsMap.set(c.id, c));
       }
+
+      // Buscar mensagens de sistema que indicam quem resolveu o ticket para preencher histórico retroativo
+      const { data: sysMsgs } = await supabase
+        .from('messages')
+        .select('conversation_id, text_content')
+        .ilike('text_content', '✅ Resolvido por %');
+
+      const convIds = Array.from(new Set((sysMsgs || []).map(m => m.conversation_id).filter(Boolean)));
+      const convToContactMap = new Map<string, string>();
+      
+      if (convIds.length > 0) {
+        const { data: convs } = await supabase
+          .from('conversations')
+          .select('id, contact_id')
+          .in('id', convIds);
+        if (convs) {
+          convs.forEach(c => convToContactMap.set(c.id, c.contact_id));
+        }
+      }
+
+      const operatorFallbacks = new Map<string, string>();
+      (sysMsgs || []).forEach(m => {
+        const contactId = convToContactMap.get(m.conversation_id);
+        if (contactId && m.text_content) {
+          const match = m.text_content.match(/Resolvido por\s+([^\n]+?)\s+dia/);
+          if (match) {
+            operatorFallbacks.set(contactId, match[1].trim());
+          }
+        }
+      });
 
       const mapped = (data || []).map(t => {
         const c = contactsMap.get(t.contact_id);
@@ -3975,7 +4030,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           ? (c.custom_name || c.name || c.phone || 'Cliente')
           : 'Cliente';
         const companyFantasyName = c?.fantasy_name || '';
-        const operatorName = t.metadata?.closed_by || (t.metadata?.operators && t.metadata.operators[0]?.name) || 'Atendente';
+        const fallbackOp = operatorFallbacks.get(t.contact_id) || 'Atendente';
+        const operatorName = t.metadata?.closed_by || (t.metadata?.operators && t.metadata.operators[0]?.name) || fallbackOp;
         
         const start = new Date(t.opened_at);
         const end = t.closed_at ? new Date(t.closed_at) : new Date();
@@ -4220,7 +4276,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                     🏢 {t.companyFantasyName || 'Empresa Própria'}
                                   </span>
                                   <span className="text-[8px] font-bold text-gray-400 shrink-0">
-                                    {new Date(t.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    {formatTimeSafe(t.closed_at)}
                                   </span>
                                 </div>
 
@@ -4312,13 +4368,13 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 <div className="p-2.5 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5 flex flex-col">
                   <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider mb-0.5">Início</span>
                   <span className="font-semibold text-gray-700 dark:text-gray-200">
-                    {new Date(selectedTicket.opened_at).toLocaleDateString('pt-BR')} {new Date(selectedTicket.opened_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {formatDateSafe(selectedTicket.opened_at)}
                   </span>
                 </div>
                 <div className="p-2.5 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5 flex flex-col">
                   <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider mb-0.5">Fim</span>
                   <span className="font-semibold text-gray-700 dark:text-gray-200">
-                    {new Date(selectedTicket.closed_at).toLocaleDateString('pt-BR')} {new Date(selectedTicket.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {formatDateSafe(selectedTicket.closed_at)}
                   </span>
                 </div>
                 <div className="p-2.5 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5 flex flex-col">
