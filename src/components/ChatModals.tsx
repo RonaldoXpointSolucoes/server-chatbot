@@ -4096,6 +4096,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           ...t,
           contactName,
           companyFantasyName,
+          companyName,
           operatorName,
           duration
         };
