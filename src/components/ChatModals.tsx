@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -4322,6 +4322,12 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
   const [activeKanbanTab, setActiveKanbanTab] = useState<'rapido' | 'medio' | 'complexo'>('rapido');
   const [activeView, setActiveView] = useState<'kanban' | 'dashboard'>('kanban');
+  const [showTicketMenu, setShowTicketMenu] = useState(false);
+  const [reanalyzingId, setReanalyzingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    setShowTicketMenu(false);
+  }, [selectedTicket?.id]);
 
   const daysList = useMemo(() => {
     const list = [];
@@ -4344,6 +4350,95 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     if (!dateStr) return 'N/A';
     const d = new Date(dateStr);
     return isNaN(d.getTime()) ? 'N/A' : `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  };
+
+  const handleReanalyzeTicket = async (ticket: any) => {
+    if (!ticket || reanalyzingId) return;
+    setReanalyzingId(ticket.id);
+    try {
+      const { supabase } = await import('../services/supabase');
+      const { geminiService } = await import('../services/geminiService');
+
+      // 1. Fetch conversation id
+      const { data: convData } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('contact_id', ticket.contact_id)
+        .maybeSingle();
+
+      if (!convData?.id) {
+        throw new Error('Conversa correspondente não encontrada para buscar histórico.');
+      }
+
+      // 2. Fetch messages within ticket lifetime
+      const { data: ticketMsgs } = await supabase
+        .from('messages')
+        .select('text_content, sender_type, timestamp')
+        .eq('conversation_id', convData.id)
+        .gte('timestamp', ticket.opened_at)
+        .lte('timestamp', ticket.closed_at)
+        .order('timestamp', { ascending: true });
+
+      const formattedMsgs = (ticketMsgs || []).map((m: any) => {
+        const text = (m.text_content || '').trim();
+        let isHuman = m.sender_type === 'human';
+        if (!isHuman && text) {
+          const matchAsterisk = text.match(/^\*([^*:\n]+):\*/);
+          if (matchAsterisk) {
+            isHuman = true;
+          }
+        }
+        return {
+          sender: isHuman ? 'human' : 'client',
+          text: text,
+          timestamp: new Date(m.timestamp).toLocaleString('pt-BR')
+        };
+      });
+
+      // 3. Generate analysis
+      const result = await geminiService.generateTicketAnalysis({
+        opened_at: new Date(ticket.opened_at).toLocaleString('pt-BR'),
+        closed_at: new Date(ticket.closed_at).toLocaleString('pt-BR'),
+        operators: ticket.metadata?.operators || [],
+        closed_by: ticket.metadata?.closed_by || 'Atendente',
+        messages: formattedMsgs
+      });
+
+      const finalStats = { 
+        ...(ticket.metadata || {}), 
+        summary: result.summary || '', 
+        checklist: result.problems_checklist || [],
+        error_log: result.error_log || null
+      };
+
+      // 4. Update row
+      const { error: updateErr } = await supabase
+        .from('chat_tickets')
+        .update({ 
+          problem_description: result.problem_description || "Sem descrição",
+          resolution_summary: result.resolution_summary || "Sem detalhes",
+          metadata: finalStats
+        })
+        .eq('id', ticket.id);
+
+      if (updateErr) throw updateErr;
+
+      // 5. Update state
+      const updatedLocalTicket = {
+        ...ticket,
+        problem_description: result.problem_description || "Sem descrição",
+        resolution_summary: result.resolution_summary || "Sem detalhes",
+        metadata: finalStats
+      };
+
+      setSelectedTicket(updatedLocalTicket);
+      await fetchClosedTickets();
+    } catch (err: any) {
+      console.error('Erro na reanálise do ticket:', err);
+      alert('Erro ao reanalisar ticket: ' + (err?.message || String(err)));
+    } finally {
+      setReanalyzingId(null);
+    }
   };
 
   const fetchClosedTickets = async () => {
@@ -4545,7 +4640,18 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     filteredTickets.forEach(t => {
       const start = new Date(t.opened_at);
       const end = t.closed_at ? new Date(t.closed_at) : new Date();
-      const diffMins = Math.floor((end.getTime() - s    return [
+      const diffMins = Math.floor((end.getTime() - start.getTime()) / 60000);
+
+      if (diffMins < 15) {
+        rapido.push(t);
+      } else if (diffMins <= 120) {
+        medio.push(t);
+      } else {
+        complexo.push(t);
+      }
+    });
+
+    return [
       { 
         id: 'rapido', 
         title: '⚡ Rápido', 
@@ -4832,7 +4938,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                       <img 
                                         src={t.profile_picture_url} 
                                         alt={t.contactName} 
-                                        className="w-8.5 h-8.5 rounded-full object-cover border border-black/5 dark:border-white/10 shadow-sm shrink-0"
+                                        className="w-9 h-9 rounded-full object-cover border border-black/5 dark:border-white/10 shadow-sm shrink-0"
                                         onError={(e) => {
                                           e.currentTarget.style.display = 'none';
                                           if (e.currentTarget.nextElementSibling) {
@@ -4843,7 +4949,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                       />
                                     ) : null}
                                     <div className={cn(
-                                      "w-8.5 h-8.5 rounded-full bg-gradient-to-tr text-white font-black text-[12px] flex items-center justify-center shadow-inner shrink-0",
+                                      "w-9 h-9 rounded-full bg-gradient-to-tr text-white font-black text-[12px] flex items-center justify-center shadow-inner shrink-0",
                                       col.avatarGradient,
                                       t.profile_picture_url ? "hidden" : "flex"
                                     )}>
@@ -4916,7 +5022,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             <div className="w-full md:w-[55%] xl:w-[40%] border border-gray-150/10 dark:border-white/5 bg-slate-50/30 dark:bg-black/20 rounded-[24px] p-5 flex flex-col gap-4.5 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
               
               {/* Header Details */}
-              <div className="flex items-center justify-between border-b border-gray-150/15 dark:border-white/5 pb-3 shrink-0">
+              <div className="flex items-center justify-between border-b border-gray-150/15 dark:border-white/5 pb-3 shrink-0 relative">
                 <div className="flex flex-col gap-1">
                   <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-wider">
                     Detalhes do Ticket #{selectedTicket.id}
@@ -4936,65 +5042,96 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     🧑‍💻 Atendente: {selectedTicket.operatorName}
                   </span>
                 </div>
-                <button
-                  onClick={() => setSelectedTicket(null)}
-                  className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-white transition-colors shrink-0 align-top self-start cursor-pointer"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-
-              {/* Exclude Reports Settings Card */}
-              <div className="p-4 bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/15 rounded-2xl flex flex-col gap-2 transition-all shrink-0">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[10.5px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-wider flex items-center gap-1.5">
-                      🚫 Excluir de Relatórios & I.A.
-                    </span>
-                    <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 leading-relaxed">
-                      Ignorar este contato e seus chamados nas métricas, dashboards e análise de I.A. ao encerrar.
-                    </span>
+                <div className="flex items-center gap-1.5 align-top self-start shrink-0">
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowTicketMenu(!showTicketMenu)}
+                      className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                      title="Mais opções"
+                    >
+                      <MoreVertical size={14} />
+                    </button>
+                    {showTicketMenu && (
+                      <div className="absolute right-0 mt-1 w-64 bg-white dark:bg-[#202c33] border border-black/10 dark:border-white/10 rounded-2xl shadow-xl z-50 p-3.5 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-150 text-left">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10.5px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-wider flex items-center gap-1">
+                            🚫 Excluir de Relatórios & I.A.
+                          </span>
+                          <span className="text-[9.5px] font-semibold text-gray-550 dark:text-gray-400 leading-normal">
+                            Ignorar este contato e seus chamados nas métricas, dashboards e análise de I.A. ao encerrar.
+                          </span>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const newExcl = !selectedTicket.exclude_reports;
+                              const { supabase } = await import('../services/supabase');
+                              const { error } = await supabase
+                                .from('contacts')
+                                .update({ exclude_reports: newExcl })
+                                .eq('id', selectedTicket.contact_id);
+                              
+                              if (!error) {
+                                setSelectedTicket({
+                                  ...selectedTicket,
+                                  exclude_reports: newExcl
+                                });
+                                fetchClosedTickets();
+                                setShowTicketMenu(false);
+                              }
+                            } catch (err) {
+                              console.error(err);
+                            }
+                          }}
+                          className={cn(
+                            "w-full py-1.5 rounded-xl text-[9.5px] font-black uppercase transition-all duration-200 border cursor-pointer text-center",
+                            selectedTicket.exclude_reports
+                              ? "bg-rose-500 text-white border-rose-500 hover:bg-rose-600 shadow-sm"
+                              : "bg-transparent text-rose-500 border-rose-500/20 hover:bg-rose-500/10"
+                          )}
+                        >
+                          {selectedTicket.exclude_reports ? 'Ignorado' : 'Ignorar'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <button
-                    onClick={async () => {
-                      try {
-                        const newExcl = !selectedTicket.exclude_reports;
-                        const { supabase } = await import('../services/supabase');
-                        const { error } = await supabase
-                          .from('contacts')
-                          .update({ exclude_reports: newExcl })
-                          .eq('id', selectedTicket.contact_id);
-                        
-                        if (!error) {
-                          setSelectedTicket({
-                            ...selectedTicket,
-                            exclude_reports: newExcl
-                          });
-                          fetchClosedTickets();
-                        }
-                      } catch (err) {
-                        console.error(err);
-                      }
-                    }}
-                    className={cn(
-                      "px-3 py-1.5 rounded-xl text-[9.5px] font-black uppercase transition-all duration-200 shrink-0 border cursor-pointer",
-                      selectedTicket.exclude_reports
-                        ? "bg-rose-500 text-white border-rose-500 hover:bg-rose-600 shadow-sm"
-                        : "bg-transparent text-rose-500 border-rose-500/20 hover:bg-rose-500/10"
-                    )}
+                    onClick={() => setSelectedTicket(null)}
+                    className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-white transition-colors shrink-0 cursor-pointer"
                   >
-                    {selectedTicket.exclude_reports ? 'Ignorado' : 'Ignorar'}
+                    <X size={14} />
                   </button>
                 </div>
               </div>
 
               {/* AI Processing Error Log Alert */}
               {(selectedTicket.metadata?.error_log || selectedTicket.problem_description === "Erro no processamento do problema." || selectedTicket.metadata?.summary === "Erro ao gerar resumo da solução.") && (
-                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 p-4 rounded-xl text-xs flex flex-col gap-2 leading-relaxed font-sans shrink-0 border-l-[4px] border-l-rose-500">
-                  <div className="flex items-center gap-1.5 font-black uppercase tracking-wider text-[10px]">
-                    <AlertTriangle size={14} className="text-rose-500 animate-pulse animate-duration-1000" />
-                    <span>Falha no Processamento da I.A.</span>
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 p-4 rounded-xl text-xs flex flex-col gap-3 leading-relaxed font-sans shrink-0 border-l-[4px] border-l-rose-500">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-1.5 font-black uppercase tracking-wider text-[10px]">
+                      <AlertTriangle size={14} className="text-rose-500 animate-pulse animate-duration-1000" />
+                      <span>Falha no Processamento da I.A.</span>
+                    </div>
+                    
+                    <button
+                      onClick={() => handleReanalyzeTicket(selectedTicket)}
+                      disabled={reanalyzingId === selectedTicket.id}
+                      className="px-2.5 py-1 bg-rose-500 text-white rounded-lg text-[9px] font-black uppercase hover:bg-rose-600 active:scale-95 disabled:opacity-50 transition-all flex items-center gap-1 cursor-pointer shrink-0"
+                    >
+                      {reanalyzingId === selectedTicket.id ? (
+                        <>
+                          <Loader2 size={10} className="animate-spin" />
+                          <span>Analisando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <BrainCircuit size={10} />
+                          <span>Reanalisar</span>
+                        </>
+                      )}
+                    </button>
                   </div>
+                  
                   <p className="font-semibold text-gray-850 dark:text-rose-250 select-text">
                     {selectedTicket.metadata?.error_log || "A chave de API do Gemini pode estar incorreta, ausente ou instável. O chamado foi encerrado manualmente sem o preenchimento automático das anotações."}
                   </p>
@@ -5086,21 +5223,6 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                       <div key={idx} className="flex justify-between text-xs text-gray-650 dark:text-gray-305 font-semibold">
                         <span>{op.name}</span>
                         <span className="font-bold text-gray-850 dark:text-white">{op.percentage}% ({op.count} msgs)</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-            </div>
-          )}
-
-        </div>
-
-      </div>
-    </div>
-  );
-}t-white">{op.percentage}% ({op.count} msgs)</span>
                       </div>
                     ))}
                   </div>
