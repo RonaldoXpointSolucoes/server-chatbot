@@ -4516,7 +4516,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       if (contactIds.length > 0) {
         const { data: cData, error: cErr } = await supabase
           .from('contacts')
-          .select('id, name, custom_name, fantasy_name, phone, company_ids, profile_picture_url, exclude_reports, instance_id, conv_status, is_blocked')
+          .select('id, name, custom_name, fantasy_name, phone, company_ids, profile_picture_url, exclude_reports, instance_id, is_blocked')
           .in('id', contactIds);
         if (!cErr && cData) {
           contactsData = cData;
@@ -4550,27 +4550,32 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         contactsMap.set(c.id, c);
       });
 
-      // Mapeamento dos operadores reais que atuaram no ticket como fallback
+      // Mapeamento dos operadores reais que atuaram no ticket como fallback e status da conversa
       const operatorFallbacks = new Map<string, string>();
+      const convStatusMap = new Map<string, string>();
       const { data: convsData } = await supabase
         .from('conversations')
-        .select('contact_id, user_email, user_name')
+        .select('contact_id, user_email, user_name, status')
         .in('contact_id', contactIds);
       
       if (convsData) {
         convsData.forEach(c => {
           if (c.contact_id) {
             operatorFallbacks.set(c.contact_id, c.user_name || c.user_email || 'Atendente');
+            convStatusMap.set(c.contact_id, c.status || 'open');
           }
         });
       }
 
       const mappedOpen = openList.map(t => {
         const c = contactsMap.get(t.contact_id);
-        if (!c || c.exclude_reports) return null;
-        if (c.conv_status === 'resolved' || c.conv_status === 'closed' || c.is_blocked) {
+        if (!c || c.exclude_reports || c.is_blocked) return null;
+
+        const convStatus = convStatusMap.get(t.contact_id) || 'open';
+        if (convStatus === 'resolved' || convStatus === 'closed') {
           return null;
         }
+
         return {
           ...t,
           instance_id: t.instance_id || c?.instance_id || null
