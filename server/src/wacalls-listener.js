@@ -159,16 +159,41 @@ async function handleWaCallsEvent(ev) {
             }
         }
 
-        // 2. Buscar o contato no Supabase
+        // 2. Buscar o contato no Supabase (suportando variações do 9º dígito brasileiro)
+        const getBrazilianPhoneVariations = (phone) => {
+            const clean = phone.replace(/\D/g, '');
+            if (!clean.startsWith('55')) return [clean];
+            if (clean.length === 13) {
+                const ddd = clean.substring(2, 4);
+                const local = clean.substring(4);
+                if (local.startsWith('9')) {
+                    const phone8 = '55' + ddd + local.substring(1);
+                    return [clean, phone8];
+                }
+            } else if (clean.length === 12) {
+                const ddd = clean.substring(2, 4);
+                const local = clean.substring(4);
+                const phone9 = '55' + ddd + '9' + local;
+                return [clean, phone9];
+            }
+            return [clean];
+        };
+
+        const phoneVariations = getBrazilianPhoneVariations(cleanPeer);
         const { data: contact, error: contactErr } = await supabase
             .from('contacts')
             .select('id, tenant_id')
             .eq('instance_id', sessionId)
-            .eq('phone', cleanPeer)
+            .in('phone', phoneVariations)
             .maybeSingle();
 
-        if (contactErr || !contact) {
-            console.warn(`[WaCalls Listener] Contato não encontrado no Supabase para o telefone ${cleanPeer} na instância ${sessionId}`);
+        if (contactErr) {
+            console.error(`[WaCalls Listener] Erro ao buscar contato no Supabase para o telefone ${cleanPeer}:`, contactErr.message);
+            return;
+        }
+
+        if (!contact) {
+            console.warn(`[WaCalls Listener] Contato não encontrado no Supabase para o telefone ${cleanPeer} (variações: ${phoneVariations.join(', ')}) na instância ${sessionId}`);
             return;
         }
 
