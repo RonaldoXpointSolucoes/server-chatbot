@@ -4516,7 +4516,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       if (contactIds.length > 0) {
         const { data: cData, error: cErr } = await supabase
           .from('contacts')
-          .select('id, name, custom_name, fantasy_name, phone, company_ids, profile_picture_url, exclude_reports, instance_id')
+          .select('id, name, custom_name, fantasy_name, phone, company_ids, profile_picture_url, exclude_reports, instance_id, conv_status, is_blocked')
           .in('id', contactIds);
         if (!cErr && cData) {
           contactsData = cData;
@@ -4567,11 +4567,15 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       const mappedOpen = openList.map(t => {
         const c = contactsMap.get(t.contact_id);
+        if (!c || c.exclude_reports) return null;
+        if (c.conv_status === 'resolved' || c.conv_status === 'closed' || c.is_blocked) {
+          return null;
+        }
         return {
           ...t,
           instance_id: t.instance_id || c?.instance_id || null
         };
-      });
+      }).filter(Boolean);
       setOpenTickets(mappedOpen);
 
       const mapped = resolvedList.map(t => {
