@@ -205,7 +205,12 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
             const jid = args[0];
             const content = args[1];
             
-            let messageType = 'text';
+            // Se for uma edição de mensagem (contém a chave 'edit'), não insere na fila de saída (wa_outgoing_messages)
+            // e deixa passar direto para o socket do Baileys para evitar duplicar a mensagem
+            if (content && content.edit) {
+                // Passa direto
+            } else {
+                let messageType = 'text';
             let body = content.text || '';
             let mediaUrl = null;
 
@@ -248,6 +253,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     messageTimestamp: Math.floor(Date.now() / 1000)
                 }
             });
+            }
         }
 
         if(typeof sock[method] !== 'function') return res.status(400).json({ error: `Method ${method} not found on Baileys socket` });

@@ -369,20 +369,23 @@ class EventProcessor {
                     // Ou se possui explicitamente a propriedade "editedMessage"
                     if (p.type === 14 || p.type === 'MESSAGE_EDIT' || p.editedMessage) {
                         if (p.key && p.key.id && p.editedMessage) {
-                            const newText = this.extractTextFromMessage({ message: p.editedMessage });
-                            supabase.from('messages')
-                                .update({ text_content: newText })
-                                .eq('whatsapp_message_id', p.key.id)
-                                .then(({ error }) => {
-                                    if (error) console.error('[EventProcessor] Erro ao atualizar mensagem editada:', error);
-                                    else console.log('[EventProcessor] Mensagem editada processada no banco:', p.key.id);
-                                });
-                            
-                            // Tenta publicar no realtime (não bloqueia o fluxo)
-                            realtime.publishInboxEvent(tenantId, 'message.update', {
-                                whatsapp_message_id: p.key.id,
-                                text_content: newText
-                            }).catch(() => {});
+                             let newText = this.extractTextFromMessage({ message: p.editedMessage });
+                             if (newText && !newText.endsWith(' *(Editado)*')) {
+                                 newText = newText + ' *(Editado)*';
+                             }
+                             supabase.from('messages')
+                                 .update({ text_content: newText })
+                                 .eq('whatsapp_message_id', p.key.id)
+                                 .then(({ error }) => {
+                                     if (error) console.error('[EventProcessor] Erro ao atualizar mensagem editada:', error);
+                                     else console.log('[EventProcessor] Mensagem editada processada no banco:', p.key.id);
+                                 });
+                             
+                             // Tenta publicar no realtime (não bloqueia o fluxo)
+                             realtime.publishInboxEvent(tenantId, 'message.update', {
+                                 whatsapp_message_id: p.key.id,
+                                 text_content: newText
+                             }).catch(() => {});
                         }
                         // Sempre pula o enfileiramento de protocolMessage de edição
                         continue; 
