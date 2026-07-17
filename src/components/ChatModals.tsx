@@ -4313,8 +4313,9 @@ interface ClosedTicketsModalProps {
 
 export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps) {
   const tenantInfo = useChatStore(state => state.tenantInfo);
+  const storeContacts = useChatStore(state => state.contacts);
+  const connectedInstanceName = useChatStore(state => state.connectedInstanceName);
   const [tickets, setTickets] = useState<any[]>([]);
-  const [openTickets, setOpenTickets] = useState<any[]>([]);
   const [instances, setInstances] = useState<any[]>([]);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>(() => {
     return localStorage.getItem('closed_tickets_selected_instance_id') || 'all';
@@ -4510,22 +4511,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       const resolvedList = resolvedData || [];
 
-      // 2. Buscar conversas ativas (não resolvidas)
-      let convsQuery = supabase
-        .from('conversations')
-        .select('id, contact_id, status, instance_id, updated_at')
-        .eq('tenant_id', tenantId)
-        .neq('status', 'resolved')
-        .neq('status', 'closed');
-
-      const { data: activeConvs, error: convsErr } = await convsQuery;
-      if (convsErr) throw convsErr;
-
-      // 3. Obter todos os contact IDs envolvidos
-      const contactIds = Array.from(new Set([
-        ...resolvedList.map(t => t.contact_id),
-        ...(activeConvs || []).map(c => c.contact_id)
-      ].filter(Boolean)));
+      // 2. Obter todos os contact IDs envolvidos
+      const contactIds = Array.from(new Set(resolvedList.map(t => t.contact_id).filter(Boolean)));
 
       let contactsData: any[] = [];
       if (contactIds.length > 0) {
@@ -4579,22 +4566,6 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           }
         });
       }
-
-      // Map open tickets from active conversations
-      const mappedOpen = (activeConvs || []).map(conv => {
-        const c = contactsMap.get(conv.contact_id);
-        if (!c || c.exclude_reports || c.is_blocked) return null;
-
-        return {
-          id: conv.id,
-          contact_id: conv.contact_id,
-          status: 'open',
-          opened_at: conv.updated_at,
-          instance_id: conv.instance_id || c.instance_id || null,
-          problem_description: c.custom_name || c.name || 'Conversa Ativa'
-        };
-      }).filter(Boolean);
-      setOpenTickets(mappedOpen);
 
       // Map resolved tickets
       const mapped = resolvedList.map(t => {
@@ -4716,26 +4687,67 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     });
   }, [tickets, search, dateFilter, selectedDate, selectedInstanceId]);
 
-  const filteredOpenTickets = useMemo(() => {
-    return openTickets.filter(t => {
-      const term = search.toLowerCase();
-      const matchSearch = !term || 
-        (t.problem_description || '').toLowerCase().includes(term);
+  const openContactsFiltered = useMemo(() => {
+    const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+    const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
+    
+    let allowedInstances: string[] = [];
+    if (!isGlobalAdmin) {
+      const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+      if (allowedStr) {
+        try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
+      }
+    }
 
-      if (!matchSearch) return false;
+    return storeContacts.filter(c => {
+      // 1) RBAC Enforcement
+      if (!isGlobalAdmin) {
+        const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+        if (allowedStr) {
+          if (allowedInstances.length === 0) return false;
+          const effectiveInstId = c.instance_id || connectedInstanceName;
+          if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) {
+            return false;
+          }
+        } else {
+          return false;
+        }
+      }
 
+      // 2) Filtro de Caixa/Instância Selecionada
       if (selectedInstanceId !== 'all') {
-        const ticketInstId = t.instance_id || null;
-        if (ticketInstId !== selectedInstanceId) return false;
+        const dbInstId = c.instance_id || connectedInstanceName;
+        if (dbInstId !== selectedInstanceId) return false;
+      }
+
+      // 3) Não estar bloqueado
+      if (c.is_blocked) return false;
+
+      // 4) Não estar resolvido (Somente tickets ativos)
+      if (c.conv_status === 'resolved' || c.conv_status === 'closed') return false;
+
+      // 5) Não estar adiado ativo
+      if (c.conv_status === 'snoozed' && c.snoozed_until) {
+        const untilTimestamp = new Date(c.snoozed_until).getTime();
+        if (untilTimestamp > Date.now()) return false;
+      }
+
+      // 6) Filtro de busca por texto
+      const term = search.toLowerCase();
+      if (term) {
+        const matchText = (c.custom_name || '').toLowerCase().includes(term) ||
+                          (c.name || '').toLowerCase().includes(term) ||
+                          (c.phone || '').toLowerCase().includes(term);
+        if (!matchText) return false;
       }
 
       return true;
     });
-  }, [openTickets, search, selectedInstanceId]);
+  }, [storeContacts, selectedInstanceId, search, connectedInstanceName]);
 
   const stats = useMemo(() => {
     const closed = filteredTickets.length;
-    const open = filteredOpenTickets.length;
+    const open = openContactsFiltered.length;
     const total = closed + open;
 
     // Saúde do atendimento: porcentagem de chamados fechados com checklist 100% resolvido E sem falha de IA
@@ -4753,7 +4765,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     const health = closed > 0 ? Math.round((healthyCount / closed) * 100) : 100;
 
     return { total, closed, open, health };
-  }, [filteredTickets, filteredOpenTickets]);
+  }, [filteredTickets, openContactsFiltered]);
 
   const columns = useMemo(() => {
     const rapido: any[] = [];
