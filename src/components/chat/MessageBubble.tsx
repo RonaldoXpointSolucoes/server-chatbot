@@ -959,7 +959,9 @@ export const MessageBubble = memo(({
     prevProps.msg.taskCompleted === nextProps.msg.taskCompleted &&
     JSON.stringify(prevProps.msg.checklistItems || []) === JSON.stringify(nextProps.msg.checklistItems || []) &&
     prevProps.msg.created_by_name === nextProps.msg.created_by_name &&
-    JSON.stringify(prevProps.msg.mediaMetadata || {}) === JSON.stringify(nextProps.msg.mediaMetadata || {})
+    JSON.stringify(prevProps.msg.mediaMetadata || {}) === JSON.stringify(nextProps.msg.mediaMetadata || {}) &&
+    prevProps.messageFilter === nextProps.messageFilter &&
+    prevProps.ticketMode === nextProps.ticketMode
   );
 });
 
