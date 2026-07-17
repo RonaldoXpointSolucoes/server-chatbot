@@ -4545,28 +4545,17 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     filteredTickets.forEach(t => {
       const start = new Date(t.opened_at);
       const end = t.closed_at ? new Date(t.closed_at) : new Date();
-      const diffMins = Math.floor((end.getTime() - start.getTime()) / 60000);
-
-      if (diffMins < 15) {
-        rapido.push(t);
-      } else if (diffMins <= 120) {
-        medio.push(t);
-      } else {
-        complexo.push(t);
-      }
-    });
-
-    return [
+      const diffMins = Math.floor((end.getTime() - s    return [
       { 
         id: 'rapido', 
         title: '⚡ Rápido', 
         subtitle: '< 15 min', 
         tickets: rapido, 
-        headerBg: 'bg-amber-550 dark:bg-amber-600/90', 
-        colBorder: 'border-amber-500/25 dark:border-amber-500/15',
-        badgeBg: 'bg-white/20 text-white dark:bg-white/10 dark:text-amber-200',
-        companyBadgeClass: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/15',
-        cardHoverBorder: 'hover:border-amber-500/30 dark:hover:border-amber-500/20',
+        headerBg: 'bg-gradient-to-r from-amber-500/12 to-amber-500/[0.02] text-amber-700 dark:text-amber-400 border-amber-500/25 dark:border-amber-500/15', 
+        colBorder: 'border-amber-500/20 dark:border-amber-500/10',
+        badgeBg: 'bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 border border-amber-500/25 dark:border-amber-500/15',
+        companyBadgeClass: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/20 dark:border-amber-500/10',
+        cardHoverBorder: 'hover:border-amber-500/35 dark:hover:border-amber-500/25 hover:shadow-[0_8px_30px_rgba(245,158,11,0.08)]',
         cardLeftBorder: 'border-l-[3.5px] border-l-amber-500',
         avatarGradient: 'from-amber-400 to-orange-500'
       },
@@ -4575,11 +4564,11 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         title: '🕒 Médio', 
         subtitle: '15 min - 2h', 
         tickets: medio, 
-        headerBg: 'bg-sky-550 dark:bg-sky-600/90', 
-        colBorder: 'border-sky-500/25 dark:border-sky-500/15',
-        badgeBg: 'bg-white/20 text-white dark:bg-white/10 dark:text-sky-200',
-        companyBadgeClass: 'text-sky-600 dark:text-sky-400 bg-sky-500/10 dark:bg-sky-500/15',
-        cardHoverBorder: 'hover:border-sky-500/30 dark:hover:border-sky-500/20',
+        headerBg: 'bg-gradient-to-r from-sky-500/12 to-sky-500/[0.02] text-sky-700 dark:text-sky-400 border-sky-500/25 dark:border-sky-500/15', 
+        colBorder: 'border-sky-500/20 dark:border-sky-500/10',
+        badgeBg: 'bg-sky-500/10 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300 border border-sky-500/25 dark:border-sky-500/15',
+        companyBadgeClass: 'text-sky-600 dark:text-sky-400 bg-sky-500/10 dark:bg-sky-500/15 border border-sky-500/20 dark:border-sky-500/10',
+        cardHoverBorder: 'hover:border-sky-500/35 dark:hover:border-sky-500/25 hover:shadow-[0_8px_30px_rgba(14,165,233,0.08)]',
         cardLeftBorder: 'border-l-[3.5px] border-l-sky-500',
         avatarGradient: 'from-sky-400 to-blue-500'
       },
@@ -4588,11 +4577,11 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         title: '🔥 Complexo', 
         subtitle: '> 2h', 
         tickets: complexo, 
-        headerBg: 'bg-rose-550 dark:bg-rose-600/90', 
-        colBorder: 'border-rose-500/25 dark:border-rose-500/15',
-        badgeBg: 'bg-white/20 text-white dark:bg-white/10 dark:text-rose-200',
-        companyBadgeClass: 'text-rose-600 dark:text-rose-455 bg-rose-500/10 dark:bg-rose-500/15',
-        cardHoverBorder: 'hover:border-rose-500/30 dark:hover:border-rose-500/20',
+        headerBg: 'bg-gradient-to-r from-rose-500/12 to-rose-500/[0.02] text-rose-700 dark:text-rose-400 border-rose-500/25 dark:border-rose-500/15', 
+        colBorder: 'border-rose-500/20 dark:border-rose-500/10',
+        badgeBg: 'bg-rose-500/10 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300 border border-rose-500/25 dark:border-rose-500/15',
+        companyBadgeClass: 'text-rose-600 dark:text-rose-455 bg-rose-500/10 dark:bg-rose-500/15 border border-rose-500/20 dark:border-rose-500/10',
+        cardHoverBorder: 'hover:border-rose-500/35 dark:hover:border-rose-500/25 hover:shadow-[0_8px_30px_rgba(244,63,94,0.08)]',
         cardLeftBorder: 'border-l-[3.5px] border-l-rose-500',
         avatarGradient: 'from-rose-400 to-red-500'
       }
@@ -4605,34 +4594,34 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
       
-      <div className="relative w-full max-w-6xl xl:max-w-7xl h-[85vh] bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col gap-4.5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden">
+      <div className="relative w-full max-w-6xl xl:max-w-7xl h-[85vh] bg-white/90 dark:bg-[#111b21]/80 backdrop-blur-2xl border border-gray-250 dark:border-white/10 rounded-[28px] shadow-2xl p-6 flex flex-col gap-5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden">
         
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5 animate-in fade-in duration-200">
-            <div className="p-2.5 bg-gradient-to-tr from-emerald-500 to-teal-500 rounded-2xl text-white shadow-sm shrink-0">
+          <div className="flex items-center gap-3 animate-in fade-in duration-200">
+            <div className="p-3 bg-gradient-to-tr from-emerald-500 to-teal-500 rounded-2xl text-white shadow-sm shrink-0">
               <FolderCheck size={20} />
             </div>
             <div className="flex flex-col text-left">
               <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
                 Tickets Fechados
               </h3>
-              <p className="text-[10px] font-bold text-gray-400">
+              <p className="text-[10px] font-bold text-gray-400 mt-0.5">
                 Auditoria de atendimentos e base de conhecimento resolvida
               </p>
             </div>
           </div>
           
           {/* View switcher */}
-          <div className="flex gap-1 bg-slate-100 dark:bg-black/25 p-1 rounded-xl border border-black/5 dark:border-white/5 select-none shrink-0 h-[34px] items-center ml-auto mr-4">
+          <div className="flex gap-1 bg-gray-100 dark:bg-black/25 p-1 rounded-xl border border-gray-200/50 dark:border-white/5 select-none shrink-0 h-[36px] items-center ml-auto mr-4 shadow-inner">
             <button
               onClick={() => setActiveView('kanban')}
               type="button"
               className={cn(
-                "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
+                "px-3.5 py-1.5 rounded-lg text-[9.5px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
                 activeView === 'kanban'
-                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold"
-                  : "text-gray-500 dark:text-gray-400 hover:text-gray-900"
+                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-400 font-black"
+                  : "text-gray-500 dark:text-gray-455 hover:text-gray-900"
               )}
             >
               <span>Mosaico</span>
@@ -4641,17 +4630,17 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               onClick={() => setActiveView('dashboard')}
               type="button"
               className={cn(
-                "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
+                "px-3.5 py-1.5 rounded-lg text-[9.5px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
                 activeView === 'dashboard'
-                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold"
-                  : "text-gray-500 dark:text-gray-400 hover:text-gray-900"
+                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-400 font-black"
+                  : "text-gray-500 dark:text-gray-455 hover:text-gray-900"
               )}
             >
               <span>Insights I.A.</span>
             </button>
           </div>
 
-          <button onClick={onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-550 transition-colors">
+          <button onClick={onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-white transition-colors cursor-pointer shrink-0">
             <X size={16} />
           </button>
         </div>
@@ -4665,11 +4654,11 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               placeholder="Buscar por cliente, atendente, problema ou resumo..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full text-xs pl-9 pr-3 py-2.5 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 font-medium font-sans"
+              className="w-full text-xs pl-9 pr-3 py-2.5 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 font-medium font-sans transition-all"
             />
           </div>
           
-          <div className="flex gap-1.5 bg-slate-100 dark:bg-black/30 p-1 rounded-2xl border border-black/5 dark:border-white/5 select-none shrink-0 h-[38px] items-center">
+          <div className="flex gap-1.5 bg-gray-100 dark:bg-black/30 p-1 rounded-2xl border border-gray-200/50 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner">
             {[
               { id: 'all', label: 'Todos' },
               { id: 'today', label: 'Hoje' },
@@ -4681,9 +4670,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 onClick={() => setDateFilter(btn.id)}
                 type="button"
                 className={cn(
-                  "px-3.5 py-1.5 rounded-xl text-[10px] font-bold transition-all",
+                  "px-4 py-1.5 rounded-xl text-[10.5px] font-bold transition-all cursor-pointer",
                   dateFilter === btn.id 
-                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold" 
+                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-400 font-extrabold" 
                     : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
                 )}
               >
@@ -4694,7 +4683,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         </div>
 
         {/* Weekly Day Selector (3 days before / 3 days after today) */}
-        <div className="flex justify-center items-center gap-3.5 bg-slate-50/50 dark:bg-black/10 p-3 rounded-2xl border border-black/5 dark:border-white/5 select-none overflow-x-auto shrink-0">
+        <div className="flex justify-center items-center gap-3.5 bg-slate-50/50 dark:bg-[#182229]/30 p-3.5 rounded-2xl border border-gray-150/10 dark:border-white/5 select-none overflow-x-auto shrink-0 custom-scrollbar">
           {daysList.map((day, idx) => {
             const isToday = day.toDateString() === new Date().toDateString();
             const isSelected = dateFilter === 'today' && day.toDateString() === selectedDate.toDateString();
@@ -4710,12 +4699,12 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                   setDateFilter('today');
                 }}
                 className={cn(
-                  "flex flex-col items-center gap-1 py-1.5 w-11 rounded-xl transition-all duration-200 shrink-0",
+                  "flex flex-col items-center gap-1 py-2 w-12 rounded-xl transition-all duration-200 shrink-0 cursor-pointer border",
                   isSelected
-                    ? "bg-emerald-500 text-white font-extrabold shadow-md shadow-emerald-500/20 scale-105"
+                    ? "bg-emerald-500 text-white font-extrabold shadow-lg shadow-emerald-500/20 border-emerald-500 scale-105"
                     : isToday
-                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20"
-                      : "text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white"
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-450 font-bold border-emerald-500/20 hover:bg-emerald-500/20"
+                      : "text-gray-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white border-transparent"
                 )}
               >
                 <span className="text-[9px] uppercase tracking-wider opacity-60 font-black">{weekdayLabel}</span>
@@ -4728,7 +4717,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         {/* Kanban Tab Selector for Mobile / Tablet */}
         {activeView === 'kanban' && (
           <div className={cn(
-            "gap-1.5 bg-slate-100 dark:bg-black/30 p-1.5 rounded-2xl border border-black/5 dark:border-white/5 select-none shrink-0 h-[38px] items-center",
+            "gap-1.5 bg-gray-100 dark:bg-black/30 p-1.5 rounded-2xl border border-gray-200/50 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner",
             selectedTicket ? "flex xl:hidden" : "flex md:hidden"
           )}>
             {columns.map(col => (
@@ -4737,14 +4726,14 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 onClick={() => setActiveKanbanTab(col.id)}
                 type="button"
                 className={cn(
-                  "flex-1 py-1.5 rounded-xl text-[10px] font-black transition-all flex items-center justify-center gap-1.5",
+                  "flex-1 py-1.5 rounded-xl text-[10.5px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer",
                   activeKanbanTab === col.id 
-                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold" 
-                    : "text-gray-500 dark:text-gray-400 hover:text-gray-900"
+                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-400 font-extrabold" 
+                    : "text-gray-500 dark:text-gray-450 hover:text-gray-900"
                 )}
               >
                 <span>{col.title}</span>
-                <span className="px-1.5 py-0.2 text-[8px] font-black rounded bg-black/5 dark:bg-white/5 shrink-0">
+                <span className="px-2 py-0.2 text-[8.5px] font-black rounded bg-black/5 dark:bg-white/5 shrink-0">
                   {col.tickets.length}
                 </span>
               </button>
@@ -4753,20 +4742,20 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         )}
 
         {/* Main Body */}
-        <div className="flex-1 flex gap-4 min-h-0">
+        <div className="flex-1 flex gap-5 min-h-0">
           
           {activeView === 'dashboard' ? (
             <ClosedTicketsDashboard tickets={filteredTickets} />
           ) : (
             /* Kanban Board columns container */
-            <div className={cn("flex-grow overflow-hidden flex gap-4 min-w-0 transition-all duration-300 h-full", selectedTicket && "hidden md:flex md:w-[45%] md:flex-grow-0 xl:w-[60%]")}>
+            <div className={cn("flex-grow overflow-hidden flex gap-5 min-w-0 transition-all duration-300 h-full", selectedTicket && "hidden md:flex md:w-[45%] md:flex-grow-0 xl:w-[60%]")}>
             {loading ? (
-              <div className="flex-1 flex items-center justify-center flex-col gap-2 text-gray-400">
-                <Loader2 className="animate-spin" size={24} />
+              <div className="flex-1 flex items-center justify-center flex-col gap-3 text-gray-400">
+                <Loader2 className="animate-spin text-emerald-500" size={28} />
                 <span className="text-xs font-semibold">Carregando tickets...</span>
               </div>
             ) : (
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-5 h-full">
                 {columns.map(col => {
                   const isVisible = activeKanbanTab === col.id;
                   
@@ -4774,7 +4763,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     <div 
                       key={col.id}
                       className={cn(
-                        "flex flex-col h-full bg-slate-50/20 dark:bg-[#182229]/20 border rounded-[24px] overflow-hidden transition-all duration-200",
+                        "flex flex-col h-full bg-slate-50/20 dark:bg-[#182229]/20 border rounded-[24px] overflow-hidden transition-all duration-200 shadow-sm",
                         col.colBorder,
                         selectedTicket 
                           ? (!isVisible ? "hidden xl:flex" : "flex") 
@@ -4782,18 +4771,18 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                       )}
                     >
                       {/* Column Header */}
-                      <div className={cn("px-4.5 py-4 text-white flex flex-col gap-1 shrink-0 select-none", col.headerBg)}>
+                      <div className={cn("px-5 py-4 flex flex-col gap-1 shrink-0 select-none border-b", col.headerBg)}>
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-black uppercase tracking-wider text-white">{col.title}</span>
-                          <span className={cn("px-2 py-0.5 rounded-full text-[9px] font-black shrink-0", col.badgeBg)}>
+                          <span className="text-xs font-black uppercase tracking-wider">{col.title}</span>
+                          <span className={cn("px-2.5 py-0.5 rounded-full text-[9.5px] font-black shrink-0", col.badgeBg)}>
                             {col.tickets.length}
                           </span>
                         </div>
-                        <span className="text-[8.5px] font-semibold text-white/70 uppercase tracking-wide text-left">{col.subtitle}</span>
+                        <span className="text-[9px] font-bold opacity-75 uppercase tracking-wide text-left">{col.subtitle}</span>
                       </div>
 
                       {/* Column Content */}
-                      <div className="flex-1 overflow-y-auto custom-scrollbar p-3.5 flex flex-col gap-3">
+                      <div className="flex-1 overflow-y-auto custom-scrollbar p-3.5 flex flex-col gap-3.5">
                         {col.tickets.length > 0 ? (
                           col.tickets.map(t => {
                             const totalMsg = t.metadata?.total_messages || 0;
@@ -4819,17 +4808,17 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                       🏢 {t.companyFantasyName || 'Empresa Própria'}
                                     </span>
                                     {t.companyName && t.companyName.toLowerCase() !== t.companyFantasyName?.toLowerCase() && (
-                                      <span className="text-[8.5px] font-medium text-gray-400 dark:text-gray-500 pl-2 truncate max-w-[150px] md:max-w-[200px]">
+                                      <span className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 pl-2 truncate max-w-[150px] md:max-w-[200px]">
                                         {t.companyName}
                                       </span>
                                     )}
                                   </div>
-                                  <div className="flex flex-col items-end text-right shrink-0 mt-0.5 text-[8px] font-black text-gray-400 dark:text-gray-500 gap-0.5">
-                                    <span className="flex items-center gap-1 font-semibold text-[#8696a0] dark:text-[#aebac1]">
+                                  <div className="flex flex-col items-end text-right shrink-0 mt-0.5 text-[8.5px] font-black text-gray-400 dark:text-gray-500 gap-0.5">
+                                    <span className="flex items-center gap-1 font-semibold text-gray-500 dark:text-[#aebac1]">
                                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
                                       {formatTimeSafe(t.opened_at)}
                                     </span>
-                                    <span className="flex items-center gap-1 font-semibold text-emerald-500 dark:text-emerald-400">
+                                    <span className="flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-450">
                                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
                                       {formatTimeSafe(t.closed_at)}
                                     </span>
@@ -4843,7 +4832,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                       <img 
                                         src={t.profile_picture_url} 
                                         alt={t.contactName} 
-                                        className="w-8 h-8 rounded-full object-cover border border-black/5 dark:border-white/10 shadow-sm"
+                                        className="w-8.5 h-8.5 rounded-full object-cover border border-black/5 dark:border-white/10 shadow-sm shrink-0"
                                         onError={(e) => {
                                           e.currentTarget.style.display = 'none';
                                           if (e.currentTarget.nextElementSibling) {
@@ -4854,7 +4843,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                       />
                                     ) : null}
                                     <div className={cn(
-                                      "w-8 h-8 rounded-full bg-gradient-to-tr text-white font-black text-[12px] flex items-center justify-center shadow-inner",
+                                      "w-8.5 h-8.5 rounded-full bg-gradient-to-tr text-white font-black text-[12px] flex items-center justify-center shadow-inner shrink-0",
                                       col.avatarGradient,
                                       t.profile_picture_url ? "hidden" : "flex"
                                     )}>
@@ -4862,45 +4851,45 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                     </div>
                                   </div>
                                   <div className="flex flex-col min-w-0 text-left">
-                                    <span className="text-[11.5px] font-black text-gray-900 dark:text-[#e9edef] truncate">
+                                    <span className="text-xs font-black text-gray-900 dark:text-[#e9edef] truncate">
                                       {t.contactName}
                                     </span>
-                                    <span className="text-[9.5px] text-gray-400 dark:text-gray-500 font-bold flex items-center gap-1">
-                                      <User size={10} className="text-gray-400 dark:text-gray-500 shrink-0" /> Atendente: <strong className="text-gray-600 dark:text-gray-300 font-black">{t.operatorName}</strong>
+                                    <span className="text-[10px] text-gray-500 dark:text-gray-400 font-bold flex items-center gap-1 mt-0.5">
+                                      <User size={11} className="text-gray-400 dark:text-gray-550 shrink-0" /> Atendente: <strong className="text-gray-650 dark:text-gray-300 font-black">{t.operatorName}</strong>
                                     </span>
                                   </div>
                                 </div>
 
                                 {/* Problem description */}
                                 {t.problem_description && (
-                                  <p className="text-[10px] text-gray-650 dark:text-gray-300 leading-normal line-clamp-2 bg-slate-50/50 dark:bg-black/10 p-2.5 rounded-[14px] border border-black/[0.02] dark:border-white/[0.02]">
-                                    <span className="font-extrabold text-[8px] text-gray-400 uppercase tracking-wide mr-1 select-none text-left block mb-0.5">Problema:</span>
+                                  <p className="text-[10.5px] text-gray-650 dark:text-gray-300 leading-relaxed line-clamp-2 bg-slate-50/50 dark:bg-black/10 p-2.5 rounded-[14px] border border-black/[0.01] dark:border-white/[0.01]">
+                                    <span className="font-extrabold text-[8.5px] text-gray-455 dark:text-gray-500 uppercase tracking-wide mr-1 select-none text-left block mb-0.5">Problema:</span>
                                     {t.problem_description}
                                   </p>
                                 )}
 
                                 {/* Bottom Statistics Footer */}
-                                <div className="pt-2 border-t border-black/[0.03] dark:border-white/[0.03] flex items-center justify-between flex-wrap gap-2 text-[8.5px] font-extrabold text-gray-400 select-none">
+                                <div className="pt-2 border-t border-black/[0.03] dark:border-white/[0.03] flex items-center justify-between flex-wrap gap-2 text-[9px] font-black text-gray-455 select-none">
                                   <div className="flex items-center gap-2">
-                                    <span className="flex items-center gap-1"><Clock size={10} className="text-gray-400 dark:text-gray-500" /> <span className="font-semibold text-gray-600 dark:text-gray-300">{t.duration}</span></span>
+                                    <span className="flex items-center gap-1"><Clock size={11} className="text-gray-455 dark:text-gray-500" /> <span className="font-bold text-gray-655 dark:text-gray-300">{t.duration}</span></span>
                                     <span>•</span>
-                                    <span className="flex items-center gap-1"><MessageSquare size={10} className="text-gray-400 dark:text-gray-500" /> <span className="font-semibold text-gray-600 dark:text-gray-300">{totalMsg}</span></span>
+                                    <span className="flex items-center gap-1"><MessageSquare size={11} className="text-gray-455 dark:text-gray-500" /> <span className="font-bold text-gray-655 dark:text-gray-300">{totalMsg}</span></span>
                                   </div>
                                   
                                   <div className="flex items-center gap-1.5">
                                     {(t.metadata?.error_log || t.problem_description === "Erro no processamento do problema." || t.metadata?.summary === "Erro ao gerar resumo da solução.") && (
-                                      <span className="px-2 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md text-[8px] font-black animate-pulse flex items-center gap-1 shrink-0">
-                                        <AlertTriangle size={9} /> Falha I.A.
+                                      <span className="px-2 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md text-[8.5px] font-black animate-pulse flex items-center gap-1 shrink-0 border border-rose-500/20">
+                                        <AlertTriangle size={10} /> Falha I.A.
                                       </span>
                                     )}
                                     {checklistItems.length > 0 && (
                                       <span className={cn(
-                                        "px-2 py-0.5 rounded-md text-[8px] font-black flex items-center gap-1 shrink-0 transition-colors",
+                                        "px-2 py-0.5 rounded-md text-[8.5px] font-black flex items-center gap-1 shrink-0 transition-colors border",
                                         resolvedCount === checklistItems.length
-                                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                          : "bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                          : "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
                                       )}>
-                                        <CheckCircle2 size={9} /> {resolvedCount}/{checklistItems.length} Checklist
+                                        <CheckCircle2 size={10} /> {resolvedCount}/{checklistItems.length} Checklist
                                       </span>
                                     )}
                                   </div>
@@ -4909,8 +4898,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                             );
                           })
                         ) : (
-                          <div className="flex-1 flex items-center justify-center flex-col gap-1 p-8 text-gray-400/60 dark:text-gray-500/50 border-2 border-dashed border-black/5 dark:border-white/5 rounded-2xl">
-                            <span className="text-[10px] font-bold">Nenhum ticket nesta coluna</span>
+                          <div className="flex-1 flex items-center justify-center flex-col gap-2 p-8 text-gray-400/60 dark:text-gray-500/50 border-2 border-dashed border-black/5 dark:border-white/5 rounded-3xl bg-slate-50/10">
+                            <span className="text-[11px] font-bold">Nenhum ticket nesta coluna</span>
                           </div>
                         )}
                       </div>
@@ -4924,45 +4913,45 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
           {/* Ticket Details Panel */}
           {selectedTicket && (
-            <div className="w-full md:w-[55%] xl:w-[40%] border border-black/5 dark:border-white/5 bg-slate-50/50 dark:bg-black/20 rounded-[24px] p-5 flex flex-col gap-4 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
+            <div className="w-full md:w-[55%] xl:w-[40%] border border-gray-150/10 dark:border-white/5 bg-slate-50/30 dark:bg-black/20 rounded-[24px] p-5 flex flex-col gap-4.5 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
               
               {/* Header Details */}
-              <div className="flex items-center justify-between border-b border-black/[0.04] dark:border-white/[0.04] pb-3 shrink-0">
-                <div className="flex flex-col gap-0.5">
+              <div className="flex items-center justify-between border-b border-gray-150/15 dark:border-white/5 pb-3 shrink-0">
+                <div className="flex flex-col gap-1">
                   <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-wider">
                     Detalhes do Ticket #{selectedTicket.id}
                   </h4>
-                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex flex-col gap-0.5">
+                  <span className="text-[10.5px] font-bold text-emerald-600 dark:text-emerald-450 uppercase tracking-wide flex flex-col gap-0.5 mt-0.5">
                     <span>🏢 {selectedTicket.companyFantasyName || 'Empresa Própria'}</span>
                     {selectedTicket.companyName && selectedTicket.companyName.toLowerCase() !== selectedTicket.companyFantasyName?.toLowerCase() && (
-                      <span className="text-[8.5px] font-semibold text-gray-400 dark:text-gray-500 pl-4 lowercase first-letter:uppercase">
+                      <span className="text-[9px] font-semibold text-gray-405 dark:text-gray-500 pl-4 lowercase first-letter:uppercase">
                         Empresa: {selectedTicket.companyName}
                       </span>
                     )}
                   </span>
-                  <span className="text-[9.5px] font-bold text-gray-600 dark:text-gray-300">
+                  <span className="text-xs font-bold text-gray-700 dark:text-gray-250 mt-1">
                     👤 Cliente: {selectedTicket.contactName}
                   </span>
-                  <span className="text-[9.5px] font-bold text-gray-500 dark:text-gray-400">
+                  <span className="text-xs font-bold text-gray-500 dark:text-gray-400 mt-0.5">
                     🧑‍💻 Atendente: {selectedTicket.operatorName}
                   </span>
                 </div>
                 <button
                   onClick={() => setSelectedTicket(null)}
-                  className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-455 hover:text-gray-650 transition-colors shrink-0 align-top self-start"
+                  className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-white transition-colors shrink-0 align-top self-start cursor-pointer"
                 >
                   <X size={14} />
                 </button>
               </div>
 
               {/* Exclude Reports Settings Card */}
-              <div className="p-3.5 bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/15 rounded-2xl flex flex-col gap-2 transition-all shrink-0">
+              <div className="p-4 bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/15 rounded-2xl flex flex-col gap-2 transition-all shrink-0">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-wider flex items-center gap-1">
+                    <span className="text-[10.5px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-wider flex items-center gap-1.5">
                       🚫 Excluir de Relatórios & I.A.
                     </span>
-                    <span className="text-[9.5px] font-semibold text-gray-500 dark:text-gray-400 leading-normal">
+                    <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 leading-relaxed">
                       Ignorar este contato e seus chamados nas métricas, dashboards e análise de I.A. ao encerrar.
                     </span>
                   </div>
@@ -4988,9 +4977,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                       }
                     }}
                     className={cn(
-                      "px-2.5 py-1 rounded-xl text-[9px] font-black uppercase transition-all duration-200 shrink-0 border cursor-pointer",
+                      "px-3 py-1.5 rounded-xl text-[9.5px] font-black uppercase transition-all duration-200 shrink-0 border cursor-pointer",
                       selectedTicket.exclude_reports
-                        ? "bg-rose-500 text-white border-rose-500 hover:bg-rose-600"
+                        ? "bg-rose-500 text-white border-rose-500 hover:bg-rose-600 shadow-sm"
                         : "bg-transparent text-rose-500 border-rose-500/20 hover:bg-rose-500/10"
                     )}
                   >
@@ -5001,46 +4990,46 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* AI Processing Error Log Alert */}
               {(selectedTicket.metadata?.error_log || selectedTicket.problem_description === "Erro no processamento do problema." || selectedTicket.metadata?.summary === "Erro ao gerar resumo da solução.") && (
-                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 p-3.5 rounded-xl text-xs flex flex-col gap-1.5 leading-relaxed font-sans shrink-0">
-                  <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px]">
-                    <AlertTriangle size={14} className="text-rose-500 animate-pulse" />
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 p-4 rounded-xl text-xs flex flex-col gap-2 leading-relaxed font-sans shrink-0 border-l-[4px] border-l-rose-500">
+                  <div className="flex items-center gap-1.5 font-black uppercase tracking-wider text-[10px]">
+                    <AlertTriangle size={14} className="text-rose-500 animate-pulse animate-duration-1000" />
                     <span>Falha no Processamento da I.A.</span>
                   </div>
-                  <p className="font-semibold text-gray-800 dark:text-rose-250 select-text">
+                  <p className="font-semibold text-gray-850 dark:text-rose-250 select-text">
                     {selectedTicket.metadata?.error_log || "A chave de API do Gemini pode estar incorreta, ausente ou instável. O chamado foi encerrado manualmente sem o preenchimento automático das anotações."}
                   </p>
                 </div>
               )}
 
               {/* Timing Metadata Info */}
-              <div className="grid grid-cols-2 gap-2 text-[10px]">
-                <div className="p-2.5 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5 flex flex-col">
-                  <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider mb-0.5">Início</span>
-                  <span className="font-semibold text-gray-700 dark:text-gray-200">
+              <div className="grid grid-cols-2 gap-2 text-[10.5px]">
+                <div className="p-3 bg-white dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col">
+                  <span className="text-gray-400 dark:text-gray-500 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Início</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-200">
                     {formatDateSafe(selectedTicket.opened_at)}
                   </span>
                 </div>
-                <div className="p-2.5 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5 flex flex-col">
-                  <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider mb-0.5">Fim</span>
-                  <span className="font-semibold text-gray-700 dark:text-gray-200">
+                <div className="p-3 bg-white dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col">
+                  <span className="text-gray-400 dark:text-gray-500 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Fim</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-200">
                     {formatDateSafe(selectedTicket.closed_at)}
                   </span>
                 </div>
-                <div className="p-2.5 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5 flex flex-col">
-                  <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider mb-0.5">Duração</span>
-                  <span className="font-semibold text-gray-700 dark:text-gray-200">{selectedTicket.duration}</span>
+                <div className="p-3 bg-white dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col">
+                  <span className="text-gray-400 dark:text-gray-500 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Duração</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-200">{selectedTicket.duration}</span>
                 </div>
-                <div className="p-2.5 bg-white dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5 flex flex-col">
-                  <span className="text-gray-400 font-extrabold uppercase text-[8px] tracking-wider mb-0.5">Mensagens</span>
-                  <span className="font-semibold text-gray-700 dark:text-gray-200">{selectedTicket.metadata?.total_messages || 0} trocadas</span>
+                <div className="p-3 bg-white dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col">
+                  <span className="text-gray-400 dark:text-gray-500 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Mensagens</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-200">{selectedTicket.metadata?.total_messages || 0} trocadas</span>
                 </div>
               </div>
 
               {/* Description */}
               {selectedTicket.problem_description && (
-                <div className="flex flex-col gap-1 bg-white dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5">
-                  <span className="text-[9px] uppercase font-black text-gray-400 tracking-wider">Descrição do Problema</span>
-                  <p className="text-xs text-gray-700 dark:text-gray-200 font-medium leading-relaxed">
+                <div className="flex flex-col gap-1.5 bg-white dark:bg-black/20 p-4 rounded-xl border border-gray-150/10 dark:border-white/5">
+                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-500 tracking-wider">Descrição do Problema</span>
+                  <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold leading-relaxed select-text">
                     {selectedTicket.problem_description}
                   </p>
                 </div>
@@ -5048,9 +5037,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* Summary */}
               {selectedTicket.metadata?.summary && (
-                <div className="flex flex-col gap-1 bg-blue-500/5 p-3 rounded-xl border border-blue-500/10">
-                  <span className="text-[9px] uppercase font-black text-blue-600 dark:text-blue-400 tracking-wider">Resumo</span>
-                  <p className="text-xs text-gray-700 dark:text-gray-200 font-medium leading-relaxed">
+                <div className="flex flex-col gap-1.5 bg-blue-500/5 p-4 rounded-xl border border-blue-500/10 dark:border-blue-500/5">
+                  <span className="text-[9.5px] uppercase font-black text-blue-600 dark:text-blue-400 tracking-wider">Resumo</span>
+                  <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold leading-relaxed select-text">
                     {selectedTicket.metadata.summary}
                   </p>
                 </div>
@@ -5058,17 +5047,17 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* Checklist */}
               {selectedTicket.metadata?.checklist && Array.isArray(selectedTicket.metadata.checklist) && selectedTicket.metadata.checklist.length > 0 && (
-                <div className="flex flex-col gap-2 bg-slate-100/50 dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5">
-                  <span className="text-[9px] uppercase font-black text-gray-400 tracking-wider">Checklist de Problemas</span>
-                  <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-2.5 bg-slate-100/30 dark:bg-black/20 p-4 rounded-xl border border-gray-150/10 dark:border-white/5">
+                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-500 tracking-wider">Checklist de Problemas</span>
+                  <div className="flex flex-col gap-2">
                     {selectedTicket.metadata.checklist.map((item: any, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between text-xs bg-white dark:bg-black/40 p-2 rounded-lg border border-black/[0.03] dark:border-white/5">
-                        <span className="text-gray-700 dark:text-gray-200 font-medium pr-2 text-left">• {item.text}</span>
+                      <div key={idx} className="flex items-center justify-between text-xs bg-white dark:bg-black/45 p-2 rounded-xl border border-black/[0.02] dark:border-white/5 shadow-sm">
+                        <span className="text-gray-750 dark:text-gray-200 font-semibold pr-3 text-left select-text">• {item.text}</span>
                         <span className={cn(
-                          "px-2 py-0.5 rounded text-[8px] font-black uppercase shrink-0",
+                          "px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase shrink-0 border",
                           item.resolved 
-                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
-                            : "bg-red-500/10 text-red-600 dark:text-red-400"
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/15" 
+                            : "bg-rose-500/10 text-rose-600 dark:text-rose-455 border-rose-500/15"
                         )}>
                           {item.resolved ? "Resolvido" : "Pendente"}
                         </span>
@@ -5080,9 +5069,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* Resolution Summary */}
               {selectedTicket.resolution_summary && (
-                <div className="flex flex-col gap-1.5 bg-emerald-500/5 p-3 rounded-xl border border-emerald-500/10">
-                  <span className="text-[9px] uppercase font-black text-emerald-600 dark:text-emerald-400 tracking-wider">Resolução Completa</span>
-                  <p className="text-xs text-gray-750 dark:text-gray-200 font-semibold leading-relaxed whitespace-pre-wrap">
+                <div className="flex flex-col gap-2 bg-emerald-500/5 p-4 rounded-xl border border-emerald-500/10 dark:border-emerald-500/5">
+                  <span className="text-[9.5px] uppercase font-black text-emerald-600 dark:text-emerald-450 tracking-wider">Resolução Completa</span>
+                  <p className="text-xs text-gray-800 dark:text-gray-150 font-bold leading-relaxed whitespace-pre-wrap select-text">
                     {selectedTicket.resolution_summary}
                   </p>
                 </div>
@@ -5090,13 +5079,28 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* Operators List */}
               {selectedTicket.metadata?.operators && selectedTicket.metadata.operators.length > 0 && (
-                <div className="flex flex-col gap-1.5 bg-white dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5">
-                  <span className="text-[9px] uppercase font-black text-gray-400 tracking-wider">Participação de Atendentes</span>
-                  <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-2 bg-white dark:bg-black/25 p-4 rounded-xl border border-gray-150/10 dark:border-white/5">
+                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-500 tracking-wider">Participação de Atendentes</span>
+                  <div className="flex flex-col gap-1.5">
                     {selectedTicket.metadata.operators.map((op: any, idx: number) => (
-                      <div key={idx} className="flex justify-between text-xs text-gray-600 dark:text-gray-300 font-medium">
+                      <div key={idx} className="flex justify-between text-xs text-gray-650 dark:text-gray-305 font-semibold">
                         <span>{op.name}</span>
-                        <span className="font-bold text-gray-800 dark:text-white">{op.percentage}% ({op.count} msgs)</span>
+                        <span className="font-bold text-gray-850 dark:text-white">{op.percentage}% ({op.count} msgs)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+
+        </div>
+
+      </div>
+    </div>
+  );
+}t-white">{op.percentage}% ({op.count} msgs)</span>
                       </div>
                     ))}
                   </div>
