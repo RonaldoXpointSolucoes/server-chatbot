@@ -4552,7 +4552,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       // Mapeamento dos operadores reais que atuaram no ticket como fallback e status da conversa
       const operatorFallbacks = new Map<string, string>();
-      const convStatusMap = new Map<string, string>();
+      const activeConvsSet = new Set<string>();
       const { data: convsData } = await supabase
         .from('conversations')
         .select('contact_id, user_email, user_name, status')
@@ -4562,7 +4562,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         convsData.forEach(c => {
           if (c.contact_id) {
             operatorFallbacks.set(c.contact_id, c.user_name || c.user_email || 'Atendente');
-            convStatusMap.set(c.contact_id, c.status || 'open');
+            if (c.status !== 'resolved' && c.status !== 'closed') {
+              activeConvsSet.add(c.contact_id);
+            }
           }
         });
       }
@@ -4571,8 +4573,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         const c = contactsMap.get(t.contact_id);
         if (!c || c.exclude_reports || c.is_blocked) return null;
 
-        const convStatus = convStatusMap.get(t.contact_id) || 'open';
-        if (convStatus === 'resolved' || convStatus === 'closed') {
+        const hasActiveConv = activeConvsSet.has(t.contact_id);
+        if (!hasActiveConv) {
           return null;
         }
 
