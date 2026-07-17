@@ -4698,9 +4698,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center">
-      <div className="absolute inset-0 bg-slate-955/65 dark:bg-black/85 backdrop-blur-xl animate-in fade-in duration-300" onClick={onClose} />
+      <div className="absolute inset-0 bg-slate-900/40 dark:bg-black/80 backdrop-blur-xl animate-in fade-in duration-300" onClick={onClose} />
       
-      <div className="relative w-full h-full max-h-screen bg-white/95 dark:bg-[#0c1317]/98 backdrop-blur-3xl border-none rounded-none shadow-none p-5 md:p-6 flex flex-col gap-4.5 animate-in fade-in duration-300 overflow-hidden">
+      <div className="relative w-full h-full max-h-screen bg-white dark:bg-[#0c1317] border-none rounded-none shadow-none p-5 md:p-6 flex flex-col gap-4.5 animate-in fade-in duration-300 overflow-hidden">
         
         {/* Header */}
         <div className="flex items-center justify-between">
