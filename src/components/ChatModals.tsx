@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical, Inbox } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -4315,6 +4315,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   const tenantInfo = useChatStore(state => state.tenantInfo);
   const [tickets, setTickets] = useState<any[]>([]);
   const [openTickets, setOpenTickets] = useState<any[]>([]);
+  const [instances, setInstances] = useState<any[]>([]);
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string>(() => {
+    return localStorage.getItem('closed_tickets_selected_instance_id') || 'all';
+  });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('today'); // all, today, week, month
@@ -4441,6 +4445,26 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     }
   };
 
+  const fetchInstances = async () => {
+    try {
+      const { supabase } = await import('../services/supabase');
+      const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (!tenantId) return;
+
+      const { data, error } = await supabase
+        .from('whatsapp_instances')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('name', { ascending: true });
+
+      if (!error && data) {
+        setInstances(data);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar caixas de entrada:', err);
+    }
+  };
+
   const fetchClosedTickets = async () => {
     setLoading(true);
     try {
@@ -4462,15 +4486,13 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       const resolvedList = (data || []).filter(t => t.status === 'resolved');
       const openList = (data || []).filter(t => t.status !== 'resolved');
 
-      setOpenTickets(openList);
-
       // Obter contatos específicos para evitar estourar o limite de paginação do Supabase (1000 registros)
-      const contactIds = Array.from(new Set(resolvedList.map(t => t.contact_id).filter(Boolean)));
+      const contactIds = Array.from(new Set((data || []).map(t => t.contact_id).filter(Boolean)));
       let contactsData: any[] = [];
       if (contactIds.length > 0) {
         const { data: cData, error: cErr } = await supabase
           .from('contacts')
-          .select('id, name, custom_name, fantasy_name, phone, company_ids, profile_picture_url, exclude_reports')
+          .select('id, name, custom_name, fantasy_name, phone, company_ids, profile_picture_url, exclude_reports, instance_id')
           .in('id', contactIds);
         if (!cErr && cData) {
           contactsData = cData;
@@ -4519,6 +4541,15 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         });
       }
 
+      const mappedOpen = openList.map(t => {
+        const c = contactsMap.get(t.contact_id);
+        return {
+          ...t,
+          instance_id: t.instance_id || c?.instance_id || null
+        };
+      });
+      setOpenTickets(mappedOpen);
+
       const mapped = resolvedList.map(t => {
         const c = contactsMap.get(t.contact_id);
         if (c?.exclude_reports) return null;
@@ -4559,7 +4590,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           profile_picture_url,
           exclude_reports: c?.exclude_reports || false,
           operatorName,
-          duration
+          duration,
+          instance_id: t.instance_id || c?.instance_id || null
         };
       }).filter(Boolean);
 
@@ -4574,6 +4606,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   useEffect(() => {
     if (isOpen) {
       fetchClosedTickets();
+      fetchInstances();
       setSelectedTicket(null);
     }
   }, [isOpen, tenantInfo?.id]);
@@ -4608,6 +4641,11 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       if (!matchSearch) return false;
 
+      if (selectedInstanceId !== 'all') {
+        const ticketInstId = t.instance_id || null;
+        if (ticketInstId !== selectedInstanceId) return false;
+      }
+
       if (dateFilter === 'all') return true;
 
       const closedDate = new Date(t.closed_at);
@@ -4629,7 +4667,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       return true;
     });
-  }, [tickets, search, dateFilter, selectedDate]);
+  }, [tickets, search, dateFilter, selectedDate, selectedInstanceId]);
 
   const filteredOpenTickets = useMemo(() => {
     return openTickets.filter(t => {
@@ -4638,6 +4676,12 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         (t.problem_description || '').toLowerCase().includes(term);
 
       if (!matchSearch) return false;
+
+      if (selectedInstanceId !== 'all') {
+        const ticketInstId = t.instance_id || null;
+        if (ticketInstId !== selectedInstanceId) return false;
+      }
+
       if (dateFilter === 'all') return true;
 
       const openedDate = new Date(t.opened_at);
@@ -4659,7 +4703,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       return true;
     });
-  }, [openTickets, search, dateFilter, selectedDate]);
+  }, [openTickets, search, dateFilter, selectedDate, selectedInstanceId]);
 
   const stats = useMemo(() => {
     const closed = filteredTickets.length;
@@ -4803,7 +4847,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         </div>
 
         {/* Filters Panel */}
-        <div className="flex flex-col sm:flex-row gap-3 shrink-0">
+        <div className="flex flex-col md:flex-row gap-3 shrink-0">
           <div className="flex-1 relative">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={14} />
             <input
@@ -4813,6 +4857,30 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               onChange={(e) => setSearch(e.target.value)}
               className="w-full text-xs pl-10 pr-4 py-2.5 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-semibold font-sans transition-all shadow-sm text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-500"
             />
+          </div>
+
+          {/* Caixa de Entrada Selector */}
+          <div className="relative min-w-[200px] shrink-0">
+            <Inbox className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={14} />
+            <select
+              value={selectedInstanceId}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedInstanceId(val);
+                localStorage.setItem('closed_tickets_selected_instance_id', val);
+              }}
+              className="w-full text-xs pl-10 pr-8 py-2.5 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-bold transition-all shadow-sm text-slate-800 dark:text-white appearance-none cursor-pointer"
+            >
+              <option value="all">📥 Todas as Caixas</option>
+              {instances.map(inst => (
+                <option key={inst.id} value={inst.id}>
+                  🟢 {inst.name}
+                </option>
+              ))}
+            </select>
+            <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 dark:text-slate-500">
+              <ChevronDown size={14} />
+            </div>
           </div>
           
           <div className="flex gap-1 bg-slate-200/60 dark:bg-[#111b21] p-1 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner">
