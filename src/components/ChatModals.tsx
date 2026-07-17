@@ -4314,6 +4314,7 @@ interface ClosedTicketsModalProps {
 export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps) {
   const tenantInfo = useChatStore(state => state.tenantInfo);
   const [tickets, setTickets] = useState<any[]>([]);
+  const [openTickets, setOpenTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('today'); // all, today, week, month
@@ -4448,8 +4449,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       let query = supabase
         .from('chat_tickets')
-        .select('*')
-        .eq('status', 'resolved');
+        .select('*');
 
       if (tenantId) {
         query = query.eq('tenant_id', tenantId);
@@ -4459,8 +4459,13 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       if (error) throw error;
 
+      const resolvedList = (data || []).filter(t => t.status === 'resolved');
+      const openList = (data || []).filter(t => t.status !== 'resolved');
+
+      setOpenTickets(openList);
+
       // Obter contatos específicos para evitar estourar o limite de paginação do Supabase (1000 registros)
-      const contactIds = Array.from(new Set((data || []).map(t => t.contact_id).filter(Boolean)));
+      const contactIds = Array.from(new Set(resolvedList.map(t => t.contact_id).filter(Boolean)));
       let contactsData: any[] = [];
       if (contactIds.length > 0) {
         const { data: cData, error: cErr } = await supabase
@@ -4488,45 +4493,33 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           companiesData = compData;
         }
       }
+
       const companiesMap = new Map<string, any>();
-      companiesData.forEach(comp => companiesMap.set(comp.id, comp));
-      
-      const contactsMap = new Map<string, any>();
-      if (contactsData) {
-        contactsData.forEach(c => contactsMap.set(c.id, c));
-      }
-
-      // Buscar mensagens de sistema que indicam quem resolveu o ticket para preencher histórico retroativo
-      const { data: sysMsgs } = await supabase
-        .from('messages')
-        .select('conversation_id, text_content')
-        .ilike('text_content', '✅ Resolvido por %');
-
-      const convIds = Array.from(new Set((sysMsgs || []).map(m => m.conversation_id).filter(Boolean)));
-      const convToContactMap = new Map<string, string>();
-      
-      if (convIds.length > 0) {
-        const { data: convs } = await supabase
-          .from('conversations')
-          .select('id, contact_id')
-          .in('id', convIds);
-        if (convs) {
-          convs.forEach(c => convToContactMap.set(c.id, c.contact_id));
-        }
-      }
-
-      const operatorFallbacks = new Map<string, string>();
-      (sysMsgs || []).forEach(m => {
-        const contactId = convToContactMap.get(m.conversation_id);
-        if (contactId && m.text_content) {
-          const match = m.text_content.match(/Resolvido por\s+([^\n]+?)\s+dia/);
-          if (match) {
-            operatorFallbacks.set(contactId, match[1].trim());
-          }
-        }
+      companiesData.forEach(c => {
+        companiesMap.set(c.id, c);
       });
 
-      const mapped = (data || []).map(t => {
+      const contactsMap = new Map<string, any>();
+      contactsData.forEach(c => {
+        contactsMap.set(c.id, c);
+      });
+
+      // Mapeamento dos operadores reais que atuaram no ticket como fallback
+      const operatorFallbacks = new Map<string, string>();
+      const { data: convsData } = await supabase
+        .from('conversations')
+        .select('contact_id, user_email, user_name')
+        .in('contact_id', contactIds);
+      
+      if (convsData) {
+        convsData.forEach(c => {
+          if (c.contact_id) {
+            operatorFallbacks.set(c.contact_id, c.user_name || c.user_email || 'Atendente');
+          }
+        });
+      }
+
+      const mapped = resolvedList.map(t => {
         const c = contactsMap.get(t.contact_id);
         if (c?.exclude_reports) return null;
 
@@ -4637,6 +4630,58 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       return true;
     });
   }, [tickets, search, dateFilter, selectedDate]);
+
+  const filteredOpenTickets = useMemo(() => {
+    return openTickets.filter(t => {
+      const term = search.toLowerCase();
+      const matchSearch = !term || 
+        (t.problem_description || '').toLowerCase().includes(term);
+
+      if (!matchSearch) return false;
+      if (dateFilter === 'all') return true;
+
+      const openedDate = new Date(t.opened_at);
+      const now = new Date();
+
+      if (dateFilter === 'today') {
+        return openedDate.toDateString() === selectedDate.toDateString();
+      }
+
+      if (dateFilter === 'week') {
+        const diffTime = Math.abs(now.getTime() - openedDate.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays <= 7;
+      }
+
+      if (dateFilter === 'month') {
+        return openedDate.getMonth() === now.getMonth() && openedDate.getFullYear() === now.getFullYear();
+      }
+
+      return true;
+    });
+  }, [openTickets, search, dateFilter, selectedDate]);
+
+  const stats = useMemo(() => {
+    const closed = filteredTickets.length;
+    const open = filteredOpenTickets.length;
+    const total = closed + open;
+
+    // Saúde do atendimento: porcentagem de chamados fechados com checklist 100% resolvido E sem falha de IA
+    let healthyCount = 0;
+    filteredTickets.forEach(t => {
+      const hasAiError = t.metadata?.error_log || t.problem_description === "Erro no processamento do problema.";
+      const checklist = t.metadata?.checklist || [];
+      const allChecklistResolved = checklist.length === 0 || checklist.every((item: any) => item.resolved);
+      
+      if (!hasAiError && allChecklistResolved) {
+        healthyCount++;
+      }
+    });
+
+    const health = closed > 0 ? Math.round((healthyCount / closed) * 100) : 100;
+
+    return { total, closed, open, health };
+  }, [filteredTickets, filteredOpenTickets]);
 
   const columns = useMemo(() => {
     const rapido: any[] = [];
@@ -4824,6 +4869,67 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               </button>
             );
           })}
+        </div>
+
+        {/* Top Metrics Row */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0">
+          {/* Total */}
+          <div className="bg-white dark:bg-[#111b21]/60 border border-slate-200/60 dark:border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden group animate-in fade-in duration-300">
+            <div className="flex flex-col text-left">
+              <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Total Geral</span>
+              <span className="text-xl font-black text-slate-800 dark:text-white mt-0.5">{stats.total}</span>
+            </div>
+            <div className="p-2 bg-indigo-500/10 rounded-xl text-indigo-500 dark:text-indigo-400 shrink-0">
+              <FolderCheck size={16} />
+            </div>
+          </div>
+
+          {/* Fechados */}
+          <div className="bg-white dark:bg-[#111b21]/60 border border-slate-200/60 dark:border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
+            <div className="flex flex-col text-left">
+              <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Fechados</span>
+              <span className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5">{stats.closed}</span>
+            </div>
+            <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400 shrink-0">
+              <CheckCircle2 size={16} />
+            </div>
+          </div>
+
+          {/* Abertos */}
+          <div className="bg-white dark:bg-[#111b21]/60 border border-slate-200/60 dark:border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
+            <div className="flex flex-col text-left">
+              <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Em Aberto</span>
+              <span className="text-xl font-black text-sky-500 dark:text-sky-400 mt-0.5">{stats.open}</span>
+            </div>
+            <div className="p-2 bg-sky-500/10 rounded-xl text-sky-500 dark:text-sky-400 shrink-0">
+              <Clock size={16} />
+            </div>
+          </div>
+
+          {/* Saúde do Atendimento */}
+          <div className="bg-white dark:bg-[#111b21]/60 border border-slate-200/60 dark:border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
+            <div className="flex flex-col text-left">
+              <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Saúde do Suporte</span>
+              <span className={cn(
+                "text-xl font-black mt-0.5",
+                stats.health >= 85 
+                  ? "text-emerald-600 dark:text-emerald-400" 
+                  : stats.health >= 60 
+                    ? "text-amber-500" 
+                    : "text-rose-500"
+              )}>{stats.health}%</span>
+            </div>
+            <div className={cn(
+              "p-2 rounded-xl shrink-0",
+              stats.health >= 85 
+                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
+                : stats.health >= 60 
+                  ? "bg-amber-500/10 text-amber-500" 
+                  : "bg-rose-500/10 text-rose-500"
+            )}>
+              <Activity size={16} className={cn(stats.health < 85 && "animate-pulse")} />
+            </div>
+          </div>
         </div>
 
         {/* Kanban Tab Selector for Mobile / Tablet */}
