@@ -44,25 +44,17 @@ class GeminiService {
       }
     } catch (e) {}
 
-    // 3. Fallback to Gemini Env variable if it is standard GCP/Gemini key format (starts with AIza)
+    // 3. Fallback to VITE_GEMINI_API_KEY directly
     if (isValidKey(fallbackApiKey)) {
-      const cleanKey = fallbackApiKey.replace(/^['"]|['"]$/g, '').trim();
-      if (cleanKey.startsWith('AIza')) {
-        return cleanKey;
-      }
+      return fallbackApiKey.replace(/^['"]|['"]$/g, '').trim();
     }
 
-    // 4. Fallback to Google Cloud API key if it's the one starting with AIza
+    // 4. Fallback to Google Cloud API key if it starts with AIza (only if Gemini key is not set)
     if (isValidKey(fallbackGcpKey)) {
       const cleanGcp = fallbackGcpKey.replace(/^['"]|['"]$/g, '').trim();
       if (cleanGcp.startsWith('AIza')) {
         return cleanGcp;
       }
-    }
-
-    // 5. If no key starts with AIza, use fallbackApiKey if set
-    if (isValidKey(fallbackApiKey)) {
-      return fallbackApiKey.replace(/^['"]|['"]$/g, '').trim();
     }
 
     return '';
