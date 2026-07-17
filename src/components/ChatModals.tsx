@@ -4554,15 +4554,32 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       // Mapeamento de operadores e fallbacks das conversas
       const operatorFallbacks = new Map<string, string>();
+      
       const { data: allConvsData } = await supabase
         .from('conversations')
-        .select('contact_id, user_email, user_name')
+        .select('contact_id, assigned_to')
         .in('contact_id', contactIds);
+        
+      let tenantUsersData: any[] = [];
+      if (tenantId) {
+        const { data: uData } = await supabase
+          .from('tenant_users')
+          .select('id, full_name, email')
+          .eq('tenant_id', tenantId);
+        if (uData) tenantUsersData = uData;
+      }
       
       if (allConvsData) {
         allConvsData.forEach(c => {
           if (c.contact_id) {
-            operatorFallbacks.set(c.contact_id, c.user_name || c.user_email || 'Atendente');
+            let opName = 'Atendente';
+            if (c.assigned_to) {
+              const matchedUser = tenantUsersData.find(u => u.id === c.assigned_to);
+              if (matchedUser) {
+                opName = matchedUser.full_name || matchedUser.email || 'Atendente';
+              }
+            }
+            operatorFallbacks.set(c.contact_id, opName);
           }
         });
       }
