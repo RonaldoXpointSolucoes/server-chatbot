@@ -4312,6 +4312,7 @@ interface ClosedTicketsModalProps {
 }
 
 export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps) {
+  const tenantInfo = useChatStore(state => state.tenantInfo);
   const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -4443,11 +4444,18 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     setLoading(true);
     try {
       const { supabase } = await import('../services/supabase');
-      const { data, error } = await supabase
+      const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+
+      let query = supabase
         .from('chat_tickets')
         .select('*')
-        .eq('status', 'resolved')
-        .order('closed_at', { ascending: false });
+        .eq('status', 'resolved');
+
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+
+      const { data, error } = await query.order('closed_at', { ascending: false });
 
       if (error) throw error;
 
@@ -4575,7 +4583,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       fetchClosedTickets();
       setSelectedTicket(null);
     }
-  }, [isOpen]);
+  }, [isOpen, tenantInfo?.id]);
 
   // Sincronizar aba ativa do Kanban com a coluna correspondente ao ticket selecionado
   useEffect(() => {
