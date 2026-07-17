@@ -125,18 +125,20 @@ export const MessageBubble = memo(({
   const separatorNode = showDateSeparator ? (
     <div className="flex justify-center my-4 w-full items-center gap-2 select-none">
        {dateSeparatorText === 'HOJE' && ticketMode ? (
-         <div className="flex items-center gap-1.5 bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 text-[#54656f] dark:text-[#8696a0] text-[11px] px-3.5 py-1 rounded-lg border border-black/5 dark:border-white/5 font-semibold shadow-sm">
-           <span>HOJE</span>
-           <span className="text-gray-300 dark:text-gray-600">|</span>
-           <select
-             value={messageFilter}
-             onChange={(e) => setMessageFilter?.(e.target.value as 'today' | 'all')}
-             className="bg-transparent text-[#00a884] font-black focus:outline-none cursor-pointer border-none p-0 text-[10px] uppercase tracking-wider"
-           >
-             <option value="today" className="bg-white dark:bg-[#202c33] text-gray-800 dark:text-gray-200">Apenas Hoje</option>
-             <option value="all" className="bg-white dark:bg-[#202c33] text-gray-800 dark:text-gray-200">Ver Anteriores</option>
-           </select>
-         </div>
+         <button
+            type="button"
+            onClick={() => setMessageFilter?.(messageFilter === 'today' ? 'all' : 'today')}
+            className="flex items-center gap-1.5 bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 text-[#54656f] dark:text-[#8696a0] hover:text-[#00a884] dark:hover:text-white text-[11px] px-3.5 py-1.5 rounded-full border border-black/5 dark:border-white/5 font-semibold shadow-sm transition-all duration-200 cursor-pointer select-none hover:shadow"
+          >
+            <span>HOJE</span>
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span className="text-[#00a884] font-black uppercase tracking-wider text-[10px]">
+              Modo Ticket: {messageFilter === 'today' ? 'Apenas Hoje' : 'Ver Anteriores'}
+            </span>
+            <span className="text-[#00a884] font-black text-[9px] ml-0.5">
+              {messageFilter === 'today' ? '▲' : '▼'}
+            </span>
+          </button>
        ) : (
          <span className="bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 text-[#54656f] dark:text-[#8696a0] text-[11px] px-3 py-1 rounded-lg border border-black/5 dark:border-white/5 font-medium shadow-sm uppercase tracking-wider">
             {dateSeparatorText}

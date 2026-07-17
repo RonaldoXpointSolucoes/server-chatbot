@@ -6575,21 +6575,7 @@ export default function ChatDashboard() {
                </div>
             )}
             
-            {ticketMode && (
-              <div className="flex justify-center mb-3 shrink-0 select-none animate-in fade-in slide-in-from-top-2 duration-300">
-                <div className="flex items-center gap-1.5 bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 text-[#54656f] dark:text-[#aebac1] text-[11px] px-3.5 py-1.5 rounded-full border border-black/5 dark:border-white/5 font-semibold shadow-sm">
-                  <span>Modo Ticket:</span>
-                  <select
-                    value={messageFilter}
-                    onChange={(e) => setMessageFilter(e.target.value as 'today' | 'all')}
-                    className="bg-transparent text-[#00a884] font-black focus:outline-none cursor-pointer border-none p-0 text-[11px] uppercase tracking-wider"
-                  >
-                    <option value="today" className="bg-white dark:bg-[#202c33] text-gray-800 dark:text-gray-200">Apenas Hoje</option>
-                    <option value="all" className="bg-white dark:bg-[#202c33] text-gray-800 dark:text-gray-200">Ver Anteriores</option>
-                  </select>
-                </div>
-              </div>
-            )}
+
 
             {(() => {
               const rawMsgs = activeChat.messages?.filter(m => m.text || m.mediaUrl) || [];
