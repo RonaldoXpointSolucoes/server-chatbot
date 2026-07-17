@@ -4698,36 +4698,36 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
+      <div className="absolute inset-0 bg-slate-955/65 dark:bg-black/85 backdrop-blur-xl animate-in fade-in duration-300" onClick={onClose} />
       
-      <div className="relative w-full max-w-6xl xl:max-w-7xl h-[85vh] bg-white/90 dark:bg-[#111b21]/80 backdrop-blur-2xl border border-gray-250 dark:border-white/10 rounded-[28px] shadow-2xl p-6 flex flex-col gap-5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden">
+      <div className="relative w-full max-w-6xl xl:max-w-7xl h-[88vh] bg-white/90 dark:bg-[#121b22]/75 backdrop-blur-3xl border border-gray-200/50 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col gap-5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden">
         
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 animate-in fade-in duration-200">
-            <div className="p-3 bg-gradient-to-tr from-emerald-500 to-teal-500 rounded-2xl text-white shadow-sm shrink-0">
+          <div className="flex items-center gap-3.5 animate-in fade-in duration-200">
+            <div className="p-3 bg-gradient-to-tr from-emerald-500 to-teal-655 rounded-2xl text-white shadow-lg shadow-emerald-500/10 shrink-0">
               <FolderCheck size={20} />
             </div>
             <div className="flex flex-col text-left">
-              <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+              <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5 animate-pulse">
                 Tickets Fechados
               </h3>
-              <p className="text-[10px] font-bold text-gray-400 mt-0.5">
+              <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 mt-0.5">
                 Auditoria de atendimentos e base de conhecimento resolvida
               </p>
             </div>
           </div>
           
           {/* View switcher */}
-          <div className="flex gap-1 bg-gray-100 dark:bg-black/25 p-1 rounded-xl border border-gray-200/50 dark:border-white/5 select-none shrink-0 h-[36px] items-center ml-auto mr-4 shadow-inner">
+          <div className="flex gap-1 bg-gray-150/80 dark:bg-black/35 p-1 rounded-xl border border-gray-200/30 dark:border-white/5 select-none shrink-0 h-[36px] items-center ml-auto mr-4 shadow-inner">
             <button
               onClick={() => setActiveView('kanban')}
               type="button"
               className={cn(
                 "px-3.5 py-1.5 rounded-lg text-[9.5px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
                 activeView === 'kanban'
-                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-400 font-black"
-                  : "text-gray-500 dark:text-gray-455 hover:text-gray-900"
+                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-455 font-black"
+                  : "text-gray-500 dark:text-gray-450 hover:text-gray-900"
               )}
             >
               <span>Mosaico</span>
@@ -4738,7 +4738,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               className={cn(
                 "px-3.5 py-1.5 rounded-lg text-[9.5px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
                 activeView === 'dashboard'
-                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-400 font-black"
+                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-455 font-black"
                   : "text-gray-500 dark:text-gray-455 hover:text-gray-900"
               )}
             >
@@ -4746,7 +4746,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             </button>
           </div>
 
-          <button onClick={onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-white transition-colors cursor-pointer shrink-0">
+          <button onClick={onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-gray-755 dark:text-gray-400 dark:hover:text-white transition-colors cursor-pointer shrink-0">
             <X size={16} />
           </button>
         </div>
@@ -4754,17 +4754,17 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         {/* Filters Panel */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
             <input
               type="text"
               placeholder="Buscar por cliente, atendente, problema ou resumo..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full text-xs pl-9 pr-3 py-2.5 bg-black/[0.02] dark:bg-white/[0.02] border border-black/15 dark:border-white/10 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 font-medium font-sans transition-all"
+              className="w-full text-xs pl-10 pr-4 py-2.5 bg-gray-50/50 dark:bg-[#202c33]/45 border border-gray-200/50 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-medium font-sans transition-all shadow-inner"
             />
           </div>
           
-          <div className="flex gap-1.5 bg-gray-100 dark:bg-black/30 p-1 rounded-2xl border border-gray-200/50 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner">
+          <div className="flex gap-1 bg-gray-150/80 dark:bg-[#202c33]/45 p-1 rounded-2xl border border-gray-200/30 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner">
             {[
               { id: 'all', label: 'Todos' },
               { id: 'today', label: 'Hoje' },
@@ -4778,7 +4778,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 className={cn(
                   "px-4 py-1.5 rounded-xl text-[10.5px] font-bold transition-all cursor-pointer",
                   dateFilter === btn.id 
-                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-400 font-extrabold" 
+                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-450 font-extrabold" 
                     : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
                 )}
               >
@@ -4789,7 +4789,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         </div>
 
         {/* Weekly Day Selector (3 days before / 3 days after today) */}
-        <div className="flex justify-center items-center gap-3.5 bg-slate-50/50 dark:bg-[#182229]/30 p-3.5 rounded-2xl border border-gray-150/10 dark:border-white/5 select-none overflow-x-auto shrink-0 custom-scrollbar">
+        <div className="flex justify-center items-center gap-3 bg-white/40 dark:bg-[#182229]/25 p-3 rounded-2xl border border-gray-200/40 dark:border-white/5 select-none overflow-x-auto shrink-0 custom-scrollbar">
           {daysList.map((day, idx) => {
             const isToday = day.toDateString() === new Date().toDateString();
             const isSelected = dateFilter === 'today' && day.toDateString() === selectedDate.toDateString();
@@ -4807,10 +4807,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 className={cn(
                   "flex flex-col items-center gap-1 py-2 w-12 rounded-xl transition-all duration-200 shrink-0 cursor-pointer border",
                   isSelected
-                    ? "bg-emerald-500 text-white font-extrabold shadow-lg shadow-emerald-500/20 border-emerald-500 scale-105"
+                    ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white font-extrabold shadow-lg shadow-emerald-500/25 border-emerald-500 scale-105"
                     : isToday
-                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-450 font-bold border-emerald-500/20 hover:bg-emerald-500/20"
-                      : "text-gray-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white border-transparent"
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border-emerald-500/20 hover:bg-emerald-500/20"
+                      : "bg-white/50 dark:bg-[#202c33]/30 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5 border-gray-200/50 dark:border-white/5"
                 )}
               >
                 <span className="text-[9px] uppercase tracking-wider opacity-60 font-black">{weekdayLabel}</span>
@@ -4823,7 +4823,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         {/* Kanban Tab Selector for Mobile / Tablet */}
         {activeView === 'kanban' && (
           <div className={cn(
-            "gap-1.5 bg-gray-100 dark:bg-black/30 p-1.5 rounded-2xl border border-gray-200/50 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner",
+            "gap-1.5 bg-gray-150/80 dark:bg-black/35 p-1.5 rounded-2xl border border-gray-200/30 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner",
             selectedTicket ? "flex xl:hidden" : "flex md:hidden"
           )}>
             {columns.map(col => (
@@ -4834,8 +4834,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 className={cn(
                   "flex-1 py-1.5 rounded-xl text-[10.5px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer",
                   activeKanbanTab === col.id 
-                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-400 font-extrabold" 
-                    : "text-gray-500 dark:text-gray-450 hover:text-gray-900"
+                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-455 font-extrabold" 
+                    : "text-gray-500 dark:text-gray-455 hover:text-gray-900"
                 )}
               >
                 <span>{col.title}</span>
@@ -5019,15 +5019,15 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
           {/* Ticket Details Panel */}
           {selectedTicket && (
-            <div className="w-full md:w-[55%] xl:w-[40%] border border-gray-150/10 dark:border-white/5 bg-slate-50/30 dark:bg-black/20 rounded-[24px] p-5 flex flex-col gap-4.5 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
+            <div className="w-full md:w-[55%] xl:w-[40%] border border-gray-200/50 dark:border-white/10 bg-white/70 dark:bg-[#182229]/40 backdrop-blur-md rounded-[24px] p-5 flex flex-col gap-4.5 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
               
               {/* Header Details */}
-              <div className="flex items-center justify-between border-b border-gray-150/15 dark:border-white/5 pb-3 shrink-0 relative">
+              <div className="flex items-center justify-between border-b border-gray-200/50 dark:border-white/5 pb-3 shrink-0 relative">
                 <div className="flex flex-col gap-1">
                   <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-wider">
                     Detalhes do Ticket #{selectedTicket.id}
                   </h4>
-                  <span className="text-[10.5px] font-bold text-emerald-600 dark:text-emerald-450 uppercase tracking-wide flex flex-col gap-0.5 mt-0.5">
+                  <span className="text-[10.5px] font-bold text-emerald-600 dark:text-emerald-455 uppercase tracking-wide flex flex-col gap-0.5 mt-0.5">
                     <span>🏢 {selectedTicket.companyFantasyName || 'Empresa Própria'}</span>
                     {selectedTicket.companyName && selectedTicket.companyName.toLowerCase() !== selectedTicket.companyFantasyName?.toLowerCase() && (
                       <span className="text-[9px] font-semibold text-gray-405 dark:text-gray-500 pl-4 lowercase first-letter:uppercase">
@@ -5054,7 +5054,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     {showTicketMenu && (
                       <div className="absolute right-0 mt-1 w-64 bg-white dark:bg-[#202c33] border border-black/10 dark:border-white/10 rounded-2xl shadow-xl z-50 p-3.5 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-150 text-left">
                         <div className="flex flex-col gap-1">
-                          <span className="text-[10.5px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-wider flex items-center gap-1">
+                          <span className="text-[10.5px] font-black uppercase text-rose-600 dark:text-rose-455 tracking-wider flex items-center gap-1">
                             🚫 Excluir de Relatórios & I.A.
                           </span>
                           <span className="text-[9.5px] font-semibold text-gray-550 dark:text-gray-400 leading-normal">
@@ -5097,7 +5097,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                   </div>
                   <button
                     onClick={() => setSelectedTicket(null)}
-                    className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-white transition-colors shrink-0 cursor-pointer"
+                    className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-white transition-colors cursor-pointer shrink-0"
                   >
                     <X size={14} />
                   </button>
@@ -5106,33 +5106,12 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* AI Processing Error Log Alert */}
               {(selectedTicket.metadata?.error_log || selectedTicket.problem_description === "Erro no processamento do problema." || selectedTicket.metadata?.summary === "Erro ao gerar resumo da solução.") && (
-                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 p-4 rounded-xl text-xs flex flex-col gap-3 leading-relaxed font-sans shrink-0 border-l-[4px] border-l-rose-500">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-1.5 font-black uppercase tracking-wider text-[10px]">
-                      <AlertTriangle size={14} className="text-rose-500 animate-pulse animate-duration-1000" />
-                      <span>Falha no Processamento da I.A.</span>
-                    </div>
-                    
-                    <button
-                      onClick={() => handleReanalyzeTicket(selectedTicket)}
-                      disabled={reanalyzingId === selectedTicket.id}
-                      className="px-2.5 py-1 bg-rose-500 text-white rounded-lg text-[9px] font-black uppercase hover:bg-rose-600 active:scale-95 disabled:opacity-50 transition-all flex items-center gap-1 cursor-pointer shrink-0"
-                    >
-                      {reanalyzingId === selectedTicket.id ? (
-                        <>
-                          <Loader2 size={10} className="animate-spin" />
-                          <span>Analisando...</span>
-                        </>
-                      ) : (
-                        <>
-                          <BrainCircuit size={10} />
-                          <span>Reanalisar</span>
-                        </>
-                      )}
-                    </button>
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-450 p-4 rounded-xl text-xs flex flex-col gap-2 leading-relaxed font-sans shrink-0 border-l-[4px] border-l-rose-500 shadow-sm">
+                  <div className="flex items-center gap-1.5 font-black uppercase tracking-wider text-[10px]">
+                    <AlertTriangle size={14} className="text-rose-500 animate-pulse" />
+                    <span>Falha no Processamento da I.A.</span>
                   </div>
-                  
-                  <p className="font-semibold text-gray-850 dark:text-rose-250 select-text">
+                  <p className="font-semibold text-gray-855 dark:text-rose-250 select-text">
                     {selectedTicket.metadata?.error_log || "A chave de API do Gemini pode estar incorreta, ausente ou instável. O chamado foi encerrado manualmente sem o preenchimento automático das anotações."}
                   </p>
                 </div>
@@ -5140,32 +5119,32 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* Timing Metadata Info */}
               <div className="grid grid-cols-2 gap-2 text-[10.5px]">
-                <div className="p-3 bg-white dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col">
-                  <span className="text-gray-400 dark:text-gray-500 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Início</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-200">
+                <div className="p-3 bg-white/50 dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col shadow-sm">
+                  <span className="text-gray-400 dark:text-gray-550 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Início</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-205">
                     {formatDateSafe(selectedTicket.opened_at)}
                   </span>
                 </div>
-                <div className="p-3 bg-white dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col">
-                  <span className="text-gray-400 dark:text-gray-500 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Fim</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-200">
+                <div className="p-3 bg-white/50 dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col shadow-sm">
+                  <span className="text-gray-400 dark:text-gray-555 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Fim</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-205">
                     {formatDateSafe(selectedTicket.closed_at)}
                   </span>
                 </div>
-                <div className="p-3 bg-white dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col">
-                  <span className="text-gray-400 dark:text-gray-500 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Duração</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-200">{selectedTicket.duration}</span>
+                <div className="p-3 bg-white/50 dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col shadow-sm">
+                  <span className="text-gray-400 dark:text-gray-550 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Duração</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-205">{selectedTicket.duration}</span>
                 </div>
-                <div className="p-3 bg-white dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col">
-                  <span className="text-gray-400 dark:text-gray-500 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Mensagens</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-200">{selectedTicket.metadata?.total_messages || 0} trocadas</span>
+                <div className="p-3 bg-white/50 dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col shadow-sm">
+                  <span className="text-gray-400 dark:text-gray-550 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Mensagens</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-205">{selectedTicket.metadata?.total_messages || 0} trocadas</span>
                 </div>
               </div>
 
               {/* Description */}
               {selectedTicket.problem_description && (
-                <div className="flex flex-col gap-1.5 bg-white dark:bg-black/20 p-4 rounded-xl border border-gray-150/10 dark:border-white/5">
-                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-500 tracking-wider">Descrição do Problema</span>
+                <div className="flex flex-col gap-1.5 bg-white/50 dark:bg-[#202c33]/30 p-4 rounded-xl border border-gray-150/20 dark:border-white/5 shadow-sm">
+                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-555 tracking-wider">Descrição do Problema</span>
                   <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold leading-relaxed select-text">
                     {selectedTicket.problem_description}
                   </p>
@@ -5174,8 +5153,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* Summary */}
               {selectedTicket.metadata?.summary && (
-                <div className="flex flex-col gap-1.5 bg-blue-500/5 p-4 rounded-xl border border-blue-500/10 dark:border-blue-500/5">
-                  <span className="text-[9.5px] uppercase font-black text-blue-600 dark:text-blue-400 tracking-wider">Resumo</span>
+                <div className="flex flex-col gap-1.5 bg-blue-500/5 p-4 rounded-xl border border-blue-500/10 dark:border-blue-500/5 shadow-sm border-l-[3.5px] border-l-blue-500">
+                  <span className="text-[9.5px] uppercase font-black text-blue-600 dark:text-blue-400 tracking-wider">Resumo Inteligente</span>
                   <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold leading-relaxed select-text">
                     {selectedTicket.metadata.summary}
                   </p>
@@ -5184,16 +5163,16 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* Checklist */}
               {selectedTicket.metadata?.checklist && Array.isArray(selectedTicket.metadata.checklist) && selectedTicket.metadata.checklist.length > 0 && (
-                <div className="flex flex-col gap-2.5 bg-slate-100/30 dark:bg-black/20 p-4 rounded-xl border border-gray-150/10 dark:border-white/5">
+                <div className="flex flex-col gap-2.5 bg-slate-100/30 dark:bg-black/20 p-4 rounded-xl border border-gray-150/10 dark:border-white/5 shadow-sm">
                   <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-500 tracking-wider">Checklist de Problemas</span>
                   <div className="flex flex-col gap-2">
                     {selectedTicket.metadata.checklist.map((item: any, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between text-xs bg-white dark:bg-black/45 p-2 rounded-xl border border-black/[0.02] dark:border-white/5 shadow-sm">
+                      <div key={idx} className="flex items-center justify-between text-xs bg-white/50 dark:bg-black/45 p-2 rounded-xl border border-gray-150/10 dark:border-white/5 shadow-sm animate-in fade-in duration-200">
                         <span className="text-gray-750 dark:text-gray-200 font-semibold pr-3 text-left select-text">• {item.text}</span>
                         <span className={cn(
                           "px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase shrink-0 border",
                           item.resolved 
-                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/15" 
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-450 border-emerald-500/15" 
                             : "bg-rose-500/10 text-rose-600 dark:text-rose-455 border-rose-500/15"
                         )}>
                           {item.resolved ? "Resolvido" : "Pendente"}
@@ -5206,7 +5185,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* Resolution Summary */}
               {selectedTicket.resolution_summary && (
-                <div className="flex flex-col gap-2 bg-emerald-500/5 p-4 rounded-xl border border-emerald-500/10 dark:border-emerald-500/5">
+                <div className="flex flex-col gap-2 bg-emerald-500/5 p-4 rounded-xl border border-emerald-500/10 dark:border-emerald-500/5 shadow-sm border-l-[3.5px] border-l-emerald-500 animate-in fade-in duration-200">
                   <span className="text-[9.5px] uppercase font-black text-emerald-600 dark:text-emerald-450 tracking-wider">Resolução Completa</span>
                   <p className="text-xs text-gray-800 dark:text-gray-150 font-bold leading-relaxed whitespace-pre-wrap select-text">
                     {selectedTicket.resolution_summary}
@@ -5216,11 +5195,11 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* Operators List */}
               {selectedTicket.metadata?.operators && selectedTicket.metadata.operators.length > 0 && (
-                <div className="flex flex-col gap-2 bg-white dark:bg-black/25 p-4 rounded-xl border border-gray-150/10 dark:border-white/5">
-                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-500 tracking-wider">Participação de Atendentes</span>
-                  <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-2 bg-white/50 dark:bg-[#202c33]/30 p-4 rounded-xl border border-gray-150/20 dark:border-white/5 shadow-sm">
+                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-550 tracking-wider">Participação de Atendentes</span>
+                  <div className="flex flex-col gap-2">
                     {selectedTicket.metadata.operators.map((op: any, idx: number) => (
-                      <div key={idx} className="flex justify-between text-xs text-gray-650 dark:text-gray-305 font-semibold">
+                      <div key={idx} className="flex justify-between text-xs text-gray-655 dark:text-gray-300 font-semibold border-b border-gray-150/30 dark:border-white/5 pb-1.5 last:border-b-0 last:pb-0">
                         <span>{op.name}</span>
                         <span className="font-bold text-gray-850 dark:text-white">{op.percentage}% ({op.count} msgs)</span>
                       </div>

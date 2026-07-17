@@ -244,6 +244,7 @@ interface ChatState {
   pictureFetchLocks: Record<string, number>;
   activeChannelFilter: string | null;
   activeChannelName: string | null; // Adicionado para suportar old e nova engines comparations
+  isChannelLoading: boolean; // Estado de carregamento ao trocar de caixa
   isQRModalOpen: boolean;
   qrModalTargetInstance: string | null;
   automations: any[];
@@ -641,6 +642,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   appVersion: null,
   activeChannelFilter: localStorage.getItem('activeChannelFilter') || null,
   activeChannelName: localStorage.getItem('activeChannelName') || null,
+  isChannelLoading: false,
   isQRModalOpen: false,
   qrModalTargetInstance: null,
   automations: [],
@@ -705,6 +707,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       pictureFetchLocks: {},
       activeChannelFilter: null,
       activeChannelName: null,
+      isChannelLoading: false,
       isQRModalOpen: false,
       qrModalTargetInstance: null,
       automations: [],
@@ -1285,7 +1288,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     
     // Mantém os contatos atuais exibidos durante o carregamento dos novos contatos para transição suave
-    set({ activeChannelFilter: id, activeChannelName: name || null, activeChatId: null });
+    set({ activeChannelFilter: id, activeChannelName: name || null, activeChatId: null, isChannelLoading: true });
     
     // Recarrega os contatos baseados no novo filtro de canal de imediato
     get().fetchInitialData();
@@ -2889,7 +2892,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
 
         const newContacts: ContactType[] = validContacts.map(dbC => {
-            const conv = dbConvs?.find(cv => cv.contact_id === dbC.id);
+            const targetInstanceId = state.activeChannelFilter || dbC.instance_id || state.connectedInstanceName;
+            const compositeId = targetInstanceId ? `${dbC.id}_${targetInstanceId}` : dbC.id;
+            
+            const conv = dbConvs?.find(cv => cv.contact_id === dbC.id && cv.instance_id === targetInstanceId);
             const msgs = conv ? (dbMessages?.filter(m => m.conversation_id === conv.id) || []) : [];
             
             const mappedMessages: MessageType[] = msgs.map((m: any) => ({
@@ -2903,6 +2909,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             return {
                 ...dbC,
+                id: compositeId,
                 avatar: dbC.profile_picture_url || '',
                 messages: mappedMessages,
                 unread: conv?.unread_count || 0,
@@ -2916,7 +2923,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 priority: conv?.priority,
                 assigned_to: conv?.assigned_to,
                 conv_labels: conv?.conversation_labels || [],
-                instance_id: conv?.instance_id || dbC.instance_id
+                instance_id: targetInstanceId
             } as ContactType;
         });
 
@@ -3293,7 +3300,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
            }
        }
     } catch(e) {
-       console.error("Erro ao puxar initialDBContacts", e);
+        console.error("Erro ao puxar initialDBContacts", e);
+     } finally {
+        set({ isChannelLoading: false });
     }
   },
 

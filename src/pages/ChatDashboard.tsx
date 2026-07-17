@@ -430,6 +430,7 @@ export default function ChatDashboard() {
     activeChannelFilter,
     setActiveChannelFilter,
     activeChannelName,
+    isChannelLoading,
     fetchAutomations,
     searchGlobalContacts,
     isSearchingGlobally,
@@ -490,6 +491,7 @@ export default function ChatDashboard() {
     activeChannelFilter: state.activeChannelFilter,
     setActiveChannelFilter: state.setActiveChannelFilter,
     activeChannelName: state.activeChannelName,
+    isChannelLoading: state.isChannelLoading,
     fetchAutomations: state.fetchAutomations,
     searchGlobalContacts: state.searchGlobalContacts,
     isSearchingGlobally: state.isSearchingGlobally,
@@ -1404,6 +1406,7 @@ export default function ChatDashboard() {
   const [batchResolvedCount, setBatchResolvedCount] = useState(0);
   const [isProcessingBatchResolve, setIsProcessingBatchResolve] = useState(false);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [messageFilter, setMessageFilter] = useState<'today' | 'all'>('today');
 
   // Cálculo de Tickets Ativos da Caixa Selecionada (respeitando RBAC e status)
   const activeTicketsCount = React.useMemo(() => {
@@ -2460,6 +2463,7 @@ export default function ChatDashboard() {
         setInputText('');
       }
       setReplyMessage(null); // Limpa rascunho de resposta (quote) ao trocar de conversa
+      setMessageFilter('today'); // Reseta para 'today' por padrão no modo ticket
       prevActiveChatId.current = activeChatId || null;
     }
   }, [activeChatId]);
@@ -5536,7 +5540,7 @@ export default function ChatDashboard() {
         >
            <AnimatePresence mode="popLayout">
             {/* Expressão 1: Nenhum contato encontrado durante a busca */}
-            {filteredContacts.length === 0 && searchTerm && (
+            {!isChannelLoading && filteredContacts.length === 0 && searchTerm && (
               <motion.div 
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -5571,8 +5575,8 @@ export default function ChatDashboard() {
             )}
 
             {/* Expressão 2: Renderização estável dos contatos correspondentes */}
-            {(filteredContacts.length > 0 || !searchTerm) && filteredContacts.slice(0, contactPageLimit).map((contact) => {
-              const lastMsg = contact.messages?.[contact.messages.length - 1];
+            {!isChannelLoading && (filteredContacts.length > 0 || !searchTerm) && filteredContacts.slice(0, contactPageLimit).map((contact) => {
+              const lastMsg = Array.isArray(contact.messages) && contact.messages.length > 0 ? contact.messages[contact.messages.length - 1] : null;
               const timeDisplay = lastMsg 
                 ? (isToday(lastMsg.timestamp) ? format(lastMsg.timestamp, 'HH:mm') 
                    : isYesterday(lastMsg.timestamp) ? 'Ontem' 
@@ -6019,6 +6023,30 @@ export default function ChatDashboard() {
                 </motion.div>
               );
             })}
+
+            {isChannelLoading && (
+              <motion.div 
+                key="channel-loading-skeletons"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="flex flex-col w-full divide-y divide-[#f2f2f2] dark:divide-[#222d34]"
+              >
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 px-3 py-3 animate-pulse">
+                    <div className="w-12 h-12 rounded-full bg-black/5 dark:bg-white/5 shrink-0" />
+                    <div className="flex-grow flex flex-col gap-2 min-w-0">
+                      <div className="flex justify-between items-center w-full">
+                        <div className="h-3.5 w-28 bg-black/5 dark:bg-white/5 rounded-lg" />
+                        <div className="h-2.5 w-8 bg-black/5 dark:bg-white/5 rounded-md" />
+                      </div>
+                      <div className="h-3 w-3/4 bg-black/5 dark:bg-white/5 rounded-lg" />
+                    </div>
+                  </div>
+                ))}
+              </motion.div>
+            )}
           </AnimatePresence>
         </div>
       </div>
@@ -6547,11 +6575,36 @@ export default function ChatDashboard() {
                </div>
             )}
             
+            {ticketMode && (
+              <div className="flex justify-center mb-3 shrink-0 select-none animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="flex items-center gap-1.5 bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 text-[#54656f] dark:text-[#aebac1] text-[11px] px-3.5 py-1.5 rounded-full border border-black/5 dark:border-white/5 font-semibold shadow-sm">
+                  <span>Modo Ticket:</span>
+                  <select
+                    value={messageFilter}
+                    onChange={(e) => setMessageFilter(e.target.value as 'today' | 'all')}
+                    className="bg-transparent text-[#00a884] font-black focus:outline-none cursor-pointer border-none p-0 text-[11px] uppercase tracking-wider"
+                  >
+                    <option value="today" className="bg-white dark:bg-[#202c33] text-gray-800 dark:text-gray-200">Apenas Hoje</option>
+                    <option value="all" className="bg-white dark:bg-[#202c33] text-gray-800 dark:text-gray-200">Ver Anteriores</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
             {(() => {
               const rawMsgs = activeChat.messages?.filter(m => m.text || m.mediaUrl) || [];
-              const dedupedMsgs = rawMsgs.filter((msg, idx) => {
+              const msgsFilteredByMode = (ticketMode && messageFilter === 'today')
+                ? rawMsgs.filter(m => {
+                    try {
+                      return isToday(new Date(m.timestamp));
+                    } catch (e) {
+                      return false;
+                    }
+                  })
+                : rawMsgs;
+              const dedupedMsgs = msgsFilteredByMode.filter((msg, idx) => {
                 if (msg.sender !== 'system') return true;
-                const nextMsg = rawMsgs[idx + 1];
+                const nextMsg = msgsFilteredByMode[idx + 1];
                 return !nextMsg || nextMsg.sender !== 'system';
               });
               
@@ -6603,6 +6656,9 @@ export default function ChatDashboard() {
                     showDateSeparator={showDateSeparator}
                     dateSeparatorText={dateSeparatorText}
                     onAlterarRaciocinio={handleOpenAlterarRaciocinio}
+                    ticketMode={ticketMode}
+                    messageFilter={messageFilter}
+                    setMessageFilter={setMessageFilter}
                   />
                 );
               });

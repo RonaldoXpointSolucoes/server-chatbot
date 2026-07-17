@@ -412,6 +412,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
          const userEmail = storage ? storage.getItem('current_user_email') : null;
          
          if (userEmail && payload.new && payload.new.email && payload.new.email.toLowerCase() === userEmail.toLowerCase()) {
+             const isRonaldo = userEmail.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+             if (isRonaldo) return;
              const newAllowedInstances = payload.new.allowed_instances || [];
              const newAllowedCompanies = payload.new.allowed_companies || [];
              
@@ -638,6 +640,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                 icon={<User size={16} className={filterType === 'mine' ? "text-indigo-400" : ""} />} 
                 isActive={filterType === 'mine'} 
                 onClick={() => {
+                  if (activeChannelFilter === null && filterType === 'mine' && window.location.pathname === '/chat') return;
                   setActiveChannelFilter(null, null);
                   setFilterType('mine');
                   navigate('/chat');
@@ -658,6 +661,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               icon={<CheckSquare size={16} className={filterType === 'tasks' ? "text-amber-400" : ""} />} 
               isActive={filterType === 'tasks'} 
               onClick={() => {
+                if (activeChannelFilter === null && filterType === 'tasks' && window.location.pathname === '/chat') return;
                 setActiveChannelFilter(null, null);
                 setFilterType('tasks');
                 navigate('/chat');
@@ -665,6 +669,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
             />
             {instances.length !== 1 && (
               <NavItem title="Todas as conversas" isActive={filterType !== 'mine' && filterType !== 'blocked'} onClick={() => {
+                if (activeChannelFilter === null && filterType === 'all' && window.location.pathname === '/chat') return;
                 setActiveChannelFilter(null, null);
                 setFilterType('all');
                 if (window.location.pathname !== '/chat') {
@@ -741,12 +746,16 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                           isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
                           className={cn(!isConnected && !isConnecting ? "opacity-60 hover:opacity-100 hover:bg-gray-200/30 dark:hover:bg-[#202c33]/40" : isConnecting ? "opacity-90 hover:opacity-100 hover:bg-yellow-500/5" : "")}
                           onClick={() => {
-                            useChatStore.getState().setActiveChannelFilter(inst.id, inst.display_name);
-                            useChatStore.getState().setFilterType('all');
-                            if (window.location.pathname !== '/chat') {
-                              navigate('/chat');
-                            }
-                          }}
+                             const state = useChatStore.getState();
+                             if (state.activeChannelFilter === inst.id && state.filterType === 'all' && window.location.pathname === '/chat') {
+                               return;
+                             }
+                             state.setActiveChannelFilter(inst.id, inst.display_name);
+                             state.setFilterType('all');
+                             if (window.location.pathname !== '/chat') {
+                               navigate('/chat');
+                             }
+                           }}
                         />
                         {unreadCount > 0 && (
                           <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none animate-in zoom-in duration-300">

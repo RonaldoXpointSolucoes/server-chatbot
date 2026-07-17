@@ -43,3 +43,10 @@ O deploy NUNCA deve ser executado de forma automática após alterações de có
 
 1. **PROIBIDO CANCELAR OU INTERROMPER PROCESSOS DE DEPLOY EM MEIO À EXECUÇÃO**: Nunca force o cancelamento, interrupção ou concorrência de comandos de deploy ativos (ex: `npm run deploy` que invoca `vercel --prod`) ou chamadas sensíveis de infraestrutura. Interromper prematuramente processos de upload da CLI da Vercel ou Coolify bloqueia o estado do deploy remoto, resultando em builds parciais, arquivos de assets corrompidos ou perda de variáveis de ambiente ativas.
 2. **AGUARDAR SEMPRE A CONCLUSÃO TOTAL**: Todo e qualquer comando de deploy iniciado deve ter seu ciclo completo acompanhado através dos logs até que o resultado final de sucesso ou falha real seja devolvido.
+
+## Credenciais para Testes de Automação no Chrome
+
+Sempre que o agente precisar realizar login de forma automatizada e testar as funcionalidades e fluxos no Chrome, deve utilizar as seguintes credenciais:
+* **E-mail/Login**: `ronaldo.xpointsolucoes@gmail.com`
+* **Senha**: `Cc@xroxmaxi7`
+
