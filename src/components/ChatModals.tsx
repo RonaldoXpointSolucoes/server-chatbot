@@ -4321,6 +4321,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     return localStorage.getItem('closed_tickets_selected_instance_id') || 'all';
   });
   const [loading, setLoading] = useState(false);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('today'); // all, today, week, month
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -4854,113 +4855,151 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       
       <div className="relative w-full h-full max-h-screen bg-slate-50 dark:bg-[#0c1317] border-none rounded-none shadow-none p-5 md:p-6 flex flex-col gap-4 animate-in fade-in duration-300 overflow-hidden text-left">
         
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-white/5 pb-3">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-gradient-to-tr from-emerald-500 to-teal-500 rounded-2xl text-white shadow-md shadow-emerald-500/10 shrink-0">
-              <FolderCheck size={20} className="animate-pulse" />
-            </div>
-            <div className="flex flex-col text-left">
-              <h3 className="text-base font-extrabold text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-1.5 animate-pulse">
-                Tickets Fechados
-              </h3>
-              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mt-0.5">
-                Auditoria de atendimentos e base de conhecimento resolvida
-              </p>
-            </div>
+        {/* Mobile Header & Filter Toggle Bar */}
+        <div className="md:hidden flex items-center justify-between p-3 bg-white dark:bg-[#111b21]/60 border border-slate-200/60 dark:border-white/5 rounded-2xl shadow-sm shrink-0">
+          <div className="flex flex-col text-left">
+            <span className="text-xs font-black uppercase text-slate-800 dark:text-white">Tickets Fechados</span>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold mt-0.5">
+              {instances.find(i => i.id === selectedInstanceId)?.display_name || 'Todas as Caixas'} • {
+                dateFilter === 'today' ? 'Hoje' :
+                dateFilter === 'week' ? 'Últimos 7 dias' :
+                dateFilter === 'month' ? 'Mês Atual' : 'Todos'
+              }
+            </span>
           </div>
-          
-          {/* View switcher */}
-          <div className="flex gap-1 bg-slate-200/60 dark:bg-[#111b21] p-1 rounded-xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[36px] items-center ml-auto mr-4 shadow-inner">
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setActiveView('kanban')}
-              type="button"
+              onClick={() => setShowMobileFilters(!showMobileFilters)}
               className={cn(
-                "px-3.5 py-1.5 rounded-lg text-[9.5px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
-                activeView === 'kanban'
-                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-black"
-                  : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                "px-3 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-1.5 border cursor-pointer",
+                showMobileFilters
+                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-455"
+                  : "bg-slate-100 dark:bg-white/5 border-slate-200/40 dark:border-white/5 text-slate-600 dark:text-[#aebac1]"
               )}
             >
-              <span>Mosaico</span>
+              <span>{showMobileFilters ? 'Ocultar Filtros' : 'Filtrar'}</span>
+              <ChevronDown size={12} className={cn("transition-transform duration-200", showMobileFilters && "rotate-180")} />
             </button>
-            <button
-              onClick={() => setActiveView('dashboard')}
-              type="button"
-              className={cn(
-                "px-3.5 py-1.5 rounded-lg text-[9.5px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
-                activeView === 'dashboard'
-                  ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-black"
-                  : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              )}
-            >
-              <span>Insights I.A.</span>
+            <button onClick={onClose} className="p-1.5 rounded-full bg-slate-200/60 dark:bg-white/5 hover:bg-slate-350 dark:hover:bg-white/10 text-slate-500 dark:text-[#aebac1] transition-colors cursor-pointer shrink-0">
+              <X size={14} />
             </button>
           </div>
-
-          <button onClick={onClose} className="p-2 rounded-full bg-slate-200/60 dark:bg-white/5 hover:bg-slate-300 dark:hover:bg-white/10 text-slate-550 hover:text-slate-700 dark:text-[#aebac1] dark:hover:text-white transition-colors cursor-pointer shrink-0">
-            <X size={16} />
-          </button>
         </div>
 
-        {/* Filters Panel */}
-        <div className="flex flex-col md:flex-row gap-3 shrink-0">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={14} />
-            <input
-              type="text"
-              placeholder="Buscar por cliente, atendente, problema ou resumo..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full text-xs pl-10 pr-4 py-2.5 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-semibold font-sans transition-all shadow-sm text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-500"
-            />
-          </div>
-
-          {/* Caixa de Entrada Selector */}
-          <div className="relative min-w-[200px] shrink-0">
-            <Inbox className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={14} />
-            <select
-              value={selectedInstanceId}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSelectedInstanceId(val);
-                localStorage.setItem('closed_tickets_selected_instance_id', val);
-              }}
-              className="w-full text-xs pl-10 pr-8 py-2.5 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-bold transition-all shadow-sm text-slate-800 dark:text-white appearance-none cursor-pointer"
-            >
-              <option value="all">📥 Todas as Caixas</option>
-              {instances.map(inst => (
-                <option key={inst.id} value={inst.id}>
-                  🟢 {inst.display_name || inst.name}
-                </option>
-              ))}
-            </select>
-            <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 dark:text-slate-500">
-              <ChevronDown size={14} />
+        {/* Collapsible Header & Filter Panel Wrapper */}
+        <div className={cn(
+          "flex flex-col gap-4 shrink-0 transition-all duration-300",
+          "md:flex", // Always flex on desktop
+          showMobileFilters ? "flex animate-in slide-in-from-top-2 duration-200" : "hidden md:flex"
+        )}>
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-white/5 pb-3">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-gradient-to-tr from-emerald-500 to-teal-500 rounded-2xl text-white shadow-md shadow-emerald-500/10 shrink-0">
+                <FolderCheck size={20} className="animate-pulse" />
+              </div>
+              <div className="flex flex-col text-left">
+                <h3 className="text-base font-extrabold text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-1.5 animate-pulse">
+                  Tickets Fechados
+                </h3>
+                <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mt-0.5">
+                  Auditoria de atendimentos e base de conhecimento resolvida
+                </p>
+              </div>
             </div>
-          </div>
-          
-          <div className="flex gap-1 bg-slate-200/60 dark:bg-[#111b21] p-1 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner">
-            {[
-              { id: 'all', label: 'Todos' },
-              { id: 'today', label: 'Hoje' },
-              { id: 'week', label: 'Últimos 7 dias' },
-              { id: 'month', label: 'Mês Atual' }
-            ].map(btn => (
+            
+            {/* View switcher */}
+            <div className="flex gap-1 bg-slate-200/60 dark:bg-[#111b21] p-1 rounded-xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[36px] items-center ml-auto mr-4 shadow-inner">
               <button
-                key={btn.id}
-                onClick={() => setDateFilter(btn.id)}
+                onClick={() => setActiveView('kanban')}
                 type="button"
                 className={cn(
-                  "px-4 py-1.5 rounded-xl text-[10.5px] font-extrabold transition-all cursor-pointer",
-                  dateFilter === btn.id 
-                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-455 font-extrabold" 
+                  "px-3.5 py-1.5 rounded-lg text-[9.5px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
+                  activeView === 'kanban'
+                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-black"
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
-                {btn.label}
+                <span>Mosaico</span>
               </button>
-            ))}
+              <button
+                onClick={() => setActiveView('dashboard')}
+                type="button"
+                className={cn(
+                  "px-3.5 py-1.5 rounded-lg text-[9.5px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
+                  activeView === 'dashboard'
+                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-black"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                <span>Insights I.A.</span>
+              </button>
+            </div>
+
+            <button onClick={onClose} className="hidden md:flex p-2 rounded-full bg-slate-200/60 dark:bg-white/5 hover:bg-slate-300 dark:hover:bg-white/10 text-slate-550 hover:text-slate-700 dark:text-[#aebac1] dark:hover:text-white transition-colors cursor-pointer shrink-0">
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Filters Panel */}
+          <div className="flex flex-col md:flex-row gap-3 shrink-0">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={14} />
+              <input
+                type="text"
+                placeholder="Buscar por cliente, atendente, problema ou resumo..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full text-xs pl-10 pr-4 py-2.5 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-semibold font-sans transition-all shadow-sm text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-500"
+              />
+            </div>
+
+            {/* Caixa de Entrada Selector */}
+            <div className="relative min-w-[200px] shrink-0">
+              <Inbox className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={14} />
+              <select
+                value={selectedInstanceId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedInstanceId(val);
+                  localStorage.setItem('closed_tickets_selected_instance_id', val);
+                }}
+                className="w-full text-xs pl-10 pr-8 py-2.5 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-bold transition-all shadow-sm text-slate-800 dark:text-white appearance-none cursor-pointer"
+              >
+                <option value="all">📥 Todas as Caixas</option>
+                {instances.map(inst => (
+                  <option key={inst.id} value={inst.id}>
+                    🟢 {inst.display_name || inst.name}
+                  </option>
+                ))}
+              </select>
+              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 dark:text-slate-500">
+                <ChevronDown size={14} />
+              </div>
+            </div>
+            
+            <div className="flex gap-1 bg-slate-200/60 dark:bg-[#111b21] p-1 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner">
+              {[
+                { id: 'all', label: 'Todos' },
+                { id: 'today', label: 'Hoje' },
+                { id: 'week', label: 'Últimos 7 dias' },
+                { id: 'month', label: 'Mês Atual' }
+              ].map(btn => (
+                <button
+                  key={btn.id}
+                  onClick={() => setDateFilter(btn.id)}
+                  type="button"
+                  className={cn(
+                    "px-4 py-1.5 rounded-xl text-[10.5px] font-extrabold transition-all cursor-pointer",
+                    dateFilter === btn.id 
+                      ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-455 font-extrabold" 
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                >
+                  {btn.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
