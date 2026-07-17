@@ -4697,10 +4697,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center">
       <div className="absolute inset-0 bg-slate-955/65 dark:bg-black/85 backdrop-blur-xl animate-in fade-in duration-300" onClick={onClose} />
       
-      <div className="relative w-full max-w-6xl xl:max-w-7xl h-[88vh] bg-white/90 dark:bg-[#121b22]/75 backdrop-blur-3xl border border-gray-200/50 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col gap-5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden">
+      <div className="relative w-full h-full max-h-screen bg-white/95 dark:bg-[#0c1317]/98 backdrop-blur-3xl border-none rounded-none shadow-none p-5 md:p-6 flex flex-col gap-4.5 animate-in fade-in duration-300 overflow-hidden">
         
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -4854,7 +4854,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             <ClosedTicketsDashboard tickets={filteredTickets} />
           ) : (
             /* Kanban Board columns container */
-            <div className={cn("flex-grow overflow-hidden flex gap-5 min-w-0 transition-all duration-300 h-full", selectedTicket && "hidden md:flex md:w-[45%] md:flex-grow-0 xl:w-[60%]")}>
+            <div className={cn("flex-grow overflow-hidden flex gap-5 min-w-0 transition-all duration-300 h-full", selectedTicket && "hidden md:flex md:w-[50%] md:flex-grow-0 xl:w-[68%]")}>
             {loading ? (
               <div className="flex-1 flex items-center justify-center flex-col gap-3 text-gray-400">
                 <Loader2 className="animate-spin text-emerald-500" size={28} />
@@ -4901,7 +4901,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 key={t.id}
                                 onClick={() => setSelectedTicket(t)}
                                 className={cn(
-                                  "group p-4 rounded-[22px] border text-left cursor-pointer transition-all duration-300 bg-white hover:bg-slate-50/70 dark:bg-[#182229]/65 dark:hover:bg-[#182229] hover:scale-[1.015] hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] flex flex-col gap-3 relative border-black/[0.04] dark:border-white/[0.04]",
+                                  "group p-3 rounded-2xl border text-left cursor-pointer transition-all duration-300 bg-white hover:bg-slate-50/70 dark:bg-[#182229]/65 dark:hover:bg-[#182229] hover:scale-[1.012] hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] flex flex-col gap-2 relative border-black/[0.04] dark:border-white/[0.04]",
                                   selectedTicket?.id === t.id && "border-emerald-500/50 dark:border-emerald-500/30 ring-1 ring-emerald-500/30 dark:ring-emerald-500/10 shadow-sm",
                                   col.cardHoverBorder,
                                   col.cardLeftBorder
@@ -5019,7 +5019,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
           {/* Ticket Details Panel */}
           {selectedTicket && (
-            <div className="w-full md:w-[55%] xl:w-[40%] border border-gray-200/50 dark:border-white/10 bg-white/70 dark:bg-[#182229]/40 backdrop-blur-md rounded-[24px] p-5 flex flex-col gap-4.5 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
+            <div className="w-full md:w-[50%] xl:w-[32%] border border-gray-200/50 dark:border-white/10 bg-white/70 dark:bg-[#182229]/40 backdrop-blur-md rounded-[24px] p-5 flex flex-col gap-4.5 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
               
               {/* Header Details */}
               <div className="flex items-center justify-between border-b border-gray-200/50 dark:border-white/5 pb-3 shrink-0 relative">

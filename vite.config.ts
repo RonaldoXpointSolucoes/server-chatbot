@@ -21,7 +21,22 @@ export default defineConfig({
       injectManifest: {
         maximumFileSizeToCacheInBytes: 5000000,
       },
-      includeAssets: ['vite.svg', 'pwa-192x192.svg', 'pwa-512x512.svg'],
+      includeAssets: [
+        'vite.svg', 
+        'pwa-192x192.svg', 
+        'pwa-512x512.svg',
+        'pwa-72x72.png',
+        'pwa-96x96.png',
+        'pwa-128x128.png',
+        'pwa-144x144.png',
+        'pwa-152x152.png',
+        'pwa-180x180.png',
+        'pwa-192x192.png',
+        'pwa-384x384.png',
+        'pwa-512x512.png',
+        'apple-touch-icon.png',
+        'apple-splash.png'
+      ],
       devOptions: {
         enabled: true,
         type: 'module',
@@ -34,18 +49,68 @@ export default defineConfig({
         theme_color: '#ffffff',
         background_color: '#ffffff',
         display: 'standalone',
+        display_override: ['standalone', 'fullscreen', 'minimal-ui'],
+        orientation: 'portrait',
+        categories: ['business', 'productivity'],
+        lang: 'pt-BR',
+        dir: 'ltr',
+        id: '/',
         scope: '/',
         start_url: '/',
         icons: [
           {
-            src: 'pwa-192x192.svg',
-            sizes: '192x192',
-            type: 'image/svg+xml'
+            src: 'pwa-72x72.png',
+            sizes: '72x72',
+            type: 'image/png',
+            purpose: 'any'
           },
           {
-            src: 'pwa-512x512.svg',
+            src: 'pwa-96x96.png',
+            sizes: '96x96',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: 'pwa-128x128.png',
+            sizes: '128x128',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: 'pwa-144x144.png',
+            sizes: '144x144',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: 'pwa-152x152.png',
+            sizes: '152x152',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: 'pwa-180x180.png',
+            sizes: '180x180',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: 'pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any maskable'
+          },
+          {
+            src: 'pwa-384x384.png',
+            sizes: '384x384',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: 'pwa-512x512.png',
             sizes: '512x512',
-            type: 'image/svg+xml'
+            type: 'image/png',
+            purpose: 'any maskable'
           }
         ]
       }

@@ -554,25 +554,60 @@ ${historyText}`;
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = this.getGenAI().getGenerativeModel({ 
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "Um título curto e atraente para o quadro (ex: 'Processo Seletivo', 'Funil de Vendas')."
+            },
+            description: {
+              type: "string",
+              description: "Uma breve descrição de 1 linha sobre a finalidade desse funil."
+            },
+            stages: {
+              type: "array",
+              description: "Entre 3 e 6 etapas ordenadas logicamente.",
+              items: {
+                type: "object",
+                properties: {
+                  id: {
+                    type: "string",
+                    description: "Um identificador string único em letras minúsculas sem espaços (ex: 'novo', 'analise')."
+                  },
+                  label: {
+                    type: "string",
+                    description: "O título legível da etapa (ex: 'Novo Lead', 'Em Análise')."
+                  },
+                  subtitle: {
+                    type: "string",
+                    description: "Uma legenda super curta explicando a ação dessa etapa."
+                  },
+                  color: {
+                    type: "string",
+                    description: "Uma classe de cor do Tailwind CSS (bg-blue-500, bg-yellow-500, bg-emerald-500, bg-purple-500, bg-rose-500, bg-indigo-500)."
+                  }
+                },
+                required: ["id", "label", "subtitle", "color"]
+              }
+            }
+          },
+          required: ["name", "description", "stages"]
+        }
+      }
+    });
+
     const prompt = `Você é uma Inteligência Artificial especialista em gestão comercial, CRM e processos operacionais (Kanban).
 Sua missão é ler a seguinte descrição do processo fornecido pelo usuário e gerar a estrutura perfeita de um Quadro Kanban de CRM com suas respectivas etapas (colunas).
 
 Descrição do processo:
 "${description}"
 
-Você deve retornar obrigatoriamente um objeto JSON com as seguintes propriedades:
-1. "name": Um título curto e atraente para o quadro (ex: "Processo Seletivo", "Funil de Vendas", "Produção de Pizzas").
-2. "description": Uma breve descrição de 1 linha sobre a finalidade desse funil.
-3. "stages": Um array contendo entre 3 e 6 etapas ordenadas logicamente. Cada etapa deve ser um objeto com:
-   - "id": Um identificador string único em letras minúsculas sem espaços (ex: "novo", "analise", "entrevista").
-   - "label": O título legível da etapa (ex: "Novo Lead", "Em Análise", "Entrevista").
-   - "subtitle": Uma legenda super curta explicando a ação dessa etapa (ex: "Contato inicial", "Verificando documentos").
-   - "color": Uma classe do Tailwind CSS para a cor da coluna (escolha entre: "bg-blue-500", "bg-yellow-500", "bg-emerald-500", "bg-purple-500", "bg-rose-500", "bg-indigo-500").
-
-REGRAS DE RETORNO CRÍTICAS:
-1. Retorne EXATAMENTE e APENAS o JSON.
-2. NUNCA coloque blocos de marcação markdown (\`\`\`json ou \`\`\`) na resposta. Retorne apenas o JSON cru para fazermos JSON.parse de imediato.`;
+Gere o JSON contendo exatamente as informações solicitadas no schema.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -590,7 +625,39 @@ REGRAS DE RETORNO CRÍTICAS:
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = this.getGenAI().getGenerativeModel({ 
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            customerName: {
+              type: "string",
+              description: "Nome completo extraído do cliente (vazio se não encontrado)."
+            },
+            mainInterest: {
+              type: "string",
+              description: "O produto/serviço que ele tem interesse. Escolha entre: 'Sistema', 'Totem', 'Desenvolvimento', 'Revenda', 'Outros'."
+            },
+            businessType: {
+              type: "string",
+              description: "O tipo de empresa dele. Escolha entre: 'Gastronomia', 'Revendedor', 'Pesquisa Iniciante', 'Outros'."
+            },
+            priority: {
+              type: "integer",
+              description: "1 (baixo), 2 (médio) ou 3 (alto) com base no nível de engajamento."
+            },
+            summaryHTML: {
+              type: "string",
+              description: "Um resumo comercial rico com marcadores e parágrafos contendo a dor do cliente, proposta de valor e combinados finais formatado em HTML simples."
+            }
+          },
+          required: ["customerName", "mainInterest", "businessType", "priority", "summaryHTML"]
+        }
+      }
+    });
+
     const prompt = `Analise a seguinte conversa do WhatsApp e notas adicionais de atendimento comercial.
 Sua missão é extrair as intenções de compra, prioridade e gerar um resumo comercial rico formatado em HTML.
 
@@ -600,18 +667,7 @@ ${historyText}
 --- NOTAS ADICIONAIS ---
 ${additionalNotes || 'Nenhuma nota adicional.'}
 
-Você deve retornar obrigatoriamente um objeto JSON com as seguintes propriedades:
-{
-  "customerName": "Nome completo extraído do cliente (vazio se não encontrado)",
-  "mainInterest": "O produto/serviço que ele tem interesse. Escolha entre: 'Sistema', 'Totem', 'Desenvolvimento', 'Revenda', 'Outros'",
-  "businessType": "O tipo de empresa dele. Escolha entre: 'Gastronomia', 'Revendedor', 'Pesquisa Iniciante', 'Outros'",
-  "priority": 1 (baixo), 2 (médio) ou 3 (alto) com base no nível de engajamento e prontidão de compra,
-  "summaryHTML": "Um resumo comercial rico com marcadores e parágrafos contendo a dor do cliente, proposta de valor e combinados finais."
-}
-
-REGRAS DE RETORNO CRÍTICAS:
-1. Retorne EXATAMENTE e APENAS o JSON.
-2. NUNCA coloque blocos de marcação markdown (\`\`\`json ou \`\`\`) na resposta.`;
+Gere o JSON contendo exatamente as informações solicitadas no schema.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -635,7 +691,47 @@ REGRAS DE RETORNO CRÍTICAS:
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = this.getGenAI().getGenerativeModel({ 
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            problem_description: {
+              type: "string",
+              description: "Escreva um resumo extremamente simplificado, focado UNICAMENTE na falha ou solicitação principal, sem termos como 'usuário', 'cliente' ou 'atendente' (máximo de 8 palavras, ex: 'Notas fiscais em contingência pendentes de reemissão')."
+            },
+            summary: {
+              type: "string",
+              description: "Um resumo ultra-conciso (máximo de 25 palavras) de como a questão foi resolvida, focando na ação resolutiva final."
+            },
+            problems_checklist: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  text: { 
+                    type: "string", 
+                    description: "O problema ou dúvida citado pelo cliente, de forma simplificada e direta (máximo de 8 palavras)." 
+                  },
+                  resolved: { 
+                    type: "boolean",
+                    description: "True se o problema foi resolvido ou respondido, false se ficou pendente ou sem solução." 
+                  }
+                },
+                required: ["text", "resolved"]
+              }
+            },
+            resolution_summary: {
+              type: "string",
+              description: "Descrição detalhada do desenrolar do atendimento e a participação dos atendentes. Use parágrafos (\\n\\n) e marcadores (bullet points com hífens '- ') para listar as etapas de solução."
+            }
+          },
+          required: ["problem_description", "summary", "problems_checklist", "resolution_summary"]
+        }
+      }
+    });
     
     const opsText = params.operators.map(op => `${op.name} (${op.percentage}% de participação, ${op.count} msgs)`).join(', ');
     const historyText = params.messages.slice(-65).map(m => `[${m.timestamp}] ${m.sender === 'human' ? 'Atendente' : 'Cliente'}: ${m.text}`).join('\n');
@@ -652,22 +748,7 @@ Sua missão é analisar o histórico de conversação de atendimento a seguir e 
 --- HISTÓRICO DE MENSAGENS DO TICKET ---
 ${historyText}
 
-Você deve gerar obrigatoriamente um objeto JSON em português contendo exatamente estas quatro propriedades:
-{
-  "problem_description": "Escreva um resumo extremamente simplificado, focado UNICAMENTE na falha ou solicitação principal, sem termos como 'usuário', 'cliente' ou 'atendente' (máximo de 8 palavras, ex: 'Sem acesso para imprimir relatório de fechamento de caixa' ou 'Problema de conexão com impressora'). Não use saudações ou palavras de preenchimento.",
-  "summary": "Um resumo ultra-conciso (máximo de 25 palavras, 1 ou 2 frases curtas) de como a questão foi resolvida, focando na ação resolutiva final.",
-  "problems_checklist": [
-    {
-      "text": "Escreva o problema ou dúvida de forma simplificada e direta (máximo de 8 palavras, ex: 'Sem acesso para imprimir relatório'). Organize rigorosamente na mesma ordem em que o cliente citou os problemas na conversa.",
-      "resolved": true
-    }
-  ],
-  "resolution_summary": "Descreva de forma cronológica, rica e detalhada o desenrolar do atendimento, o que foi explicado ou solucionado, e a participação dos atendentes. Use parágrafos (\\n\\n) e marcadores (bullet points com hífens '- ') para listar as etapas de solução de forma muito organizada e legível."
-}
-
-REGRAS DE RETORNO CRÍTICAS:
-1. Retorne EXATAMENTE e APENAS o JSON.
-2. NUNCA coloque blocos de marcação markdown (\`\`\`json ou \`\`\`) na resposta.`;
+    Gere o JSON contendo exatamente as informações solicitadas no schema.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;

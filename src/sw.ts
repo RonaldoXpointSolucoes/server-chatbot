@@ -10,6 +10,83 @@ cleanupOutdatedCaches();
 // Precache resources
 precacheAndRoute(self.__WB_MANIFEST);
 
+// --- IMPORTAÇÃO DE ESTRATÉGIAS WORKBOX PARA PWA PREMIUM ---
+import { registerRoute, NavigationRoute } from 'workbox-routing';
+import { StaleWhileRevalidate, CacheFirst, NetworkFirst } from 'workbox-strategies';
+import { CacheableResponsePlugin } from 'workbox-cacheable-response';
+import { ExpirationPlugin } from 'workbox-expiration';
+import { createHandlerBoundToURL } from 'workbox-precaching';
+
+// 1. Roteamento de Fallback de Navegação para SPA (index.html)
+try {
+  const handler = createHandlerBoundToURL('/index.html');
+  const navigationRoute = new NavigationRoute(handler, {
+    denylist: [
+      /\/_matrix/, // Ignorar rotas de chat motor/baileys se existirem no mesmo domínio
+      /\/api\//,    // Ignorar requisições de API
+      /\/v1\//      // Ignorar funções Supabase Edge
+    ]
+  });
+  registerRoute(navigationRoute);
+} catch (e) {
+  console.warn('[SW] Falha ao registrar NavigationRoute fallback:', e);
+}
+
+// 2. Cache dinâmico de Estilos e Scripts
+registerRoute(
+  ({ request }) => request.destination === 'script' || request.destination === 'style',
+  new StaleWhileRevalidate({
+    cacheName: 'static-resources',
+    plugins: [
+      new CacheableResponsePlugin({
+        statuses: [0, 200]
+      })
+    ]
+  })
+);
+
+// 3. Cache dinâmico de Fontes Google (Google Fonts API)
+registerRoute(
+  ({ url }) => url.origin === 'https://fonts.googleapis.com',
+  new StaleWhileRevalidate({
+    cacheName: 'google-fonts-stylesheets',
+  })
+);
+
+registerRoute(
+  ({ url }) => url.origin === 'https://fonts.gstatic.com',
+  new CacheFirst({
+    cacheName: 'google-fonts-webformats',
+    plugins: [
+      new CacheableResponsePlugin({
+        statuses: [0, 200],
+      }),
+      new ExpirationPlugin({
+        maxAgeSeconds: 60 * 60 * 24 * 365, // 1 ano
+        maxEntries: 50,
+      }),
+    ],
+  })
+);
+
+// 4. Cache dinâmico de Imagens (Avatares, mídias de chat e logos)
+registerRoute(
+  ({ request }) => request.destination === 'image',
+  new StaleWhileRevalidate({
+    cacheName: 'dynamic-images',
+    plugins: [
+      new CacheableResponsePlugin({
+        statuses: [0, 200]
+      }),
+      new ExpirationPlugin({
+        maxEntries: 200,
+        maxAgeSeconds: 30 * 24 * 60 * 60, // 30 dias de retenção
+        purgeOnQuotaError: true
+      }),
+    ],
+  })
+);
+
 // Permite que o cliente dite a ativação via botão "Atualizar"
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
