@@ -4495,23 +4495,38 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       const { supabase } = await import('../services/supabase');
       const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
 
-      let query = supabase
+      // 1. Buscar tickets resolvidos
+      let resolvedQuery = supabase
         .from('chat_tickets')
-        .select('*');
+        .select('*')
+        .eq('status', 'resolved');
 
       if (tenantId) {
-        query = query.eq('tenant_id', tenantId);
+        resolvedQuery = resolvedQuery.eq('tenant_id', tenantId);
       }
 
-      const { data, error } = await query.order('closed_at', { ascending: false });
+      const { data: resolvedData, error: resolvedErr } = await resolvedQuery.order('closed_at', { ascending: false });
+      if (resolvedErr) throw resolvedErr;
 
-      if (error) throw error;
+      const resolvedList = resolvedData || [];
 
-      const resolvedList = (data || []).filter(t => t.status === 'resolved');
-      const openList = (data || []).filter(t => t.status !== 'resolved');
+      // 2. Buscar conversas ativas (não resolvidas)
+      let convsQuery = supabase
+        .from('conversations')
+        .select('id, contact_id, status, instance_id, created_at')
+        .eq('tenant_id', tenantId)
+        .neq('status', 'resolved')
+        .neq('status', 'closed');
 
-      // Obter contatos específicos para evitar estourar o limite de paginação do Supabase (1000 registros)
-      const contactIds = Array.from(new Set((data || []).map(t => t.contact_id).filter(Boolean)));
+      const { data: activeConvs, error: convsErr } = await convsQuery;
+      if (convsErr) throw convsErr;
+
+      // 3. Obter todos os contact IDs envolvidos
+      const contactIds = Array.from(new Set([
+        ...resolvedList.map(t => t.contact_id),
+        ...(activeConvs || []).map(c => c.contact_id)
+      ].filter(Boolean)));
+
       let contactsData: any[] = [];
       if (contactIds.length > 0) {
         const { data: cData, error: cErr } = await supabase
@@ -4523,7 +4538,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         }
       }
 
-      // Buscar empresas vinculadas a estes contatos para preencher nome fantasia e razão social corretos
+      // Buscar empresas vinculadas a estes contatos
       const assocCompanyIds = Array.from(
         new Set(
           contactsData.flatMap(c => c.company_ids || []).filter(Boolean)
@@ -4550,41 +4565,38 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         contactsMap.set(c.id, c);
       });
 
-      // Mapeamento dos operadores reais que atuaram no ticket como fallback e status da conversa
+      // Mapeamento de operadores e fallbacks das conversas
       const operatorFallbacks = new Map<string, string>();
-      const activeConvsSet = new Set<string>();
-      const { data: convsData } = await supabase
+      const { data: allConvsData } = await supabase
         .from('conversations')
-        .select('contact_id, user_email, user_name, status')
+        .select('contact_id, user_email, user_name')
         .in('contact_id', contactIds);
       
-      if (convsData) {
-        convsData.forEach(c => {
+      if (allConvsData) {
+        allConvsData.forEach(c => {
           if (c.contact_id) {
             operatorFallbacks.set(c.contact_id, c.user_name || c.user_email || 'Atendente');
-            if (c.status !== 'resolved' && c.status !== 'closed') {
-              activeConvsSet.add(c.contact_id);
-            }
           }
         });
       }
 
-      const mappedOpen = openList.map(t => {
-        const c = contactsMap.get(t.contact_id);
+      // Map open tickets from active conversations
+      const mappedOpen = (activeConvs || []).map(conv => {
+        const c = contactsMap.get(conv.contact_id);
         if (!c || c.exclude_reports || c.is_blocked) return null;
 
-        const hasActiveConv = activeConvsSet.has(t.contact_id);
-        if (!hasActiveConv) {
-          return null;
-        }
-
         return {
-          ...t,
-          instance_id: t.instance_id || c?.instance_id || null
+          id: conv.id,
+          contact_id: conv.contact_id,
+          status: 'open',
+          opened_at: conv.created_at,
+          instance_id: conv.instance_id || c.instance_id || null,
+          problem_description: c.custom_name || c.name || 'Conversa Ativa'
         };
       }).filter(Boolean);
       setOpenTickets(mappedOpen);
 
+      // Map resolved tickets
       const mapped = resolvedList.map(t => {
         const c = contactsMap.get(t.contact_id);
         if (c?.exclude_reports) return null;
@@ -4717,28 +4729,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         if (ticketInstId !== selectedInstanceId) return false;
       }
 
-      if (dateFilter === 'all') return true;
-
-      const openedDate = new Date(t.opened_at);
-      const now = new Date();
-
-      if (dateFilter === 'today') {
-        return openedDate.toDateString() === selectedDate.toDateString();
-      }
-
-      if (dateFilter === 'week') {
-        const diffTime = Math.abs(now.getTime() - openedDate.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        return diffDays <= 7;
-      }
-
-      if (dateFilter === 'month') {
-        return openedDate.getMonth() === now.getMonth() && openedDate.getFullYear() === now.getFullYear();
-      }
-
       return true;
     });
-  }, [openTickets, search, dateFilter, selectedDate, selectedInstanceId]);
+  }, [openTickets, search, selectedInstanceId]);
 
   const stats = useMemo(() => {
     const closed = filteredTickets.length;
