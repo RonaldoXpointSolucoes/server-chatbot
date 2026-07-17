@@ -4091,10 +4091,10 @@ export function ClosedTicketsDashboard({ tickets }: ClosedTicketsDashboardProps)
     <div className="flex-grow overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-4 text-left h-full pb-8">
       
       {/* 4 Cards Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 shrink-0">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
         
         {/* Card 1: Produtividade */}
-        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-4.5 flex flex-col justify-between shadow-sm relative overflow-hidden group">
+        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-5 flex flex-col justify-between shadow-sm relative overflow-hidden group">
           <div className="flex justify-between items-start">
             <div className="flex flex-col">
               <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Produtividade</span>
@@ -4104,13 +4104,13 @@ export function ClosedTicketsDashboard({ tickets }: ClosedTicketsDashboardProps)
               <Activity size={18} />
             </div>
           </div>
-          <div className="text-[10px] text-gray-400 mt-4.5 font-bold flex items-center gap-1.5">
+          <div className="text-[10px] text-gray-400 mt-4 font-bold flex items-center gap-1.5">
             <span className="text-emerald-500 font-extrabold flex items-center">⚡ {avgMessages}</span> msgs médias por chamado
           </div>
         </div>
 
         {/* Card 2: Tempo de Resposta (MTTR) */}
-        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-4.5 flex flex-col justify-between shadow-sm relative overflow-hidden">
+        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-5 flex flex-col justify-between shadow-sm relative overflow-hidden">
           <div className="flex justify-between items-start">
             <div className="flex flex-col">
               <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Tempo Médio (TMR)</span>
@@ -4120,13 +4120,13 @@ export function ClosedTicketsDashboard({ tickets }: ClosedTicketsDashboardProps)
               <Clock size={18} />
             </div>
           </div>
-          <div className="text-[10px] text-gray-400 mt-4.5 font-bold flex items-center gap-1.5">
+          <div className="text-[10px] text-gray-400 mt-4 font-bold flex items-center gap-1.5">
             <span className="text-sky-500 font-extrabold">✓ {checklistEffectiveness}%</span> de eficácia (checklist)
           </div>
         </div>
 
         {/* Card 3: Qualidade & Falhas */}
-        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-4.5 flex flex-col justify-between shadow-sm relative overflow-hidden">
+        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-5 flex flex-col justify-between shadow-sm relative overflow-hidden">
           <div className="flex justify-between items-start">
             <div className="flex flex-col">
               <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Erros & Reaberturas</span>
@@ -4136,23 +4136,23 @@ export function ClosedTicketsDashboard({ tickets }: ClosedTicketsDashboardProps)
               <AlertTriangle size={18} />
             </div>
           </div>
-          <div className="text-[10px] text-gray-400 mt-4.5 font-bold flex items-center gap-1.5">
+          <div className="text-[10px] text-gray-400 mt-4 font-bold flex items-center gap-1.5">
             <span className="text-rose-500 font-extrabold">⚠️ {aiFailureRate}%</span> taxa de falhas de processamento I.A.
           </div>
         </div>
 
         {/* Card 4: Sentimento do Cliente */}
-        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-4.5 flex flex-col justify-between shadow-sm relative overflow-hidden">
+        <div className="bg-gradient-to-br from-slate-50/60 to-slate-100/30 dark:from-[#182229]/60 dark:to-[#182229]/30 border border-black/5 dark:border-white/5 rounded-3xl p-5 flex flex-col justify-between shadow-sm relative overflow-hidden">
           <div className="flex justify-between items-start">
             <div className="flex flex-col">
               <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Clientes Insatisfeitos</span>
               <span className="text-2xl font-black text-rose-600 mt-1">{unsatisfiedTickets.length}</span>
             </div>
-            <div className="p-2 bg-rose-500/10 rounded-xl text-rose-650 dark:text-rose-400">
+            <div className="p-2 bg-rose-500/10 rounded-xl text-rose-650 dark:text-rose-450">
               {unsatisfiedTickets.length > 0 ? <Frown size={18} className="animate-bounce" /> : <Smile size={18} />}
             </div>
           </div>
-          <div className="text-[10px] text-gray-400 mt-4.5 font-bold flex items-center gap-1.5">
+          <div className="text-[10px] text-gray-400 mt-4 font-bold flex items-center gap-1.5">
             {unsatisfiedTickets.length > 0 ? (
               <span className="text-rose-500 font-extrabold flex items-center gap-0.5 animate-pulse">⚠️ Alerta Máximo ativo</span>
             ) : (
@@ -4194,7 +4194,13 @@ export function ClosedTicketsDashboard({ tickets }: ClosedTicketsDashboardProps)
                     <div 
                       className={cn(
                         "h-full rounded-full transition-all duration-500",
-                        idx === 0 ? "bg-emerald-500" : idx === 1 ? "bg-teal-500" : idx === 2 ? "bg-sky-500" : "bg-indigo-500"
+                        idx === 0 
+                          ? "bg-gradient-to-r from-emerald-500 to-teal-500" 
+                          : idx === 1 
+                            ? "bg-gradient-to-r from-teal-500 to-cyan-500" 
+                            : idx === 2 
+                              ? "bg-gradient-to-r from-sky-500 to-blue-500" 
+                              : "bg-gradient-to-r from-violet-500 to-purple-500"
                       )} 
                       style={{ width: `${p.percentage}%` }}
                     />
