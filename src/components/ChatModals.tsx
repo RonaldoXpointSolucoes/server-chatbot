@@ -4513,7 +4513,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       // 2. Buscar conversas ativas (não resolvidas)
       let convsQuery = supabase
         .from('conversations')
-        .select('id, contact_id, status, instance_id, created_at')
+        .select('id, contact_id, status, instance_id, updated_at')
         .eq('tenant_id', tenantId)
         .neq('status', 'resolved')
         .neq('status', 'closed');
@@ -4589,7 +4589,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           id: conv.id,
           contact_id: conv.contact_id,
           status: 'open',
-          opened_at: conv.created_at,
+          opened_at: conv.updated_at,
           instance_id: conv.instance_id || c.instance_id || null,
           problem_description: c.custom_name || c.name || 'Conversa Ativa'
         };
