@@ -4453,12 +4453,36 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       const { data, error } = await supabase
         .from('whatsapp_instances')
-        .select('*')
+        .select('id, display_name')
         .eq('tenant_id', tenantId)
-        .order('name', { ascending: true });
+        .order('display_name', { ascending: true });
 
-      if (!error && data) {
-        setInstances(data);
+      if (error) throw error;
+      if (data) {
+        let finalData = data;
+        const userEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email') || '';
+        const isRonaldo = userEmail.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+        if (!isRonaldo) {
+          finalData = data.filter(d => d.id !== '5c78d358-d449-41c4-b396-a04ab20a39e4' && !d.display_name?.toLowerCase().includes('ronaldo'));
+          
+          const allowedStr = sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances') || null;
+          const currentUserRole = sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role') || null;
+          if (allowedStr) {
+            try {
+              const allowed = JSON.parse(allowedStr);
+              if (Array.isArray(allowed) && allowed.length > 0) {
+                finalData = finalData.filter(d => allowed.includes(d.id));
+              } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
+                finalData = [];
+              }
+            } catch(e) {
+              if (currentUserRole === 'agent' || currentUserRole === 'Agente') finalData = [];
+            }
+          } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
+            finalData = [];
+          }
+        }
+        setInstances(finalData);
       }
     } catch (err) {
       console.error('Erro ao buscar caixas de entrada:', err);
@@ -4874,7 +4898,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               <option value="all">📥 Todas as Caixas</option>
               {instances.map(inst => (
                 <option key={inst.id} value={inst.id}>
-                  🟢 {inst.name}
+                  🟢 {inst.display_name || inst.name}
                 </option>
               ))}
             </select>
