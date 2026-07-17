@@ -5462,7 +5462,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               {selectedTicket.resolution_summary && (
                 <div className="flex flex-col gap-2 bg-emerald-500/5 p-4 rounded-xl border border-emerald-500/10 dark:border-emerald-500/5 shadow-sm border-l-[3.5px] border-l-emerald-500 animate-in fade-in duration-200">
                   <span className="text-[9.5px] uppercase font-black text-emerald-600 dark:text-emerald-450 tracking-wider">Resolução Completa</span>
-                  <p className="text-xs text-gray-800 dark:text-gray-150 font-bold leading-relaxed whitespace-pre-wrap select-text">
+                  <p className="text-xs text-gray-800 dark:text-white font-bold leading-relaxed whitespace-pre-wrap select-text">
                     {selectedTicket.resolution_summary}
                   </p>
                 </div>
