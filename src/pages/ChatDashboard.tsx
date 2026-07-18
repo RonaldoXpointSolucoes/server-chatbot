@@ -520,8 +520,20 @@ export default function ChatDashboard() {
   const [resolvingTicketContactId, setResolvingTicketContactId] = useState<string | null>(null);
   const activeTicket = useChatStore(s => s.activeTicket);
 
-  const calculateFinalStats = async (contactId: string) => {
-    const activeTicket = useChatStore.getState().activeTicket;
+  const calculateFinalStats = async (contactId: string, customTicket?: any) => {
+    let activeTicket = customTicket;
+    if (!activeTicket) {
+      const realContactId = contactId.includes('_') ? contactId.split('_')[0] : contactId;
+      const { data: dbTicket } = await supabase
+        .from('chat_tickets')
+        .select('*')
+        .eq('contact_id', realContactId)
+        .eq('status', 'open')
+        .order('opened_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      activeTicket = dbTicket;
+    }
     if (!activeTicket) return {};
 
     const contact = contacts.find(c => c.id === contactId);
@@ -2194,23 +2206,32 @@ export default function ChatDashboard() {
 
           if (instData?.ticket_mode) {
             if (instData?.hide_ticket_modal) {
-              const currentActiveTicket = useChatStore.getState().activeTicket;
+              // Buscar o ticket ativo correspondente ao contactId no Supabase antes da troca de chat ativo
+              const realContactId = contactId.includes('_') ? contactId.split('_')[0] : contactId;
+              const { data: dbTicket } = await supabase
+                .from('chat_tickets')
+                .select('*')
+                .eq('contact_id', realContactId)
+                .eq('status', 'open')
+                .order('opened_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
               
               // Executa a resolução na interface imediatamente
               await executeResolve(contactId, true);
 
-              if (currentActiveTicket) {
+              if (dbTicket) {
                 // Roda a análise de IA e gravação do ticket em background
                 (async () => {
                   try {
-                    const stats = await calculateFinalStats(contactId);
+                    const stats = await calculateFinalStats(contactId, dbTicket);
                     
-                    const start = new Date(currentActiveTicket.opened_at);
+                    const start = new Date(dbTicket.opened_at);
                     const { data: ticketMsgs } = await supabase
                       .from('messages')
                       .select('text_content, sender_type, timestamp, raw_payload')
                       .eq('conversation_id', contact.conv_id || '')
-                      .gte('timestamp', currentActiveTicket.opened_at);
+                      .gte('timestamp', dbTicket.opened_at);
 
                     const formattedMsgs = (ticketMsgs || []).map((m: any) => {
                       const text = (m.text_content || '').trim();
@@ -2232,7 +2253,7 @@ export default function ChatDashboard() {
                     const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
                     const operatorName = currentUserName || currentUserEmail || 'Atendente';
 
-                    let problemDesc = currentActiveTicket.problem_description || '';
+                    let problemDesc = dbTicket.problem_description || '';
                     let resolution = 'Resolvido pelo atendente.';
                     let summaryText = '';
                     let problemsChecklist: any[] = [];
@@ -2241,7 +2262,7 @@ export default function ChatDashboard() {
                     if (geminiService.isConfigured()) {
                       try {
                         const result = await geminiService.generateTicketAnalysis({
-                          opened_at: new Date(currentActiveTicket.opened_at).toLocaleString('pt-BR'),
+                          opened_at: new Date(dbTicket.opened_at).toLocaleString('pt-BR'),
                           closed_at: new Date().toLocaleString('pt-BR'),
                           operators: stats.operators || [],
                           closed_by: operatorName,
@@ -3726,7 +3747,18 @@ export default function ChatDashboard() {
         contact={activeChat}
         onConfirm={async (problemDesc, resolution, reactivateAi, summaryText, problemsChecklist, errorLog) => {
           if (resolvingTicketContactId) {
-            const baseStats = await calculateFinalStats(resolvingTicketContactId);
+            // Buscar o ticket ativo correspondente ao resolvingTicketContactId no Supabase
+            const realContactId = resolvingTicketContactId.includes('_') ? resolvingTicketContactId.split('_')[0] : resolvingTicketContactId;
+            const { data: dbTicket } = await supabase
+              .from('chat_tickets')
+              .select('*')
+              .eq('contact_id', realContactId)
+              .eq('status', 'open')
+              .order('opened_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            const baseStats = await calculateFinalStats(resolvingTicketContactId, dbTicket);
             const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
             const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
             const operatorName = currentUserName || currentUserEmail || 'Atendente';
@@ -3738,9 +3770,8 @@ export default function ChatDashboard() {
               closed_by: operatorName,
               error_log: errorLog
             };
-            const currentActiveTicket = useChatStore.getState().activeTicket;
-            if (currentActiveTicket) {
-              await useChatStore.getState().resolveActiveTicket(currentActiveTicket.id, problemDesc, resolution, stats);
+            if (dbTicket) {
+              await useChatStore.getState().resolveActiveTicket(dbTicket.id, problemDesc, resolution, stats);
             }
             await executeResolve(resolvingTicketContactId, reactivateAi);
           }
