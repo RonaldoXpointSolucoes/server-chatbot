@@ -4126,7 +4126,7 @@ export function ClosedTicketsDashboard({ tickets }: ClosedTicketsDashboardProps)
   }
 
   return (
-    <div className="flex-grow overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-4 text-left h-full pb-8">
+    <div className="flex-grow md:overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-4 text-left md:h-full pb-8">
       
       {/* 4 Cards Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
@@ -4918,10 +4918,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     <div className="fixed inset-0 z-[120] flex items-center justify-center">
       <div className="absolute inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
       
-      <div className="relative w-full h-full max-h-screen bg-slate-50 dark:bg-[#0c1317] border-none rounded-none shadow-none p-5 md:p-6 flex flex-col gap-4 animate-in fade-in duration-300 overflow-hidden text-left">
+      <div className="relative w-full h-full max-h-screen bg-slate-50 dark:bg-[#0c1317] border-none rounded-none shadow-none p-0 md:p-6 flex flex-col gap-4 animate-in fade-in duration-300 overflow-y-auto md:overflow-hidden text-left">
         
         {/* Mobile Header & Filter Toggle Bar */}
-        <div className="md:hidden flex items-center justify-between p-3 bg-white dark:bg-[#111b21]/60 border border-slate-200/60 dark:border-white/5 rounded-2xl shadow-sm shrink-0">
+        <div className="md:hidden sticky top-0 z-50 flex items-center justify-between px-5 py-4 bg-slate-50/90 dark:bg-[#0c1317]/90 backdrop-blur-md border-b border-slate-200/60 dark:border-white/5 shadow-sm shrink-0">
           <div className="flex flex-col text-left">
             <span className="text-xs font-black uppercase text-slate-800 dark:text-white">Tickets Fechados</span>
             <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold mt-0.5">
@@ -4953,7 +4953,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
         {/* Collapsible Header & Filter Panel Wrapper */}
         <div className={cn(
-          "flex flex-col gap-4 shrink-0 transition-all duration-300",
+          "flex flex-col gap-4 shrink-0 transition-all duration-300 px-5 md:px-0",
           "md:flex", // Always flex on desktop
           showMobileFilters ? "flex animate-in slide-in-from-top-2 duration-200" : "hidden md:flex"
         )}>
@@ -5069,7 +5069,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         </div>
 
         {/* Weekly Day Selector */}
-        <div className="flex justify-center items-center gap-2 bg-white dark:bg-[#111b21]/50 p-2.5 rounded-2xl border border-slate-200/60 dark:border-white/5 select-none overflow-x-auto shrink-0 custom-scrollbar">
+        <div className="flex justify-center items-center gap-2 bg-white dark:bg-[#111b21]/50 p-2.5 rounded-2xl border border-slate-200/60 dark:border-white/5 select-none overflow-x-auto shrink-0 custom-scrollbar mx-5 md:mx-0">
           {daysList.map((day, idx) => {
             const isToday = day.toDateString() === new Date().toDateString();
             const isSelected = dateFilter === 'today' && day.toDateString() === selectedDate.toDateString();
@@ -5101,7 +5101,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         </div>
 
         {/* Top Metrics Row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0 px-5 md:px-0">
           {/* Total */}
           <div className="bg-white dark:bg-[#111b21]/60 border border-slate-200/60 dark:border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden group animate-in fade-in duration-300">
             <div className="flex flex-col text-left">
@@ -5164,7 +5164,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         {/* Kanban Tab Selector for Mobile / Tablet */}
         {activeView === 'kanban' && (
           <div className={cn(
-            "gap-1.5 bg-slate-200/60 dark:bg-[#111b21] p-1.5 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner",
+            "mx-5 md:mx-0 gap-1.5 bg-slate-200/60 dark:bg-[#111b21] p-1.5 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner",
             selectedTicket ? "flex xl:hidden" : "flex md:hidden"
           )}>
             {columns.map(col => (
@@ -5189,20 +5189,20 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         )}
 
         {/* Main Body */}
-        <div className="flex-1 flex gap-5 min-h-0">
+        <div className="flex-1 flex flex-col md:flex-row gap-5 min-h-0 md:h-full px-5 md:px-0 pb-5 md:pb-0">
           
           {activeView === 'dashboard' ? (
             <ClosedTicketsDashboard tickets={filteredTickets} />
           ) : (
             /* Kanban Board columns container */
-            <div className={cn("flex-grow overflow-hidden flex gap-5 min-w-0 transition-all duration-300 h-full", selectedTicket && "hidden md:flex md:w-[50%] md:flex-grow-0 xl:w-[68%]")}>
+            <div className={cn("flex-grow overflow-visible md:overflow-hidden flex flex-col md:flex-row gap-5 min-w-0 transition-all duration-300 md:h-full", selectedTicket && "hidden md:flex md:w-[50%] md:flex-grow-0 xl:w-[68%]")}>
             {loading ? (
               <div className="flex-1 flex items-center justify-center flex-col gap-3 text-slate-400 dark:text-slate-500">
                 <Loader2 className="animate-spin text-emerald-500" size={28} />
                 <span className="text-xs font-semibold">Carregando tickets...</span>
               </div>
             ) : (
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-5 h-full">
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-5 h-fit md:h-full">
                 {columns.map(col => {
                   const isVisible = activeKanbanTab === col.id;
                   
@@ -5210,7 +5210,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     <div 
                       key={col.id}
                       className={cn(
-                        "flex flex-col h-full bg-slate-100/50 dark:bg-[#111b21]/45 border rounded-[24px] overflow-hidden transition-all duration-200 shadow-sm border-slate-200/60 dark:border-white/5",
+                        "flex flex-col h-fit md:h-full bg-slate-100/50 dark:bg-[#111b21]/45 border rounded-[24px] overflow-hidden transition-all duration-200 shadow-sm border-slate-200/60 dark:border-white/5",
                         selectedTicket 
                           ? (!isVisible ? "hidden xl:flex" : "flex") 
                           : (!isVisible ? "hidden md:flex" : "flex")
@@ -5228,7 +5228,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                       </div>
 
                       {/* Column Content */}
-                      <div className="flex-1 overflow-y-auto custom-scrollbar p-3.5 flex flex-col gap-3.5">
+                      <div className="flex-1 md:overflow-y-auto custom-scrollbar p-3.5 flex flex-col gap-3.5">
                         {col.tickets.length > 0 ? (
                           col.tickets.map(t => {
                             const totalMsg = t.metadata?.total_messages || 0;
@@ -5359,7 +5359,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
           {/* Ticket Details Panel */}
           {selectedTicket && (
-            <div className="w-full md:w-[50%] xl:w-[32%] border border-gray-200/50 dark:border-white/10 bg-white/70 dark:bg-[#182229]/40 backdrop-blur-md rounded-[24px] p-5 flex flex-col gap-4.5 min-h-0 overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
+            <div className="w-full md:w-[50%] xl:w-[32%] border border-gray-200/50 dark:border-white/10 bg-white/70 dark:bg-[#182229]/40 backdrop-blur-md rounded-[24px] p-5 flex flex-col gap-4.5 min-h-0 md:overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
               
               {/* Header Details */}
               <div className="flex items-center justify-between border-b border-gray-200/50 dark:border-white/5 pb-3 shrink-0 relative">
