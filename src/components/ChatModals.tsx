@@ -3594,54 +3594,92 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
         return ts >= start;
       });
 
-      const formattedMsgs = ticketMsgs.map((m: any) => {
-        const text = (m.text || m.text_content || '').trim();
-        let isHuman = m.sender === 'human' || m.sender_type === 'human' || m.sender === 'me' || m.sender_type === 'me';
-        
-        if (!isHuman && text) {
-          const matchAsterisk = text.match(/^\*([^*:\n]+):\*/);
-          if (matchAsterisk) {
-            isHuman = true;
-          } else {
-            const lines = text.split('\n');
-            const firstLine = lines[0].trim();
-            const cleanFirstLine = firstLine.replace(/:$/, '').trim();
-            const isNamePattern = /^[A-Z\u00C0-\u00FF][a-z\u00E0-\u00FC]+(?:\s+[A-Z\u00C0-\u00FF][a-z\u00E0-\u00FC]+){0,2}$/.test(cleanFirstLine);
-            if (lines.length > 1 && isNamePattern && cleanFirstLine.length >= 3 && cleanFirstLine.length <= 25) {
-              isHuman = true;
+      // Transcrever áudios pendentes assincronamente e rodar a análise
+      const processAndAnalyze = async () => {
+        try {
+          const { geminiService } = await import('../services/geminiService');
+          const processedMsgs = [];
+
+          for (const m of ticketMsgs) {
+            let text = (m.text || m.text_content || '').trim();
+            const isAudio = m.mediaType === 'audio' || m.message_type === 'audio' || text === '🎵 Áudio';
+
+            if (isAudio) {
+              if (m.transcription) {
+                text = `🎵 Áudio (Transcrito): "${m.transcription}"`;
+              } else {
+                const audioUrl = m.mediaUrl || m.media_url;
+                if (audioUrl) {
+                  try {
+                    const transcribedText = await geminiService.transcribeAudio(audioUrl);
+                    // Atualizar no Supabase
+                    const { supabase } = await import('../services/supabase');
+                    await supabase
+                      .from('messages')
+                      .update({ transcription: transcribedText })
+                      .eq('id', m.id);
+
+                    text = `🎵 Áudio (Transcrito): "${transcribedText}"`;
+                    m.transcription = transcribedText;
+                  } catch (transcribeErr) {
+                    console.error("Erro ao transcrever áudio no fechamento:", transcribeErr);
+                    text = `🎵 Áudio (Falha ao transcrever)`;
+                  }
+                } else {
+                  text = `🎵 Áudio (Mídia indisponível)`;
+                }
+              }
             }
+
+            let isHuman = m.sender === 'human' || m.sender_type === 'human' || m.sender === 'me' || m.sender_type === 'me';
+            if (!isHuman && text) {
+              const matchAsterisk = text.match(/^\*([^*:\n]+):\*/);
+              if (matchAsterisk) {
+                isHuman = true;
+              } else {
+                const lines = text.split('\n');
+                const firstLine = lines[0].trim();
+                const cleanFirstLine = firstLine.replace(/:$/, '').trim();
+                const isNamePattern = /^[A-Z\u00C0-\u00FF][a-z\u00E0-\u00FC]+(?:\s+[A-Z\u00C0-\u00FF][a-z\u00E0-\u00FC]+){0,2}$/.test(cleanFirstLine);
+                if (lines.length > 1 && isNamePattern && cleanFirstLine.length >= 3 && cleanFirstLine.length <= 25) {
+                  isHuman = true;
+                }
+              }
+            }
+
+            processedMsgs.push({
+              sender: isHuman ? 'human' : 'client',
+              text: text,
+              timestamp: new Date(m.timestamp || m.created_at).toLocaleString('pt-BR')
+            });
           }
+
+          const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+          const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
+          const operatorName = currentUserName || currentUserEmail || 'Atendente';
+
+          const result = await geminiService.generateTicketAnalysis({
+            opened_at: new Date(activeTicket.opened_at).toLocaleString('pt-BR'),
+            closed_at: new Date().toLocaleString('pt-BR'),
+            operators: ticketStats.operators,
+            closed_by: operatorName,
+            messages: processedMsgs
+          });
+
+          if (result.problem_description) setProblemDesc(result.problem_description);
+          if (result.summary) setSummary(result.summary);
+          if (result.problems_checklist) setChecklist(result.problems_checklist);
+          if (result.resolution_summary) setResolution(result.resolution_summary);
+          if (result.error_log) setErrorLog(result.error_log);
+        } catch (err: any) {
+          console.error("Erro na análise automática do ticket:", err);
+          setErrorLog(err?.message || String(err));
+        } finally {
+          setAnalyzing(false);
         }
+      };
 
-        return {
-          sender: isHuman ? 'human' : 'client',
-          text: text,
-          timestamp: new Date(m.timestamp || m.created_at).toLocaleString('pt-BR')
-        };
-      });
-
-      const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
-      const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
-      const operatorName = currentUserName || currentUserEmail || 'Atendente';
-
-      geminiService.generateTicketAnalysis({
-        opened_at: new Date(activeTicket.opened_at).toLocaleString('pt-BR'),
-        closed_at: new Date().toLocaleString('pt-BR'),
-        operators: ticketStats.operators,
-        closed_by: operatorName,
-        messages: formattedMsgs
-      }).then((result) => {
-        if (result.problem_description) setProblemDesc(result.problem_description);
-        if (result.summary) setSummary(result.summary);
-        if (result.problems_checklist) setChecklist(result.problems_checklist);
-        if (result.resolution_summary) setResolution(result.resolution_summary);
-        if (result.error_log) setErrorLog(result.error_log);
-      }).catch((err) => {
-        console.error("Erro na análise automática do ticket:", err);
-        setErrorLog(err?.message || String(err));
-      }).finally(() => {
-        setAnalyzing(false);
-      });
+      processAndAnalyze();
     } else if (!geminiService.isConfigured()) {
       setErrorLog("Chave de API do Gemini não configurada nas Configurações.");
     }
@@ -4376,17 +4414,43 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         throw new Error('Conversa correspondente não encontrada para buscar histórico.');
       }
 
-      // 2. Fetch messages within ticket lifetime
+      // 2. Fetch messages within ticket lifetime including media metadata and transcriptions
       const { data: ticketMsgs } = await supabase
         .from('messages')
-        .select('text_content, sender_type, timestamp')
+        .select('id, text_content, sender_type, timestamp, transcription, message_type, media_url')
         .eq('conversation_id', convData.id)
         .gte('timestamp', ticket.opened_at)
         .lte('timestamp', ticket.closed_at)
         .order('timestamp', { ascending: true });
 
-      const formattedMsgs = (ticketMsgs || []).map((m: any) => {
-        const text = (m.text_content || '').trim();
+      // Transcrever áudios pendentes assincronamente
+      const processedMsgs = [];
+      for (const m of (ticketMsgs || [])) {
+        let text = (m.text_content || '').trim();
+        const isAudio = m.message_type === 'audio' || text === '🎵 Áudio';
+
+        if (isAudio) {
+          if (m.transcription) {
+            text = `🎵 Áudio (Transcrito): "${m.transcription}"`;
+          } else if (m.media_url) {
+            try {
+              const transcribedText = await geminiService.transcribeAudio(m.media_url);
+              // Salvar no Supabase
+              await supabase
+                .from('messages')
+                .update({ transcription: transcribedText })
+                .eq('id', m.id);
+
+              text = `🎵 Áudio (Transcrito): "${transcribedText}"`;
+            } catch (audioErr) {
+              console.error("Erro ao transcrever áudio na reanálise:", audioErr);
+              text = `🎵 Áudio (Falha ao transcrever)`;
+            }
+          } else {
+            text = `🎵 Áudio (Mídia indisponível)`;
+          }
+        }
+
         let isHuman = m.sender_type === 'human';
         if (!isHuman && text) {
           const matchAsterisk = text.match(/^\*([^*:\n]+):\*/);
@@ -4394,12 +4458,13 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             isHuman = true;
           }
         }
-        return {
+
+        processedMsgs.push({
           sender: isHuman ? 'human' : 'client',
           text: text,
           timestamp: new Date(m.timestamp).toLocaleString('pt-BR')
-        };
-      });
+        });
+      }
 
       // 3. Generate analysis
       const result = await geminiService.generateTicketAnalysis({
@@ -4407,7 +4472,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         closed_at: new Date(ticket.closed_at).toLocaleString('pt-BR'),
         operators: ticket.metadata?.operators || [],
         closed_by: ticket.metadata?.closed_by || 'Atendente',
-        messages: formattedMsgs
+        messages: processedMsgs
       });
 
       const finalStats = { 
