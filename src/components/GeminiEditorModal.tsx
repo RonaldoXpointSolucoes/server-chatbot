@@ -124,7 +124,7 @@ export function GeminiEditorModal({ isOpen, onClose, originalText, suggestedText
         onClick={onClose}
       />
       
-      <div className="relative w-full max-w-2xl bg-white dark:bg-[#111b21] rounded-3xl shadow-[0_30px_60px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-300 border border-black/5 dark:border-white/5">
+      <div className="relative w-full max-w-2xl max-h-[90vh] bg-white dark:bg-[#111b21] rounded-3xl shadow-[0_30px_60px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-300 border border-black/5 dark:border-white/5">
         
         {/* Banner Superior com Gradiente Dinâmico */}
         <div className={cn("h-24 sm:h-32 w-full bg-gradient-to-r relative", gradientByIntent())}>
@@ -147,7 +147,7 @@ export function GeminiEditorModal({ isOpen, onClose, originalText, suggestedText
            </div>
         </div>
 
-        <div className="pt-10 sm:pt-12 px-6 sm:px-8 pb-6 sm:pb-8 flex flex-col gap-6">
+        <div className="pt-10 sm:pt-12 px-6 sm:px-8 pb-3 flex-1 flex flex-col gap-6 min-h-0 overflow-y-auto custom-scrollbar">
           
           <div className="flex flex-col">
             <h2 className="text-xl sm:text-2xl font-bold text-[#111b21] dark:text-[#e9edef] flex items-center gap-2">
@@ -243,37 +243,37 @@ export function GeminiEditorModal({ isOpen, onClose, originalText, suggestedText
             </div>
           )}
 
-          <div className="flex flex-col sm:flex-row items-center justify-end gap-3 mt-4 pt-4 border-t border-black/5 dark:border-white/5">
-            <button 
-              onClick={onClose}
-              className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-medium text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-            >
-              {intent === 'analyze' ? 'Fechar Relatório' : 'Cancelar'}
-            </button>
-            {intent !== 'analyze' && (
-              <button 
-                onClick={() => {
-                  onSend(originalText);
-                  onClose();
-                }}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-medium text-[#111b21] dark:text-white bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
-              >
-                Enviar Original
-              </button>
-            )}
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-center justify-end gap-3 px-6 sm:px-8 pb-6 sm:pb-8 pt-4 border-t border-black/5 dark:border-white/5 shrink-0 bg-white dark:bg-[#111b21] w-full">
+          <button 
+            onClick={onClose}
+            className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-medium text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer"
+          >
+            {intent === 'analyze' ? 'Fechar Relatório' : 'Cancelar'}
+          </button>
+          {intent !== 'analyze' && (
             <button 
               onClick={() => {
-                if (intent !== 'analyze') {
-                  onSend(editedText);
-                }
+                onSend(originalText);
                 onClose();
               }}
-              className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-white bg-gradient-to-r from-[#00a884] to-teal-500 hover:from-teal-500 hover:to-emerald-500 shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95"
+              className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-medium text-[#111b21] dark:text-white bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-colors flex items-center justify-center gap-2 cursor-pointer"
             >
-               {intent === 'analyze' ? <><CheckCircle2 size={18} /> Entendido</> : <><Send size={18} className="translate-x-0.5" /> Enviar Otimizada</>}
+              Enviar Original
             </button>
-          </div>
-
+          )}
+          <button 
+            onClick={() => {
+              if (intent !== 'analyze') {
+                onSend(editedText);
+              }
+              onClose();
+            }}
+            className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-white bg-gradient-to-r from-[#00a884] to-teal-500 hover:from-teal-500 hover:to-emerald-500 shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+          >
+             {intent === 'analyze' ? <><CheckCircle2 size={18} /> Entendido</> : <><Send size={18} className="translate-x-0.5" /> Enviar Otimizada</>}
+          </button>
         </div>
       </div>
     </div>
