@@ -74,7 +74,7 @@ const getColorClasses = (colorClass: string) => {
       };
     case 'rose-500':
       return {
-        text: 'text-rose-600 dark:text-rose-455',
+        text: 'text-rose-600 dark:text-rose-400',
         border: 'border-rose-500/20 dark:border-rose-500/10',
         borderTop: 'border-t-rose-500',
         bgLight: 'bg-rose-500/10 dark:bg-rose-500/15',
@@ -86,7 +86,7 @@ const getColorClasses = (colorClass: string) => {
         border: 'border-violet-500/20 dark:border-violet-500/10',
         borderTop: 'border-t-violet-500',
         bgLight: 'bg-violet-500/10 dark:bg-violet-500/15',
-        badge: 'bg-violet-500/10 text-violet-750 dark:bg-violet-500/20 dark:text-violet-300 border border-violet-500/20'
+        badge: 'bg-violet-500/10 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 border border-violet-500/20'
       };
     case 'fuchsia-500':
       return {
@@ -106,7 +106,7 @@ const getColorClasses = (colorClass: string) => {
       };
     default:
       return {
-        text: 'text-indigo-650 dark:text-indigo-400',
+        text: 'text-indigo-600 dark:text-indigo-400',
         border: 'border-indigo-500/20 dark:border-indigo-500/10',
         borderTop: 'border-t-indigo-500',
         bgLight: 'bg-indigo-500/10 dark:bg-indigo-500/15',
@@ -389,42 +389,34 @@ export default function CrmKanban() {
     // Obter leads da coluna de destino (ordenados por posição)
     const targetColLeads = leads
       .filter(l => l.status === targetStage && l.id !== leadId)
-      .sort((a, b) => (a.position || 0) - (b.position || 0));
+      .sort((a, b) => {
+        const posDiff = (a.position || 0) - (b.position || 0);
+        if (posDiff !== 0) return posDiff;
+        return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+      });
 
-    let newPosition = 0;
-
-    if (dragOverCardId && targetColLeads.length > 0) {
-      const targetCardIndex = targetColLeads.findIndex(l => l.id === dragOverCardId);
-      if (targetCardIndex !== -1) {
-        const targetCard = targetColLeads[targetCardIndex];
-        
+    const updatedColLeads = [...targetColLeads];
+    if (dragOverCardId) {
+      const targetIndex = targetColLeads.findIndex(l => l.id === dragOverCardId);
+      if (targetIndex !== -1) {
         if (dragOverCardPosition === 'before') {
-          if (targetCardIndex === 0) {
-            newPosition = (targetCard.position || 0) - 1000;
-          } else {
-            const prevCard = targetColLeads[targetCardIndex - 1];
-            newPosition = ((prevCard.position || 0) + (targetCard.position || 0)) / 2;
-          }
-        } else { // 'after'
-          if (targetCardIndex === targetColLeads.length - 1) {
-            newPosition = (targetCard.position || 0) + 1000;
-          } else {
-            const nextCard = targetColLeads[targetCardIndex + 1];
-            newPosition = ((targetCard.position || 0) + (nextCard.position || 0)) / 2;
-          }
+          updatedColLeads.splice(targetIndex, 0, leadToUpdate);
+        } else {
+          updatedColLeads.splice(targetIndex + 1, 0, leadToUpdate);
         }
+      } else {
+        updatedColLeads.push(leadToUpdate);
       }
     } else {
-      // Se não há card de referência, inserir no fim da coluna
-      if (targetColLeads.length > 0) {
-        const lastCard = targetColLeads[targetColLeads.length - 1];
-        newPosition = (lastCard.position || 0) + 1000;
-      } else {
-        newPosition = 0;
-      }
+      updatedColLeads.push(leadToUpdate);
     }
 
-    // Histórico de transição
+    const reindexedLeads = updatedColLeads.map((l, idx) => ({
+      ...l,
+      status: targetStage,
+      position: idx * 1000
+    }));
+
     const oldStatus = draggedOriginalStatusRef.current || targetStage;
     const historyEntry = {
       from: oldStatus,
@@ -432,34 +424,37 @@ export default function CrmKanban() {
       by: localStorage.getItem('current_user_name') || 'Agente',
       at: new Date().toISOString()
     };
-    const updatedHistory = [...leadToUpdate.history, historyEntry];
-
-    // Atualização otimista
-    const updatedLead = { 
-      ...leadToUpdate, 
-      status: targetStage, 
-      position: newPosition,
-      history: updatedHistory 
-    };
+    
+    const draggedLead = reindexedLeads.find(l => l.id === leadId);
+    if (draggedLead) {
+      draggedLead.history = [...leadToUpdate.history, historyEntry];
+    }
 
     setLeads(prev => {
-      const filtered = prev.filter(l => l.id !== leadId);
-      return [...filtered, updatedLead].sort((a, b) => (a.position || 0) - (b.position || 0));
+      const otherLeads = prev.filter(l => l.status !== targetStage && l.id !== leadId);
+      return [...otherLeads, ...reindexedLeads].sort((a, b) => (a.position || 0) - (b.position || 0));
     });
 
-    // Persistência
-    const { error } = await supabase
-      .from('crm_leads')
-      .update({ 
-        status: targetStage,
-        position: newPosition,
-        history: updatedHistory
-      })
-      .eq('id', leadId);
+    const updatePromises = reindexedLeads.map(l => {
+      const updateData: any = {
+        status: l.status,
+        position: l.position
+      };
+      if (l.id === leadId) {
+        updateData.history = l.history;
+      }
+      return supabase
+        .from('crm_leads')
+        .update(updateData)
+        .eq('id', l.id);
+    });
 
-    if (error) {
-      console.error('Erro ao atualizar estágio do lead:', error);
-      fetchData(); // Reverter
+    const results = await Promise.all(updatePromises);
+    const hasError = results.some(r => r.error);
+
+    if (hasError) {
+      console.error('Erro ao salvar reordenação no banco');
+      fetchData();
     }
 
     setDraggedLeadId(null);
@@ -850,7 +845,7 @@ export default function CrmKanban() {
             <select 
               value={selectedAgentFilter}
               onChange={e => setSelectedAgentFilter(e.target.value)}
-              className="px-3.5 pr-8 py-2.5 bg-slate-100/80 dark:bg-[#202c33]/40 border border-slate-200/40 dark:border-white/5 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-850 dark:text-slate-200 cursor-pointer appearance-none"
+              className="px-3.5 pr-8 py-2.5 bg-slate-100/80 dark:bg-[#202c33]/40 border border-slate-200/40 dark:border-white/5 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 cursor-pointer appearance-none"
             >
               <option value="all">👥 Todos os Agentes</option>
               {agents.map(a => (
@@ -862,7 +857,7 @@ export default function CrmKanban() {
           {/* Ações */}
           <button 
             onClick={handleDeleteBoard}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-650 dark:text-rose-400 border border-rose-500/20 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 active:scale-95 cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 active:scale-95 cursor-pointer"
             title="Excluir este quadro permanentemente"
           >
             <Trash2 size={13} />
@@ -870,14 +865,14 @@ export default function CrmKanban() {
           </button>
           <button 
             onClick={() => setIsEditBoardOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-white dark:bg-[#202c33]/70 text-slate-700 dark:text-slate-350 border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 hover:bg-slate-50 dark:hover:bg-white/5 active:scale-95 cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-white dark:bg-[#202c33]/70 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 hover:bg-slate-50 dark:hover:bg-white/5 active:scale-95 cursor-pointer"
           >
             <Settings size={13} />
             Configurar
           </button>
           <button 
             onClick={() => setIsCreatorOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-white dark:bg-[#202c33]/70 text-slate-700 dark:text-slate-350 border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 hover:bg-slate-50 dark:hover:bg-white/5 active:scale-95 cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-white dark:bg-[#202c33]/70 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 hover:bg-slate-50 dark:hover:bg-white/5 active:scale-95 cursor-pointer"
           >
             <Plus size={13} />
             Novo Quadro
@@ -887,7 +882,7 @@ export default function CrmKanban() {
               setLeadForm(prev => ({ ...prev, status: pipelineStages[0]?.id || '' }));
               setIsAddLeadOpen(true);
             }}
-            className="flex items-center gap-1.5 px-5 py-2.5 bg-gradient-to-tr from-indigo-500 to-indigo-650 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl text-xs font-black shadow-md shadow-indigo-500/10 hover:shadow-indigo-500/25 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer"
+            className="flex items-center gap-1.5 px-5 py-2.5 bg-gradient-to-tr from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl text-xs font-black shadow-md shadow-indigo-500/10 hover:shadow-indigo-500/25 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer"
           >
             <Plus size={13} strokeWidth={2.5} />
             Adicionar Oportunidade
@@ -961,7 +956,7 @@ export default function CrmKanban() {
                       </span>
                     </h3>
                     {stage.subtitle && (
-                      <p className="text-[9px] text-slate-455 dark:text-slate-500 truncate leading-tight mt-0.5 font-bold uppercase tracking-wide">
+                      <p className="text-[9px] text-slate-400 dark:text-slate-500 truncate leading-tight mt-0.5 font-bold uppercase tracking-wide">
                         {stage.subtitle}
                       </p>
                     )}
@@ -975,7 +970,7 @@ export default function CrmKanban() {
                       e.stopPropagation();
                       setCollapsedStages(prev => ({ ...prev, [stage.id]: true }));
                     }}
-                    className="p-1 hover:bg-slate-200/60 dark:hover:bg-white/5 rounded-md text-slate-455 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
+                    className="p-1 hover:bg-slate-200/60 dark:hover:bg-white/5 rounded-md text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
                     title="Dobrar Coluna"
                   >
                     <ChevronLeft size={12} strokeWidth={2.5} />
@@ -990,7 +985,7 @@ export default function CrmKanban() {
                       });
                       setIsEditBoardOpen(true);
                     }}
-                    className="p-1 hover:bg-slate-200/60 dark:hover:bg-white/5 rounded-md text-slate-455 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
+                    className="p-1 hover:bg-slate-200/60 dark:hover:bg-white/5 rounded-md text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
                     title="Editar Etapa"
                   >
                     <Sliders size={12} strokeWidth={2.5} />
@@ -1001,7 +996,7 @@ export default function CrmKanban() {
                       setLeadForm(prev => ({ ...prev, status: stage.id }));
                       setIsAddLeadOpen(true);
                     }}
-                    className="p-1 hover:bg-slate-200/60 dark:hover:bg-white/5 rounded-md text-slate-455 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
+                    className="p-1 hover:bg-slate-200/60 dark:hover:bg-white/5 rounded-md text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
                     title="Criar Oportunidade"
                   >
                     <Plus size={12} strokeWidth={2.5} />
@@ -1042,7 +1037,7 @@ export default function CrmKanban() {
                       ? "border-l-[3.5px] border-l-rose-500" 
                       : lead.priority === 2 
                         ? "border-l-[3.5px] border-l-amber-500" 
-                        : "border-l-[3.5px] border-l-slate-300 dark:border-l-white/10";
+                        : "border-l-[3.5px] border-l-indigo-500/20 dark:border-l-indigo-500/10";
 
                     itemsToRender.push(
                       <motion.div 
@@ -1058,7 +1053,7 @@ export default function CrmKanban() {
                           onDragOver={e => handleCardDragOver(e, lead.id)}
                           onClick={() => setSelectedLead(lead)}
                           className={cn(
-                            "group/card bg-white dark:bg-[#111b21] p-4.5 rounded-2xl border border-slate-200/50 dark:border-white/5 shadow-sm hover:shadow-[0_12px_24px_rgba(0,0,0,0.04)] dark:hover:shadow-[0_12px_24px_rgba(0,0,0,0.25)] hover:border-slate-350 dark:hover:border-white/10 hover:-translate-y-0.5 transition-all duration-300 cursor-grab active:cursor-grabbing relative overflow-hidden",
+                            "group/card bg-white/80 dark:bg-[#111b21]/75 backdrop-blur-md p-4.5 rounded-2xl border border-slate-200/50 dark:border-white/5 shadow-sm hover:shadow-[0_12px_24px_rgba(0,0,0,0.04)] dark:hover:shadow-[0_12px_24px_rgba(0,0,0,0.25)] hover:border-slate-300 dark:hover:border-indigo-500/20 hover:-translate-y-0.5 transition-all duration-300 cursor-grab active:cursor-grabbing relative overflow-hidden",
                             priorityBorder,
                             isBeingDragged && "border-2 border-dashed border-indigo-500/40 dark:border-indigo-400/30 bg-indigo-50/40 dark:bg-indigo-950/20 opacity-40 shadow-inner rotate-[1.5deg] scale-[0.98]"
                           )}
@@ -1126,10 +1121,10 @@ export default function CrmKanban() {
                                 <img 
                                   src={clientContact.profile_picture_url} 
                                   alt={lead.title}
-                                  className="w-8 h-8 rounded-xl object-cover border border-slate-250/20 dark:border-white/5"
+                                  className="w-8 h-8 rounded-xl object-cover border border-slate-200/20 dark:border-white/5"
                                 />
                               ) : (
-                                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-655 dark:text-indigo-400 text-xs font-black uppercase flex items-center justify-center border border-indigo-500/15">
+                                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-xs font-black uppercase flex items-center justify-center border border-indigo-500/15">
                                   {lead.title.split(' ').map(n => n[0]).slice(0, 2).join('') || 'C'}
                                 </div>
                               )}
@@ -1177,7 +1172,7 @@ export default function CrmKanban() {
                             <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8px]">
                               Faturamento
                             </span>
-                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-655 dark:text-emerald-455 font-black text-[10px] rounded-lg border border-emerald-500/15 shrink-0">
+                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black text-[10px] rounded-lg border border-emerald-500/15 shrink-0">
                               R$ {Number(lead.estimated_revenue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </span>
                           </div>
@@ -1188,7 +1183,7 @@ export default function CrmKanban() {
                               {lead.tags.map((t, idx) => (
                                 <span 
                                   key={idx} 
-                                  className="px-2 py-0.5 bg-indigo-500/10 text-indigo-650 dark:text-indigo-400 border border-indigo-500/15 text-[8.5px] font-black uppercase rounded-md tracking-wide"
+                                  className="px-2 py-0.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/15 text-[8.5px] font-black uppercase rounded-md tracking-wide"
                                 >
                                   {t}
                                 </span>
@@ -1219,7 +1214,7 @@ export default function CrmKanban() {
                                     e.stopPropagation();
                                     handleAdvanceLead(lead);
                                   }}
-                                  className="text-[9.5px] font-black uppercase text-indigo-655 dark:text-indigo-400 hover:text-indigo-750 flex items-center gap-0.5 hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                                  className="text-[9.5px] font-black uppercase text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-0.5 hover:scale-105 active:scale-95 transition-all cursor-pointer"
                                 >
                                   Avançar <ChevronRight size={10} strokeWidth={3} />
                                 </button>
@@ -1274,16 +1269,16 @@ export default function CrmKanban() {
       {isAddLeadOpen && (
         <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#111b21] w-full max-w-md rounded-[28px] border border-slate-200/50 dark:border-white/5 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
-            <div className="px-6 py-5 border-b border-slate-250/20 dark:border-white/5 flex items-center justify-between shrink-0">
+            <div className="px-6 py-5 border-b border-slate-200/20 dark:border-white/5 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-650 dark:text-indigo-400 flex items-center justify-center shadow-inner">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shadow-inner">
                   <Plus size={18} />
                 </div>
                 <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 font-sans uppercase tracking-wider">Nova Oportunidade</h3>
               </div>
               <button 
                 onClick={() => setIsAddLeadOpen(false)} 
-                className="p-1.5 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg text-slate-455 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
               >
                 <X size={18} />
               </button>
@@ -1299,7 +1294,7 @@ export default function CrmKanban() {
                     placeholder="Ex: Nome da Empresa ou Cliente"
                     value={leadForm.title}
                     onChange={e => setLeadForm({ ...leadForm, title: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-250 transition-all duration-300"
+                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-300"
                   />
                 </div>
 
@@ -1311,7 +1306,7 @@ export default function CrmKanban() {
                       placeholder="R$ 0,00"
                       value={leadForm.estimated_revenue || ''}
                       onChange={e => setLeadForm({ ...leadForm, estimated_revenue: Number(e.target.value) })}
-                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-250 transition-all duration-300"
+                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-300"
                     />
                   </div>
                   <div className="space-y-1">
@@ -1323,7 +1318,7 @@ export default function CrmKanban() {
                       placeholder="50%"
                       value={leadForm.probability}
                       onChange={e => setLeadForm({ ...leadForm, probability: Number(e.target.value) })}
-                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-250 transition-all duration-300"
+                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-300"
                     />
                   </div>
                 </div>
@@ -1334,7 +1329,7 @@ export default function CrmKanban() {
                     <select 
                       value={leadForm.status}
                       onChange={e => setLeadForm({ ...leadForm, status: e.target.value })}
-                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-850 dark:text-slate-200 cursor-pointer appearance-none"
+                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 cursor-pointer appearance-none"
                     >
                       {pipelineStages.map(s => (
                         <option key={s.id} value={s.id}>{s.label}</option>
@@ -1346,7 +1341,7 @@ export default function CrmKanban() {
                     <select 
                       value={leadForm.priority}
                       onChange={e => setLeadForm({ ...leadForm, priority: Number(e.target.value) })}
-                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-855 dark:text-slate-200 cursor-pointer appearance-none"
+                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-855 dark:text-slate-200 cursor-pointer appearance-none"
                     >
                       <option value="1">⭐ Baixa</option>
                       <option value="2">⭐⭐ Média</option>
@@ -1360,7 +1355,7 @@ export default function CrmKanban() {
                   <select 
                     value={leadForm.customer_id}
                     onChange={e => setLeadForm({ ...leadForm, customer_id: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-855 dark:text-slate-200 cursor-pointer appearance-none"
+                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-855 dark:text-slate-200 cursor-pointer appearance-none"
                   >
                     <option value="">Nenhum contato</option>
                     {contacts.map(c => (
@@ -1375,7 +1370,7 @@ export default function CrmKanban() {
                     <select 
                       value={leadForm.agent_id}
                       onChange={e => setLeadForm({ ...leadForm, agent_id: e.target.value })}
-                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-855 dark:text-slate-200 cursor-pointer appearance-none"
+                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-855 dark:text-slate-200 cursor-pointer appearance-none"
                     >
                       <option value="">Ninguém</option>
                       {agents.map(a => (
@@ -1389,7 +1384,7 @@ export default function CrmKanban() {
                       type="date" 
                       value={leadForm.due_date}
                       onChange={e => setLeadForm({ ...leadForm, due_date: e.target.value })}
-                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-250 transition-all duration-300"
+                      className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-300"
                     />
                   </div>
                 </div>
@@ -1401,22 +1396,22 @@ export default function CrmKanban() {
                     placeholder="Ex: Totem, Sistema, Gastronomia"
                     value={leadForm.tagsString}
                     onChange={e => setLeadForm({ ...leadForm, tagsString: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-250 transition-all duration-300"
+                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-300"
                   />
                 </div>
               </div>
 
-              <div className="px-6 py-4 border-t border-slate-250/20 dark:border-white/5 bg-slate-50/50 dark:bg-black/10 shrink-0 flex gap-3">
+              <div className="px-6 py-4 border-t border-slate-200/20 dark:border-white/5 bg-slate-50/50 dark:bg-black/10 shrink-0 flex gap-3">
                 <button 
                   type="button" 
                   onClick={() => setIsAddLeadOpen(false)}
-                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-655 dark:text-slate-350 rounded-xl font-bold transition-all duration-200 active:scale-95 cursor-pointer text-xs"
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 rounded-xl font-bold transition-all duration-200 active:scale-95 cursor-pointer text-xs"
                 >
                   Cancelar
                 </button>
                 <button 
                   type="submit"
-                  className="flex-1 py-2.5 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-md shadow-indigo-500/10 hover:shadow-indigo-500/25 transition-all duration-200 active:scale-95 cursor-pointer text-xs"
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-md shadow-indigo-500/10 hover:shadow-indigo-500/25 transition-all duration-200 active:scale-95 cursor-pointer text-xs"
                 >
                   Salvar Oportunidade
                 </button>
@@ -1431,7 +1426,7 @@ export default function CrmKanban() {
         <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#111b21] w-full max-w-2xl rounded-[28px] border border-slate-200/50 dark:border-white/5 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
             {/* Cabeçalho */}
-            <div className="px-6 py-5 border-b border-slate-250/20 dark:border-white/5 flex items-center justify-between shrink-0">
+            <div className="px-6 py-5 border-b border-slate-200/20 dark:border-white/5 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-amber-550/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shadow-inner">
                   <FileText size={18} />
@@ -1448,7 +1443,7 @@ export default function CrmKanban() {
                 </button>
                 <button 
                   onClick={() => setSelectedLead(null)} 
-                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg text-slate-455 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
                 >
                   <X size={20} />
                 </button>
@@ -1495,7 +1490,7 @@ export default function CrmKanban() {
                     type="button"
                     disabled={isQualifying}
                     onClick={handleAIQualify}
-                    className="px-4.5 py-2.5 bg-gradient-to-tr from-indigo-500 to-indigo-650 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl font-bold shadow-md shadow-indigo-500/10 hover:shadow-indigo-500/20 transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none cursor-pointer text-xs flex items-center gap-1.5 shrink-0 self-start md:self-auto"
+                    className="px-4.5 py-2.5 bg-gradient-to-tr from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl font-bold shadow-md shadow-indigo-500/10 hover:shadow-indigo-500/20 transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none cursor-pointer text-xs flex items-center gap-1.5 shrink-0 self-start md:self-auto"
                   >
                     {isQualifying ? (
                       <>
@@ -1658,16 +1653,16 @@ export default function CrmKanban() {
       {isEditBoardOpen && (
         <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#111b21] w-full max-w-lg rounded-[28px] border border-slate-200/50 dark:border-white/5 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
-            <div className="px-6 py-5 border-b border-slate-250/20 dark:border-white/5 flex items-center justify-between shrink-0">
+            <div className="px-6 py-5 border-b border-slate-200/20 dark:border-white/5 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-650 dark:text-indigo-400 flex items-center justify-center shadow-inner animate-pulse">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shadow-inner animate-pulse">
                   <Settings size={18} />
                 </div>
                 <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 font-sans uppercase tracking-wider">Configurações do Quadro</h3>
               </div>
               <button 
                 onClick={() => setIsEditBoardOpen(false)} 
-                className="p-1.5 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg text-slate-455 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
               >
                 <X size={20} />
               </button>
@@ -1683,7 +1678,7 @@ export default function CrmKanban() {
                     placeholder="Nome do quadro"
                     value={editBoardForm.name}
                     onChange={e => setEditBoardForm({ ...editBoardForm, name: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-250 transition-all duration-300"
+                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-300"
                   />
                 </div>
 
@@ -1694,14 +1689,14 @@ export default function CrmKanban() {
                     placeholder="Descrição do processo"
                     value={editBoardForm.description}
                     onChange={e => setEditBoardForm({ ...editBoardForm, description: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-250 transition-all duration-300"
+                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-300"
                   />
                 </div>
 
                 {/* Lista de colunas/etapas editáveis */}
                 <div className="space-y-3 pt-2">
                   <div className="flex justify-between items-center">
-                    <label className="font-bold text-slate-455 dark:text-slate-400 uppercase tracking-wider text-[9px]">Etapas / Colunas</label>
+                    <label className="font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider text-[9px]">Etapas / Colunas</label>
                     <button 
                       type="button"
                       onClick={() => {
@@ -1723,7 +1718,7 @@ export default function CrmKanban() {
                   <div className="space-y-2.5 max-h-[250px] overflow-y-auto custom-scrollbar pr-1">
                     {editBoardForm.stages.map((stage, index) => (
                       <div key={stage.id} className="flex gap-2 items-center bg-slate-50 dark:bg-[#182229] p-3 rounded-2xl border border-slate-200/50 dark:border-white/5">
-                        <div className="w-5 h-5 rounded-lg bg-indigo-500/10 text-indigo-650 dark:text-indigo-400 text-[10px] font-black flex items-center justify-center shrink-0">
+                        <div className="w-5 h-5 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[10px] font-black flex items-center justify-center shrink-0">
                           {index + 1}
                         </div>
 
@@ -1797,7 +1792,7 @@ export default function CrmKanban() {
                   <div className="flex justify-between items-center bg-rose-500/[0.02] border border-rose-500/10 p-3.5 rounded-2xl">
                     <div>
                       <p className="font-bold text-slate-800 dark:text-slate-200 text-xs">Excluir este quadro</p>
-                      <p className="text-[10px] text-slate-455 dark:text-slate-500 mt-0.5">Excluirá permanentemente o quadro e todos os seus leads.</p>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Excluirá permanentemente o quadro e todos os seus leads.</p>
                     </div>
                     <button
                       type="button"
@@ -1805,7 +1800,7 @@ export default function CrmKanban() {
                         setIsEditBoardOpen(false);
                         handleDeleteBoard();
                       }}
-                      className="px-3.5 py-2 bg-rose-500 hover:bg-rose-650 text-white rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 transition-all duration-200 cursor-pointer"
+                      className="px-3.5 py-2 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 transition-all duration-200 cursor-pointer"
                     >
                       Excluir Quadro
                     </button>
@@ -1814,17 +1809,17 @@ export default function CrmKanban() {
               </div>
 
               {/* Footer fixado */}
-              <div className="px-6 py-4 border-t border-slate-250/20 dark:border-white/5 bg-slate-50/50 dark:bg-black/10 shrink-0 flex gap-3 justify-end">
+              <div className="px-6 py-4 border-t border-slate-200/20 dark:border-white/5 bg-slate-50/50 dark:bg-black/10 shrink-0 flex gap-3 justify-end">
                 <button 
                   type="button"
                   onClick={() => setIsEditBoardOpen(false)}
-                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-655 dark:text-slate-350 font-bold rounded-xl transition-all duration-200 text-xs active:scale-95 cursor-pointer"
+                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 font-bold rounded-xl transition-all duration-200 text-xs active:scale-95 cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button 
                   type="submit"
-                  className="px-5 py-2.5 bg-indigo-650 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition-all duration-200 text-xs active:scale-95 cursor-pointer"
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition-all duration-200 text-xs active:scale-95 cursor-pointer"
                 >
                   Salvar Alterações
                 </button>

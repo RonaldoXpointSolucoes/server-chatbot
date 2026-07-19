@@ -2190,7 +2190,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     // VALIDAÇÃO INTELIGENTE APPWEB (Realtime Barreira)
-    if (contact.whatsapp_jid && (contact.whatsapp_jid.includes('@lid') || contact.whatsapp_jid.includes('undefined') || contact.whatsapp_jid.includes('null'))) return;
+    if (contact.whatsapp_jid && (contact.whatsapp_jid.includes('undefined') || contact.whatsapp_jid.includes('null'))) return;
     if (contact.phone === 'undefined' || contact.phone === 'null' || !contact.phone) return;
     const isGroup = contact.whatsapp_jid?.endsWith('@g.us');
     if (contact.phone && contact.phone.length > 15 && !contact.phone.includes('+') && !isGroup) return;

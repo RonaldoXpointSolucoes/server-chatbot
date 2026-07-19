@@ -276,7 +276,7 @@ class QueueProcessor {
                     throw new Error(`Tipo de mensagem não suportado: ${msg.message_type}`);
                 }
 
-                if (result && targetJid !== msg.chat_jid) {
+                if (result && targetJid !== msg.chat_jid && !targetJid.endsWith('@lid')) {
                     supabase.from('contacts')
                         .update({ whatsapp_jid: targetJid })
                         .eq('phone', msg.chat_jid.split('@')[0])
