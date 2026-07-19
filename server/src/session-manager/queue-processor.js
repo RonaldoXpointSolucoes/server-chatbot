@@ -156,9 +156,8 @@ class QueueProcessor {
                             const hasPhoneToken = memCache && memCache.has(`tctoken-${finalCleanJid}@s.whatsapp.net`);
                             
                             if (!hasLidToken && !hasPhoneToken) {
-                                console.log(`[QueueProcessor] Token de segurança não encontrado para ${targetJid}. Sincronizando via onWhatsApp...`);
-                                // Note: Baileys onWhatsApp accepts phone JIDs to query, but let's query it
-                                await sock.onWhatsApp(targetJid);
+                                console.log(`[QueueProcessor] Token de segurança não encontrado para ${targetJid}. Sincronizando via onWhatsApp utilizando o JID original ${msg.chat_jid}...`);
+                                await sock.onWhatsApp(msg.chat_jid);
                             }
                         }
                     } catch (err) {

@@ -180,67 +180,62 @@ export default function CrmKanban() {
   const droppedSuccessRef = React.useRef(false);
   const draggedOriginalStatusRef = React.useRef<string | null>(null);
 
-  const moveLeadLocally = (leadId: string, targetStageId: string, hoverCardId: string | null, position: 'before' | 'after' | null) => {
-    const last = lastMoveRef.current;
-    if (last && last.leadId === leadId && last.stageId === targetStageId && last.hoverCardId === hoverCardId && last.position === position) {
-      return;
+  const getInsertionIndex = (columnEl: HTMLElement, clientY: number, draggedLeadId: string | null) => {
+    const cardEls = Array.from(columnEl.querySelectorAll('[data-card-id]')) as HTMLElement[];
+    const filteredCardEls = cardEls.filter(el => el.getAttribute('data-card-id') !== draggedLeadId);
+
+    const placeholderEl = columnEl.querySelector('[data-placeholder]') as HTMLElement | null;
+    const placeholderHeight = placeholderEl ? placeholderEl.getBoundingClientRect().height : 0;
+
+    let placeholderIndex = -1;
+    const containerEl = columnEl.querySelector('.custom-scrollbar');
+    if (placeholderEl && containerEl) {
+      const listChildren = Array.from(containerEl.children);
+      const pIndex = listChildren.indexOf(placeholderEl);
+      if (pIndex !== -1) {
+        const cardsBefore = listChildren.slice(0, pIndex).filter(c => {
+          const cardId = c.querySelector('[data-card-id]')?.getAttribute('data-card-id') || c.getAttribute('data-card-id');
+          return cardId && cardId !== draggedLeadId;
+        });
+        placeholderIndex = cardsBefore.length;
+      }
     }
-    lastMoveRef.current = { leadId, stageId: targetStageId, hoverCardId, position };
 
-    setLeads(prev => {
-      const leadToUpdate = prev.find(l => l.id === leadId);
-      if (!leadToUpdate) return prev;
+    const targets = filteredCardEls.map((el, index) => {
+      const rect = el.getBoundingClientRect();
+      let top = rect.top;
+      const height = rect.height;
 
-      if (hoverCardId === null && leadToUpdate.status === targetStageId) {
-        const colLeads = prev.filter(l => l.status === targetStageId && l.id !== leadId);
-        if (colLeads.length > 0 && prev[prev.length - 1]?.id === leadId) {
-          return prev;
-        }
+      if (placeholderEl && placeholderIndex !== -1 && index >= placeholderIndex) {
+        top -= (placeholderHeight + 12);
       }
 
-      const otherLeads = prev.filter(l => l.id !== leadId);
-      const targetColLeads = otherLeads
-        .filter(l => l.status === targetStageId)
-        .sort((a, b) => (a.position || 0) - (b.position || 0));
-
-      let newPosition = 0;
-      if (hoverCardId && targetColLeads.length > 0) {
-        const targetIndex = targetColLeads.findIndex(l => l.id === hoverCardId);
-        if (targetIndex !== -1) {
-          const targetCard = targetColLeads[targetIndex];
-          if (position === 'before') {
-            if (targetIndex === 0) {
-              newPosition = (targetCard.position || 0) - 1000;
-            } else {
-              const prevCard = targetColLeads[targetIndex - 1];
-              newPosition = ((prevCard.position || 0) + (targetCard.position || 0)) / 2;
-            }
-          } else {
-            if (targetIndex === targetColLeads.length - 1) {
-              newPosition = (targetCard.position || 0) + 1000;
-            } else {
-              const nextCard = targetColLeads[targetIndex + 1];
-              newPosition = ((targetCard.position || 0) + (nextCard.position || 0)) / 2;
-            }
-          }
-        }
-      } else {
-        if (targetColLeads.length > 0) {
-          const lastCard = targetColLeads[targetColLeads.length - 1];
-          newPosition = (lastCard.position || 0) + 1000;
-        } else {
-          newPosition = 0;
-        }
-      }
-
-      const updatedLead = {
-        ...leadToUpdate,
-        status: targetStageId,
-        position: newPosition
+      return {
+        id: el.getAttribute('data-card-id')!,
+        centerY: top + height / 2,
+        top,
+        height
       };
-
-      return [...otherLeads, updatedLead].sort((a, b) => (a.position || 0) - (b.position || 0));
     });
+
+    if (targets.length === 0) {
+      return { cardId: null, position: null };
+    }
+
+    let closestCardId: string | null = null;
+    let closestPosition: 'before' | 'after' | null = null;
+    let minDistance = Infinity;
+
+    targets.forEach(t => {
+      const distance = Math.abs(clientY - t.centerY);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestCardId = t.id;
+        closestPosition = clientY < t.centerY ? 'before' : 'after';
+      }
+    });
+
+    return { cardId: closestCardId, position: closestPosition };
   };
 
   // Modais
@@ -368,37 +363,21 @@ export default function CrmKanban() {
       draggedOriginalStatusRef.current = lead.status;
     }
     droppedSuccessRef.current = false;
-    lastMoveRef.current = null;
   };
 
   const handleDragOver = (e: React.DragEvent, stageId: string) => {
     e.preventDefault();
     setDraggingOverStage(stageId);
-    
-    // Se o mouse passar pela área da coluna e não estiver sobre nenhum card, move o card para o final desta coluna
-    const target = e.target as HTMLElement;
-    const cardEl = target.closest('[data-card-id]');
-    if (!cardEl && draggedLeadId) {
-      const leadToUpdate = leads.find(l => l.id === draggedLeadId);
-      if (leadToUpdate && leadToUpdate.status !== stageId) {
-        moveLeadLocally(draggedLeadId, stageId, null, null);
-      }
-    }
+
+    const columnEl = e.currentTarget as HTMLElement;
+    const { cardId, position } = getInsertionIndex(columnEl, e.clientY, draggedLeadId);
+
+    setDragOverCardId(cardId);
+    setDragOverCardPosition(position);
   };
 
   const handleCardDragOver = (e: React.DragEvent, cardId: string) => {
     e.preventDefault();
-    if (!draggedLeadId || cardId === draggedLeadId) return;
-
-    const rect = e.currentTarget.getBoundingClientRect();
-    const relativeY = e.clientY - rect.top;
-    const position = relativeY < rect.height / 2 ? 'before' : 'after';
-    
-    // Encontrar o card alvo para obter o estágio correspondente
-    const targetCard = leads.find(l => l.id === cardId);
-    if (targetCard) {
-      moveLeadLocally(draggedLeadId, targetCard.status, cardId, position);
-    }
   };
 
   const handleDragEnd = () => {
@@ -407,9 +386,6 @@ export default function CrmKanban() {
     setDragOverCardId(null);
     setDragOverCardPosition(null);
     lastMoveRef.current = null;
-    if (!droppedSuccessRef.current) {
-      fetchData(); // Reverter se cancelado/solto fora
-    }
   };
 
   const handleDrop = async (e: React.DragEvent, targetStage: string) => {
@@ -420,28 +396,76 @@ export default function CrmKanban() {
     const leadToUpdate = leads.find(l => l.id === leadId);
     if (!leadToUpdate) return;
 
-    // Sinalizar sucesso de drop para o handleDragEnd
+    // Sinalizar sucesso de drop
     droppedSuccessRef.current = true;
 
-    const finalStage = leadToUpdate.status;
-    const finalPosition = leadToUpdate.position;
+    // Obter leads da coluna de destino (ordenados por posição)
+    const targetColLeads = leads
+      .filter(l => l.status === targetStage && l.id !== leadId)
+      .sort((a, b) => (a.position || 0) - (b.position || 0));
+
+    let newPosition = 0;
+
+    if (dragOverCardId && targetColLeads.length > 0) {
+      const targetCardIndex = targetColLeads.findIndex(l => l.id === dragOverCardId);
+      if (targetCardIndex !== -1) {
+        const targetCard = targetColLeads[targetCardIndex];
+        
+        if (dragOverCardPosition === 'before') {
+          if (targetCardIndex === 0) {
+            newPosition = (targetCard.position || 0) - 1000;
+          } else {
+            const prevCard = targetColLeads[targetCardIndex - 1];
+            newPosition = ((prevCard.position || 0) + (targetCard.position || 0)) / 2;
+          }
+        } else { // 'after'
+          if (targetCardIndex === targetColLeads.length - 1) {
+            newPosition = (targetCard.position || 0) + 1000;
+          } else {
+            const nextCard = targetColLeads[targetCardIndex + 1];
+            newPosition = ((targetCard.position || 0) + (nextCard.position || 0)) / 2;
+          }
+        }
+      }
+    } else {
+      // Se não há card de referência, inserir no fim da coluna
+      if (targetColLeads.length > 0) {
+        const lastCard = targetColLeads[targetColLeads.length - 1];
+        newPosition = (lastCard.position || 0) + 1000;
+      } else {
+        newPosition = 0;
+      }
+    }
 
     // Histórico de transição
-    const oldStatus = draggedOriginalStatusRef.current || finalStage;
+    const oldStatus = draggedOriginalStatusRef.current || targetStage;
     const historyEntry = {
       from: oldStatus,
-      to: finalStage,
+      to: targetStage,
       by: localStorage.getItem('current_user_name') || 'Agente',
       at: new Date().toISOString()
     };
     const updatedHistory = [...leadToUpdate.history, historyEntry];
 
+    // Atualização otimista
+    const updatedLead = { 
+      ...leadToUpdate, 
+      status: targetStage, 
+      position: newPosition,
+      history: updatedHistory 
+    };
+
+    setLeads(prev => {
+      const filtered = prev.filter(l => l.id !== leadId);
+      return [...filtered, updatedLead].sort((a, b) => (a.position || 0) - (b.position || 0));
+    });
+
     // Persistência
     const { error } = await supabase
       .from('crm_leads')
       .update({ 
-        status: finalStage,
-        position: finalPosition,
+        status: targetStage,
+        position: newPosition,
         history: updatedHistory
       })
       .eq('id', leadId);
@@ -1001,9 +1025,21 @@ export default function CrmKanban() {
               <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
                 {(() => {
                   const itemsToRender: React.ReactNode[] = [];
+                  let placeholderRendered = false;
                   const isDraggingOverThisStage = draggingOverStage === stage.id;
 
                   colLeads.forEach(lead => {
+                    if (isDraggingOverThisStage && dragOverCardId === lead.id && dragOverCardPosition === 'before') {
+                      placeholderRendered = true;
+                      itemsToRender.push(
+                        <motion.div 
+                          layout
+                          key="dnd-placeholder" 
+                          data-placeholder="true"
+                          className="border-2 border-dashed border-indigo-550/40 dark:border-indigo-400/30 bg-indigo-50/10 dark:bg-indigo-950/5 h-[110px] rounded-2xl animate-pulse transition-all duration-200" 
+                        />
+                      );
+                    }
 
                     const clientContact = contacts.find(c => c.id === lead.customer_id);
                     const agentObj = agents.find(a => a.id === lead.agent_id);
@@ -1201,7 +1237,29 @@ export default function CrmKanban() {
                       </motion.div>
                     );
 
+                    if (isDraggingOverThisStage && dragOverCardId === lead.id && dragOverCardPosition === 'after') {
+                      placeholderRendered = true;
+                      itemsToRender.push(
+                        <motion.div 
+                          layout
+                          key="dnd-placeholder" 
+                          data-placeholder="true"
+                          className="border-2 border-dashed border-indigo-550/40 dark:border-indigo-400/30 bg-indigo-50/10 dark:bg-indigo-950/5 h-[110px] rounded-2xl animate-pulse transition-all duration-200" 
+                        />
+                      );
+                    }
                   });
+
+                  if (isDraggingOverThisStage && !placeholderRendered) {
+                    itemsToRender.push(
+                      <motion.div 
+                        layout
+                        key="dnd-placeholder" 
+                        data-placeholder="true"
+                        className="border-2 border-dashed border-indigo-550/40 dark:border-indigo-400/30 bg-indigo-50/10 dark:bg-indigo-950/5 h-[110px] rounded-2xl animate-pulse transition-all duration-200" 
+                      />
+                    );
+                  }
 
                   return itemsToRender;
                 })()}
@@ -1405,7 +1463,7 @@ export default function CrmKanban() {
             </div>
 
             {/* Conteúdo Rolável */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar text-xs text-left">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar text-xs text-left bg-white dark:bg-[#111b21]">
               {/* Título & Faturamento rápido */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-1">
@@ -1414,7 +1472,7 @@ export default function CrmKanban() {
                     type="text" 
                     value={selectedLead.title}
                     onChange={e => handleSaveLeadEdits({ ...selectedLead, title: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-250 transition-all duration-300"
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all duration-300"
                   />
                 </div>
                 <div className="space-y-1">
@@ -1423,7 +1481,7 @@ export default function CrmKanban() {
                     type="number" 
                     value={selectedLead.estimated_revenue}
                     onChange={e => handleSaveLeadEdits({ ...selectedLead, estimated_revenue: Number(e.target.value) })}
-                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-250 transition-all duration-300"
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all duration-300"
                   />
                 </div>
               </div>
@@ -1432,11 +1490,11 @@ export default function CrmKanban() {
               {board.config?.features?.aiSummary && (
                 <div className="p-4.5 bg-indigo-500/[0.03] dark:bg-indigo-500/[0.06] border border-indigo-500/15 dark:border-indigo-500/10 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="space-y-1">
-                    <h4 className="font-black text-indigo-650 dark:text-indigo-400 flex items-center gap-1.5 font-sans uppercase tracking-wider text-[10px]">
+                    <h4 className="font-black text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 font-sans uppercase tracking-wider text-[10px]">
                       <Sparkles size={14} className="animate-pulse" />
                       Qualificação por Inteligência Artificial
                     </h4>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
                       O Gemini analisará as conversas anteriores e atualizará o resumo de negócios e prioridades automaticamente.
                     </p>
                   </div>
@@ -1468,10 +1526,10 @@ export default function CrmKanban() {
                   <select 
                     value={selectedLead.status}
                     onChange={e => handleSaveLeadEdits({ ...selectedLead, status: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-855 dark:text-slate-200 cursor-pointer appearance-none"
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer appearance-none"
                   >
                     {pipelineStages.map(s => (
-                      <option key={s.id} value={s.id}>{s.label}</option>
+                      <option key={s.id} value={s.id} className="dark:bg-[#111b21]">{s.label}</option>
                     ))}
                   </select>
                 </div>
@@ -1481,11 +1539,11 @@ export default function CrmKanban() {
                   <select 
                     value={selectedLead.priority}
                     onChange={e => handleSaveLeadEdits({ ...selectedLead, priority: Number(e.target.value) })}
-                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-855 dark:text-slate-200 cursor-pointer appearance-none"
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer appearance-none"
                   >
-                    <option value="1">⭐ Baixa</option>
-                    <option value="2">⭐⭐ Média</option>
-                    <option value="3">⭐⭐⭐ Alta</option>
+                    <option value="1" className="dark:bg-[#111b21]">⭐ Baixa</option>
+                    <option value="2" className="dark:bg-[#111b21]">⭐⭐ Média</option>
+                    <option value="3" className="dark:bg-[#111b21]">⭐⭐⭐ Alta</option>
                   </select>
                 </div>
 
@@ -1509,11 +1567,11 @@ export default function CrmKanban() {
                   <select 
                     value={selectedLead.agent_id || ''}
                     onChange={e => handleSaveLeadEdits({ ...selectedLead, agent_id: e.target.value || null })}
-                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-855 dark:text-slate-200 cursor-pointer appearance-none"
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer appearance-none"
                   >
-                    <option value="">Sem responsável</option>
+                    <option value="" className="dark:bg-[#111b21]">Sem responsável</option>
                     {agents.map(a => (
-                      <option key={a.id} value={a.id}>{a.full_name || a.email}</option>
+                      <option key={a.id} value={a.id} className="dark:bg-[#111b21]">{a.full_name || a.email}</option>
                     ))}
                   </select>
                 </div>
@@ -1524,7 +1582,7 @@ export default function CrmKanban() {
                     type="date" 
                     value={selectedLead.due_date || ''}
                     onChange={e => handleSaveLeadEdits({ ...selectedLead, due_date: e.target.value || null })}
-                    className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-250 transition-all duration-300"
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all duration-300"
                   />
                 </div>
               </div>
@@ -1534,7 +1592,7 @@ export default function CrmKanban() {
                 <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Resumo Comercial e Notas</label>
                 {selectedLead.notes && selectedLead.notes.includes('<p>') ? (
                   <div 
-                    className="p-4 bg-slate-100/60 dark:bg-[#182229] border border-slate-250/50 dark:border-white/5 rounded-2xl min-h-[120px] text-slate-700 dark:text-slate-300 leading-relaxed max-h-[300px] overflow-y-auto custom-scrollbar"
+                    className="p-4 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-2xl min-h-[120px] text-slate-800 dark:text-slate-100 leading-relaxed max-h-[300px] overflow-y-auto custom-scrollbar"
                     dangerouslySetInnerHTML={{ __html: selectedLead.notes }}
                   />
                 ) : (
@@ -1543,13 +1601,13 @@ export default function CrmKanban() {
                     placeholder="Adicione observações importantes sobre este cliente, dores dele, ou histórico..."
                     value={selectedLead.notes || ''}
                     onChange={e => handleSaveLeadEdits({ ...selectedLead, notes: e.target.value })}
-                    className="w-full px-4 py-3 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-250/50 dark:border-white/5 rounded-2xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-250 leading-relaxed custom-scrollbar"
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-2xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white leading-relaxed custom-scrollbar"
                   />
                 )}
                 {selectedLead.notes && selectedLead.notes.includes('<p>') && (
                   <button 
                     onClick={() => handleSaveLeadEdits({ ...selectedLead, notes: selectedLead.notes.replace(/<[^>]*>/g, '') })}
-                    className="text-[10px] font-bold text-indigo-650 dark:text-indigo-400 hover:underline mt-1.5 block"
+                    className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline mt-1.5 block"
                   >
                     ✏️ Editar notas como texto puro
                   </button>
@@ -1564,10 +1622,10 @@ export default function CrmKanban() {
                     {selectedLead.history.map((h, i) => (
                       <div key={i} className="relative">
                         <div className="absolute -left-[21px] top-1.5 w-2 h-2 rounded-full bg-indigo-500 border-2 border-white dark:border-[#111b21]" />
-                        <p className="text-[10px] text-slate-550 dark:text-slate-400">
-                          De <span className="font-black text-slate-700 dark:text-slate-300">{pipelineStages.find(s => s.id === h.from)?.label || h.from}</span> para{' '}
-                          <span className="font-black text-slate-700 dark:text-slate-300">{pipelineStages.find(s => s.id === h.to)?.label || h.to}</span> por{' '}
-                          <span className="font-black text-slate-700 dark:text-slate-300">{h.by}</span> em {format(new Date(h.at), 'dd/MM/yyyy HH:mm')}
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                          De <span className="font-black text-slate-800 dark:text-slate-200">{pipelineStages.find(s => s.id === h.from)?.label || h.from}</span> para{' '}
+                          <span className="font-black text-slate-800 dark:text-slate-200">{pipelineStages.find(s => s.id === h.to)?.label || h.to}</span> por{' '}
+                          <span className="font-black text-slate-800 dark:text-slate-200">{h.by}</span> em {format(new Date(h.at), 'dd/MM/yyyy HH:mm')}
                         </p>
                       </div>
                     ))}
@@ -1577,7 +1635,7 @@ export default function CrmKanban() {
             </div>
 
             {/* Footer fixado */}
-            <div className="px-6 py-4.5 border-t border-slate-250/20 dark:border-white/5 bg-slate-50/50 dark:bg-black/10 shrink-0 flex items-center justify-between">
+            <div className="px-6 py-4.5 border-t border-slate-200/50 dark:border-white/5 bg-slate-50/50 dark:bg-black/10 shrink-0 flex items-center justify-between">
               {selectedLead.customer_id ? (
                 <button 
                   onClick={() => {
@@ -1594,7 +1652,7 @@ export default function CrmKanban() {
               )}
               <button 
                 onClick={() => setSelectedLead(null)}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-655 dark:text-slate-350 font-bold rounded-xl transition-colors active:scale-95 cursor-pointer text-xs"
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 font-bold rounded-xl transition-colors active:scale-95 cursor-pointer text-xs"
               >
                 Fechar Painel
               </button>
