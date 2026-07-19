@@ -131,9 +131,36 @@ class QueueProcessor {
                     throw new Error('Função de envio de mensagens indisponível no socket.');
                 }
 
+                let targetJid = msg.chat_jid;
+                const isGroup = targetJid.endsWith('@g.us');
+                if (!isGroup && typeof sock.onWhatsApp === 'function') {
+                    try {
+                        const { sessionCaches } = await import('./auth.js');
+                        const memCache = sessionCaches.get(instanceId);
+                        
+                        const cleanJid = targetJid.split('@')[0];
+                        const hasLidToken = memCache && memCache.has(`tctoken-${cleanJid}@lid`);
+                        const hasPhoneToken = memCache && memCache.has(`tctoken-${cleanJid}@s.whatsapp.net`);
+                        
+                        if (!hasLidToken && !hasPhoneToken) {
+                            console.log(`[QueueProcessor] Token de segurança não encontrado para ${targetJid}. Sincronizando via onWhatsApp...`);
+                            const onWhatsAppResults = await sock.onWhatsApp(targetJid);
+                            if (onWhatsAppResults && onWhatsAppResults[0]) {
+                                const result = onWhatsAppResults[0];
+                                if (result.exists && result.jid) {
+                                    targetJid = result.jid;
+                                    console.log(`[QueueProcessor] Número verificado no WhatsApp. JID Alvo resolvido para: ${targetJid}`);
+                                }
+                            }
+                        }
+                    } catch (onWAFail) {
+                        console.warn(`[QueueProcessor] Erro ao sincronizar/resolver JID no WhatsApp (onWhatsApp):`, onWAFail.message);
+                    }
+                }
+
                 let result;
                 if (msg.message_type === 'text') {
-                    result = await sendFn(msg.chat_jid, { text: msg.body });
+                    result = await sendFn(targetJid, { text: msg.body });
                 } else if (msg.message_type === 'media' && msg.media_url) {
                     // Envio de mídia por URL
                     let pathname = '';
@@ -235,9 +262,20 @@ class QueueProcessor {
 
                     if (msg.body) mediaOptions.caption = msg.body;
 
-                    result = await sendFn(msg.chat_jid, mediaOptions);
+                    result = await sendFn(targetJid, mediaOptions);
                 } else {
                     throw new Error(`Tipo de mensagem não suportado: ${msg.message_type}`);
+                }
+
+                if (result && targetJid !== msg.chat_jid) {
+                    supabase.from('contacts')
+                        .update({ whatsapp_jid: targetJid })
+                        .eq('phone', msg.chat_jid.split('@')[0])
+                        .eq('tenant_id', tenantId)
+                        .then(({ error }) => {
+                            if (error) console.error(`[QueueProcessor] Erro ao atualizar JID do contato no banco:`, error.message);
+                            else console.log(`[QueueProcessor] JID de contato atualizado com sucesso no banco para: ${targetJid}`);
+                        }).catch(() => {});
                 }
 
                 // 5. Sucesso: Atualiza a fila

@@ -39,6 +39,7 @@ import { geminiService } from '../services/geminiService';
 import KanbanBoardCreator from '../components/KanbanBoardCreator';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { motion } from 'framer-motion';
 
 function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -300,8 +301,11 @@ export default function CrmKanban() {
   const handleDragOver = (e: React.DragEvent, stageId: string) => {
     e.preventDefault();
     setDraggingOverStage(stageId);
-    // Se o mouse passar pela área vazia da coluna, reseta o card de referência
-    if (e.target === e.currentTarget) {
+    
+    // Encontrar se o cursor está sobre algum card desta coluna
+    const target = e.target as HTMLElement;
+    const cardEl = target.closest('[data-card-id]');
+    if (!cardEl) {
       setDragOverCardId(null);
       setDragOverCardPosition(null);
     }
@@ -309,7 +313,6 @@ export default function CrmKanban() {
 
   const handleCardDragOver = (e: React.DragEvent, cardId: string) => {
     e.preventDefault();
-    e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
     const relativeY = e.clientY - rect.top;
     const position = relativeY < rect.height / 2 ? 'before' : 'after';
@@ -954,14 +957,12 @@ export default function CrmKanban() {
                   let placeholderRendered = false;
 
                   colLeads.forEach(lead => {
-                    // Pular o card que está sendo arrastado para não duplicar o seu espaço na mesma coluna
-                    if (lead.id === draggedLeadId) return;
-
                     // Se o card sob o cursor pertence a esta coluna e a posição é 'before', renderiza o placeholder antes dele
-                    if (isDraggingOverThisStage && dragOverCardId === lead.id && dragOverCardPosition === 'before') {
+                    if (isDraggingOverThisStage && dragOverCardId === lead.id && dragOverCardPosition === 'before' && lead.id !== draggedLeadId) {
                       placeholderRendered = true;
                       itemsToRender.push(
-                        <div 
+                        <motion.div 
+                          layout
                           key="placeholder-before" 
                           className="border-2 border-dashed border-indigo-500/35 dark:border-indigo-400/25 bg-indigo-500/5 dark:bg-indigo-500/10 h-[100px] rounded-2xl animate-pulse transition-all duration-200" 
                         />
@@ -979,190 +980,197 @@ export default function CrmKanban() {
                         : "border-l-[3.5px] border-l-slate-300 dark:border-l-white/10";
 
                     itemsToRender.push(
-                      <div 
+                      <motion.div 
+                        layout
                         key={lead.id}
-                        draggable
-                        onDragStart={e => handleDragStart(e, lead.id)}
-                        onDragEnd={() => setDraggedLeadId(null)}
-                        onDragOver={e => handleCardDragOver(e, lead.id)}
-                        onClick={() => setSelectedLead(lead)}
-                        className={cn(
-                          "group/card bg-white dark:bg-[#111b21] p-4.5 rounded-2xl border border-slate-200/50 dark:border-white/5 shadow-sm hover:shadow-[0_12px_24px_rgba(0,0,0,0.04)] dark:hover:shadow-[0_12px_24px_rgba(0,0,0,0.25)] hover:border-slate-350 dark:hover:border-white/10 hover:-translate-y-0.5 transition-all duration-300 cursor-grab active:cursor-grabbing relative overflow-hidden",
-                          priorityBorder,
-                          isBeingDragged && "rotate-[2deg] scale-[0.98] opacity-30 border-indigo-500/50 shadow-xl"
-                        )}
+                        className="w-full shrink-0 animate-in fade-in duration-200"
                       >
-                        {/* Hover Action Toolbar */}
-                        <div className="opacity-0 group-hover/card:opacity-100 transition-all absolute top-2.5 right-2.5 flex bg-slate-900/90 dark:bg-black/90 backdrop-blur-md px-2 py-1.5 rounded-xl gap-2.5 z-10 text-white shadow-lg border border-white/10 scale-90 group-hover/card:scale-100 duration-200 ease-out">
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteLead(lead.id);
-                            }}
-                            className="p-1 hover:text-red-400 transition-colors cursor-pointer"
-                            title="Excluir Oportunidade"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCopyLead(lead);
-                            }}
-                            className="p-1 hover:text-indigo-400 transition-colors cursor-pointer"
-                            title="Copiar Oportunidade"
-                          >
-                            <Copy size={12} />
-                          </button>
-                          {clientContact && (
+                        <div 
+                          draggable="true"
+                          data-card-id={lead.id}
+                          onDragStart={e => handleDragStart(e, lead.id)}
+                          onDragEnd={() => setDraggedLeadId(null)}
+                          onDragOver={e => handleCardDragOver(e, lead.id)}
+                          onClick={() => setSelectedLead(lead)}
+                          className={cn(
+                            "group/card bg-white dark:bg-[#111b21] p-4.5 rounded-2xl border border-slate-200/50 dark:border-white/5 shadow-sm hover:shadow-[0_12px_24px_rgba(0,0,0,0.04)] dark:hover:shadow-[0_12px_24px_rgba(0,0,0,0.25)] hover:border-slate-350 dark:hover:border-white/10 hover:-translate-y-0.5 transition-all duration-300 cursor-grab active:cursor-grabbing relative overflow-hidden",
+                            priorityBorder,
+                            isBeingDragged && "rotate-[2deg] scale-[0.98] opacity-30 border-indigo-500/50 shadow-xl"
+                          )}
+                        >
+                          {/* Hover Action Toolbar */}
+                          <div className="opacity-0 group-hover/card:opacity-100 transition-all absolute top-2.5 right-2.5 flex bg-slate-900/90 dark:bg-black/90 backdrop-blur-md px-2 py-1.5 rounded-xl gap-2.5 z-10 text-white shadow-lg border border-white/10 scale-90 group-hover/card:scale-100 duration-200 ease-out">
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
-                                useChatStore.getState().setActiveChat(clientContact.id);
-                                navigate('/chat');
+                                handleDeleteLead(lead.id);
                               }}
-                              className="p-1 hover:text-emerald-400 transition-colors cursor-pointer"
-                              title="Abrir Chat"
+                              className="p-1 hover:text-red-400 transition-colors cursor-pointer"
+                              title="Excluir Oportunidade"
                             >
-                              <MessageSquare size={12} />
+                              <Trash2 size={12} />
                             </button>
-                          )}
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedLead(lead);
-                            }}
-                            className="p-1 hover:text-amber-400 transition-colors cursor-pointer"
-                            title="Editar"
-                          >
-                            <Edit2 size={12} />
-                          </button>
-                        </div>
-
-                        {/* Header do Cartão: Prazo de Vencimento/Criação */}
-                        <div className="flex justify-between items-center mb-3">
-                          <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 dark:bg-white/[0.04] text-slate-400 dark:text-slate-500 text-[9px] rounded-lg border border-slate-200/20 dark:border-white/[0.02] font-bold">
-                            <Clock size={10} />
-                            <span>{lead.created_at ? format(new Date(lead.created_at), 'dd/MM/yy • HH:mm') : '--/--/--'}</span>
-                          </div>
-                        </div>
-
-                        {/* Corpo do Cartão: Avatar + Info */}
-                        <div className="flex gap-3 items-start pl-0.5">
-                          {/* Avatar do Cliente */}
-                          <div className="relative shrink-0 select-none">
-                            {clientContact?.profile_picture_url ? (
-                              <img 
-                                src={clientContact.profile_picture_url} 
-                                alt={lead.title}
-                                className="w-8 h-8 rounded-xl object-cover border border-slate-250/20 dark:border-white/5"
-                              />
-                            ) : (
-                              <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-650 dark:text-indigo-400 text-xs font-black uppercase flex items-center justify-center border border-indigo-500/15">
-                                {lead.title.split(' ').map(n => n[0]).slice(0, 2).join('') || 'C'}
-                              </div>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCopyLead(lead);
+                              }}
+                              className="p-1 hover:text-indigo-400 transition-colors cursor-pointer"
+                              title="Copiar Oportunidade"
+                            >
+                              <Copy size={12} />
+                            </button>
+                            {clientContact && (
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  useChatStore.getState().setActiveChat(clientContact.id);
+                                  navigate('/chat');
+                                }}
+                                className="p-1 hover:text-emerald-400 transition-colors cursor-pointer"
+                                title="Abrir Chat"
+                              >
+                                <MessageSquare size={12} />
+                              </button>
                             )}
-                            <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-[#00a884] border-2 border-white dark:border-[#111b21] flex items-center justify-center shadow-sm">
-                              <svg viewBox="0 0 24 24" className="w-2 h-2 text-white fill-current">
-                                <path d="M12.012 2C6.48 2 2 6.48 2 12.012c0 1.767.46 3.427 1.264 4.887L2 22l5.244-1.378a9.96 9.96 0 004.768 1.205C17.52 21.827 22 17.348 22 11.816 22 6.48 17.52 2 12.012 2zm5.727 14.152c-.244.69-1.42 1.264-1.94 1.31-.444.04-1.012.064-2.825-.69-2.31-.96-3.8-3.32-3.916-3.48-.117-.16-.94-1.258-.94-2.4 0-1.144.597-1.706.812-1.942.215-.236.467-.294.622-.294.156 0 .313 0 .445.006.14.006.33.006.505.428.182.434.622 1.517.676 1.63.053.112.09.243.013.397-.076.155-.117.25-.235.39-.117.14-.244.31-.35.42-.116.12-.238.25-.102.484.137.234.61 1.008 1.31 1.63.9.799 1.656 1.047 1.89 1.164.234.117.37.1.505-.058.136-.156.59-.69.75-.92.155-.236.313-.197.527-.118.215.08 1.365.642 1.6.76.234.118.39.176.446.275.059.098.059.569-.185 1.259z" />
-                              </svg>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedLead(lead);
+                              }}
+                              className="p-1 hover:text-amber-400 transition-colors cursor-pointer"
+                              title="Editar"
+                            >
+                              <Edit2 size={12} />
+                            </button>
+                          </div>
+
+                          {/* Header do Cartão: Prazo de Vencimento/Criação */}
+                          <div className="flex justify-between items-center mb-3">
+                            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 dark:bg-white/[0.04] text-slate-400 dark:text-slate-500 text-[9px] rounded-lg border border-slate-200/20 dark:border-white/[0.02] font-bold">
+                              <Clock size={10} />
+                              <span>{lead.created_at ? format(new Date(lead.created_at), 'dd/MM/yy • HH:mm') : '--/--/--'}</span>
+                            </div>
+                          </div>
+
+                          {/* Corpo do Cartão: Avatar + Info */}
+                          <div className="flex gap-3 items-start pl-0.5">
+                            {/* Avatar do Cliente */}
+                            <div className="relative shrink-0 select-none">
+                              {clientContact?.profile_picture_url ? (
+                                <img 
+                                  src={clientContact.profile_picture_url} 
+                                  alt={lead.title}
+                                  className="w-8 h-8 rounded-xl object-cover border border-slate-250/20 dark:border-white/5"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-655 dark:text-indigo-400 text-xs font-black uppercase flex items-center justify-center border border-indigo-500/15">
+                                  {lead.title.split(' ').map(n => n[0]).slice(0, 2).join('') || 'C'}
+                                </div>
+                              )}
+                              <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-[#00a884] border-2 border-white dark:border-[#111b21] flex items-center justify-center shadow-sm">
+                                <svg viewBox="0 0 24 24" className="w-2 h-2 text-white fill-current">
+                                  <path d="M12.012 2C6.48 2 2 6.48 2 12.012c0 1.767.46 3.427 1.264 4.887L2 22l5.244-1.378a9.96 9.96 0 004.768 1.205C17.52 21.827 22 17.348 22 11.816 22 6.48 17.52 2 12.012 2zm5.727 14.152c-.244.69-1.42 1.264-1.94 1.31-.444.04-1.012.064-2.825-.69-2.31-.96-3.8-3.32-3.916-3.48-.117-.16-.94-1.258-.94-2.4 0-1.144.597-1.706.812-1.942.215-.236.467-.294.622-.294.156 0 .313 0 .445.006.14.006.33.006.505.428.182.434.622 1.517.676 1.63.053.112.09.243.013.397-.076.155-.117.25-.235.39-.117.14-.244.31-.35.42-.116.12-.238.25-.102.484.137.234.61 1.008 1.31 1.63.9.799 1.656 1.047 1.89 1.164.234.118.39.176.446.275.059.098.059.569-.185 1.259z" />
+                                </svg>
+                              </span>
+                            </div>
+
+                            {/* Título & Detalhes */}
+                            <div className="flex-1 min-w-0 text-left">
+                              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-snug line-clamp-2">
+                                {lead.title}
+                              </h4>
+                              
+                              {/* Priority e Probability */}
+                              <div className="flex items-center gap-3 mt-2">
+                                <div className="flex shrink-0">
+                                  {Array.from({ length: 3 }).map((_, i) => (
+                                    <Star 
+                                      key={i} 
+                                      size={10} 
+                                      className={cn(
+                                        "shrink-0",
+                                        i < lead.priority 
+                                          ? "fill-amber-400 text-amber-400" 
+                                          : "text-slate-200 dark:text-slate-800"
+                                      )} 
+                                    />
+                                  ))}
+                                </div>
+
+                                {board.config?.features?.probability && (
+                                  <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8px]">
+                                    📈 {lead.probability}% PROB.
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Informações de Faturamento */}
+                          <div className="flex items-center justify-between mt-3 pl-1 text-[10px]">
+                            <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8px]">
+                              Faturamento
+                            </span>
+                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-655 dark:text-emerald-450 font-black text-[10px] rounded-lg border border-emerald-500/15 shrink-0">
+                              R$ {Number(lead.estimated_revenue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </span>
                           </div>
 
-                          {/* Título & Detalhes */}
-                          <div className="flex-1 min-w-0 text-left">
-                            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-snug line-clamp-2">
-                              {lead.title}
-                            </h4>
-                            
-                            {/* Priority e Probability */}
-                            <div className="flex items-center gap-3 mt-2">
-                              <div className="flex shrink-0">
-                                {Array.from({ length: 3 }).map((_, i) => (
-                                  <Star 
-                                    key={i} 
-                                    size={10} 
-                                    className={cn(
-                                      "shrink-0",
-                                      i < lead.priority 
-                                        ? "fill-amber-400 text-amber-400" 
-                                        : "text-slate-200 dark:text-slate-800"
-                                    )} 
-                                  />
-                                ))}
-                              </div>
-
-                              {board.config?.features?.probability && (
-                                <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8px]">
-                                  📈 {lead.probability}% PROB.
+                          {/* Tags */}
+                          {lead.tags && lead.tags.length > 0 && (
+                            <div className="flex items-center gap-1.5 flex-wrap mt-3 pl-1">
+                              {lead.tags.map((t, idx) => (
+                                <span 
+                                  key={idx} 
+                                  className="px-2 py-0.5 bg-indigo-500/10 text-indigo-650 dark:text-indigo-400 border border-indigo-500/15 text-[8.5px] font-black uppercase rounded-md tracking-wide"
+                                >
+                                  {t}
                                 </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Footer do Cartão: Agente & Prazo */}
+                          <div className="mt-3.5 pt-2.5 border-t border-slate-200/50 dark:border-white/5 flex items-center justify-between pl-1">
+                            <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-[9px] font-bold">
+                              <Calendar size={11} />
+                              <span>{lead.due_date ? format(new Date(lead.due_date), 'dd/MM/yyyy') : 'Sem prazo'}</span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {agentObj && (
+                                <span 
+                                  className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-indigo-600 text-white text-[9px] font-black uppercase flex items-center justify-center border border-white dark:border-[#111b21] shadow-md shadow-indigo-500/10"
+                                  title={`Responsável: ${agentObj.full_name || agentObj.email}`}
+                                >
+                                  {agentObj.full_name?.split(' ').map(n => n[0]).slice(0, 2).join('') || 'AG'}
+                                </span>
+                              )}
+
+                              {pipelineStages.findIndex(s => s.id === lead.status) < pipelineStages.length - 1 && (
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAdvanceLead(lead);
+                                  }}
+                                  className="text-[9.5px] font-black uppercase text-indigo-655 dark:text-indigo-400 hover:text-indigo-750 flex items-center gap-0.5 hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                                >
+                                  Avançar <ChevronRight size={10} strokeWidth={3} />
+                                </button>
                               )}
                             </div>
                           </div>
                         </div>
-
-                        {/* Informações de Faturamento */}
-                        <div className="flex items-center justify-between mt-3 pl-1 text-[10px]">
-                          <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8px]">
-                            Faturamento
-                          </span>
-                          <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-655 dark:text-emerald-400 font-black text-[10px] rounded-lg border border-emerald-500/15 shrink-0">
-                            R$ {Number(lead.estimated_revenue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                          </span>
-                        </div>
-
-                        {/* Tags */}
-                        {lead.tags && lead.tags.length > 0 && (
-                          <div className="flex items-center gap-1.5 flex-wrap mt-3 pl-1">
-                            {lead.tags.map((t, idx) => (
-                              <span 
-                                key={idx} 
-                                className="px-2 py-0.5 bg-indigo-500/10 text-indigo-650 dark:text-indigo-400 border border-indigo-500/15 text-[8.5px] font-black uppercase rounded-md tracking-wide"
-                              >
-                                {t}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Footer do Cartão: Agente & Prazo */}
-                        <div className="mt-3.5 pt-2.5 border-t border-slate-200/50 dark:border-white/5 flex items-center justify-between pl-1">
-                          <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-[9px] font-bold">
-                            <Calendar size={11} />
-                            <span>{lead.due_date ? format(new Date(lead.due_date), 'dd/MM/yyyy') : 'Sem prazo'}</span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {agentObj && (
-                              <span 
-                                className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-indigo-600 text-white text-[9px] font-black uppercase flex items-center justify-center border border-white dark:border-[#111b21] shadow-md shadow-indigo-500/10"
-                                title={`Responsável: ${agentObj.full_name || agentObj.email}`}
-                              >
-                                {agentObj.full_name?.split(' ').map(n => n[0]).slice(0, 2).join('') || 'AG'}
-                              </span>
-                            )}
-
-                            {pipelineStages.findIndex(s => s.id === lead.status) < pipelineStages.length - 1 && (
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleAdvanceLead(lead);
-                                }}
-                                className="text-[9.5px] font-black uppercase text-indigo-600 dark:text-indigo-400 hover:text-indigo-750 flex items-center gap-0.5 hover:scale-105 active:scale-95 transition-all cursor-pointer"
-                              >
-                                Avançar <ChevronRight size={10} strokeWidth={3} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                      </motion.div>
                     );
 
-                    // Se o card sob o cursor pertence a esta coluna e a posição é 'after', renderiza o placeholder depois dele
-                    if (isDraggingOverThisStage && dragOverCardId === lead.id && dragOverCardPosition === 'after') {
+                    // Se o card sob o cursor pertence a esta coluna e a posição é 'after', renderiza o placeholder depois dele (e não é o próprio card arrastado)
+                    if (isDraggingOverThisStage && dragOverCardId === lead.id && dragOverCardPosition === 'after' && lead.id !== draggedLeadId) {
                       placeholderRendered = true;
                       itemsToRender.push(
-                        <div 
+                        <motion.div 
+                          layout
                           key="placeholder-after" 
                           className="border-2 border-dashed border-indigo-500/35 dark:border-indigo-400/25 bg-indigo-500/5 dark:bg-indigo-500/10 h-[100px] rounded-2xl animate-pulse transition-all duration-200" 
                         />
@@ -1173,7 +1181,8 @@ export default function CrmKanban() {
                   // Se estiver arrastando sobre esta coluna, mas nenhum card específico está sob o cursor (ou coluna vazia), renderiza no final
                   if (isDraggingOverThisStage && !placeholderRendered) {
                     itemsToRender.push(
-                      <div 
+                      <motion.div 
+                        layout
                         key="placeholder-final" 
                         className="border-2 border-dashed border-indigo-500/35 dark:border-indigo-400/25 bg-indigo-500/5 dark:bg-indigo-500/10 h-[100px] rounded-2xl animate-pulse transition-all duration-200" 
                       />
