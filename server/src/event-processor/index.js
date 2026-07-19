@@ -553,12 +553,13 @@ class EventProcessor {
                  // Respeita o custom_name ou o nome antigo se válido frente ao fallback bruto
                  const hasValidOldName = ex && ex.name && ex.name !== ex.phone && ex.name !== c.phone;
                  const finalName = ex?.custom_name ? ex.custom_name : (hasValidOldName ? ex.name : c.name);
+                 const finalJid = ex?.whatsapp_jid && ex.whatsapp_jid.endsWith('@lid') ? ex.whatsapp_jid : c.whatsapp_jid;
                  
                  return {
                      tenant_id: c.tenant_id,
                      phone: c.phone,
                      name: finalName,
-                     whatsapp_jid: c.whatsapp_jid,
+                     whatsapp_jid: finalJid,
                      instance_id: c.instance_id
                  };
              });

@@ -158,6 +158,8 @@ class QueueProcessor {
                             if (!hasLidToken && !hasPhoneToken) {
                                 console.log(`[QueueProcessor] Token de segurança não encontrado para ${targetJid}. Sincronizando via onWhatsApp utilizando o JID original ${msg.chat_jid}...`);
                                 await sock.onWhatsApp(msg.chat_jid);
+                                // Pequeno delay de 2 segundos para garantir o handshake E2E e a persistência dos tokens na RAM
+                                await new Promise(resolve => setTimeout(resolve, 2000));
                             }
                         }
                     } catch (err) {

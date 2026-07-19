@@ -180,63 +180,7 @@ export default function CrmKanban() {
   const droppedSuccessRef = React.useRef(false);
   const draggedOriginalStatusRef = React.useRef<string | null>(null);
 
-  const getInsertionIndex = (columnEl: HTMLElement, clientY: number, draggedLeadId: string | null) => {
-    const cardEls = Array.from(columnEl.querySelectorAll('[data-card-id]')) as HTMLElement[];
-    const filteredCardEls = cardEls.filter(el => el.getAttribute('data-card-id') !== draggedLeadId);
-
-    const placeholderEl = columnEl.querySelector('[data-placeholder]') as HTMLElement | null;
-    const placeholderHeight = placeholderEl ? placeholderEl.getBoundingClientRect().height : 0;
-
-    let placeholderIndex = -1;
-    const containerEl = columnEl.querySelector('.custom-scrollbar');
-    if (placeholderEl && containerEl) {
-      const listChildren = Array.from(containerEl.children);
-      const pIndex = listChildren.indexOf(placeholderEl);
-      if (pIndex !== -1) {
-        const cardsBefore = listChildren.slice(0, pIndex).filter(c => {
-          const cardId = c.querySelector('[data-card-id]')?.getAttribute('data-card-id') || c.getAttribute('data-card-id');
-          return cardId && cardId !== draggedLeadId;
-        });
-        placeholderIndex = cardsBefore.length;
-      }
-    }
-
-    const targets = filteredCardEls.map((el, index) => {
-      const rect = el.getBoundingClientRect();
-      let top = rect.top;
-      const height = rect.height;
-
-      if (placeholderEl && placeholderIndex !== -1 && index >= placeholderIndex) {
-        top -= (placeholderHeight + 12);
-      }
-
-      return {
-        id: el.getAttribute('data-card-id')!,
-        centerY: top + height / 2,
-        top,
-        height
-      };
-    });
-
-    if (targets.length === 0) {
-      return { cardId: null, position: null };
-    }
-
-    let closestCardId: string | null = null;
-    let closestPosition: 'before' | 'after' | null = null;
-    let minDistance = Infinity;
-
-    targets.forEach(t => {
-      const distance = Math.abs(clientY - t.centerY);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestCardId = t.id;
-        closestPosition = clientY < t.centerY ? 'before' : 'after';
-      }
-    });
-
-    return { cardId: closestCardId, position: closestPosition };
-  };
+  const cardPositionsRef = React.useRef<Record<string, { top: number; height: number; centerY: number; status: string }>>({});
 
   // Modais
   const [isCreatorOpen, setIsCreatorOpen] = useState(false);
@@ -363,17 +307,60 @@ export default function CrmKanban() {
       draggedOriginalStatusRef.current = lead.status;
     }
     droppedSuccessRef.current = false;
+
+    // Cache static absolute Y positions of all cards to prevent animation jitter loops
+    const positions: Record<string, { top: number; height: number; centerY: number; status: string }> = {};
+    const cardElements = document.querySelectorAll('[data-card-id]');
+    cardElements.forEach(el => {
+      const cid = el.getAttribute('data-card-id');
+      if (cid && cid !== leadId) {
+        const leadObj = leads.find(l => l.id === cid);
+        if (leadObj) {
+          const rect = el.getBoundingClientRect();
+          const top = rect.top + window.scrollY;
+          positions[cid] = {
+            top,
+            height: rect.height,
+            centerY: top + rect.height / 2,
+            status: leadObj.status
+          };
+        }
+      }
+    });
+    cardPositionsRef.current = positions;
   };
 
   const handleDragOver = (e: React.DragEvent, stageId: string) => {
     e.preventDefault();
     setDraggingOverStage(stageId);
 
-    const columnEl = e.currentTarget as HTMLElement;
-    const { cardId, position } = getInsertionIndex(columnEl, e.clientY, draggedLeadId);
+    const colCardPositions = Object.entries(cardPositionsRef.current)
+      .map(([id, pos]) => ({ id, ...pos }))
+      .filter(p => p.status === stageId)
+      .sort((a, b) => a.top - b.top);
 
-    setDragOverCardId(cardId);
-    setDragOverCardPosition(position);
+    if (colCardPositions.length === 0) {
+      setDragOverCardId(null);
+      setDragOverCardPosition(null);
+      return;
+    }
+
+    const mouseY = e.pageY;
+    let closestCardId: string | null = null;
+    let closestPosition: 'before' | 'after' | null = null;
+    let minDistance = Infinity;
+
+    colCardPositions.forEach(c => {
+      const distance = Math.abs(mouseY - c.centerY);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestCardId = c.id;
+        closestPosition = mouseY < c.centerY ? 'before' : 'after';
+      }
+    });
+
+    setDragOverCardId(closestCardId);
+    setDragOverCardPosition(closestPosition);
   };
 
   const handleCardDragOver = (e: React.DragEvent, cardId: string) => {
@@ -950,6 +937,7 @@ export default function CrmKanban() {
             <div 
               key={stage.id}
               onDragOver={e => handleDragOver(e, stage.id)}
+              onDragEnter={e => e.preventDefault()}
               onDrop={e => handleDrop(e, stage.id)}
               className={cn(
                 "w-[290px] shrink-0 flex flex-col h-full bg-slate-50/60 dark:bg-[#182229]/40 backdrop-blur-md rounded-[28px] border border-slate-200/50 dark:border-white/5 overflow-hidden transition-all duration-300",
@@ -1022,7 +1010,12 @@ export default function CrmKanban() {
               </div>
 
               {/* Lista de Cartões */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+              <div 
+                onDragOver={e => handleDragOver(e, stage.id)}
+                onDragEnter={e => e.preventDefault()}
+                onDrop={e => handleDrop(e, stage.id)}
+                className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar"
+              >
                 {(() => {
                   const itemsToRender: React.ReactNode[] = [];
                   let placeholderRendered = false;
