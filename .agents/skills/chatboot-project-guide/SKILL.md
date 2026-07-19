@@ -132,3 +132,27 @@ O método `setInstanceStatus` no [chatStore.ts](file:///c:/Users/NOTE-(FORM)02JU
     2.  **Período de Resfriamento (Cooling Period)**: Deixar a conta sem tentativas de pareamento por 48 a 72 horas para que o score de risco do WhatsApp expire, permitindo a conexão no fluxo clássico sem passkey.
     3.  **Reinstalação ou Troca de Aparelho**: Limpar os dados/cache do WhatsApp (ou reinstalar com backup prévio) para resetar o score de segurança local do dispositivo.
 
+---
+
+## 6. Tratamento de LIDs e Resolução do Erro 463 (Reachout Timelocked)
+
+Para garantir o envio de mensagens para contatos com Login ID (LID) ativo sem disparar o erro `463` (NackCallerReachoutTimelocked) ou causar contatos duplicados e invisíveis no CRM, siga estritamente estas diretrizes:
+
+### A. Domínio Correto de Envio (`@lid`)
+O WhatsApp exige que envios para contatos cujos chips foram migrados para identificadores de login (LID) utilizem o domínio `@lid` (ex: `150547344662594@lid`). Tentar enviar para um LID utilizando o domínio clássico `@s.whatsapp.net` causará rejeição instantânea com o erro `463`.
+* O resolvedor de filas (`queue-processor.js`) deve traduzir o JID telefônico do destinatário para o JID LID correspondente em memória RAM antes do envio.
+
+### B. Aquisição de Token de Privacidade (`tctoken`) e Delay de Handshake
+Quando o token de segurança (`tctoken`) não estiver presente no cache de chaves, o sistema deve forçar a troca de chaves na rede do WhatsApp:
+1. Chame o método `sock.onWhatsApp(...)` passando **obrigatoriamente o JID de telefone clássico** (o método do Baileys não suporta LIDs diretos).
+2. Introduza um **delay síncrono de pelo menos 2 segundos** (`setTimeout`/`Promise`) logo após a consulta para permitir que a biblioteca receba a resposta assíncrona do servidor, processe o aperto de mão criptográfico E2E no background e salve o `tctoken` na memória.
+
+### C. Proteção do JID de Telefone no Banco de Dados
+* **Nunca** atualize a coluna `whatsapp_jid` da tabela `contacts` no Supabase para `@lid`. O banco de dados deve preservar o JID clássico de telefone (`@s.whatsapp.net`).
+* O frontend React descarta e oculta contatos cujo JID contém `@lid` devido a filtros visuais. Manter o JID clássico no banco de dados impede que o contato desapareça no painel e garante que o queue-processor continue resolvendo o JID localmente em tempo de execução de forma invisível para o usuário.
+
+### D. Tradução Reversa de LID no EventProcessor
+Para evitar que confirmações de entrega (ACKs) ou eventos de recebimento gerados por LIDs criem contatos duplicados no CRM:
+* Intercepte o processamento no `handleMessageUpsert` do `event-processor/index.js`. Se o JID da mensagem recebida contiver `@lid`, consulte o mapeamento reverso `lid-mapping-[LID]_reverse` no cache de chaves da instância para traduzir o JID de volta para o telefone correspondente antes de qualquer salvamento ou atualização no banco.
+
+
