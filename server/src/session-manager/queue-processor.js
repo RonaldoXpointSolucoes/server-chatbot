@@ -133,28 +133,36 @@ class QueueProcessor {
 
                 let targetJid = msg.chat_jid;
                 const isGroup = targetJid.endsWith('@g.us');
-                if (!isGroup && typeof sock.onWhatsApp === 'function') {
+                if (!isGroup) {
                     try {
                         const { sessionCaches } = await import('./auth.js');
                         const memCache = sessionCaches.get(instanceId);
-                        
                         const cleanJid = targetJid.split('@')[0];
-                        const hasLidToken = memCache && memCache.has(`tctoken-${cleanJid}@lid`);
-                        const hasPhoneToken = memCache && memCache.has(`tctoken-${cleanJid}@s.whatsapp.net`);
                         
-                        if (!hasLidToken && !hasPhoneToken) {
-                            console.log(`[QueueProcessor] Token de segurança não encontrado para ${targetJid}. Sincronizando via onWhatsApp...`);
-                            const onWhatsAppResults = await sock.onWhatsApp(targetJid);
-                            if (onWhatsAppResults && onWhatsAppResults[0]) {
-                                const result = onWhatsAppResults[0];
-                                if (result.exists && result.jid) {
-                                    targetJid = result.jid;
-                                    console.log(`[QueueProcessor] Número verificado no WhatsApp. JID Alvo resolvido para: ${targetJid}`);
-                                }
+                        // 1. Tenta resolver o LID localmente via lid-mapping se JID for telefone
+                        if (targetJid.endsWith('@s.whatsapp.net') && memCache) {
+                            const mappedLid = memCache.get(`lid-mapping-${cleanJid}`);
+                            if (mappedLid) {
+                                targetJid = `${mappedLid}@lid`;
+                                console.log(`[QueueProcessor] JID de telefone ${msg.chat_jid} resolvido via cache para LID: ${targetJid}`);
                             }
                         }
-                    } catch (onWAFail) {
-                        console.warn(`[QueueProcessor] Erro ao sincronizar/resolver JID no WhatsApp (onWhatsApp):`, onWAFail.message);
+                        
+                        // 2. Garante o tctoken no cache
+                        if (typeof sock.onWhatsApp === 'function') {
+                            const finalCleanJid = targetJid.split('@')[0];
+                            const isLid = targetJid.endsWith('@lid');
+                            const hasLidToken = memCache && memCache.has(`tctoken-${finalCleanJid}@lid`);
+                            const hasPhoneToken = memCache && memCache.has(`tctoken-${finalCleanJid}@s.whatsapp.net`);
+                            
+                            if (!hasLidToken && !hasPhoneToken) {
+                                console.log(`[QueueProcessor] Token de segurança não encontrado para ${targetJid}. Sincronizando via onWhatsApp...`);
+                                // Note: Baileys onWhatsApp accepts phone JIDs to query, but let's query it
+                                await sock.onWhatsApp(targetJid);
+                            }
+                        }
+                    } catch (err) {
+                        console.warn(`[QueueProcessor] Erro na resolução de LID/Tokens para ${targetJid}:`, err.message);
                     }
                 }
 

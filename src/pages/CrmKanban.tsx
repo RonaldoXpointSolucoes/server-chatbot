@@ -176,6 +176,73 @@ export default function CrmKanban() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedAgentFilter, setSelectedAgentFilter] = useState('all');
 
+  const lastMoveRef = React.useRef<{ leadId: string; stageId: string; hoverCardId: string | null; position: string | null } | null>(null);
+  const droppedSuccessRef = React.useRef(false);
+  const draggedOriginalStatusRef = React.useRef<string | null>(null);
+
+  const moveLeadLocally = (leadId: string, targetStageId: string, hoverCardId: string | null, position: 'before' | 'after' | null) => {
+    const last = lastMoveRef.current;
+    if (last && last.leadId === leadId && last.stageId === targetStageId && last.hoverCardId === hoverCardId && last.position === position) {
+      return;
+    }
+    lastMoveRef.current = { leadId, stageId: targetStageId, hoverCardId, position };
+
+    setLeads(prev => {
+      const leadToUpdate = prev.find(l => l.id === leadId);
+      if (!leadToUpdate) return prev;
+
+      if (hoverCardId === null && leadToUpdate.status === targetStageId) {
+        const colLeads = prev.filter(l => l.status === targetStageId && l.id !== leadId);
+        if (colLeads.length > 0 && prev[prev.length - 1]?.id === leadId) {
+          return prev;
+        }
+      }
+
+      const otherLeads = prev.filter(l => l.id !== leadId);
+      const targetColLeads = otherLeads
+        .filter(l => l.status === targetStageId)
+        .sort((a, b) => (a.position || 0) - (b.position || 0));
+
+      let newPosition = 0;
+      if (hoverCardId && targetColLeads.length > 0) {
+        const targetIndex = targetColLeads.findIndex(l => l.id === hoverCardId);
+        if (targetIndex !== -1) {
+          const targetCard = targetColLeads[targetIndex];
+          if (position === 'before') {
+            if (targetIndex === 0) {
+              newPosition = (targetCard.position || 0) - 1000;
+            } else {
+              const prevCard = targetColLeads[targetIndex - 1];
+              newPosition = ((prevCard.position || 0) + (targetCard.position || 0)) / 2;
+            }
+          } else {
+            if (targetIndex === targetColLeads.length - 1) {
+              newPosition = (targetCard.position || 0) + 1000;
+            } else {
+              const nextCard = targetColLeads[targetIndex + 1];
+              newPosition = ((targetCard.position || 0) + (nextCard.position || 0)) / 2;
+            }
+          }
+        }
+      } else {
+        if (targetColLeads.length > 0) {
+          const lastCard = targetColLeads[targetColLeads.length - 1];
+          newPosition = (lastCard.position || 0) + 1000;
+        } else {
+          newPosition = 0;
+        }
+      }
+
+      const updatedLead = {
+        ...leadToUpdate,
+        status: targetStageId,
+        position: newPosition
+      };
+
+      return [...otherLeads, updatedLead].sort((a, b) => (a.position || 0) - (b.position || 0));
+    });
+  };
+
   // Modais
   const [isCreatorOpen, setIsCreatorOpen] = useState(false);
   const [isEditBoardOpen, setIsEditBoardOpen] = useState(false);
@@ -296,105 +363,85 @@ export default function CrmKanban() {
   const handleDragStart = (e: React.DragEvent, leadId: string) => {
     e.dataTransfer.setData('text/plain', leadId);
     setDraggedLeadId(leadId);
+    const lead = leads.find(l => l.id === leadId);
+    if (lead) {
+      draggedOriginalStatusRef.current = lead.status;
+    }
+    droppedSuccessRef.current = false;
+    lastMoveRef.current = null;
   };
 
   const handleDragOver = (e: React.DragEvent, stageId: string) => {
     e.preventDefault();
     setDraggingOverStage(stageId);
     
-    // Encontrar se o cursor está sobre algum card desta coluna
+    // Se o mouse passar pela área da coluna e não estiver sobre nenhum card, move o card para o final desta coluna
     const target = e.target as HTMLElement;
     const cardEl = target.closest('[data-card-id]');
-    if (!cardEl) {
-      setDragOverCardId(null);
-      setDragOverCardPosition(null);
+    if (!cardEl && draggedLeadId) {
+      const leadToUpdate = leads.find(l => l.id === draggedLeadId);
+      if (leadToUpdate && leadToUpdate.status !== stageId) {
+        moveLeadLocally(draggedLeadId, stageId, null, null);
+      }
     }
   };
 
   const handleCardDragOver = (e: React.DragEvent, cardId: string) => {
     e.preventDefault();
+    if (!draggedLeadId || cardId === draggedLeadId) return;
+
     const rect = e.currentTarget.getBoundingClientRect();
     const relativeY = e.clientY - rect.top;
     const position = relativeY < rect.height / 2 ? 'before' : 'after';
-    setDragOverCardId(cardId);
-    setDragOverCardPosition(position);
+    
+    // Encontrar o card alvo para obter o estágio correspondente
+    const targetCard = leads.find(l => l.id === cardId);
+    if (targetCard) {
+      moveLeadLocally(draggedLeadId, targetCard.status, cardId, position);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedLeadId(null);
+    setDraggingOverStage(null);
+    setDragOverCardId(null);
+    setDragOverCardPosition(null);
+    lastMoveRef.current = null;
+    if (!droppedSuccessRef.current) {
+      fetchData(); // Reverter se cancelado/solto fora
+    }
   };
 
   const handleDrop = async (e: React.DragEvent, targetStage: string) => {
     e.preventDefault();
-    const leadId = e.dataTransfer.getData('text/plain');
+    const leadId = e.dataTransfer.getData('text/plain') || draggedLeadId;
     if (!leadId) return;
 
     const leadToUpdate = leads.find(l => l.id === leadId);
     if (!leadToUpdate) return;
 
-    // Obter leads da coluna de destino (ordenados por posição)
-    const targetColLeads = leads
-      .filter(l => l.status === targetStage && l.id !== leadId)
-      .sort((a, b) => (a.position || 0) - (b.position || 0));
+    // Sinalizar sucesso de drop para o handleDragEnd
+    droppedSuccessRef.current = true;
 
-    let newPosition = 0;
-
-    if (dragOverCardId && targetColLeads.length > 0) {
-      const targetCardIndex = targetColLeads.findIndex(l => l.id === dragOverCardId);
-      if (targetCardIndex !== -1) {
-        const targetCard = targetColLeads[targetCardIndex];
-        
-        if (dragOverCardPosition === 'before') {
-          if (targetCardIndex === 0) {
-            newPosition = (targetCard.position || 0) - 1000;
-          } else {
-            const prevCard = targetColLeads[targetCardIndex - 1];
-            newPosition = ((prevCard.position || 0) + (targetCard.position || 0)) / 2;
-          }
-        } else { // 'after'
-          if (targetCardIndex === targetColLeads.length - 1) {
-            newPosition = (targetCard.position || 0) + 1000;
-          } else {
-            const nextCard = targetColLeads[targetCardIndex + 1];
-            newPosition = ((targetCard.position || 0) + (nextCard.position || 0)) / 2;
-          }
-        }
-      }
-    } else {
-      // Se não há card de referência, inserir no fim da coluna
-      if (targetColLeads.length > 0) {
-        const lastCard = targetColLeads[targetColLeads.length - 1];
-        newPosition = (lastCard.position || 0) + 1000;
-      } else {
-        newPosition = 0;
-      }
-    }
+    const finalStage = leadToUpdate.status;
+    const finalPosition = leadToUpdate.position;
 
     // Histórico de transição
-    const oldStatus = leadToUpdate.status;
+    const oldStatus = draggedOriginalStatusRef.current || finalStage;
     const historyEntry = {
       from: oldStatus,
-      to: targetStage,
+      to: finalStage,
       by: localStorage.getItem('current_user_name') || 'Agente',
       at: new Date().toISOString()
     };
     const updatedHistory = [...leadToUpdate.history, historyEntry];
 
-    // Atualização otimista
-    const updatedLead = { 
-      ...leadToUpdate, 
-      status: targetStage, 
-      position: newPosition,
-      history: updatedHistory 
-    };
-
-    setLeads(prev => {
-      const filtered = prev.filter(l => l.id !== leadId);
-      return [...filtered, updatedLead].sort((a, b) => (a.position || 0) - (b.position || 0));
-    });
-
     // Persistência
     const { error } = await supabase
       .from('crm_leads')
       .update({ 
-        status: targetStage,
-        position: newPosition,
+        status: finalStage,
+        position: finalPosition,
         history: updatedHistory
       })
       .eq('id', leadId);
@@ -408,6 +455,7 @@ export default function CrmKanban() {
     setDraggingOverStage(null);
     setDragOverCardId(null);
     setDragOverCardPosition(null);
+    lastMoveRef.current = null;
   };
 
   // Soma de faturamento por coluna
@@ -954,20 +1002,8 @@ export default function CrmKanban() {
                 {(() => {
                   const itemsToRender: React.ReactNode[] = [];
                   const isDraggingOverThisStage = draggingOverStage === stage.id;
-                  let placeholderRendered = false;
 
                   colLeads.forEach(lead => {
-                    // Se o card sob o cursor pertence a esta coluna e a posição é 'before', renderiza o placeholder antes dele
-                    if (isDraggingOverThisStage && dragOverCardId === lead.id && dragOverCardPosition === 'before' && lead.id !== draggedLeadId) {
-                      placeholderRendered = true;
-                      itemsToRender.push(
-                        <motion.div 
-                          layout
-                          key="placeholder-before" 
-                          className="border-2 border-dashed border-indigo-500/35 dark:border-indigo-400/25 bg-indigo-500/5 dark:bg-indigo-500/10 h-[100px] rounded-2xl animate-pulse transition-all duration-200" 
-                        />
-                      );
-                    }
 
                     const clientContact = contacts.find(c => c.id === lead.customer_id);
                     const agentObj = agents.find(a => a.id === lead.agent_id);
@@ -989,13 +1025,13 @@ export default function CrmKanban() {
                           draggable="true"
                           data-card-id={lead.id}
                           onDragStart={e => handleDragStart(e, lead.id)}
-                          onDragEnd={() => setDraggedLeadId(null)}
+                          onDragEnd={handleDragEnd}
                           onDragOver={e => handleCardDragOver(e, lead.id)}
                           onClick={() => setSelectedLead(lead)}
                           className={cn(
                             "group/card bg-white dark:bg-[#111b21] p-4.5 rounded-2xl border border-slate-200/50 dark:border-white/5 shadow-sm hover:shadow-[0_12px_24px_rgba(0,0,0,0.04)] dark:hover:shadow-[0_12px_24px_rgba(0,0,0,0.25)] hover:border-slate-350 dark:hover:border-white/10 hover:-translate-y-0.5 transition-all duration-300 cursor-grab active:cursor-grabbing relative overflow-hidden",
                             priorityBorder,
-                            isBeingDragged && "rotate-[2deg] scale-[0.98] opacity-30 border-indigo-500/50 shadow-xl"
+                            isBeingDragged && "border-2 border-dashed border-indigo-500/40 dark:border-indigo-400/30 bg-indigo-50/40 dark:bg-indigo-950/20 opacity-40 shadow-inner rotate-[1.5deg] scale-[0.98]"
                           )}
                         >
                           {/* Hover Action Toolbar */}
@@ -1112,7 +1148,7 @@ export default function CrmKanban() {
                             <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8px]">
                               Faturamento
                             </span>
-                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-655 dark:text-emerald-450 font-black text-[10px] rounded-lg border border-emerald-500/15 shrink-0">
+                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-655 dark:text-emerald-455 font-black text-[10px] rounded-lg border border-emerald-500/15 shrink-0">
                               R$ {Number(lead.estimated_revenue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </span>
                           </div>
@@ -1165,29 +1201,7 @@ export default function CrmKanban() {
                       </motion.div>
                     );
 
-                    // Se o card sob o cursor pertence a esta coluna e a posição é 'after', renderiza o placeholder depois dele (e não é o próprio card arrastado)
-                    if (isDraggingOverThisStage && dragOverCardId === lead.id && dragOverCardPosition === 'after' && lead.id !== draggedLeadId) {
-                      placeholderRendered = true;
-                      itemsToRender.push(
-                        <motion.div 
-                          layout
-                          key="placeholder-after" 
-                          className="border-2 border-dashed border-indigo-500/35 dark:border-indigo-400/25 bg-indigo-500/5 dark:bg-indigo-500/10 h-[100px] rounded-2xl animate-pulse transition-all duration-200" 
-                        />
-                      );
-                    }
                   });
-
-                  // Se estiver arrastando sobre esta coluna, mas nenhum card específico está sob o cursor (ou coluna vazia), renderiza no final
-                  if (isDraggingOverThisStage && !placeholderRendered) {
-                    itemsToRender.push(
-                      <motion.div 
-                        layout
-                        key="placeholder-final" 
-                        className="border-2 border-dashed border-indigo-500/35 dark:border-indigo-400/25 bg-indigo-500/5 dark:bg-indigo-500/10 h-[100px] rounded-2xl animate-pulse transition-all duration-200" 
-                      />
-                    );
-                  }
 
                   return itemsToRender;
                 })()}

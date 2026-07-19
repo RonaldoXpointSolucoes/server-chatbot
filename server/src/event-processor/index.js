@@ -232,15 +232,41 @@ class EventProcessor {
             if (jid && jid.includes('@lid')) {
                 if (msg.key.remoteJidAlt && msg.key.remoteJidAlt.includes('@s.whatsapp.net')) {
                     jid = msg.key.remoteJidAlt;
-                } else if (sock?.signalRepository?.lidMapping) {
-                    try {
-                        const resolvedPn = await sock.signalRepository.lidMapping.getPNForLID(jid);
-                        if (resolvedPn && resolvedPn.includes('@s.whatsapp.net')) {
-                            jid = resolvedPn;
-                            console.log(`[EventProcessor] LID Resgatado via SignalRepository: ${msg.key.remoteJid} -> ${jid}`);
+                } else {
+                    let resolvedPn = null;
+                    if (sock?.signalRepository?.lidMapping) {
+                        try {
+                            resolvedPn = await sock.signalRepository.lidMapping.getPNForLID(jid);
+                            if (resolvedPn && resolvedPn.includes('@s.whatsapp.net')) {
+                                // OK
+                            } else {
+                                resolvedPn = null;
+                            }
+                        } catch (err) {
+                            console.error('[EventProcessor] Erro ao buscar mapeamento de LID no SignalRepository:', err);
                         }
-                    } catch (err) {
-                        console.error('[EventProcessor] Erro ao buscar mapeamento de LID no SignalRepository:', err);
+                    }
+                    
+                    if (!resolvedPn) {
+                        // Fallback para o sessionCaches do banco de dados/memória local
+                        try {
+                            const { sessionCaches } = await import('../session-manager/auth.js');
+                            const memCache = sessionCaches.get(instanceId);
+                            if (memCache) {
+                                const cleanLid = jid.split('@')[0];
+                                const mappedPhone = memCache.get(`lid-mapping-${cleanLid}_reverse`);
+                                if (mappedPhone) {
+                                    resolvedPn = `${mappedPhone}@s.whatsapp.net`;
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[EventProcessor] Erro no fallback de tradução de LID:', e.message);
+                        }
+                    }
+                    
+                    if (resolvedPn && resolvedPn.includes('@s.whatsapp.net')) {
+                        jid = resolvedPn;
+                        console.log(`[EventProcessor] LID Resgatado com sucesso: ${msg.key.remoteJid} -> ${jid}`);
                     }
                 }
             }
