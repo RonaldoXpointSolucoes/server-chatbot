@@ -4180,6 +4180,52 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const realContactId = getRealContactId(contactId);
 
     try {
+      // 1. Identificar a conversa correspondente
+      let convId = '';
+      const contact = get().contacts.find(c => c.id === contactId);
+      if (contact?.conv_id) {
+        convId = contact.conv_id;
+      } else {
+        const { data: convData } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('contact_id', realContactId)
+          .maybeSingle();
+        if (convData) convId = convData.id;
+      }
+
+      // 2. Buscar a data do último chamado resolvido para saber a fronteira
+      const { data: lastResolved } = await supabase
+        .from('chat_tickets')
+        .select('closed_at')
+        .eq('contact_id', realContactId)
+        .eq('status', 'resolved')
+        .order('closed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // 3. Determinar o opened_at ideal baseado na primeira nova mensagem
+      let openedAt = new Date().toISOString();
+      if (convId) {
+        let msgQuery = supabase
+          .from('messages')
+          .select('timestamp')
+          .eq('conversation_id', convId);
+
+        if (lastResolved?.closed_at) {
+          msgQuery = msgQuery.gt('timestamp', lastResolved.closed_at);
+        }
+
+        const { data: firstMsg } = await msgQuery
+          .order('timestamp', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (firstMsg?.timestamp) {
+          openedAt = firstMsg.timestamp;
+        }
+      }
+
       const { data: newTicket, error } = await supabase
         .from('chat_tickets')
         .insert({
@@ -4187,6 +4233,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           contact_id: realContactId,
           status: 'open',
           problem_description: problemDescription || null,
+          opened_at: openedAt,
           metadata: {}
         })
         .select()

@@ -607,58 +607,58 @@ export default function ContactsManager() {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-[100dvh] bg-[#111b21] text-[#e9edef] overflow-hidden relative">
+    <div className="flex-1 flex flex-col h-[100dvh] bg-[#0c1317] text-[#e9edef] overflow-hidden relative">
       
       {/* Header Premium */}
-      <div className="h-[72px] shrink-0 w-full bg-[#202c33]/80 backdrop-blur-md border-b border-[#2a3942] flex items-center px-6 justify-between z-10">
+      <div className="h-[72px] shrink-0 w-full bg-[#0c1317]/60 backdrop-blur-xl border-b border-white/5 flex items-center px-6 justify-between z-10 select-none">
         <div className="flex items-center gap-4">
            {/* Botão de voltar visível móbile/desktop */}
-           <button onClick={() => navigate(-1)} className="p-2 hover:bg-[#2a3942] rounded-full transition-colors">
+           <button onClick={() => navigate(-1)} className="p-2 hover:bg-white/5 rounded-xl transition-colors cursor-pointer">
               <ArrowLeft size={20} className="text-[#aebac1]" />
            </button>
            <div>
-             <h1 className="text-xl font-semibold text-[#e9edef] tracking-tight">Gestão de Contatos</h1>
-             <p className="text-xs text-[#8696a0] hidden md:block">Sincronizado automaticamente via Baileys & Cadastro Manual</p>
+             <h1 className="text-base font-extrabold text-slate-100 tracking-tight uppercase">Gestão de Contatos</h1>
+             <p className="text-[10px] text-slate-400 font-bold hidden md:block mt-0.5">Sincronizado automaticamente via Baileys & Cadastro Manual</p>
            </div>
         </div>
-
+ 
         <div className="flex items-center gap-2 sm:gap-3">
           <button 
             onClick={() => setIsGroupModalOpen(true)}
-            className="bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl font-semibold text-xs sm:text-sm transition-all flex items-center gap-1.5 sm:gap-2 hover:scale-[1.02] active:scale-95 shrink-0"
+            className="bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/15 px-3 py-2.5 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 sm:gap-2 hover:scale-[1.02] active:scale-95 shrink-0 cursor-pointer"
             title="Grupos Empresariais"
           >
-            <Building2 size={16} /> <span className="hidden sm:inline">Grupos Empresariais</span>
+            <Building2 size={14} /> <span className="hidden sm:inline">Grupos Empresariais</span>
           </button>
           
           <button 
             onClick={handleExportCSV}
-            className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl font-semibold text-xs sm:text-sm transition-all flex items-center gap-1.5 sm:gap-2 hover:scale-[1.02] active:scale-95 shrink-0"
+            className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/15 px-3 py-2.5 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 sm:gap-2 hover:scale-[1.02] active:scale-95 shrink-0 cursor-pointer"
             title="Exportar CSV"
           >
-            <FileText size={16} /> <span className="hidden sm:inline">Exportar CSV</span>
+            <FileText size={14} /> <span className="hidden sm:inline">Exportar CSV</span>
           </button>
           
           <button 
             onClick={() => handleOpenModal()}
-            className="bg-emerald-500 hover:bg-emerald-600 text-[#111b21] px-3 py-2 sm:px-5 sm:py-2.5 rounded-xl font-semibold text-xs sm:text-sm transition-all shadow-[0_4px_14px_0_rgba(16,185,129,0.39)] flex items-center gap-1.5 sm:gap-2 hover:scale-[1.02] active:scale-95 shrink-0"
+            className="bg-gradient-to-tr from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-[#0c1317] px-3.5 py-2.5 sm:px-5 sm:py-2.5 rounded-xl font-black text-xs transition-all shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/20 flex items-center gap-1.5 sm:gap-2 hover:scale-[1.02] active:scale-95 shrink-0 cursor-pointer"
             title="Novo Contato"
           >
-            <Plus size={16} /> <span className="hidden sm:inline">Novo Contato</span><span className="inline sm:hidden">Novo</span>
+            <Plus size={14} strokeWidth={2.5} /> <span className="hidden sm:inline">Novo Contato</span><span className="inline sm:hidden">Novo</span>
           </button>
         </div>
       </div>
       {/* Toolbox & Search */}
-      <div className="px-6 py-4 flex flex-col gap-3 shrink-0 border-b border-[#2a3942]/40 bg-[#111b21]/50">
+      <div className="px-6 py-4 flex flex-col gap-3 shrink-0 border-b border-white/5 bg-[#0c1317]/30 backdrop-blur-md">
          <div className="flex items-center gap-3 w-full">
             <div className="relative flex-1">
-               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8696a0]" />
+               <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                <input 
                  type="text" 
                  value={searchTerm}
                  onChange={(e) => setSearchTerm(e.target.value)}
                  placeholder="Buscar por nome, documento ou celular..."
-                 className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-10 pr-4 py-2.5 text-sm text-[#e9edef] placeholder-[#8696a0] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all shadow-sm"
+                 className="w-full bg-[#182229]/40 border border-white/5 rounded-xl pl-10 pr-4 py-2.5 text-xs font-semibold text-[#e9edef] placeholder-slate-500 focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none transition-all duration-300 shadow-sm"
                />
             </div>
             
@@ -667,35 +667,33 @@ export default function ContactsManager() {
               type="button"
               onClick={() => setShowMobileFilters(!showMobileFilters)}
               className={cn(
-                "md:hidden p-2.5 rounded-xl border transition-all flex items-center justify-center gap-1.5 text-sm font-semibold",
+                "md:hidden p-2.5 rounded-xl border transition-all flex items-center justify-center gap-1.5 text-xs font-bold cursor-pointer",
                 showMobileFilters || hasActiveFilters
                   ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                  : "bg-[#202c33] border-[#2a3942] text-[#e9edef]"
+                  : "bg-[#182229]/40 border-white/5 text-[#e9edef]"
               )}
               title="Filtros e Ordenação"
             >
                {/* SlidersHorizontal SVG */}
-               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-sliders-horizontal"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>
+               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-sliders-horizontal"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>
                <span className="hidden sm:inline">Filtros</span>
             </button>
-
+ 
             {/* Totalizador visível ao lado da busca no desktop */}
-            <div className="hidden md:flex bg-[#202c33] border border-[#2a3942] rounded-xl p-1 text-xs font-semibold text-[#8696a0] shrink-0">
-               <div className="px-3 py-1.5 bg-[#2a3942] text-[#e9edef] rounded-lg shadow-sm font-bold">Total ({totalCount})</div>
+            <div className="hidden md:flex bg-[#182229]/40 border border-white/5 rounded-xl p-1 text-[10px] font-bold text-slate-400 shrink-0 select-none">
+               <div className="px-3 py-1.5 bg-[#202c33]/40 text-[#e9edef] rounded-lg shadow-sm font-black uppercase tracking-wider">Total ({totalCount})</div>
             </div>
          </div>
 
          {/* Painel de Filtros (Responsivo) */}
          <div className={cn(
            "md:flex flex-wrap items-center gap-3 w-full transition-all duration-300",
-           showMobileFilters ? "flex animate-in slide-in-from-top-2" : "hidden md:flex"
-         )}>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-wrap gap-2.5 w-full">
+           showMobileFilters ? "flex animate-in slide-in-from-top-2" : "hidden              <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-wrap gap-2.5 w-full">
                <div className="relative flex flex-col gap-1 w-full md:w-auto">
                  <select 
                     value={sortOrder}
                     onChange={(e) => setSortOrder(e.target.value)}
-                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-3 pr-8 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
+                    className="w-full bg-[#182229]/40 border border-white/5 rounded-xl pl-3.5 pr-9 py-2.5 text-xs font-bold text-[#e9edef] focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none cursor-pointer appearance-none transition-all duration-300 hover:bg-[#202c33]/50 hover:border-white/10 shadow-sm"
                  >
                     <option value="recent">Mais Recentes</option>
                     <option value="oldest">Mais Antigos</option>
@@ -706,101 +704,102 @@ export default function ContactsManager() {
                     <option value="phone_asc">Celular (Crescente)</option>
                     <option value="phone_desc">Celular (Decrescente)</option>
                  </select>
-                 <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
+                 <ChevronDown size={12} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                </div>
                
                <div className="relative flex flex-col gap-1 w-full md:w-auto">
                  <select 
                     value={filterType}
                     onChange={(e) => setFilterType(e.target.value)}
-                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-3 pr-8 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
+                    className="w-full bg-[#182229]/40 border border-white/5 rounded-xl pl-3.5 pr-9 py-2.5 text-xs font-bold text-[#e9edef] focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none cursor-pointer appearance-none transition-all duration-300 hover:bg-[#202c33]/50 hover:border-white/10 shadow-sm"
                  >
                     <option value="all">Todos os Tipos</option>
                     <option value="companies">Apenas Empresas</option>
                     <option value="contacts">Apenas Contatos</option>
                  </select>
-                 <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
+                 <ChevronDown size={12} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                </div>
-
+ 
                <div className="relative flex flex-col gap-1 w-full md:w-auto">
                  <select 
                     value={filterStatus}
                     onChange={(e) => setFilterStatus(e.target.value)}
-                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-3 pr-8 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
+                    className="w-full bg-[#182229]/40 border border-white/5 rounded-xl pl-3.5 pr-9 py-2.5 text-xs font-bold text-[#e9edef] focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none cursor-pointer appearance-none transition-all duration-300 hover:bg-[#202c33]/50 hover:border-white/10 shadow-sm"
                  >
                     <option value="all">Todos os Status</option>
                     <option value="active">Apenas Ativos</option>
                     <option value="paused">Apenas Pausados</option>
                     <option value="blocked">Apenas Bloqueados</option>
                  </select>
-                 <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
+                 <ChevronDown size={12} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                </div>
-
+ 
                <div className="relative flex flex-col gap-1 w-full md:w-auto">
                  <select 
                     value={filterDate}
                     onChange={(e) => setFilterDate(e.target.value)}
-                    className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-3 pr-8 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none cursor-pointer appearance-none"
+                    className="w-full bg-[#182229]/40 border border-white/5 rounded-xl pl-3.5 pr-9 py-2.5 text-xs font-bold text-[#e9edef] focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none cursor-pointer appearance-none transition-all duration-300 hover:bg-[#202c33]/50 hover:border-white/10 shadow-sm"
                  >
                     <option value="all">Todas as Datas</option>
                     <option value="today">Cadastrado Hoje</option>
                     <option value="week">Últimos 7 dias</option>
                     <option value="month">Últimos 30 dias</option>
                  </select>
-                 <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
+                 <ChevronDown size={12} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                </div>
-
+ 
                {useChatStore.getState().tenantInfo?.settings?.contactGroups?.length > 0 && (
                   <div className="relative flex flex-col gap-1 w-full md:w-auto col-span-2 sm:col-span-1">
                     <select 
                       value={filterGroup}
                       onChange={(e) => setFilterGroup(e.target.value)}
-                      className="w-full bg-[#202c33] border border-[#2a3942] rounded-xl pl-3 pr-8 py-2 text-xs sm:text-sm text-[#e9edef] focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none cursor-pointer appearance-none"
+                      className="w-full bg-[#182229]/40 border border-white/5 rounded-xl pl-3.5 pr-9 py-2.5 text-xs font-bold text-[#e9edef] focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none cursor-pointer appearance-none transition-all duration-300 hover:bg-[#202c33]/50 hover:border-white/10 shadow-sm"
                     >
                        <option value="all">Todos os Grupos</option>
                        {useChatStore.getState().tenantInfo?.settings?.contactGroups.map((g: any) => (
                          <option key={g.id} value={g.id}>{g.name}</option>
                        ))}
                     </select>
-                    <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
+                    <ChevronDown size={12} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                   </div>
                )}
-
+ 
                {hasActiveFilters && (
                   <button
                     type="button"
                     onClick={handleClearFilters}
-                    className="col-span-2 sm:col-span-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-3 py-2 rounded-xl font-semibold text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 hover:scale-[1.01] active:scale-95 md:w-auto shrink-0"
+                    className="col-span-2 sm:col-span-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-455 border border-rose-500/15 px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 hover:scale-[1.01] active:scale-95 md:w-auto shrink-0 cursor-pointer"
                   >
                     <X size={14} /> Limpar Filtros
                   </button>
                )}
             </div>
          </div>
-
+ 
          {/* Totalizador visível no mobile */}
-         <div className="flex md:hidden justify-between items-center bg-[#202c33]/50 border border-[#2a3942]/40 rounded-xl p-2.5 text-xs font-semibold text-[#8696a0] mt-1 w-full">
+         <div className="flex md:hidden justify-between items-center bg-[#182229]/40 border border-white/5 rounded-xl p-2.5 text-xs font-semibold text-slate-400 mt-1 w-full select-none">
             <span>Resultados Filtrados</span>
-            <span className="px-2.5 py-1 bg-[#2a3942] text-[#e9edef] rounded-lg shadow-sm font-bold">Total: {totalCount}</span>
+            <span className="px-2.5 py-1 bg-[#202c33]/40 text-[#e9edef] rounded-lg shadow-sm font-bold">Total: {totalCount}</span>
          </div>
       </div>
-
+ 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto styled-scrollbar px-4 sm:px-6 pb-12">
          
          {/* Desktop View (Tabela Completa com Scroll Lateral se necessário) */}
-         <div className="hidden md:block bg-[#182229] border border-[#2a3942] rounded-2xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+         <div className="hidden md:block bg-[#182229]/50 backdrop-blur-xl border border-white/5 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
            <div className="overflow-x-auto w-full">
            <table className="w-full text-left border-collapse min-w-[900px]">
               <thead>
-                <tr className="border-b border-[#2a3942] bg-[#202c33]/50">
-                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider w-[110px]">Ações</th>
-                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Identificação</th>
-                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Celular (ID)</th>
-                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Email & Docs</th>
-                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Criado em</th>
-                  <th className="px-6 py-4 font-semibold text-[#aebac1] text-xs uppercase tracking-wider">Status Bot</th>
+                <tr className="border-b border-white/5 bg-[#202c33]/25">
+                  <th className="px-6 py-4.5 font-black text-slate-400 text-[10px] uppercase tracking-wider w-[110px]">Ações</th>
+                  <th className="px-6 py-4.5 font-black text-slate-400 text-[10px] uppercase tracking-wider">Identificação</th>
+                  <th className="px-6 py-4.5 font-black text-slate-400 text-[10px] uppercase tracking-wider">Celular (ID)</th>
+                  <th className="px-6 py-4.5 font-black text-slate-400 text-[10px] uppercase tracking-wider">Email & Docs</th>
+                  <th className="px-6 py-4.5 font-black text-slate-400 text-[10px] uppercase tracking-wider">Criado em</th>
+                  <th className="px-6 py-4.5 font-black text-slate-400 text-[10px] uppercase tracking-wider">Status Bot</th>
                 </tr>
+              </thead>     </tr>
               </thead>
               <tbody className="divide-y divide-[#2a3942]/60">
                 {loading ? (
