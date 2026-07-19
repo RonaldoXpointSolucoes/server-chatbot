@@ -2229,12 +2229,39 @@ export default function ChatDashboard() {
                     const start = new Date(dbTicket.opened_at);
                     const { data: ticketMsgs } = await supabase
                       .from('messages')
-                      .select('text_content, sender_type, timestamp, raw_payload')
+                      .select('id, text_content, sender_type, timestamp, raw_payload, transcription, message_type, media_url')
                       .eq('conversation_id', contact.conv_id || '')
-                      .gte('timestamp', dbTicket.opened_at);
+                      .gte('timestamp', dbTicket.opened_at)
+                      .order('timestamp', { ascending: true });
 
-                    const formattedMsgs = (ticketMsgs || []).map((m: any) => {
-                      const text = (m.text_content || '').trim();
+                    const processedMsgs = [];
+                    for (const m of (ticketMsgs || [])) {
+                      let text = (m.text_content || '').trim();
+                      const isAudio = m.message_type === 'audio' || text === '🎵 Áudio';
+
+                      if (isAudio) {
+                        if (m.transcription) {
+                          text = `🎵 Áudio (Transcrito): "${m.transcription}"`;
+                        } else if (m.media_url) {
+                          try {
+                            const transcribedText = await geminiService.transcribeAudio(m.media_url);
+                            // Salvar no Supabase
+                            await supabase
+                              .from('messages')
+                              .update({ transcription: transcribedText })
+                              .eq('id', m.id);
+
+                            text = `🎵 Áudio (Transcrito): "${transcribedText}"`;
+                            m.transcription = transcribedText;
+                          } catch (audioErr) {
+                            console.error("Erro ao transcrever áudio na análise silenciosa:", audioErr);
+                            text = `🎵 Áudio (Falha ao transcrever)`;
+                          }
+                        } else {
+                          text = `🎵 Áudio (Mídia indisponível)`;
+                        }
+                      }
+
                       let isHuman = m.sender_type === 'human';
                       if (!isHuman && text) {
                         const matchAsterisk = text.match(/^\*([^*:\n]+):\*/);
@@ -2242,12 +2269,14 @@ export default function ChatDashboard() {
                           isHuman = true;
                         }
                       }
-                      return {
+                      processedMsgs.push({
                         sender: isHuman ? 'human' : 'client',
                         text: text,
                         timestamp: new Date(m.timestamp).toLocaleString('pt-BR')
-                      };
-                    });
+                      });
+                    }
+
+                    const formattedMsgs = processedMsgs;
 
                     const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
                     const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
@@ -2288,7 +2317,7 @@ export default function ChatDashboard() {
                       closed_by: operatorName,
                       error_log: errorLog
                     };
-                    await useChatStore.getState().resolveActiveTicket(currentActiveTicket.id, problemDesc, resolution, finalStats);
+                    await useChatStore.getState().resolveActiveTicket(dbTicket.id, problemDesc, resolution, finalStats);
                   } catch (bgErr) {
                     console.error('Erro no processamento silencioso do ticket:', bgErr);
                   }

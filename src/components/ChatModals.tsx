@@ -3585,35 +3585,37 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
     setErrorLog(null);
 
     // Trigger Gemini AI ticket auto-analysis
-    if (geminiService.isConfigured() && activeTicket && contact?.messages && !contact?.exclude_reports) {
+    if (geminiService.isConfigured() && activeTicket && !contact?.exclude_reports) {
       setAnalyzing(true);
       
-      const start = new Date(activeTicket.opened_at);
-      const ticketMsgs = contact.messages.filter((m: any) => {
-        const ts = new Date(m.timestamp || m.created_at);
-        return ts >= start;
-      });
-
       // Transcrever áudios pendentes assincronamente e rodar a análise
       const processAndAnalyze = async () => {
         try {
+          const { supabase } = await import('../services/supabase');
+          const { data: dbMsgs } = await supabase
+            .from('messages')
+            .select('id, text_content, sender_type, timestamp, transcription, message_type, media_url')
+            .eq('conversation_id', contact.conv_id || '')
+            .gte('timestamp', activeTicket.opened_at)
+            .order('timestamp', { ascending: true });
+
+          const ticketMsgs = dbMsgs || [];
           const { geminiService } = await import('../services/geminiService');
           const processedMsgs = [];
 
           for (const m of ticketMsgs) {
-            let text = (m.text || m.text_content || '').trim();
-            const isAudio = m.mediaType === 'audio' || m.message_type === 'audio' || text === '🎵 Áudio';
+            let text = (m.text_content || '').trim();
+            const isAudio = m.message_type === 'audio' || text === '🎵 Áudio';
 
             if (isAudio) {
               if (m.transcription) {
                 text = `🎵 Áudio (Transcrito): "${m.transcription}"`;
               } else {
-                const audioUrl = m.mediaUrl || m.media_url;
+                const audioUrl = m.media_url;
                 if (audioUrl) {
                   try {
                     const transcribedText = await geminiService.transcribeAudio(audioUrl);
                     // Atualizar no Supabase
-                    const { supabase } = await import('../services/supabase');
                     await supabase
                       .from('messages')
                       .update({ transcription: transcribedText })
@@ -3631,7 +3633,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
               }
             }
 
-            let isHuman = m.sender === 'human' || m.sender_type === 'human' || m.sender === 'me' || m.sender_type === 'me';
+            let isHuman = m.sender_type === 'human';
             if (!isHuman && text) {
               const matchAsterisk = text.match(/^\*([^*:\n]+):\*/);
               if (matchAsterisk) {
@@ -3650,7 +3652,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
             processedMsgs.push({
               sender: isHuman ? 'human' : 'client',
               text: text,
-              timestamp: new Date(m.timestamp || m.created_at).toLocaleString('pt-BR')
+              timestamp: new Date(m.timestamp).toLocaleString('pt-BR')
             });
           }
 

@@ -156,8 +156,16 @@ class QueueProcessor {
                             const hasPhoneToken = memCache && memCache.has(`tctoken-${finalCleanJid}@s.whatsapp.net`);
                             
                             if (!hasLidToken && !hasPhoneToken) {
-                                console.log(`[QueueProcessor] Token de segurança não encontrado para ${targetJid}. Sincronizando via onWhatsApp utilizando o JID original ${msg.chat_jid}...`);
-                                await sock.onWhatsApp(msg.chat_jid);
+                                let queryJid = msg.chat_jid;
+                                if (queryJid.endsWith('@lid') && memCache) {
+                                    const cleanLid = queryJid.split('@')[0];
+                                    const mappedPhone = memCache.get(`lid-mapping-${cleanLid}_reverse`);
+                                    if (mappedPhone) {
+                                        queryJid = `${mappedPhone}@s.whatsapp.net`;
+                                    }
+                                }
+                                console.log(`[QueueProcessor] Token de segurança não encontrado para ${targetJid}. Sincronizando via onWhatsApp utilizando o JID de telefone ${queryJid}...`);
+                                await sock.onWhatsApp(queryJid);
                                 // Pequeno delay de 2 segundos para garantir o handshake E2E e a persistência dos tokens na RAM
                                 await new Promise(resolve => setTimeout(resolve, 2000));
                             }
