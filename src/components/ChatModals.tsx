@@ -4963,10 +4963,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-white/5 pb-3">
             <div className="flex items-center gap-3">
               <div className="p-3 bg-gradient-to-tr from-emerald-500 to-teal-500 rounded-2xl text-white shadow-md shadow-emerald-500/10 shrink-0">
-                <FolderCheck size={20} className="animate-pulse" />
+                <FolderCheck size={20} />
               </div>
               <div className="flex flex-col text-left">
-                <h3 className="text-base font-extrabold text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-1.5 animate-pulse">
+                <h3 className="text-base font-extrabold text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
                   Tickets Fechados
                 </h3>
                 <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mt-0.5">
@@ -4976,7 +4976,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             </div>
             
             {/* View switcher */}
-            <div className="flex gap-1 bg-slate-200/60 dark:bg-[#111b21] p-1 rounded-xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[36px] items-center ml-auto mr-4 shadow-inner">
+            <div className="flex gap-1 bg-slate-200/60 dark:bg-[#182229]/40 p-1 rounded-xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[36px] items-center ml-auto mr-4 shadow-inner">
               <button
                 onClick={() => setActiveView('kanban')}
                 type="button"
@@ -5017,7 +5017,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 placeholder="Buscar por cliente, atendente, problema ou resumo..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full text-xs pl-10 pr-4 py-2.5 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-semibold font-sans transition-all shadow-sm text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-500"
+                className="w-full text-xs pl-10 pr-4 py-2.5 bg-white dark:bg-[#182229]/40 border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-semibold font-sans transition-all shadow-sm text-slate-800 dark:text-[#e9edef] placeholder-slate-400 dark:placeholder-slate-500"
               />
             </div>
 
@@ -5031,7 +5031,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                   setSelectedInstanceId(val);
                   localStorage.setItem('closed_tickets_selected_instance_id', val);
                 }}
-                className="w-full text-xs pl-10 pr-8 py-2.5 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-bold transition-all shadow-sm text-slate-800 dark:text-white appearance-none cursor-pointer"
+                className="w-full text-xs pl-10 pr-8 py-2.5 bg-white dark:bg-[#182229]/40 border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-bold transition-all shadow-sm text-slate-800 dark:text-white appearance-none cursor-pointer"
               >
                 <option value="all">📥 Todas as Caixas</option>
                 {instances.map(inst => (
@@ -5045,7 +5045,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               </div>
             </div>
             
-            <div className="flex gap-1 bg-slate-200/60 dark:bg-[#111b21] p-1 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner">
+            <div className="flex gap-1 bg-slate-200/60 dark:bg-[#182229]/40 p-1 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner">
               {[
                 { id: 'all', label: 'Todos' },
                 { id: 'today', label: 'Hoje' },
@@ -5059,7 +5059,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                   className={cn(
                     "px-4 py-1.5 rounded-xl text-[10.5px] font-extrabold transition-all cursor-pointer",
                     dateFilter === btn.id 
-                      ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-455 font-extrabold" 
+                      ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold" 
                       : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                   )}
                 >
@@ -5071,7 +5071,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         </div>
 
         {/* Weekly Day Selector */}
-        <div className="flex justify-center items-center gap-2 bg-white dark:bg-[#111b21]/50 p-2.5 rounded-2xl border border-slate-200/60 dark:border-white/5 select-none overflow-x-auto shrink-0 custom-scrollbar mx-5 md:mx-0">
+        <div className="flex justify-center items-center gap-2 bg-white dark:bg-[#182229]/20 p-2.5 rounded-2xl border border-slate-200/60 dark:border-white/5 select-none overflow-x-auto shrink-0 custom-scrollbar mx-5 md:mx-0">
           {daysList.map((day, idx) => {
             const isToday = day.toDateString() === new Date().toDateString();
             const isSelected = dateFilter === 'today' && day.toDateString() === selectedDate.toDateString();
@@ -5091,7 +5091,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                   isSelected
                     ? "bg-gradient-to-tr from-emerald-500 to-teal-500 text-white font-extrabold shadow-md shadow-emerald-500/25 border-emerald-500 scale-105"
                     : isToday
-                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-455 font-bold border-emerald-500/20 hover:bg-emerald-500/20"
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border-emerald-500/20 hover:bg-emerald-500/20"
                       : "bg-slate-100 dark:bg-[#202c33]/30 text-slate-600 dark:text-[#aebac1] hover:bg-slate-200 dark:hover:bg-white/5 border-slate-200/40 dark:border-white/5"
                 )}
               >
@@ -5105,7 +5105,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         {/* Top Metrics Row */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0 px-5 md:px-0">
           {/* Total */}
-          <div className="bg-white dark:bg-[#111b21]/60 border border-slate-200/60 dark:border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden group animate-in fade-in duration-300">
+          <div className="bg-[#182229]/40 border border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden group animate-in fade-in duration-300">
             <div className="flex flex-col text-left">
               <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Total Geral</span>
               <span className="text-xl font-black text-slate-800 dark:text-white mt-0.5">{stats.total}</span>
@@ -5116,7 +5116,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           </div>
 
           {/* Fechados */}
-          <div className="bg-white dark:bg-[#111b21]/60 border border-slate-200/60 dark:border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
+          <div className="bg-[#182229]/40 border border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
             <div className="flex flex-col text-left">
               <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Fechados</span>
               <span className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5">{stats.closed}</span>
@@ -5127,7 +5127,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           </div>
 
           {/* Abertos */}
-          <div className="bg-white dark:bg-[#111b21]/60 border border-slate-200/60 dark:border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
+          <div className="bg-[#182229]/40 border border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
             <div className="flex flex-col text-left">
               <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Em Aberto</span>
               <span className="text-xl font-black text-sky-500 dark:text-sky-400 mt-0.5">{stats.open}</span>
@@ -5138,7 +5138,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           </div>
 
           {/* Saúde do Atendimento */}
-          <div className="bg-white dark:bg-[#111b21]/60 border border-slate-200/60 dark:border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
+          <div className="bg-[#182229]/40 border border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
             <div className="flex flex-col text-left">
               <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Saúde do Suporte</span>
               <span className={cn(
@@ -5166,7 +5166,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         {/* Kanban Tab Selector for Mobile / Tablet */}
         {activeView === 'kanban' && (
           <div className={cn(
-            "mx-5 md:mx-0 gap-1.5 bg-slate-200/60 dark:bg-[#111b21] p-1.5 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner",
+            "mx-5 md:mx-0 gap-1.5 bg-slate-200/60 dark:bg-[#182229]/40 p-1.5 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner",
             selectedTicket ? "flex xl:hidden" : "flex md:hidden"
           )}>
             {columns.map(col => (
@@ -5177,7 +5177,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 className={cn(
                   "flex-1 py-1.5 rounded-xl text-[10.5px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer",
                   activeKanbanTab === col.id 
-                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-650 dark:text-emerald-455 font-extrabold" 
+                    ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold" 
                     : "text-slate-500 dark:text-[#aebac1] hover:text-slate-900"
                 )}
               >
@@ -5212,7 +5212,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     <div 
                       key={col.id}
                       className={cn(
-                        "flex flex-col h-fit md:h-full bg-slate-100/50 dark:bg-[#111b21]/45 border rounded-[24px] overflow-hidden transition-all duration-200 shadow-sm border-slate-200/60 dark:border-white/5",
+                        "flex flex-col h-fit md:h-full bg-slate-100/50 dark:bg-[#182229]/20 border rounded-3xl overflow-hidden transition-all duration-200 shadow-sm border-slate-200/60 dark:border-white/5",
                         selectedTicket 
                           ? (!isVisible ? "hidden xl:flex" : "flex") 
                           : (!isVisible ? "hidden md:flex" : "flex")
@@ -5243,7 +5243,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 key={t.id}
                                 onClick={() => setSelectedTicket(t)}
                                 className={cn(
-                                  "group p-3.5 rounded-2xl border text-left cursor-pointer transition-all duration-300 bg-white hover:bg-slate-50 dark:bg-[#182229]/80 dark:hover:bg-[#182229] hover:scale-[1.015] hover:-translate-y-0.5 hover:shadow-md dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.3)] flex flex-col gap-2 relative border-slate-200/60 dark:border-white/5",
+                                  "group p-3.5 rounded-2xl border text-left cursor-pointer transition-all duration-300 bg-white hover:bg-slate-50 dark:bg-[#1f2c34]/40 dark:hover:bg-[#1f2c34]/60 hover:scale-[1.015] hover:-translate-y-0.5 hover:shadow-md dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.3)] flex flex-col gap-2 relative border-slate-200/60 dark:border-white/5",
                                   selectedTicket?.id === t.id && "border-emerald-500 dark:border-emerald-500/50 ring-1 ring-emerald-500/30 dark:ring-emerald-500/10 shadow-md",
                                   col.cardHoverBorder,
                                   col.cardLeftBorder
@@ -5262,7 +5262,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                     )}
                                   </div>
                                   <div className="flex flex-col items-end text-right shrink-0 mt-0.5 text-[8.5px] font-black text-slate-400 dark:text-slate-500 gap-0.5">
-                                    <span className="flex items-center gap-1 font-semibold text-slate-550 dark:text-[#aebac1]">
+                                    <span className="flex items-center gap-1 font-semibold text-slate-400 dark:text-[#aebac1]">
                                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
                                       {formatTimeSafe(t.opened_at)}
                                     </span>

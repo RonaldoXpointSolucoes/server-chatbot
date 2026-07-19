@@ -688,7 +688,9 @@ export default function ContactsManager() {
          {/* Painel de Filtros (Responsivo) */}
          <div className={cn(
            "md:flex flex-wrap items-center gap-3 w-full transition-all duration-300",
-           showMobileFilters ? "flex animate-in slide-in-from-top-2" : "hidden              <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-wrap gap-2.5 w-full">
+           showMobileFilters ? "flex animate-in slide-in-from-top-2" : "hidden md:flex"
+         )}>
+             <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-wrap gap-2.5 w-full">
                <div className="relative flex flex-col gap-1 w-full md:w-auto">
                  <select 
                     value={sortOrder}
@@ -799,9 +801,8 @@ export default function ContactsManager() {
                   <th className="px-6 py-4.5 font-black text-slate-400 text-[10px] uppercase tracking-wider">Criado em</th>
                   <th className="px-6 py-4.5 font-black text-slate-400 text-[10px] uppercase tracking-wider">Status Bot</th>
                 </tr>
-              </thead>     </tr>
               </thead>
-              <tbody className="divide-y divide-[#2a3942]/60">
+              <tbody className="divide-y divide-white/[0.02] bg-transparent">
                 {loading ? (
                   <tr>
                     <td colSpan={6} className="py-20 text-center text-[#8696a0]">
@@ -822,12 +823,12 @@ export default function ContactsManager() {
                     const displayPhone = isPseudoPhone ? 'N/A' : (contact.phone ? formatPhoneNumber(contact.phone) : 'N/A');
                     
                     return (
-                    <tr key={contact.id} className="hover:bg-[#202c33]/50 transition-colors group">
+                    <tr key={contact.id} className="hover:bg-white/[0.02] border-b border-white/[0.02] transition-colors group">
                       <td className="px-6 py-4 whitespace-nowrap relative w-[110px]">
                         {/* Barra lateral indicadora no hover */}
                         <div className={cn(
                           "absolute left-0 top-0 bottom-0 w-[3px] scale-y-0 group-hover:scale-y-100 transition-transform duration-200 origin-center shrink-0",
-                          contact.document_type === 'cnpj' ? "bg-blue-500" : "bg-[#00a884]"
+                          contact.document_type === 'cnpj' ? "bg-blue-500" : "bg-emerald-500"
                         )} />
                         
                         <div className="flex items-center gap-1.5 relative">
@@ -990,7 +991,7 @@ export default function ContactsManager() {
                                     return (
                                       <div key={`assoc-${cId}`} className="flex flex-col gap-1 p-1.5 rounded-lg bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
                                         <span className="flex items-center gap-1.5 text-[11px] font-semibold text-[#54656f] dark:text-[#aebac1]">
-                                          <Building2 size={12} className="text-[#00a884]"/>
+                                          <Building2 size={12} className="text-emerald-500"/>
                                           Empresa: {company.fantasy_name || company.name}
                                         </span>
                                         {company.tags && company.tags.length > 0 && (
@@ -1098,8 +1099,8 @@ export default function ContactsManager() {
                   <div 
                     key={`mob-card-${contact.id}`} 
                     className={cn(
-                      "p-4 bg-[#182229] border border-[#2a3942] rounded-2xl shadow-md hover:border-[#2a3942]/80 transition-all flex flex-col gap-2.5 border-l-4",
-                      contact.document_type === 'cnpj' ? "border-l-blue-500" : "border-l-[#00a884]"
+                      "p-4 bg-[#182229]/50 backdrop-blur-md border border-white/5 rounded-2xl shadow-md hover:border-white/10 transition-all flex flex-col gap-2.5 border-l-4",
+                      contact.document_type === 'cnpj' ? "border-l-blue-500" : "border-l-emerald-500"
                     )}
                   >
                      {/* Linha 1: Avatar + Nome/Empresa + Status */}
