@@ -4920,10 +4920,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     <div className="fixed inset-0 z-[120] flex items-center justify-center">
       <div className="absolute inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
       
-      <div className="relative w-full h-full max-h-screen bg-slate-50 dark:bg-[#0c1317] border-none rounded-none shadow-none p-0 md:p-6 flex flex-col gap-4 animate-in fade-in duration-300 overflow-y-auto md:overflow-hidden text-left">
+      <div className="relative w-full h-full max-h-screen bg-slate-50 dark:bg-[#0c1317] border-none rounded-none shadow-none p-0 md:p-6 flex flex-col gap-4 animate-in fade-in duration-300 overflow-y-auto md:overflow-hidden text-left md:max-w-7xl md:h-[90dvh] md:max-h-[900px] md:rounded-[32px] md:border md:border-white/5 md:shadow-2xl">
         
         {/* Mobile Header & Filter Toggle Bar */}
-        <div className="md:hidden sticky top-0 z-50 flex items-center justify-between px-5 py-4 bg-slate-50/90 dark:bg-[#0c1317]/90 backdrop-blur-md border-b border-slate-200/60 dark:border-white/5 shadow-sm shrink-0">
+        <div className="md:hidden sticky top-0 z-50 flex items-center justify-between px-5 py-4 bg-[#0c1317]/80 backdrop-blur-xl border-b border-white/5 shadow-sm shrink-0">
           <div className="flex flex-col text-left">
             <span className="text-xs font-black uppercase text-slate-800 dark:text-white">Tickets Fechados</span>
             <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold mt-0.5">
@@ -4940,7 +4940,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               className={cn(
                 "px-3 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-1.5 border cursor-pointer",
                 showMobileFilters
-                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-455"
+                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
                   : "bg-slate-100 dark:bg-white/5 border-slate-200/40 dark:border-white/5 text-slate-600 dark:text-[#aebac1]"
               )}
             >
@@ -5003,7 +5003,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               </button>
             </div>
 
-            <button onClick={onClose} className="hidden md:flex p-2 rounded-full bg-slate-200/60 dark:bg-white/5 hover:bg-slate-300 dark:hover:bg-white/10 text-slate-550 hover:text-slate-700 dark:text-[#aebac1] dark:hover:text-white transition-colors cursor-pointer shrink-0">
+            <button onClick={onClose} className="hidden md:flex p-2 rounded-full bg-slate-200/60 dark:bg-white/5 hover:bg-slate-300 dark:hover:bg-white/10 text-slate-550 hover:text-slate-700 dark:hover:text-white transition-colors cursor-pointer shrink-0">
               <X size={16} />
             </button>
           </div>
@@ -5317,7 +5317,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 )}
 
                                 {/* Bottom Statistics Footer */}
-                                <div className="pt-2 border-t border-slate-100 dark:border-white/5 flex items-center justify-between flex-wrap gap-2 text-[9px] font-black text-slate-455 select-none">
+                                <div className="pt-2 border-t border-slate-100 dark:border-white/5 flex items-center justify-between flex-wrap gap-2 text-[9px] font-black text-slate-400 select-none">
                                   <div className="flex items-center gap-2">
                                     <span className="flex items-center gap-1"><Clock size={11} className="text-slate-400 dark:text-slate-500" /> <span className="font-bold text-slate-600 dark:text-[#e9edef]">{t.duration}</span></span>
                                     <span>•</span>
@@ -5369,10 +5369,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                   <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-wider">
                     Detalhes do Ticket #{selectedTicket.id}
                   </h4>
-                  <span className="text-[10.5px] font-bold text-emerald-600 dark:text-emerald-455 uppercase tracking-wide flex flex-col gap-0.5 mt-0.5">
+                  <span className="text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex flex-col gap-0.5 mt-0.5">
                     <span>🏢 {selectedTicket.companyFantasyName || 'Empresa Própria'}</span>
                     {selectedTicket.companyName && selectedTicket.companyName.toLowerCase() !== selectedTicket.companyFantasyName?.toLowerCase() && (
-                      <span className="text-[9px] font-semibold text-gray-405 dark:text-gray-500 pl-4 lowercase first-letter:uppercase">
+                      <span className="text-[9px] font-semibold text-slate-400 dark:text-gray-500 pl-4 lowercase first-letter:uppercase">
                         Empresa: {selectedTicket.companyName}
                       </span>
                     )}
@@ -5396,7 +5396,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     {showTicketMenu && (
                       <div className="absolute right-0 mt-1 w-64 bg-white dark:bg-[#202c33] border border-black/10 dark:border-white/10 rounded-2xl shadow-xl z-50 p-3.5 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-150 text-left">
                         <div className="flex flex-col gap-1">
-                          <span className="text-[10.5px] font-black uppercase text-rose-600 dark:text-rose-455 tracking-wider flex items-center gap-1">
+                          <span className="text-[10.5px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-wider flex items-center gap-1">
                             🚫 Excluir de Relatórios & I.A.
                           </span>
                           <span className="text-[9.5px] font-semibold text-gray-550 dark:text-gray-400 leading-normal">
@@ -5448,12 +5448,12 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
               {/* AI Processing Error Log Alert */}
               {(selectedTicket.metadata?.error_log || selectedTicket.problem_description === "Erro no processamento do problema." || selectedTicket.metadata?.summary === "Erro ao gerar resumo da solução.") && (
-                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-450 p-4 rounded-xl text-xs flex flex-col gap-2 leading-relaxed font-sans shrink-0 border-l-[4px] border-l-rose-500 shadow-sm">
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 p-4 rounded-xl text-xs flex flex-col gap-2 leading-relaxed font-sans shrink-0 border-l-[4px] border-l-rose-500 shadow-sm">
                   <div className="flex items-center gap-1.5 font-black uppercase tracking-wider text-[10px]">
                     <AlertTriangle size={14} className="text-rose-500 animate-pulse" />
                     <span>Falha no Processamento da I.A.</span>
                   </div>
-                  <p className="font-semibold text-gray-855 dark:text-rose-250 select-text">
+                  <p className="font-semibold text-slate-800 dark:text-rose-250 select-text">
                     {selectedTicket.metadata?.error_log || "A chave de API do Gemini pode estar incorreta, ausente ou instável. O chamado foi encerrado manualmente sem o preenchimento automático das anotações."}
                   </p>
                 </div>
@@ -5510,12 +5510,12 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                   <div className="flex flex-col gap-2">
                     {selectedTicket.metadata.checklist.map((item: any, idx: number) => (
                       <div key={idx} className="flex items-center justify-between text-xs bg-white/50 dark:bg-black/45 p-2 rounded-xl border border-gray-150/10 dark:border-white/5 shadow-sm animate-in fade-in duration-200">
-                        <span className="text-gray-750 dark:text-gray-200 font-semibold pr-3 text-left select-text">• {item.text}</span>
+                        <span className="text-slate-700 dark:text-gray-200 font-semibold pr-3 text-left select-text">• {item.text}</span>
                         <span className={cn(
                           "px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase shrink-0 border",
                           item.resolved 
-                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-450 border-emerald-500/15" 
-                            : "bg-rose-500/10 text-rose-600 dark:text-rose-455 border-rose-500/15"
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/15" 
+                            : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/15"
                         )}>
                           {item.resolved ? "Resolvido" : "Pendente"}
                         </span>
@@ -5528,7 +5528,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               {/* Resolution Summary */}
               {selectedTicket.resolution_summary && (
                 <div className="flex flex-col gap-2 bg-emerald-500/5 p-4 rounded-xl border border-emerald-500/10 dark:border-emerald-500/5 shadow-sm border-l-[3.5px] border-l-emerald-500 animate-in fade-in duration-200">
-                  <span className="text-[9.5px] uppercase font-black text-emerald-600 dark:text-emerald-450 tracking-wider">Resolução Completa</span>
+                  <span className="text-[9.5px] uppercase font-black text-emerald-600 dark:text-emerald-400 tracking-wider">Resolução Completa</span>
                   <p className="text-xs text-gray-800 dark:text-white font-bold leading-relaxed whitespace-pre-wrap select-text">
                     {selectedTicket.resolution_summary}
                   </p>
@@ -5541,9 +5541,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                   <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-550 tracking-wider">Participação de Atendentes</span>
                   <div className="flex flex-col gap-2">
                     {selectedTicket.metadata.operators.map((op: any, idx: number) => (
-                      <div key={idx} className="flex justify-between text-xs text-gray-655 dark:text-gray-300 font-semibold border-b border-gray-150/30 dark:border-white/5 pb-1.5 last:border-b-0 last:pb-0">
+                      <div key={idx} className="flex justify-between text-xs text-slate-600 dark:text-gray-300 font-semibold border-b border-gray-150/30 dark:border-white/5 pb-1.5 last:border-b-0 last:pb-0">
                         <span>{op.name}</span>
-                        <span className="font-bold text-gray-850 dark:text-white">{op.percentage}% ({op.count} msgs)</span>
+                        <span className="font-bold text-slate-800 dark:text-white">{op.percentage}% ({op.count} msgs)</span>
                       </div>
                     ))}
                   </div>

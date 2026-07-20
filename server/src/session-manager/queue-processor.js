@@ -52,7 +52,11 @@ class QueueProcessor {
                 }
             }
         } catch (err) {
-            console.error(`[QueueProcessor/Loop] Erro no loop de outbox:`, err.message);
+            if (err.message && (err.message.includes('fetch failed') || err.message.includes('timeout') || err.message.includes('Network'))) {
+                console.warn(`[QueueProcessor/Loop] Falha de rede temporária no loop de outbox:`, err.message);
+            } else {
+                console.error(`[QueueProcessor/Loop] Erro no loop de outbox:`, err.message);
+            }
         }
 
         // Agenda a próxima execução após 3 segundos
