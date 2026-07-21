@@ -17,6 +17,146 @@ export default function DevLogger() {
   const [telemetry, setTelemetry] = useState<{ cpu: number, memory: number, uptime: number } | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   
+  // Draggable Floating Button logic
+  const [position, setPosition] = useState<{ x: number; y: number }>(() => {
+    try {
+      const saved = localStorage.getItem('devlogger_position');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error('Error loading devlogger position:', e);
+    }
+    return { x: -1, y: -1 };
+  });
+
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const isDraggingRef = useRef(false);
+  const dragStartPosRef = useRef({ x: 0, y: 0 });
+  const elementStartPosRef = useRef({ x: 0, y: 0 });
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return; // Left click only
+    isDraggingRef.current = false;
+    dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+    
+    const rect = buttonRef.current?.getBoundingClientRect();
+    elementStartPosRef.current = {
+      x: rect ? rect.left : 0,
+      y: rect ? rect.top : 0
+    };
+    
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const dx = moveEvent.clientX - dragStartPosRef.current.x;
+      const dy = moveEvent.clientY - dragStartPosRef.current.y;
+      
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        isDraggingRef.current = true;
+      }
+      
+      if (isDraggingRef.current) {
+        let newX = elementStartPosRef.current.x + dx;
+        let newY = elementStartPosRef.current.y + dy;
+        
+        const btnWidth = rect ? rect.width : 50;
+        const btnHeight = rect ? rect.height : 50;
+        newX = Math.max(8, Math.min(newX, window.innerWidth - btnWidth - 8));
+        newY = Math.max(8, Math.min(newY, window.innerHeight - btnHeight - 8));
+        
+        setPosition({ x: newX, y: newY });
+      }
+    };
+    
+    const handleMouseUp = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      
+      if (isDraggingRef.current) {
+        const rect = buttonRef.current?.getBoundingClientRect();
+        if (rect) {
+          const finalPos = { x: rect.left, y: rect.top };
+          localStorage.setItem('devlogger_position', JSON.stringify(finalPos));
+        }
+      }
+    };
+    
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLButtonElement>) => {
+    const touch = e.touches[0];
+    isDraggingRef.current = false;
+    dragStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+    
+    const rect = buttonRef.current?.getBoundingClientRect();
+    elementStartPosRef.current = {
+      x: rect ? rect.left : 0,
+      y: rect ? rect.top : 0
+    };
+    
+    const handleTouchMove = (moveEvent: TouchEvent) => {
+      const touchMove = moveEvent.touches[0];
+      const dx = touchMove.clientX - dragStartPosRef.current.x;
+      const dy = touchMove.clientY - dragStartPosRef.current.y;
+      
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        isDraggingRef.current = true;
+      }
+      
+      if (isDraggingRef.current) {
+        if (moveEvent.cancelable) {
+          moveEvent.preventDefault();
+        }
+        
+        let newX = elementStartPosRef.current.x + dx;
+        let newY = elementStartPosRef.current.y + dy;
+        
+        const btnWidth = rect ? rect.width : 50;
+        const btnHeight = rect ? rect.height : 50;
+        newX = Math.max(8, Math.min(newX, window.innerWidth - btnWidth - 8));
+        newY = Math.max(8, Math.min(newY, window.innerHeight - btnHeight - 8));
+        
+        setPosition({ x: newX, y: newY });
+      }
+    };
+    
+    const handleTouchEnd = () => {
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      
+      if (isDraggingRef.current) {
+        const rect = buttonRef.current?.getBoundingClientRect();
+        if (rect) {
+          const finalPos = { x: rect.left, y: rect.top };
+          localStorage.setItem('devlogger_position', JSON.stringify(finalPos));
+        }
+      }
+    };
+    
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd);
+  };
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (position.x !== -1 && position.y !== -1 && buttonRef.current) {
+        const rect = buttonRef.current.getBoundingClientRect();
+        let newX = position.x;
+        let newY = position.y;
+        
+        newX = Math.max(8, Math.min(newX, window.innerWidth - rect.width - 8));
+        newY = Math.max(8, Math.min(newY, window.innerHeight - rect.height - 8));
+        
+        if (newX !== position.x || newY !== position.y) {
+          setPosition({ x: newX, y: newY });
+        }
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [position]);
+  
   // Estados do Antigravity Application Simulator & Test Suite (ASTS)
   const [activeTab, setActiveTab] = useState<'console' | 'asts' | 'gastrofood'>('console');
   const showTestPanel = activeTab === 'asts';
@@ -405,6 +545,8 @@ export default function DevLogger() {
       if (typeof args[0] === 'string' && (args[0].includes('[useWaCallsStore') || args[0].includes('wacalls') || args[0].includes('WaCalls'))) return;
       // Evitar spam de lock do Supabase gotrue-js
       if (typeof args[0] === 'string' && (args[0].includes('@supabase/gotrue-js') || args[0].includes('auth-token') || args[0].includes('orphaned lock') || args[0].includes('lock:sb-'))) return;
+      // Evitar ruídos operacionais rotineiros que não indicam bugs
+      if (typeof args[0] === 'string' && (args[0].includes('[History Sync]') || args[0].includes('socket zumbi'))) return;
       
       addLog({
         type: 'warn',
@@ -707,9 +849,20 @@ export default function DevLogger() {
            const data = await response.json();
            if (data.success && data.errors && data.errors.length > 0) {
               data.errors.forEach((err: any) => {
+                 const msg = err.message || '';
+                 const isRoutineNoise = 
+                    msg.includes('socket zumbi') ||
+                    msg.includes('não retornou novas mensagens') ||
+                    msg.includes('[History Sync]') ||
+                    (msg.includes('[WaCalls Listener]') && (msg.includes('Contato não encontrado') || msg.includes('mapeamento LID')));
+                 
+                 if (isRoutineNoise && err.level === 'warn') {
+                    return; // Ignora avisos rotineiros no DevLogger
+                 }
+
                  addLog({
                     type: err.level === 'warn' ? 'warn' : 'error',
-                    message: err.message || 'Erro/Aviso Interno no Servidor',
+                    message: msg || 'Erro/Aviso Interno no Servidor',
                     source: `Server Node (${err.level || 'error'})`,
                     details: err
                  });
@@ -1335,8 +1488,23 @@ export default function DevLogger() {
       {/* Floating Indicator when closed */}
       {!isVisible && (
         <button 
-           onClick={(e) => { e.stopPropagation(); toggleVisibility(); }}
-           className={`fixed bottom-24 right-4 z-[9999] text-white p-3 rounded-full shadow-xl transition-all ${engineStatus === 'online' ? 'bg-emerald-600 hover:bg-emerald-500 hover:shadow-emerald-500/20' : 'bg-red-600 hover:bg-red-500 animate-pulse hover:shadow-red-500/20'} cursor-pointer`}
+           ref={buttonRef}
+           onMouseDown={handleMouseDown}
+           onTouchStart={handleTouchStart}
+           onClick={(e) => {
+             e.stopPropagation();
+             if (isDraggingRef.current) return;
+             toggleVisibility();
+           }}
+           style={position.x !== -1 && position.y !== -1 ? {
+             left: `${position.x}px`,
+             top: `${position.y}px`,
+             bottom: 'auto',
+             right: 'auto'
+           } : undefined}
+           className={`fixed z-[9999] text-white p-3 rounded-full shadow-xl transition-colors duration-200 ${
+             position.x === -1 ? 'bottom-24 right-4' : ''
+           } ${engineStatus === 'online' ? 'bg-emerald-600 hover:bg-emerald-500 hover:shadow-emerald-500/20' : 'bg-red-600 hover:bg-red-500 animate-pulse hover:shadow-red-500/20'} cursor-grab active:cursor-grabbing select-none`}
            title="Abrir DevLogger"
         >
           <Terminal size={20} />

@@ -833,7 +833,7 @@ class SessionManager {
         const sock = data.sock;
         // Valida se o WebSocket está saudável (não está CLOSING nem CLOSED)
         if (sock.ws && (sock.ws.isClosing || sock.ws.isClosed)) {
-            console.warn(`[SessionManager] Detectado socket zumbi para ${instanceId} com WebSocket fechado/fechando. Descartando.`);
+            console.log(`[SessionManager] Limpeza de socket zumbi para ${instanceId} (WebSocket fechado/fechando).`);
             this.sessions.delete(instanceId);
             return null;
         }

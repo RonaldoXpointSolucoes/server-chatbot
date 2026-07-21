@@ -34,8 +34,13 @@ function interceptConsole() {
         text = '[Non-serializable Object Object]';
     }
 
-    // Filtro de ruído: Ignora warnings de prekey bundle do Baileys para não inundar o logger
-    if (level === 'warn' && text.includes('Closing open session in favor of incoming prekey bundle')) {
+    // Filtro de ruído: Ignora warnings de prekey bundle e logs rotineiros para não inundar o logger
+    if (level === 'warn' && (
+        text.includes('Closing open session in favor of incoming prekey bundle') ||
+        text.includes('socket zumbi') ||
+        text.includes('[History Sync] O WhatsApp não retornou') ||
+        (text.includes('[WaCalls Listener]') && (text.includes('Contato não encontrado') || text.includes('mapeamento LID')))
+    )) {
         originalFn.apply(console, args);
         return;
     }

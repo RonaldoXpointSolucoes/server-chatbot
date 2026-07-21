@@ -1052,6 +1052,34 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#e9edef] dark:border-[#202c33] rounded-full group-hover:border-gray-200 dark:group-hover:border-[#2a3942] transition-colors" />
         </div>
         <div className={cn("ml-3 flex-1 min-w-0 transition-opacity duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100")}>
+          <span 
+            className="text-[10px] font-mono text-[#00a884] opacity-90 block truncate leading-tight mb-0.5 select-none" 
+            title={(() => {
+              const version = import.meta.env.PACKAGE_VERSION || '5.2.4';
+              const rawDate = import.meta.env.PACKAGE_BUILD_DATE || import.meta.env.VITE_PACKAGE_BUILD_DATE;
+              if (!rawDate) return `v${version}`;
+              const d = new Date(rawDate);
+              if (isNaN(d.getTime())) return `v${version}`;
+              const day = String(d.getDate()).padStart(2, '0');
+              const month = String(d.getMonth() + 1).padStart(2, '0');
+              const hours = String(d.getHours()).padStart(2, '0');
+              const mins = String(d.getMinutes()).padStart(2, '0');
+              return `v${version} | ${day}/${month} ${hours}:${mins}`;
+            })()}
+          >
+            {(() => {
+              const version = import.meta.env.PACKAGE_VERSION || '5.2.4';
+              const rawDate = import.meta.env.PACKAGE_BUILD_DATE || import.meta.env.VITE_PACKAGE_BUILD_DATE;
+              if (!rawDate) return `v${version}`;
+              const d = new Date(rawDate);
+              if (isNaN(d.getTime())) return `v${version}`;
+              const day = String(d.getDate()).padStart(2, '0');
+              const month = String(d.getMonth() + 1).padStart(2, '0');
+              const hours = String(d.getHours()).padStart(2, '0');
+              const mins = String(d.getMinutes()).padStart(2, '0');
+              return `v${version} | ${day}/${month} ${hours}:${mins}`;
+            })()}
+          </span>
           <p className="text-[14px] font-medium text-[#111b21] dark:text-[#e9edef] truncate">{agentName}</p>
           <p className="text-[11px] text-[#54656f] dark:text-[#8696a0] truncate opacity-80">{currentUserEmail || ''}</p>
         </div>

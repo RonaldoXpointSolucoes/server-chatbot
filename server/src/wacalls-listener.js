@@ -121,24 +121,47 @@ async function handleWaCallsEvent(ev) {
         }
 
         const { peer, direction, startedAt } = callRecord;
-        let cleanPeer = peer.split('@')[0]; // ex: 5511999999999
+        let cleanPeer = peer.split('@')[0]; // ex: 5511999999999 ou 215938708324551
         
-        // Se for um LID (@lid), tentamos resolver para o número de telefone real (PN)
-        if (peer.includes('@lid')) {
+        const isLid = peer.includes('@lid') || (cleanPeer.length >= 14 && !cleanPeer.startsWith('55')) || cleanPeer.length >= 15;
+
+        // Se for um LID, tentamos resolver para o número de telefone real (PN)
+        if (isLid) {
             let resolved = false;
+            const lidJid = cleanPeer.endsWith('@lid') ? cleanPeer : `${cleanPeer}@lid`;
+
+            // 1. Resolver via socket signalRepository (RAM)
             const sock = sessionManager.getSocket(sessionId);
             if (sock?.signalRepository?.lidMapping) {
                 try {
-                    const resolvedPn = await sock.signalRepository.lidMapping.getPNForLID(peer);
+                    const resolvedPn = await sock.signalRepository.lidMapping.getPNForLID(lidJid);
                     if (resolvedPn) {
                         cleanPeer = resolvedPn.split('@')[0].split(':')[0];
-                        console.log(`[WaCalls Listener] LID resolvido para o telefone: ${cleanPeer}`);
+                        console.log(`[WaCalls Listener] LID resolvido via Socket para o telefone: ${cleanPeer}`);
                         resolved = true;
                     }
                 } catch (err) {
-                    console.error(`[WaCalls Listener] Erro ao tentar resolver LID via socket:`, err.message);
+                    // Silencioso
                 }
             }
+
+            // 2. Resolver via sessionCaches em memória
+            if (!resolved) {
+                try {
+                    const { sessionCaches } = await import('./session-manager/auth.js');
+                    const memCache = sessionCaches.get(sessionId);
+                    if (memCache) {
+                        const mappedPhone = memCache.get(`lid-mapping-${cleanPeer}_reverse`);
+                        if (mappedPhone) {
+                            cleanPeer = typeof mappedPhone === 'string' ? mappedPhone : String(mappedPhone);
+                            console.log(`[WaCalls Listener] LID resolvido via Memory Cache para o telefone: ${cleanPeer}`);
+                            resolved = true;
+                        }
+                    }
+                } catch (memErr) {}
+            }
+
+            // 3. Resolver via DB wa_auth_keys
             if (!resolved) {
                 try {
                     const { data: dbKey } = await supabase
@@ -150,16 +173,15 @@ async function handleWaCallsEvent(ev) {
                     if (dbKey && dbKey.key_data) {
                         cleanPeer = typeof dbKey.key_data === 'string' ? dbKey.key_data : String(dbKey.key_data);
                         console.log(`[WaCalls Listener] LID resolvido via DB para o telefone: ${cleanPeer}`);
-                    } else {
-                        console.warn(`[WaCalls Listener] Não foi possível encontrar mapeamento LID para ${cleanPeer} na tabela wa_auth_keys.`);
+                        resolved = true;
                     }
                 } catch (dbErr) {
-                    console.error(`[WaCalls Listener] Erro ao buscar reverse LID mapping no DB:`, dbErr.message);
+                    console.warn(`[WaCalls Listener] Erro ao buscar reverse LID mapping no DB:`, dbErr.message);
                 }
             }
         }
 
-        // 2. Buscar o contato no Supabase (suportando variações do 9º dígito brasileiro)
+        // 2. Buscar o contato no Supabase (suportando variações do 9º dígito brasileiro e buscas por JID)
         const getBrazilianPhoneVariations = (phone) => {
             const clean = phone.replace(/\D/g, '');
             if (!clean.startsWith('55')) return [clean];
@@ -180,20 +202,78 @@ async function handleWaCallsEvent(ev) {
         };
 
         const phoneVariations = getBrazilianPhoneVariations(cleanPeer);
-        const { data: contact, error: contactErr } = await supabase
+
+        // Obter tenant_id da instância
+        const { data: instData } = await supabase
+            .from('whatsapp_instances')
+            .select('tenant_id')
+            .eq('id', sessionId)
+            .maybeSingle();
+            
+        const tenantId = instData?.tenant_id;
+
+        let contact = null;
+        let { data: foundContacts, error: contactErr } = await supabase
             .from('contacts')
             .select('id, tenant_id')
             .eq('instance_id', sessionId)
-            .in('phone', phoneVariations)
-            .maybeSingle();
+            .in('phone', phoneVariations);
 
-        if (contactErr) {
-            console.error(`[WaCalls Listener] Erro ao buscar contato no Supabase para o telefone ${cleanPeer}:`, contactErr.message);
-            return;
+        if (foundContacts && foundContacts.length > 0) {
+            contact = foundContacts[0];
+        }
+
+        // Fallback: busca por tenant_id se não encontrou por instance_id
+        if (!contact && tenantId) {
+            const { data: tContacts } = await supabase
+                .from('contacts')
+                .select('id, tenant_id')
+                .eq('tenant_id', tenantId)
+                .in('phone', phoneVariations);
+
+            if (tContacts && tContacts.length > 0) {
+                contact = tContacts[0];
+            }
+        }
+
+        // Fallback: busca por whatsapp_jid contendo cleanPeer
+        if (!contact) {
+            let jidQuery = supabase
+                .from('contacts')
+                .select('id, tenant_id')
+                .ilike('whatsapp_jid', `%${cleanPeer}%`);
+            if (tenantId) jidQuery = jidQuery.eq('tenant_id', tenantId);
+            const { data: jidContacts } = await jidQuery;
+            if (jidContacts && jidContacts.length > 0) {
+                contact = jidContacts[0];
+            }
+        }
+
+        // Se ainda não encontrou e temos tenantId, cria o contato automaticamente para registrar a chamada
+        if (!contact && tenantId) {
+            console.log(`[WaCalls Listener] Contato não encontrado. Criando registro automático para ${cleanPeer}...`);
+            const { data: newContact, error: newContactErr } = await supabase
+                .from('contacts')
+                .insert({
+                    tenant_id: tenantId,
+                    instance_id: sessionId,
+                    phone: cleanPeer,
+                    whatsapp_jid: cleanPeer.includes('@') ? cleanPeer : `${cleanPeer}@s.whatsapp.net`,
+                    name: `Contato (${cleanPeer})`,
+                    created_at: new Date().toISOString()
+                })
+                .select('id, tenant_id')
+                .single();
+
+            if (!newContactErr && newContact) {
+                contact = newContact;
+            } else {
+                console.error(`[WaCalls Listener] Falha ao criar contato automático para chamada:`, newContactErr?.message);
+            }
         }
 
         if (!contact) {
-            console.warn(`[WaCalls Listener] Contato não encontrado no Supabase para o telefone ${cleanPeer} (variações: ${phoneVariations.join(', ')}) na instância ${sessionId}`);
+            console.warn(`[WaCalls Listener] Não foi possível localizar ou criar contato para ${cleanPeer} na instância ${sessionId}`);
             return;
         }
 

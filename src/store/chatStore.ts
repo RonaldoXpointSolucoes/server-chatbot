@@ -2449,9 +2449,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
     
     try {
-      // Garantimos exclusão forte apagando mensagens antes de contatos, prevenindo falta de CASCADE
-      await supabase.from('messages').delete().eq('contact_id', getRealContactId(contactId));
-      await supabase.from('contacts').delete().eq('id', getRealContactId(contactId));
+      const realId = getRealContactId(contactId);
+      // Garantimos exclusão forte apagando mensagens via conversa antes de contatos, prevenindo falta de CASCADE
+      const { data: convs } = await supabase.from('conversations').select('id').eq('contact_id', realId);
+      if (convs && convs.length > 0) {
+        const convIds = convs.map(c => c.id);
+        await supabase.from('messages').delete().in('conversation_id', convIds);
+        await supabase.from('conversations').delete().in('id', convIds);
+      }
+      await supabase.from('contacts').delete().eq('id', realId);
     } catch (e) {
       console.error('Erro ao excluir contato no DB:', e);
     }
@@ -3652,7 +3658,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                             }));
                         } else {
                             useDevStore.getState().addLog({
-                                type: 'warn',
+                                type: 'info',
                                 message: `[History Sync] O WhatsApp não retornou novas mensagens para este contato.`,
                                 source: 'ChatStore',
                                 details: { 
@@ -3665,7 +3671,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                             window.dispatchEvent(new CustomEvent('toast', { 
                                 detail: { 
                                     message: 'Nenhuma mensagem nova foi retornada pelo WhatsApp para este contato.', 
-                                    type: 'warning' 
+                                    type: 'info' 
                                 } 
                             }));
                         }
