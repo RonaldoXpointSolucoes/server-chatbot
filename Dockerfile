@@ -2,12 +2,10 @@
 FROM golang:alpine AS go-builder
 RUN apk add --no-cache git
 WORKDIR /build
-# Copy wacalls-go source
+COPY wacalls-go/go.mod wacalls-go/go.sum ./
+RUN go mod download
 COPY wacalls-go/ ./
-# Tidy modules
-RUN go mod tidy
-# Build static binary
-RUN GOMAXPROCS=1 CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o wacalls-server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o wacalls-server ./cmd/server
 
 # Stage 2: Main Node.js app
 FROM node:20-slim
