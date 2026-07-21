@@ -4732,8 +4732,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
   const filteredTickets = useMemo(() => {
     return tickets.filter(t => {
-      const term = search.toLowerCase();
+      const term = search.toLowerCase().trim();
+      const cleanTerm = term.startsWith('#') ? term.substring(1) : term;
       const matchSearch = !term || 
+        (t.id && String(t.id).includes(cleanTerm)) ||
         t.contactName.toLowerCase().includes(term) ||
         (t.companyFantasyName || '').toLowerCase().includes(term) ||
         (t.operatorName || '').toLowerCase().includes(term) ||
@@ -5249,12 +5251,17 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                   col.cardLeftBorder
                                 )}
                               >
-                                {/* Top: Company + Date */}
+                                {/* Top: Ticket ID + Company + Date */}
                                 <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-white/5 pb-2.5">
-                                  <div className="flex flex-col gap-1 min-w-0">
-                                    <span className={cn("text-[9.5px] font-black px-2 py-0.5 rounded-lg truncate max-w-full uppercase tracking-wider inline-block", col.companyBadgeClass)}>
-                                      🏢 {t.companyFantasyName || 'Empresa Própria'}
-                                    </span>
+                                  <div className="flex flex-col gap-1.5 min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="px-2 py-0.5 rounded-lg text-[9.5px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-500/25 dark:border-emerald-500/15 shrink-0 shadow-2xs">
+                                        #{t.id}
+                                      </span>
+                                      <span className={cn("text-[9.5px] font-black px-2 py-0.5 rounded-lg truncate max-w-[140px] md:max-w-[170px] uppercase tracking-wider inline-block", col.companyBadgeClass)}>
+                                        🏢 {t.companyFantasyName || 'Empresa Própria'}
+                                      </span>
+                                    </div>
                                     {t.companyName && t.companyName.toLowerCase() !== t.companyFantasyName?.toLowerCase() && (
                                       <span className="text-[9px] font-semibold text-slate-400 dark:text-slate-500 pl-1.5 truncate max-w-[150px] md:max-w-[200px]">
                                         {t.companyName}
