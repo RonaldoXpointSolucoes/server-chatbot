@@ -5,6 +5,7 @@ WORKDIR /build
 COPY wacalls-go/go.mod wacalls-go/go.sum ./
 RUN go mod download
 COPY wacalls-go/ ./
+RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o wacalls-server ./cmd/server
 
 # Stage 2: Main Node.js app
