@@ -4832,12 +4832,144 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     });
   }, [storeContacts, selectedInstanceId, search, connectedInstanceName]);
 
+  // Agrupamento de tickets do mesmo cliente no mesmo dia para manter em um único cartão
+  const groupedTickets = useMemo(() => {
+    const groupsMap = new Map<string, any[]>();
+
+    filteredTickets.forEach(t => {
+      const rawDate = t.closed_at || t.opened_at;
+      const dateObj = rawDate ? new Date(rawDate) : new Date();
+      const dateKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+      const groupKey = `${t.contact_id}_${dateKey}`;
+
+      if (!groupsMap.has(groupKey)) {
+        groupsMap.set(groupKey, []);
+      }
+      groupsMap.get(groupKey)!.push(t);
+    });
+
+    const mergedList: any[] = [];
+
+    groupsMap.forEach((subTickets) => {
+      subTickets.sort((a, b) => new Date(a.opened_at).getTime() - new Date(b.opened_at).getTime());
+
+      if (subTickets.length === 1) {
+        const t = subTickets[0];
+        let checklist = Array.isArray(t.metadata?.checklist) ? [...t.metadata.checklist] : [];
+        if (checklist.length === 0 && t.problem_description && t.problem_description !== "Nenhum problema ou solicitação iniciada no atendimento.") {
+          checklist = [{ text: t.problem_description, resolved: true, ticketId: t.id }];
+        }
+
+        mergedList.push({
+          ...t,
+          subTickets,
+          chamadosCount: 1,
+          combinedChecklist: checklist,
+          ticketIds: [t.id]
+        });
+      } else {
+        const firstTicket = subTickets[0];
+        const earliestStart = new Date(Math.min(...subTickets.map((st: any) => new Date(st.opened_at).getTime())));
+        const latestEnd = new Date(Math.max(...subTickets.map((st: any) => new Date(st.closed_at || st.opened_at).getTime())));
+
+        const diffMs = Math.max(0, latestEnd.getTime() - earliestStart.getTime());
+        const diffHrs = Math.floor(diffMs / 3600000);
+        const diffMins = Math.floor((diffMs % 3600000) / 60000);
+        const duration = diffHrs > 0 ? `${diffHrs}h ${diffMins}m` : `${diffMins} min`;
+
+        const ticketIds = subTickets.map((st: any) => st.id);
+
+        const problemList = subTickets
+          .map((st: any) => st.problem_description)
+          .filter((p: string) => p && p !== "Nenhum problema ou solicitação iniciada no atendimento.");
+
+        const combinedProblemDesc = problemList.length > 0
+          ? problemList.join(' • ')
+          : (firstTicket.problem_description || "Atendimento finalizado");
+
+        const combinedChecklist: any[] = [];
+        const seenTexts = new Set<string>();
+
+        subTickets.forEach((st: any) => {
+          const list = Array.isArray(st.metadata?.checklist) ? st.metadata.checklist : [];
+          if (list.length > 0) {
+            list.forEach((item: any) => {
+              const key = (item.text || '').toLowerCase().trim();
+              if (key && !seenTexts.has(key)) {
+                seenTexts.add(key);
+                combinedChecklist.push({ ...item, ticketId: st.id });
+              }
+            });
+          } else if (st.problem_description && st.problem_description !== "Nenhum problema ou solicitação iniciada no atendimento.") {
+            const key = st.problem_description.toLowerCase().trim();
+            if (!seenTexts.has(key)) {
+              seenTexts.add(key);
+              combinedChecklist.push({
+                text: st.problem_description,
+                resolved: true,
+                ticketId: st.id
+              });
+            }
+          }
+        });
+
+        const totalMessages = subTickets.reduce((acc: number, st: any) => acc + (st.metadata?.total_messages || 0), 0);
+
+        const opsSet = new Set<string>();
+        subTickets.forEach((st: any) => {
+          if (st.operatorName) opsSet.add(st.operatorName);
+          if (st.metadata?.closed_by) opsSet.add(st.metadata.closed_by);
+          (st.metadata?.operators || []).forEach((op: any) => { if (op.name) opsSet.add(op.name); });
+        });
+        const operatorName = Array.from(opsSet).join(', ') || firstTicket.operatorName;
+
+        const combinedSummaries = subTickets
+          .map((st: any) => `• Chamado #${st.id}: ${st.metadata?.summary || st.problem_description || 'Atendimento concluído'}`)
+          .join('\n\n');
+
+        const combinedResolutions = subTickets
+          .map((st: any) => `[Chamado #${st.id}]\n${st.resolution_summary || 'Resolvido pelo atendente.'}`)
+          .join('\n\n');
+
+        const hasAiError = subTickets.some((st: any) => 
+          st.metadata?.error_log || 
+          st.problem_description === "Erro no processamento do problema." || 
+          st.metadata?.summary === "Erro ao gerar resumo da solução."
+        );
+        const firstErrorLog = subTickets.find((st: any) => st.metadata?.error_log)?.metadata?.error_log || null;
+
+        mergedList.push({
+          ...firstTicket,
+          id: firstTicket.id,
+          ticketIds,
+          chamadosCount: subTickets.length,
+          subTickets,
+          opened_at: earliestStart.toISOString(),
+          closed_at: latestEnd.toISOString(),
+          duration,
+          problem_description: combinedProblemDesc,
+          resolution_summary: combinedResolutions,
+          operatorName,
+          combinedChecklist,
+          metadata: {
+            ...firstTicket.metadata,
+            summary: combinedSummaries,
+            checklist: combinedChecklist,
+            total_messages: totalMessages,
+            error_log: hasAiError ? (firstErrorLog || "Instabilidade ou falha no processamento de I.A.") : null
+          }
+        });
+      }
+    });
+
+    return mergedList;
+  }, [filteredTickets]);
+
   const stats = useMemo(() => {
-    const closed = filteredTickets.length;
+    const closed = filteredTickets.length; // Manter o total de chamados individuais para precisão de métricas
     const open = openContactsFiltered.length;
     const total = closed + open;
 
-    // Saúde do atendimento: porcentagem de chamados fechados com checklist 100% resolvido E sem falha de IA
     let healthyCount = 0;
     filteredTickets.forEach(t => {
       const hasAiError = t.metadata?.error_log || t.problem_description === "Erro no processamento do problema.";
@@ -4859,7 +4991,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     const medio: any[] = [];
     const complexo: any[] = [];
 
-    filteredTickets.forEach(t => {
+    groupedTickets.forEach(t => {
       const start = new Date(t.opened_at);
       const end = t.closed_at ? new Date(t.closed_at) : new Date();
       const diffMins = Math.floor((end.getTime() - start.getTime()) / 60000);
@@ -4914,7 +5046,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         avatarGradient: 'from-rose-400 to-red-500'
       }
     ] as const;
-  }, [filteredTickets]);
+  }, [groupedTickets]);
 
   if (!isOpen) return null;
 
@@ -5236,7 +5368,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                         {col.tickets.length > 0 ? (
                           col.tickets.map(t => {
                             const totalMsg = t.metadata?.total_messages || 0;
-                            const checklistItems = t.metadata?.checklist || [];
+                            const checklistItems = t.combinedChecklist || t.metadata?.checklist || [];
                             const resolvedCount = checklistItems.filter((i: any) => i.resolved).length;
                             const initial = t.contactName.charAt(0).toUpperCase();
 
@@ -5256,11 +5388,16 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                   <div className="flex flex-col gap-1.5 min-w-0">
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="px-2 py-0.5 rounded-lg text-[9.5px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-500/25 dark:border-emerald-500/15 shrink-0 shadow-2xs">
-                                        #{t.id}
+                                        {t.chamadosCount > 1 ? `#${t.ticketIds.join(', #')}` : `#${t.id}`}
                                       </span>
                                       <span className={cn("text-[9.5px] font-black px-2 py-0.5 rounded-lg truncate max-w-[140px] md:max-w-[170px] uppercase tracking-wider inline-block", col.companyBadgeClass)}>
                                         🏢 {t.companyFantasyName || 'Empresa Própria'}
                                       </span>
+                                      {t.chamadosCount > 1 && (
+                                        <span className="px-2 py-0.5 rounded-lg text-[9.5px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-300 border border-purple-500/25 dark:border-purple-500/15 shrink-0">
+                                          {t.chamadosCount} Chamados
+                                        </span>
+                                      )}
                                     </div>
                                     {t.companyName && t.companyName.toLowerCase() !== t.companyFantasyName?.toLowerCase() && (
                                       <span className="text-[9px] font-semibold text-slate-400 dark:text-slate-500 pl-1.5 truncate max-w-[150px] md:max-w-[200px]">
@@ -5315,12 +5452,28 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                   </div>
                                 </div>
 
-                                {/* Problem description */}
-                                {t.problem_description && (
-                                  <p className="text-[10.5px] text-slate-600 dark:text-[#e9edef] leading-relaxed line-clamp-2 bg-slate-50 dark:bg-black/15 p-2.5 rounded-[14px] border border-slate-100 dark:border-white/5">
-                                    <span className="font-extrabold text-[8.5px] text-slate-400 dark:text-slate-500 uppercase tracking-wide mr-1 select-none text-left block mb-0.5">Problema:</span>
-                                    {t.problem_description}
-                                  </p>
+                                {/* Problem description / Multiple Chamados Problems */}
+                                {t.chamadosCount > 1 && t.subTickets ? (
+                                  <div className="bg-slate-50 dark:bg-black/15 p-2.5 rounded-[14px] border border-slate-100 dark:border-white/5 flex flex-col gap-1">
+                                    <span className="font-extrabold text-[8.5px] text-slate-400 dark:text-slate-500 uppercase tracking-wide flex items-center justify-between select-none">
+                                      <span>Problemas do Dia ({t.chamadosCount}):</span>
+                                    </span>
+                                    <div className="flex flex-col gap-1 text-[10.5px] text-slate-600 dark:text-[#e9edef] leading-relaxed">
+                                      {t.subTickets.map((st: any) => (
+                                        <div key={st.id} className="line-clamp-2">
+                                          <strong className="text-emerald-600 dark:text-emerald-400 font-extrabold mr-1">#{st.id}:</strong>
+                                          {st.problem_description || 'Atendimento/Solicitação'}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  t.problem_description && (
+                                    <p className="text-[10.5px] text-slate-600 dark:text-[#e9edef] leading-relaxed line-clamp-2 bg-slate-50 dark:bg-black/15 p-2.5 rounded-[14px] border border-slate-100 dark:border-white/5">
+                                      <span className="font-extrabold text-[8.5px] text-slate-400 dark:text-slate-500 uppercase tracking-wide mr-1 select-none text-left block mb-0.5">Problema:</span>
+                                      {t.problem_description}
+                                    </p>
+                                  )
                                 )}
 
                                 {/* Bottom Statistics Footer */}
@@ -5373,8 +5526,13 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               {/* Header Details */}
               <div className="flex items-center justify-between border-b border-gray-200/50 dark:border-white/5 pb-3 shrink-0 relative">
                 <div className="flex flex-col gap-1">
-                  <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-wider">
-                    Detalhes do Ticket #{selectedTicket.id}
+                  <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                    <span>Detalhes do Ticket #{selectedTicket.ticketIds ? selectedTicket.ticketIds.join(', #') : selectedTicket.id}</span>
+                    {selectedTicket.chamadosCount > 1 && (
+                      <span className="px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-300 border border-purple-500/25 dark:border-purple-500/15">
+                        {selectedTicket.chamadosCount} Chamados Unificados
+                      </span>
+                    )}
                   </h4>
                   <span className="text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex flex-col gap-0.5 mt-0.5">
                     <span>🏢 {selectedTicket.companyFantasyName || 'Empresa Própria'}</span>
@@ -5493,8 +5651,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               {/* Description */}
               {selectedTicket.problem_description && (
                 <div className="flex flex-col gap-1.5 bg-white/50 dark:bg-[#202c33]/30 p-4 rounded-xl border border-gray-150/20 dark:border-white/5 shadow-sm">
-                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-555 tracking-wider">Descrição do Problema</span>
-                  <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold leading-relaxed select-text">
+                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-555 tracking-wider">
+                    {selectedTicket.chamadosCount > 1 ? `Descrição de Problemas do Dia (${selectedTicket.chamadosCount})` : 'Descrição do Problema'}
+                  </span>
+                  <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold leading-relaxed select-text whitespace-pre-line">
                     {selectedTicket.problem_description}
                   </p>
                 </div>
@@ -5504,20 +5664,25 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               {selectedTicket.metadata?.summary && (
                 <div className="flex flex-col gap-1.5 bg-blue-500/5 p-4 rounded-xl border border-blue-500/10 dark:border-blue-500/5 shadow-sm border-l-[3.5px] border-l-blue-500">
                   <span className="text-[9.5px] uppercase font-black text-blue-600 dark:text-blue-400 tracking-wider">Resumo Inteligente</span>
-                  <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold leading-relaxed select-text">
+                  <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold leading-relaxed select-text whitespace-pre-line">
                     {selectedTicket.metadata.summary}
                   </p>
                 </div>
               )}
 
-              {/* Checklist */}
-              {selectedTicket.metadata?.checklist && Array.isArray(selectedTicket.metadata.checklist) && selectedTicket.metadata.checklist.length > 0 && (
+              {/* Combined Checklist of Problems */}
+              {(selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist) && Array.isArray(selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist) && (selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist).length > 0 && (
                 <div className="flex flex-col gap-2.5 bg-slate-100/30 dark:bg-black/20 p-4 rounded-xl border border-gray-150/10 dark:border-white/5 shadow-sm">
-                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-500 tracking-wider">Checklist de Problemas</span>
+                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-500 tracking-wider">
+                    Checklist de Problemas {selectedTicket.chamadosCount > 1 ? `do Dia (${selectedTicket.chamadosCount} Chamados)` : ''}
+                  </span>
                   <div className="flex flex-col gap-2">
-                    {selectedTicket.metadata.checklist.map((item: any, idx: number) => (
+                    {(selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist).map((item: any, idx: number) => (
                       <div key={idx} className="flex items-center justify-between text-xs bg-white/50 dark:bg-black/45 p-2 rounded-xl border border-gray-150/10 dark:border-white/5 shadow-sm animate-in fade-in duration-200">
-                        <span className="text-slate-700 dark:text-gray-200 font-semibold pr-3 text-left select-text">• {item.text}</span>
+                        <span className="text-slate-700 dark:text-gray-200 font-semibold pr-3 text-left select-text">
+                          {item.ticketId && <strong className="text-emerald-600 dark:text-emerald-400 font-extrabold mr-1">[#{item.ticketId}]</strong>}
+                          {item.text}
+                        </span>
                         <span className={cn(
                           "px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase shrink-0 border",
                           item.resolved 
@@ -5532,8 +5697,43 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 </div>
               )}
 
+              {/* Sub-Tickets Individual Breakdown */}
+              {selectedTicket.subTickets && selectedTicket.subTickets.length > 1 && (
+                <div className="flex flex-col gap-2.5 bg-slate-100/30 dark:bg-black/20 p-4 rounded-xl border border-gray-150/10 dark:border-white/5 shadow-sm">
+                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-500 tracking-wider">
+                    Histórico de Chamados Unificados ({selectedTicket.subTickets.length})
+                  </span>
+                  <div className="flex flex-col gap-3">
+                    {selectedTicket.subTickets.map((st: any) => (
+                      <div key={st.id} className="p-3 bg-white/60 dark:bg-[#202c33]/50 rounded-xl border border-gray-200/50 dark:border-white/5 flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black text-[10px] rounded-md border border-emerald-500/20">
+                            Chamado #{st.id}
+                          </span>
+                          <span className="text-[9.5px] font-bold text-gray-400 dark:text-gray-500">
+                            {formatTimeSafe(st.opened_at)} às {formatTimeSafe(st.closed_at)} ({st.duration})
+                          </span>
+                        </div>
+                        {st.problem_description && (
+                          <p className="text-xs text-slate-700 dark:text-gray-200 font-semibold select-text">
+                            <strong className="text-gray-400 dark:text-gray-500 uppercase text-[9px] block mb-0.5">Problema:</strong>
+                            {st.problem_description}
+                          </p>
+                        )}
+                        {st.resolution_summary && (
+                          <p className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold bg-emerald-500/5 p-2 rounded-lg border border-emerald-500/10 select-text">
+                            <strong className="text-emerald-600 dark:text-emerald-400 uppercase text-[9px] block mb-0.5">Solução:</strong>
+                            {st.resolution_summary}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Resolution Summary */}
-              {selectedTicket.resolution_summary && (
+              {selectedTicket.resolution_summary && (!selectedTicket.subTickets || selectedTicket.subTickets.length <= 1) && (
                 <div className="flex flex-col gap-2 bg-emerald-500/5 p-4 rounded-xl border border-emerald-500/10 dark:border-emerald-500/5 shadow-sm border-l-[3.5px] border-l-emerald-500 animate-in fade-in duration-200">
                   <span className="text-[9.5px] uppercase font-black text-emerald-600 dark:text-emerald-400 tracking-wider">Resolução Completa</span>
                   <p className="text-xs text-gray-800 dark:text-white font-bold leading-relaxed whitespace-pre-wrap select-text">

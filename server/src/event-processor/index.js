@@ -196,6 +196,68 @@ class EventProcessor {
         return jid && jid.endsWith('@lid');
     }
 
+    async resolveLidToPhone(instanceId, jid, sock) {
+        if (!jid || !jid.includes('@lid')) return null;
+        
+        const cleanLid = jid.split('@')[0];
+        
+        // 1. Try socket repository RAM
+        if (sock?.signalRepository?.lidMapping) {
+            try {
+                const resolvedPn = await sock.signalRepository.lidMapping.getPNForLID(jid);
+                if (resolvedPn && resolvedPn.includes('@s.whatsapp.net')) {
+                    return resolvedPn;
+                }
+            } catch (err) {
+                console.error('[EventProcessor] Erro resolveLidToPhone (SignalRepository):', err);
+            }
+        }
+        
+        // 2. Try memory cache RAM
+        try {
+            const { sessionCaches } = await import('../session-manager/auth.js');
+            const memCache = sessionCaches.get(instanceId);
+            if (memCache) {
+                const mappedPhone = memCache.get(`lid-mapping-${cleanLid}_reverse`);
+                if (mappedPhone) {
+                    return `${mappedPhone}@s.whatsapp.net`;
+                }
+            }
+        } catch (e) {
+            // Silenciado
+        }
+        
+        // 3. Try global wa_auth_keys query (LID mappings are globally constant)
+        try {
+            const { data: dbKeys } = await supabase
+                .from('wa_auth_keys')
+                .select('key_data')
+                .eq('key_name', `lid-mapping-${cleanLid}_reverse`)
+                .limit(1);
+            if (dbKeys && dbKeys.length > 0 && dbKeys[0].key_data) {
+                return `${dbKeys[0].key_data}@s.whatsapp.net`;
+            }
+        } catch (e) {
+            // Silenciado
+        }
+        
+        // 4. Try global contacts query
+        try {
+            const { data: dbContact } = await supabase
+                .from('contacts')
+                .select('phone')
+                .eq('whatsapp_jid', jid)
+                .limit(1);
+            if (dbContact && dbContact.length > 0 && dbContact[0].phone) {
+                return `${dbContact[0].phone}@s.whatsapp.net`;
+            }
+        } catch (e) {
+            // Silenciado
+        }
+        
+        return null;
+    }
+
     async handleMessageUpsert(tenantId, instanceId, sock, m) {
         if (!m.messages || m.messages.length === 0) return;
  
@@ -233,38 +295,8 @@ class EventProcessor {
                 if (msg.key.remoteJidAlt && msg.key.remoteJidAlt.includes('@s.whatsapp.net')) {
                     jid = msg.key.remoteJidAlt;
                 } else {
-                    let resolvedPn = null;
-                    if (sock?.signalRepository?.lidMapping) {
-                        try {
-                            resolvedPn = await sock.signalRepository.lidMapping.getPNForLID(jid);
-                            if (resolvedPn && resolvedPn.includes('@s.whatsapp.net')) {
-                                // OK
-                            } else {
-                                resolvedPn = null;
-                            }
-                        } catch (err) {
-                            console.error('[EventProcessor] Erro ao buscar mapeamento de LID no SignalRepository:', err);
-                        }
-                    }
-                    
-                    if (!resolvedPn) {
-                        // Fallback para o sessionCaches do banco de dados/memória local
-                        try {
-                            const { sessionCaches } = await import('../session-manager/auth.js');
-                            const memCache = sessionCaches.get(instanceId);
-                            if (memCache) {
-                                const cleanLid = jid.split('@')[0];
-                                const mappedPhone = memCache.get(`lid-mapping-${cleanLid}_reverse`);
-                                if (mappedPhone) {
-                                    resolvedPn = `${mappedPhone}@s.whatsapp.net`;
-                                }
-                            }
-                        } catch (e) {
-                            console.warn('[EventProcessor] Erro no fallback de tradução de LID:', e.message);
-                        }
-                    }
-                    
-                    if (resolvedPn && resolvedPn.includes('@s.whatsapp.net')) {
+                    const resolvedPn = await this.resolveLidToPhone(instanceId, jid, sock);
+                    if (resolvedPn) {
                         jid = resolvedPn;
                         console.log(`[EventProcessor] LID Resgatado com sucesso: ${msg.key.remoteJid} -> ${jid}`);
                     }
@@ -310,10 +342,10 @@ class EventProcessor {
             const instanceConfig = await this.getInstanceConfig(instanceId);
             const allowedGroups = instanceConfig.allowed_groups || [];
             
-            // Ignora status e LIDs isolados, forçando a ignorar as ecos de múltiplos aparelhos para IDs nativos
-            if (this.isBroadcast(jid) || this.isLid(jid)) {
+            // Ignora status e LIDs isolados sem conteúdo de mensagem
+            if (this.isBroadcast(jid) || (this.isLid(jid) && !msg.message)) {
                 // Silenciado ou reduzido para não floodar os logs
-                console.log(`[EventProcessor] Mensagem Descartada - Motivo: É um Broadcast ou LID isolado. JID: ${jid}`);
+                console.log(`[EventProcessor] Mensagem Descartada - Motivo: É um Broadcast ou LID isolado sem conteúdo. JID: ${jid}`);
                 continue;
             }
             
@@ -1231,7 +1263,14 @@ class EventProcessor {
         const mappedContactsToHistory = {};
         for (const c of contacts) {
             let jid = c.id;
-            if (!jid || this.isBroadcast(jid) || this.isGroup(jid) || this.isLid(jid)) continue;
+            if (!jid || this.isBroadcast(jid) || this.isGroup(jid)) continue;
+            
+            if (this.isLid(jid)) {
+                const resolvedPn = await this.resolveLidToPhone(instanceId, jid, sock);
+                if (resolvedPn) {
+                    jid = resolvedPn;
+                }
+            }
             
             const phone = jid.split('@')[0].split(':')[0];
             const cleanJid = phone + '@' + jid.split('@')[1];
@@ -1500,7 +1539,7 @@ class EventProcessor {
                 
                 const jid = update.key.remoteJid;
                 
-                if (jid && (this.isBroadcast(jid) || this.isLid(jid))) {
+                if (jid && this.isBroadcast(jid)) {
                     continue;
                 }
                 

@@ -1290,6 +1290,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Mantém os contatos atuais exibidos durante o carregamento dos novos contatos para transição suave
     set({ activeChannelFilter: id, activeChannelName: name || null, activeChatId: null, isChannelLoading: true });
     
+    // Timer de segurança para desativar isChannelLoading em caso de oscilação de rede
+    setTimeout(() => {
+      if (get().isChannelLoading) {
+        set({ isChannelLoading: false });
+      }
+    }, 5000);
+
     // Recarrega os contatos baseados no novo filtro de canal de imediato
     get().fetchInitialData();
   },
@@ -2958,11 +2965,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   fetchInitialData: async () => {
     const tenant = get().tenantInfo;
-    if (!tenant) return;
+    if (!tenant) {
+      set({ isChannelLoading: false });
+      return;
+    }
+
+    // Safety fallback timeout to prevent infinite skeleton loader state if network fails
+    const safetyTimer = setTimeout(() => {
+      if (get().isChannelLoading) {
+        console.warn('[fetchInitialData] Fallback safety timeout reached. Clearing loading state.');
+        set({ isChannelLoading: false });
+      }
+    }, 5000);
 
     try {
-        // Disparar buscas auxiliares de forma concorrente em background
-        const supportPromises = Promise.all([
+        // Disparar buscas auxiliares de forma concorrente e resiliente em background
+        const supportPromises = Promise.allSettled([
           get().fetchAutomations(),
           get().fetchTenantLabels(),
           get().fetchQuickReplies(),
@@ -3016,6 +3034,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
            
         if (!dbConvs || dbConvs.length === 0) {
            await supportPromises;
+           set({ isChannelLoading: false });
            return;
         }
 

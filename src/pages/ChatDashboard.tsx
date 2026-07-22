@@ -1579,9 +1579,9 @@ export default function ChatDashboard() {
           }
        }
 
-       // Filtro de Modo Ticket (Estilo Chatwoot)
-       if (ticketMode && !searchTerm) {
-          if (c.conv_status === 'resolved') {
+       // Filtro de Conversas Resolvidas/Encerradas (Oculta conversas finalizadas da lista ativa, a menos que haja busca)
+       if (!searchTerm) {
+          if (c.conv_status === 'resolved' || c.conv_status === 'closed') {
              return false;
           }
        }
@@ -1609,7 +1609,7 @@ export default function ChatDashboard() {
     const deduped: any[] = [];
     for (const c of sorted) {
       const realId = c.id.includes('_') ? c.id.split('_')[0] : c.id;
-      const caixa = c.instance_id || connectedInstanceName || 'default';
+      const caixa = (c.id.includes('_') ? c.id.split('_')[1] : c.instance_id) || connectedInstanceName || 'default';
       const key = `${realId}_${caixa}`;
       if (!seenKeys.has(key)) {
         seenKeys.add(key);
@@ -1707,6 +1707,11 @@ export default function ChatDashboard() {
   const [showSnoozeModal, setShowSnoozeModal] = useState<string | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [activeChatDropdown, setActiveChatDropdown] = useState(false);
+  const [draftNewChat, setDraftNewChat] = useState<{
+    phone: string;
+    formattedPhone: string;
+    instanceId?: string | null;
+  } | null>(null);
 
   // Estados para Drag and Drop de Arquivos
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -2338,7 +2343,7 @@ export default function ChatDashboard() {
     await executeResolve(contactId, true);
   };
 
-  const handleStartChatWithSearchedNumber = async (phoneNumber: string) => {
+  const handlePrepareDraftChat = (phoneNumber: string, targetInstance?: string | null) => {
     let cleanPhone = phoneNumber.replace(/\D/g, '');
     if (!cleanPhone) return;
     
@@ -2349,84 +2354,156 @@ export default function ChatDashboard() {
     }
     
     const jid = `${cleanPhone}@s.whatsapp.net`;
+    const properInstance = targetInstance || activeChannelFilter || connectedInstanceName;
+
+    // Se o contato já existe nos contatos carregados, seleciona direto
+    const existingInStore = contacts.find(c => c.phone === cleanPhone || c.whatsapp_jid === jid);
+    if (existingInStore) {
+      setActiveChat(existingInStore.id);
+      const instToLoad = properInstance || getStrictInstance(existingInStore) || connectedInstanceName;
+      if (instToLoad) {
+        useChatStore.getState().loadHistoricalMessages(existingInStore.id, instToLoad);
+      }
+      setSearchTerm('');
+      setDraftNewChat(null);
+      return;
+    }
+
+    // Prepara a tela em modo rascunho sem criar contatos/conversas no Supabase ou na lista lateral
+    const formatted = formatPhoneNumber(cleanPhone.length > 11 ? cleanPhone.slice(2) : cleanPhone) || cleanPhone;
+    setDraftNewChat({
+      phone: cleanPhone,
+      formattedPhone: formatted,
+      instanceId: properInstance || null
+    });
+    useChatStore.setState({ activeChatId: null });
+    setSearchTerm('');
+
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 150);
+  };
+
+  const handleSendDraftMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!draftNewChat || isSendingRef.current) return;
+    if (!inputText.trim() && !pendingMediaToSend) return;
+
+    const cleanPhone = draftNewChat.phone;
+    const jid = `${cleanPhone}@s.whatsapp.net`;
     const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || tenantInfo?.id;
-    const properInstance = activeChannelFilter || connectedInstanceName;
+    const properInstance = draftNewChat.instanceId || activeChannelFilter || connectedInstanceName;
+
+    // Alerta de instância offline
+    if (properInstance && instancesStatus[properInstance] && instancesStatus[properInstance] !== 'connected' && instancesStatus[properInstance] !== 'connected_local') {
+      if (instancesStatus[properInstance] === 'connecting') {
+        alert('A conexão está sendo restabelecida automaticamente. Aguarde alguns instantes antes de enviar.');
+      } else {
+        alert('Instância offline. Conecte-a para enviar mensagens.');
+      }
+      return;
+    }
+
+    isSendingRef.current = true;
+    setIsSendingMessage(true);
 
     try {
+      // 1. Criar ou buscar contato no Supabase SOMENTE NO MOMENTO DO ENVIO DA MENSAGEM
       let { data: existingContact } = await supabase
         .from('contacts')
         .select('*')
         .eq('tenant_id', tenantId)
         .eq('phone', cleanPhone)
         .maybeSingle();
-        
+
       if (!existingContact) {
         const { data: newContact, error } = await supabase.from('contacts').insert({
           tenant_id: tenantId,
           instance_id: properInstance || null,
-          name: cleanPhone,
+          name: draftNewChat.formattedPhone || cleanPhone,
           phone: cleanPhone,
           whatsapp_jid: jid,
           bot_status: 'active'
         }).select().single();
-        
+
         if (newContact && !error) {
           existingContact = newContact;
         } else {
-          console.error('Erro ao criar novo contato na base:', error);
+          console.error('Erro ao criar contato:', error);
+          alert('Erro ao criar contato na base.');
           return;
         }
       }
-      
-      if (existingContact) {
-         // Garante que a conversa exista e esteja no status 'open' para o novo chat iniciado manualmente
-         let { data: existingConv } = await supabase
-           .from('conversations')
-           .select('*')
-           .eq('tenant_id', tenantId)
-           .eq('contact_id', existingContact.id)
-           .maybeSingle();
 
-         if (!existingConv) {
-           await supabase.from('conversations').insert({
-             tenant_id: tenantId,
-             contact_id: existingContact.id,
-             instance_id: properInstance || null,
-             status: 'open',
-             unread_count: 0,
-             last_message_preview: 'Conversa iniciada',
-             last_message_at: new Date().toISOString(),
-             updated_at: new Date().toISOString(),
-             priority: 'medium',
-             ai_paused: true
-           });
-         } else if (existingConv.status === 'resolved' || existingConv.status === 'closed') {
-           await supabase
-             .from('conversations')
-             .update({ status: 'open', updated_at: new Date().toISOString() })
-             .eq('id', existingConv.id);
-         }
+      // 2. Criar ou buscar conversa no Supabase SOMENTE NO MOMENTO DO ENVIO
+      let { data: existingConv } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .eq('contact_id', existingContact.id)
+        .maybeSingle();
 
-         // Atualiza a base de dados do store para refletir a nova conversa no menu esquerdo
-         await useChatStore.getState().fetchInitialData();
-
-         const targetInstanceId = properInstance || existingContact.instance_id || 'default';
-         const targetCompositeId = `${existingContact.id}_${targetInstanceId}`;
-
-         setActiveChat(targetCompositeId);
-         const targetInstance = properInstance || existingContact.instance_id;
-         if (targetInstance) {
-           useChatStore.getState().loadHistoricalMessages(targetCompositeId, targetInstance);
-         }
-         setSearchTerm('');
-
-         // Força o foco do cursor no campo de texto de envio de mensagens
-         setTimeout(() => {
-           textareaRef.current?.focus();
-         }, 350);
+      if (!existingConv) {
+        const { data: newConv } = await supabase.from('conversations').insert({
+          tenant_id: tenantId,
+          contact_id: existingContact.id,
+          instance_id: properInstance || null,
+          status: 'open',
+          unread_count: 0,
+          last_message_preview: inputText.trim() || 'Mídia enviada',
+          last_message_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          priority: 'medium',
+          ai_paused: true
+        }).select().single();
+        existingConv = newConv;
+      } else if (existingConv.status === 'resolved' || existingConv.status === 'closed') {
+        await supabase
+          .from('conversations')
+          .update({ status: 'open', updated_at: new Date().toISOString() })
+          .eq('id', existingConv.id);
       }
+
+      // 3. Atualiza a lista de contatos no store
+      await useChatStore.getState().fetchInitialData();
+
+      const targetInstanceId = properInstance || existingContact.instance_id || 'default';
+      const targetCompositeId = `${existingContact.id}_${targetInstanceId}`;
+
+      // 4. Dispara o envio da mensagem
+      let finalMessageText = inputText;
+      if (replyMessage) {
+        const shortQuote = replyMessage.text.length > 80 ? replyMessage.text.substring(0, 80) + '...' : replyMessage.text;
+        finalMessageText = `> *Mensagem Citada:* "${shortQuote}"\n\n${inputText}`;
+      }
+
+      setInputText('');
+      setReplyMessage(null);
+
+      if (pendingMediaToSend) {
+        const mediaInfo = pendingMediaToSend;
+        setPendingMediaToSend(null);
+        await useChatStore.getState().sendMediaFromUrl(
+          targetCompositeId,
+          mediaInfo.url,
+          mediaInfo.type,
+          properInstance as string,
+          finalMessageText,
+          mediaInfo.name
+        );
+      } else {
+        await sendHumanMessage(targetCompositeId, finalMessageText, properInstance as string);
+      }
+
+      // 5. Ativa o novo chat e limpa o modo rascunho
+      setActiveChat(targetCompositeId);
+      setDraftNewChat(null);
     } catch (err) {
-      console.error('Erro no fluxo de iniciar novo chat com número pesquisado:', err);
+      console.error('Erro ao enviar mensagem no modo rascunho:', err);
+      alert('Erro ao enviar mensagem.');
+    } finally {
+      isSendingRef.current = false;
+      setIsSendingMessage(false);
     }
   };
 
@@ -2509,6 +2586,7 @@ export default function ChatDashboard() {
       }
       if (activeChatId) {
         setInputText(draftsRef.current[activeChatId] || '');
+        setDraftNewChat(null);
       } else {
         setInputText('');
       }
@@ -2546,12 +2624,18 @@ export default function ChatDashboard() {
 
   useEffect(() => {
     (async () => {
-      await fetchTenantConfig();
-      await fetchInitialData();
-      await fetchTenantAgents();
-      
-      // Chama subscriber *depois* do tenant carregado
-      subscribeToNewMessages();
+      try {
+        await fetchTenantConfig();
+        await fetchInitialData();
+        await fetchTenantAgents();
+        
+        // Chama subscriber *depois* do tenant carregado
+        subscribeToNewMessages();
+      } catch (err) {
+        console.error("[ChatDashboard] Erro no carregamento inicial de dados:", err);
+      } finally {
+        useChatStore.setState({ isChannelLoading: false });
+      }
     })();
 
     (async () => {
@@ -4781,66 +4865,9 @@ export default function ChatDashboard() {
             useChatStore.getState().loadHistoricalMessages(contactId, properInstance);
           }
         }}
-        onStartNewNumber={async (phone, instanceId) => {
-          let cleanPhone = phone.replace(/\D/g, '');
-          if (cleanPhone) {
-            if (cleanPhone.length <= 11) {
-              cleanPhone = '55' + cleanPhone;
-            } else if (cleanPhone.length > 11 && !cleanPhone.startsWith('55')) {
-              cleanPhone = '55' + cleanPhone;
-            }
-          }
-          
-          const jid = `${cleanPhone}@s.whatsapp.net`;
-          
-          let { data: existingContact } = await supabase
-            .from('contacts')
-            .select('*')
-            .eq('tenant_id', tenantInfo?.id)
-            .eq('phone', cleanPhone)
-            .single();
-            
-          // Se não existe, criamos um novo
-          if (!existingContact) {
-            const { data: newContact, error } = await supabase.from('contacts').insert({
-              tenant_id: tenantInfo?.id,
-              instance_id: instanceId,
-              name: cleanPhone,
-              phone: cleanPhone,
-              whatsapp_jid: jid,
-              bot_status: 'active'
-            }).select().single();
-            
-            if (newContact && !error) {
-              existingContact = newContact;
-            } else {
-              console.error('Erro ao criar novo contato na base:', error);
-              return;
-            }
-          }
-          
-          if (existingContact) {
-             // Injeta no estado local se não existir para o ChatDashboard conseguir renderizar
-             useChatStore.setState(state => {
-               const exists = state.contacts.find(c => c.id === existingContact.id);
-               if (exists) return state;
-               return { 
-                 contacts: [{
-                   ...existingContact,
-                   instance_id: instanceId,
-                   messages: [],
-                   unread: 0,
-                   custom_name: existingContact.custom_name || existingContact.name,
-                 }, ...state.contacts] 
-               };
-             });
-
-             setActiveChat(existingContact.id);
-             const properInstance = instanceId || connectedInstanceName;
-             if (properInstance) {
-               useChatStore.getState().loadHistoricalMessages(existingContact.id, properInstance);
-             }
-          }
+        onStartNewNumber={(phone, instanceId) => {
+          handlePrepareDraftChat(phone, instanceId);
+          setIsNewChatOpen(false);
         }}
       />
 
@@ -4957,8 +4984,6 @@ export default function ChatDashboard() {
           "h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 shadow-sm relative transition-all duration-200",
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
-          {/* Versão e badge no header top-left */}
-          <span className="absolute top-1 left-4 text-[10px] font-mono text-[#00a884] opacity-80 whitespace-nowrap">{`v${import.meta.env.PACKAGE_VERSION || '3.1.5'} | Deploy: ${import.meta.env.PACKAGE_BUILD_DATE ? new Date(import.meta.env.PACKAGE_BUILD_DATE).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '13/06/2026, 17:02'}`}</span>
           <div className="flex items-center justify-between w-full mt-2">
             <div className="flex items-center gap-3">
               <button 
@@ -5623,7 +5648,7 @@ export default function ChatDashboard() {
                   
                   {searchTerm.replace(/\D/g, '').length >= 8 && (
                     <button
-                      onClick={() => handleStartChatWithSearchedNumber(searchTerm.replace(/\D/g, ''))}
+                      onClick={() => handlePrepareDraftChat(searchTerm.replace(/\D/g, ''))}
                       className="w-full flex items-center justify-center gap-2.5 px-5 py-3.5 bg-[#00a884] hover:bg-[#008f70] text-white rounded-2xl shadow-lg hover:shadow-emerald-500/20 font-semibold text-sm transition-all active:scale-95 hover:scale-[1.02] duration-200"
                     >
                       <MessageSquarePlus size={18} className="shrink-0" />
@@ -6129,14 +6154,14 @@ export default function ChatDashboard() {
       </div>
 
       {/* Main Chat Area */}
-      {activeChat ? (
+      {activeChat || draftNewChat ? (
         <div 
           onClick={() => setActiveChatDropdown(false)}
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
-          className={cn("flex-1 flex flex-col relative w-full h-full max-w-[100vw] overflow-hidden min-w-0 bg-[#efeae2] dark:bg-[#0b141a]", !activeChatId && "hidden md:flex")} 
+          className={cn("flex-1 flex flex-col relative w-full h-full max-w-[100vw] overflow-hidden min-w-0 bg-[#efeae2] dark:bg-[#0b141a]", (!activeChatId && !draftNewChat) && "hidden md:flex")} 
           style={{
            backgroundImage: 'url("https://w7.pngwing.com/pngs/946/407/png-transparent-whatsapp-background-theme-pattern-design.png")',
            backgroundSize: 'cover',
@@ -6160,7 +6185,40 @@ export default function ChatDashboard() {
           )}
           
           {/* Chat Header */}
-          <div className="relative h-16 shrink-0 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5">
+          {draftNewChat && !activeChat ? (
+            <div className="relative h-16 shrink-0 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5 select-none">
+              <div className="flex items-center gap-3 relative min-w-0">
+                <button 
+                  onClick={() => setDraftNewChat(null)}
+                  className="sm:hidden p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1]"
+                >
+                  <ChevronLeft size={24} />
+                </button>
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-white font-bold shadow-md shrink-0">
+                  <MessageSquarePlus size={20} />
+                </div>
+                <div className="flex flex-col justify-center min-w-0">
+                  <h2 className="font-bold text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
+                    <span className="truncate max-w-[200px] sm:max-w-[320px]">{draftNewChat.formattedPhone}</span>
+                    <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 rounded-md border border-emerald-500/20 shrink-0">Nova Mensagem</span>
+                  </h2>
+                  <span className="text-xs text-[#54656f] dark:text-[#8696a0] truncate">
+                    {draftNewChat.phone} • Conversa não iniciada
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setDraftNewChat(null)}
+                  className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-all"
+                  title="Cancelar Rascunho"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="relative h-16 shrink-0 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5">
             <div className="flex items-center gap-3 relative">
               <button className="sm:hidden p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1]" onClick={() => {
                 setActiveChat(null);
@@ -6609,13 +6667,37 @@ export default function ChatDashboard() {
               </div>
             </div>
           </div>
+          )}
 
           {/* Badge flutuante de novas mensagens foi movido para o cabeçalho */}
 
           {/* Chat Messages */}
-          <div 
-             className="flex-1 overflow-y-auto p-4 z-10 flex flex-col gap-2"
-             ref={messagesContainerRef}
+          {draftNewChat && !activeChat ? (
+            <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center relative select-none">
+              <div className="max-w-md w-full p-6 bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-md rounded-3xl border border-black/5 dark:border-white/10 shadow-xl flex flex-col items-center text-center gap-4 animate-in fade-in zoom-in-95 duration-200">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-500 shadow-inner">
+                  <MessageSquarePlus size={32} />
+                </div>
+                
+                <div className="flex flex-col gap-1.5">
+                  <h3 className="text-lg font-bold text-[#111b21] dark:text-[#e9edef]">
+                    Enviar mensagem para {draftNewChat.formattedPhone}
+                  </h3>
+                  <p className="text-xs text-[#54656f] dark:text-[#8696a0] leading-relaxed">
+                    Digite sua mensagem no campo de texto abaixo e envie. A conversa e o contato só serão salvos no sistema quando a mensagem for realmente enviada.
+                  </p>
+                </div>
+
+                <div className="px-3.5 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-[11px] font-semibold flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                  <span>Pronto para digitar mensagem</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div 
+               className="flex-1 overflow-y-auto p-4 z-10 flex flex-col gap-2"
+               ref={messagesContainerRef}
              onScroll={handleScroll}
              onClick={() => {
                if (activeChatId) {
@@ -6711,6 +6793,7 @@ export default function ChatDashboard() {
             })()}
             <div ref={messagesEndRef} />
           </div>
+          )}
 
           {/* Botão de Rolar para Baixo Premium */}
           {showScrollButton && (
@@ -7085,7 +7168,7 @@ export default function ChatDashboard() {
                 )}
                 
                 <form 
-                  onSubmit={handleSendHuman} 
+                  onSubmit={activeChat ? handleSendHuman : handleSendDraftMessage} 
                   className={cn(
                     "min-h-[70px] flex px-4 py-3 gap-3 relative shrink-0",
                     chatMode === 'internal_note'

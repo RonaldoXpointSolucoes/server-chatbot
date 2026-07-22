@@ -7,26 +7,67 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Credenciais do Supabase ausentes no .env");
 }
 
+let hasReportedServiceError = false;
+
 const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries = 3, delay = 1000): Promise<Response> => {
   try {
-    return await fetch(input, init);
+    const response = await fetch(input, init);
+
+    // Identificar erros HTTP 5xx de servidor/infraestrutura Supabase (500 Internal, 502 Bad Gateway, 503 Service Unavailable, 504 Timeout)
+    if (response.status >= 500) {
+      if (retries > 0) {
+        console.warn(`[Supabase Cloud] Erro HTTP ${response.status} no servidor Supabase. Retentando em ${delay}ms... (Tentativas restantes: ${retries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return customFetch(input, init, retries - 1, delay * 2);
+      }
+
+      if (typeof window !== 'undefined') {
+        hasReportedServiceError = true;
+        window.dispatchEvent(new CustomEvent('supabase-service-error', {
+          detail: { 
+            status: response.status,
+            service: 'Supabase Cloud (Banco de Dados)',
+            title: '☁️ Indisponibilidade na Nuvem (Supabase)',
+            message: `O serviço em nuvem do Supabase retornou um erro de servidor (HTTP ${response.status}). O aplicativo continua operacional com dados em cache local.`,
+            url: typeof input === 'string' ? input : input.toString()
+          }
+        }));
+      }
+    } else if (response.ok && hasReportedServiceError) {
+      hasReportedServiceError = false;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('supabase-service-recovered', {
+          detail: {
+            service: 'Supabase Cloud (Banco de Dados)',
+            title: '🟢 Serviço Supabase Restabelecido',
+            message: 'A conexão com o banco de dados em nuvem Supabase foi restabelecida com sucesso.'
+          }
+        }));
+      }
+    }
+
+    return response;
   } catch (error: any) {
     const isNetworkError = 
-      error.name === 'TypeError' && error.message === 'Failed to fetch';
+      error.name === 'TypeError' && (error.message === 'Failed to fetch' || error.message.includes('fetch'));
       
     if (retries > 0 && isNetworkError) {
-      console.warn(`[Supabase Network] Falha de conexão. Retentando em ${delay}ms... (Tentativas restantes: ${retries})`, error);
+      console.warn(`[Supabase Cloud] Oscilação de rede no servidor Supabase. Retentando em ${delay}ms... (Tentativas restantes: ${retries})`, error);
       await new Promise(resolve => setTimeout(resolve, delay));
       return customFetch(input, init, retries - 1, delay * 2);
     }
     
     if (isNetworkError) {
-      console.error('[Supabase Network] Falha definitiva de conexão. Verifique sua internet.', error);
+      console.error('[Supabase Cloud Network] Falha de conexão com a API do Supabase.', error);
       if (typeof window !== 'undefined') {
+        hasReportedServiceError = true;
         window.dispatchEvent(new CustomEvent('supabase-network-error', {
           detail: { 
-            message: "Sua conexão com a internet parece instável ou o servidor demorou a responder.",
-            originalError: error.message 
+            service: 'Supabase Cloud (Banco de Dados)',
+            title: '☁️ Instabilidade na Nuvem (Supabase)',
+            message: "Instabilidade temporária no servidor do banco de dados (Supabase Cloud). O aplicativo continuará funcionando com os dados salvos.",
+            originalError: error.message,
+            url: typeof input === 'string' ? input : input.toString()
           }
         }));
       }

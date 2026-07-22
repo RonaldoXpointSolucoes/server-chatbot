@@ -603,14 +603,25 @@ export const makeChatsSocket = (config: SocketConfig) => {
 						} catch (error: any) {
 							// if retry attempts overshoot
 							// or key not found
+							const isDecryptionFailure = error.message?.includes('decrypt');
 							const isIrrecoverableError =
 								attemptsMap[name]! >= MAX_SYNC_ATTEMPTS ||
 								error.output?.statusCode === 404 ||
-								error.name === 'TypeError'
-							logger.info(
-								{ name, error: error.stack },
-								`failed to sync state from version${isIrrecoverableError ? '' : ', removing and trying from scratch'}`
-							)
+								error.name === 'TypeError' ||
+								isDecryptionFailure;
+							
+							if (isDecryptionFailure) {
+								logger.info(
+									{ name },
+									`failed to sync state ${name} due to decryption failure (bad decrypt). Skipping sync to avoid infinite loop.`
+								);
+							} else {
+								logger.info(
+									{ name, error: error.stack },
+									`failed to sync state from version${isIrrecoverableError ? '' : ', removing and trying from scratch'}`
+								);
+							}
+							
 							await authState.keys.set({ 'app-state-sync-version': { [name]: null } })
 							// increment number of retries
 							attemptsMap[name] = (attemptsMap[name] || 0) + 1
