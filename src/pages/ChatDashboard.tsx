@@ -1579,8 +1579,8 @@ export default function ChatDashboard() {
           }
        }
 
-       // Filtro de Conversas Resolvidas/Encerradas (Oculta conversas finalizadas da lista ativa, a menos que haja busca)
-       if (!searchTerm) {
+       // Filtro de Conversas Resolvidas/Encerradas (Oculta conversas finalizadas da lista ativa se o modo ticket estiver ativo e não houver busca)
+       if (!searchTerm && ticketMode) {
           if (c.conv_status === 'resolved' || c.conv_status === 'closed') {
              return false;
           }

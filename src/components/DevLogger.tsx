@@ -1544,11 +1544,19 @@ export default function DevLogger() {
                 </span>
               )}
             </div>
-          <div className="flex items-center gap-2">
-             <button onClick={(e) => { e.stopPropagation(); setShowServerLogs(!showServerLogs); }} className="text-gray-400 hover:text-green-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Abrir Server Terminal SSE">
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  setShowServerLogs(true); 
+                  useDevStore.setState({ isVisible: false }); 
+                }} 
+                className="text-gray-400 hover:text-green-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" 
+                title="Abrir Server Terminal SSE"
+              >
                 <Terminal size={14} />
-             </button>
-             <button onClick={(e) => { e.stopPropagation(); handleTestSupabase(); }} className="text-gray-400 hover:text-purple-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Testar Supabase (DB)">
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); handleTestSupabase(); }} className="text-gray-400 hover:text-purple-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Testar Supabase (DB)">
                 <Database size={14} />
              </button>
              <button onClick={(e) => { e.stopPropagation(); handleTestApp(); }} className="text-gray-400 hover:text-cyan-400 transition-colors bg-gray-800/50 p-1.5 rounded-md flex items-center justify-center" title="Testar App React">
