@@ -154,8 +154,9 @@ app.use('/', publicRestRoutes);
 app.use('/api', apiGateway);
 app.use('/api/v1/system/logs', systemLogger);
 
-// Middleware global de tratamento de erros (ex: Multer LIMIT_FILE_SIZE)
+// Middleware global de tratamento de erros (ex: Multer LIMIT_FILE_SIZE, Client Abort)
 app.use((err, req, res, next) => {
+    // 1) Erro de tamanho de upload do Multer
     if (err.name === 'MulterError' || err.code === 'LIMIT_FILE_SIZE') {
         const isKnowledge = req.originalUrl && req.originalUrl.includes('/knowledge');
         const limitMB = isKnowledge ? '100MB' : '500MB';
@@ -163,6 +164,18 @@ app.use((err, req, res, next) => {
             error: `O arquivo enviado é muito grande. O limite máximo permitido para este recurso é de ${limitMB}.`
         });
     }
+
+    // 2) Erro de requisição abortada prematuramente pelo cliente (ex: raw-body BadRequestError)
+    if (err.message === 'request aborted' || err.code === 'ECONNABORTED' || (err.status === 400 && err.message?.includes('abort'))) {
+        console.warn(`[Network] Requisição abortada prematuramente pelo cliente: ${err.message}`);
+        return res.status(400).json({ error: 'Conexão interrompida pelo cliente antes da conclusão da requisição' });
+    }
+
+    // 3) Erros de limite de tamanho do body-parser (Entity too large)
+    if (err.status === 413 || err.type === 'entity.too.large') {
+        return res.status(413).json({ error: 'O tamanho da requisição excede o limite máximo permitido.' });
+    }
+
     console.error('Erro interno do servidor:', err);
     return res.status(500).json({ error: err.message || 'Erro interno no servidor' });
 });
