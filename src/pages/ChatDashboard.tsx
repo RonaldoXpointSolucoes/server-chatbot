@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck } from 'lucide-react';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
 import { useChatStore, instanceCache } from '../store/chatStore';
@@ -2620,6 +2620,28 @@ export default function ChatDashboard() {
     }
     prevMessagesLength.current = currentMessagesLength;
   }, [activeChat?.messages, showScrollButton]);
+
+  // Prevenir pulo de scroll para o topo ao alternar filtro de mensagens (Modo Ticket: Apenas Hoje / Ver Anteriores)
+  const prevMessageFilter = useRef(messageFilter);
+
+  useLayoutEffect(() => {
+    if (prevMessageFilter.current !== messageFilter) {
+      prevMessageFilter.current = messageFilter;
+
+      if (messagesContainerRef.current) {
+        const scrollToRecent = () => {
+          if (messagesContainerRef.current) {
+            messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+          }
+        };
+
+        scrollToRecent();
+        requestAnimationFrame(scrollToRecent);
+        const timeouts = [30, 100, 250, 500].map(ms => setTimeout(scrollToRecent, ms));
+        return () => timeouts.forEach(clearTimeout);
+      }
+    }
+  }, [messageFilter]);
 
 
   useEffect(() => {

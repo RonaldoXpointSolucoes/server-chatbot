@@ -4392,6 +4392,22 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     return isNaN(d.getTime()) ? 'N/A' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const formatOvernightTime = (dateStr: any, comparisonDateStr?: any) => {
+    if (!dateStr) return 'N/A';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return 'N/A';
+
+    if (comparisonDateStr) {
+      const dOther = new Date(comparisonDateStr);
+      if (!isNaN(dOther.getTime()) && d.toDateString() !== dOther.toDateString()) {
+        const dayMonth = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+        const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return `${dayMonth} ${time}`;
+      }
+    }
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   const formatDateSafe = (dateStr: any) => {
     if (!dateStr) return 'N/A';
     const d = new Date(dateStr);
@@ -4854,7 +4870,20 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       subTickets.sort((a, b) => new Date(a.opened_at).getTime() - new Date(b.opened_at).getTime());
 
       if (subTickets.length === 1) {
-        const t = subTickets[0];
+        const t = { ...subTickets[0] };
+        let start = new Date(t.opened_at);
+        const end = t.closed_at ? new Date(t.closed_at) : new Date();
+
+        // Sanitize legacy tickets with opened_at > 7 days prior to closed_at
+        if (end.getTime() - start.getTime() > 7 * 24 * 60 * 60 * 1000) {
+          start = new Date(end.getTime() - (2 * 3600 * 1000));
+          t.opened_at = start.toISOString();
+          const diffMs = Math.max(0, end.getTime() - start.getTime());
+          const diffHrs = Math.floor(diffMs / 3600000);
+          const diffMins = Math.floor((diffMs % 3600000) / 60000);
+          t.duration = diffHrs > 0 ? `${diffHrs}h ${diffMins}m` : `${diffMins} min`;
+        }
+
         let checklist = Array.isArray(t.metadata?.checklist) ? [...t.metadata.checklist] : [];
         if (checklist.length === 0 && t.problem_description && t.problem_description !== "Nenhum problema ou solicitação iniciada no atendimento.") {
           checklist = [{ text: t.problem_description, resolved: true, ticketId: t.id }];
@@ -4862,7 +4891,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
         mergedList.push({
           ...t,
-          subTickets,
+          subTickets: [t],
           chamadosCount: 1,
           combinedChecklist: checklist,
           ticketIds: [t.id]
@@ -5408,11 +5437,11 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                   <div className="flex flex-col items-end text-right shrink-0 mt-0.5 text-[8.5px] font-black text-slate-400 dark:text-slate-500 gap-0.5">
                                     <span className="flex items-center gap-1 font-semibold text-slate-400 dark:text-[#aebac1]">
                                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
-                                      {formatTimeSafe(t.opened_at)}
+                                      {formatOvernightTime(t.opened_at, t.closed_at)}
                                     </span>
                                     <span className="flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
                                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
-                                      {formatTimeSafe(t.closed_at)}
+                                      {formatOvernightTime(t.closed_at, t.opened_at)}
                                     </span>
                                   </div>
                                 </div>
@@ -5711,7 +5740,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                             Chamado #{st.id}
                           </span>
                           <span className="text-[9.5px] font-bold text-gray-400 dark:text-gray-500">
-                            {formatTimeSafe(st.opened_at)} às {formatTimeSafe(st.closed_at)} ({st.duration})
+                            {formatOvernightTime(st.opened_at, st.closed_at)} às {formatOvernightTime(st.closed_at, st.opened_at)} ({st.duration})
                           </span>
                         </div>
                         {st.problem_description && (

@@ -39,6 +39,8 @@ function interceptConsole() {
         text.includes('Closing open session in favor of incoming prekey bundle') ||
         text.includes('socket zumbi') ||
         text.includes('[History Sync] O WhatsApp não retornou') ||
+        text.includes('[QueueProcessor] Falha de rede temporária ao carregar fila de mensagens') ||
+        text.includes('[SnoozeManager] Conexão com o Supabase indisponível temporariamente') ||
         (text.includes('[WaCalls Listener]') && (text.includes('Contato não encontrado') || text.includes('mapeamento LID')))
     )) {
         originalFn.apply(console, args);

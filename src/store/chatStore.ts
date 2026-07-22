@@ -4229,7 +4229,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         .limit(1)
         .maybeSingle();
 
-      // 3. Determinar o opened_at ideal baseado na primeira nova mensagem
+      // 3. Determinar o opened_at ideal baseado na primeira mensagem da sessão ativa atual (cluster sem gapped > 24h)
       let openedAt = new Date().toISOString();
       if (convId) {
         let msgQuery = supabase
@@ -4241,13 +4241,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
           msgQuery = msgQuery.gt('timestamp', lastResolved.closed_at);
         }
 
-        const { data: firstMsg } = await msgQuery
+        const { data: msgs } = await msgQuery
           .order('timestamp', { ascending: true })
-          .limit(1)
-          .maybeSingle();
+          .limit(300);
 
-        if (firstMsg?.timestamp) {
-          openedAt = firstMsg.timestamp;
+        if (msgs && msgs.length > 0) {
+          // Identifica o início do atendimento recente procurando por um gap de inatividade > 24h (86.400.000 ms)
+          const GAP_MS = 24 * 60 * 60 * 1000;
+          let sessionStartIndex = 0;
+
+          for (let i = 1; i < msgs.length; i++) {
+            const prevTs = new Date(msgs[i - 1].timestamp).getTime();
+            const currTs = new Date(msgs[i].timestamp).getTime();
+            if (currTs - prevTs > GAP_MS) {
+              sessionStartIndex = i; // Reinicia para o primeiro registro do novo atendimento pós-inatividade
+            }
+          }
+
+          const sessionStart = new Date(msgs[sessionStartIndex].timestamp);
+          const now = new Date();
+
+          // Proteção extra: se a mensagem mais antiga da sessão tiver mais de 7 dias, limita para no máximo 7 dias antes ou o horário atual
+          if (now.getTime() - sessionStart.getTime() > 7 * 24 * 60 * 60 * 1000) {
+            openedAt = msgs[msgs.length - 1]?.timestamp || now.toISOString();
+          } else {
+            openedAt = sessionStart.toISOString();
+          }
         }
       }
 
