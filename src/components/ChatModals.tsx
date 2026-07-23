@@ -4598,7 +4598,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       // 1.5. Busca conversas com status 'resolved' ou 'closed' como fallback
       let convResolvedQuery = supabase
         .from('conversations')
-        .select('id, contact_id, status, updated_at, created_at, assigned_to, instance_id')
+        .select('id, contact_id, status, updated_at, assigned_to, instance_id')
         .or('status.eq.resolved,status.eq.closed');
 
       if (tenantId) {
@@ -4617,7 +4617,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       if (resolvedConvs && resolvedConvs.length > 0) {
         resolvedConvs.forEach(conv => {
-          const dt = conv.updated_at || conv.created_at || new Date().toISOString();
+          const dt = conv.updated_at || new Date().toISOString();
           const dStr = dt.split('T')[0];
           const key = `${conv.contact_id}_${dStr}`;
           
