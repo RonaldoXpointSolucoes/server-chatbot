@@ -15,7 +15,9 @@ import {
   KeyRound, 
   Sparkles, 
   CheckCircle2, 
-  AlertTriangle 
+  AlertTriangle,
+  Briefcase,
+  Calendar
 } from 'lucide-react';
 
 interface Unit {
@@ -56,24 +58,48 @@ interface Profile {
   is_active: boolean;
   unit_permissions?: string[];
   sector_permissions?: string[];
+  cargo_id?: string | null;
 }
+
+interface Cargo {
+  id: string;
+  tenant_id: string;
+  name: string;
+  start_time: string;
+  end_time: string;
+  work_days: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+const DAYS_OF_WEEK = [
+  { key: 'seg', label: 'Segunda-feira', short: 'Seg' },
+  { key: 'ter', label: 'Terça-feira', short: 'Ter' },
+  { key: 'qua', label: 'Quarta-feira', short: 'Qua' },
+  { key: 'qui', label: 'Quinta-feira', short: 'Qui' },
+  { key: 'sex', label: 'Sexta-feira', short: 'Sex' },
+  { key: 'sab', label: 'Sábado', short: 'Sáb' },
+  { key: 'dom', label: 'Domingo', short: 'Dom' }
+];
 
 export default function ChecklistSettings() {
   const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
   
   // Estados de Abas
-  const [activeTab, setActiveTab] = useState<'units' | 'sectors' | 'users'>('units');
+  const [activeTab, setActiveTab] = useState<'units' | 'sectors' | 'users' | 'cargos'>('units');
   
   // Listas de Dados
   const [units, setUnits] = useState<Unit[]>([]);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [users, setUsers] = useState<Profile[]>([]);
+  const [cargos, setCargos] = useState<Cargo[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Estados de Formulários / Modais
   const [editingUnit, setEditingUnit] = useState<Partial<Unit> | null>(null);
   const [editingSector, setEditingSector] = useState<Partial<Sector> | null>(null);
   const [editingUser, setEditingUser] = useState<Partial<Profile> | null>(null);
+  const [editingCargo, setEditingCargo] = useState<Partial<Cargo> | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -107,7 +133,16 @@ export default function ChecklistSettings() {
       if (sErr) throw sErr;
       setSectors(sectorsData || []);
 
-      // 3. Carregar Usuários Operacionais
+      // 3. Carregar Cargos
+      const { data: cargosData, error: cErr } = await supabase
+        .from('cargos')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('name');
+      if (cErr) throw cErr;
+      setCargos(cargosData || []);
+
+      // 4. Carregar Usuários Operacionais
       const { data: profilesData, error: pErr } = await supabase
         .from('v_checklist_operators')
         .select('*')
@@ -321,6 +356,71 @@ export default function ChecklistSettings() {
   };
 
   // ==========================================
+  // AÇÕES DE CARGOS
+  // ==========================================
+
+  const saveCargo = async () => {
+    if (!editingCargo?.name) {
+      showToast('error', 'O nome do cargo é obrigatório.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        tenant_id: tenantId,
+        name: editingCargo.name,
+        start_time: editingCargo.start_time || '08:00:00',
+        end_time: editingCargo.end_time || '18:00:00',
+        work_days: editingCargo.work_days || [],
+      };
+
+      if (editingCargo.id) {
+        const cargoBefore = cargos.find(c => c.id === editingCargo.id);
+        const { error } = await supabase
+          .from('cargos')
+          .update(payload)
+          .eq('id', editingCargo.id);
+        if (error) throw error;
+        const cargoAfter = { ...cargoBefore, ...payload };
+        await useChatStore.getState().logOperation('UPDATE', 'cargos', editingCargo.id, cargoBefore || null, cargoAfter);
+        showToast('success', 'Cargo operacional atualizado!');
+      } else {
+        const { data, error } = await supabase
+          .from('cargos')
+          .insert(payload)
+          .select()
+          .single();
+        if (error) throw error;
+        await useChatStore.getState().logOperation('INSERT', 'cargos', data?.id || 'new-cargo', null, data || payload);
+        showToast('success', 'Cargo cadastrado com sucesso!');
+      }
+
+      setEditingCargo(null);
+      loadData();
+    } catch (err: any) {
+      console.error(err);
+      showToast('error', `Erro ao salvar cargo: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteCargo = async (id: string) => {
+    if (!window.confirm('Tem certeza de que deseja excluir este cargo? Colaboradores vinculados ficarão sem cargo.')) return;
+    try {
+      const cargoBefore = cargos.find(c => c.id === id);
+      const { error } = await supabase.from('cargos').delete().eq('id', id);
+      if (error) throw error;
+      await useChatStore.getState().logOperation('DELETE', 'cargos', id, cargoBefore || null, null);
+      showToast('success', 'Cargo operacional removido.');
+      loadData();
+    } catch (err: any) {
+      console.error(err);
+      showToast('error', `Erro ao deletar cargo: ${err.message}`);
+    }
+  };
+
+  // ==========================================
   // AÇÕES DE USUÁRIOS E PERMISSÕES
   // ==========================================
 
@@ -368,7 +468,8 @@ export default function ChecklistSettings() {
             phone: editingUser.phone || '',
             pin: finalPin,
             role: editingUser.role,
-            is_active: editingUser.is_active ?? true
+            is_active: editingUser.is_active ?? true,
+            cargo_id: editingUser.cargo_id || null
           }, { onConflict: 'id' });
         if (error) throw error;
 
@@ -465,6 +566,13 @@ export default function ChecklistSettings() {
         >
           Equipe & PINs ({users.length})
           {activeTab === 'users' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-t" />}
+        </button>
+        <button
+          onClick={() => { setActiveTab('cargos'); setEditingCargo(null); }}
+          className={`px-5 py-3 text-sm font-medium transition-all relative ${activeTab === 'cargos' ? 'text-indigo-400 font-semibold' : 'text-[#8696a0] hover:text-[#d1d7db]'}`}
+        >
+          Cargos / Funções ({cargos.length})
+          {activeTab === 'cargos' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-t" />}
         </button>
       </div>
 
@@ -949,6 +1057,14 @@ export default function ChecklistSettings() {
                           PIN de Acesso Rápido: <span className="font-mono font-bold text-white tracking-widest">{user.pin || 'Não Definido'}</span>
                         </p>
                         <p className="flex items-center gap-1.5 truncate">
+                          <Briefcase size={13} className="text-slate-400 shrink-0" />
+                          Cargo Operacional: <span className="text-indigo-400 font-semibold">{
+                            user.cargo_id 
+                              ? cargos.find(c => c.id === user.cargo_id)?.name || 'Definido'
+                              : 'Não Definido'
+                          }</span>
+                        </p>
+                        <p className="flex items-center gap-1.5 truncate">
                           <Building2 size={13} className="text-slate-400" />
                           Filiais: <span className="text-[#d1d7db]">{
                             user.unit_permissions && user.unit_permissions.length > 0 
@@ -1021,7 +1137,7 @@ export default function ChecklistSettings() {
 
                 {/* Cargo */}
                 <div>
-                  <label className="block text-xs font-medium text-[#8696a0] mb-1">Perfil de Cargo *</label>
+                  <label className="block text-xs font-medium text-[#8696a0] mb-1">Perfil de Acesso *</label>
                   <select
                     value={editingUser.role || 'operator'}
                     onChange={e => setEditingUser(p => ({ ...p, role: e.target.value as any }))}
@@ -1031,6 +1147,22 @@ export default function ChecklistSettings() {
                     <option value="manager">Gerente de Unidade (Visualiza rotinas de filiais específicas)</option>
                     <option value="company_admin">Administrador (Acesso total)</option>
                   </select>
+                </div>
+
+                {/* Cargo Operacional */}
+                <div>
+                  <label className="block text-xs font-medium text-[#8696a0] mb-1">Cargo Operacional (Escala de Trabalho)</label>
+                  <select
+                    value={editingUser.cargo_id || ''}
+                    onChange={e => setEditingUser(p => ({ ...p, cargo_id: e.target.value || null }))}
+                    className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2.5 text-sm text-[#d1d7db] focus:outline-none focus:border-indigo-500 transition-all"
+                  >
+                    <option value="">Não Definido / Nenhum</option>
+                    {cargos.map(cargo => (
+                      <option key={cargo.id} value={cargo.id}>{cargo.name}</option>
+                    ))}
+                  </select>
+                  <span className="text-[10px] text-[#8696a0] block mt-1">Define os dias e horários em que o colaborador está de escala para os checklists.</span>
                 </div>
 
                 {/* Permissões de Filiais */}

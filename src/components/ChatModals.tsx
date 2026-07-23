@@ -4639,8 +4639,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         });
       }
 
-      // 2. Obter todos os contact IDs envolvidos
-      const contactIds = Array.from(new Set(resolvedList.map(t => t.contact_id).filter(Boolean)));
+      const validateUuid = (uuid: any) => typeof uuid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid);
+
+      // 2. Obter todos os contact IDs envolvidos (apenas UUIDs válidos)
+      const contactIds = Array.from(new Set(resolvedList.map(t => t.contact_id).filter(validateUuid)));
 
       let contactsData: any[] = [];
       if (contactIds.length > 0) {
@@ -4653,10 +4655,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         }
       }
 
-      // Buscar empresas vinculadas a estes contatos
+      // Buscar empresas vinculadas a estes contatos (apenas UUIDs válidos)
       const assocCompanyIds = Array.from(
         new Set(
-          contactsData.flatMap(c => c.company_ids || []).filter(Boolean)
+          contactsData.flatMap(c => c.company_ids || []).filter(validateUuid)
         )
       );
       let companiesData: any[] = [];
