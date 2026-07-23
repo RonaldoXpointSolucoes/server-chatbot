@@ -3,7 +3,7 @@ import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail,
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
-import { geminiService } from '../services/geminiService';
+import { geminiService, sanitizeChecklistItems } from '../services/geminiService';
 
 interface BaseModalProps {
   isOpen: boolean;
@@ -4593,7 +4593,51 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       const { data: resolvedData, error: resolvedErr } = await resolvedQuery.order('closed_at', { ascending: false });
       if (resolvedErr) throw resolvedErr;
 
-      const resolvedList = resolvedData || [];
+      const resolvedList = [...(resolvedData || [])];
+
+      // 1.5. Busca conversas com status 'resolved' ou 'closed' como fallback
+      let convResolvedQuery = supabase
+        .from('conversations')
+        .select('id, contact_id, status, updated_at, created_at, assigned_to, instance_id')
+        .or('status.eq.resolved,status.eq.closed');
+
+      if (tenantId) {
+        convResolvedQuery = convResolvedQuery.eq('tenant_id', tenantId);
+      }
+
+      const { data: resolvedConvs } = await convResolvedQuery;
+
+      const existingTicketContactDateSet = new Set(
+        resolvedList.map(t => {
+          const dt = t.closed_at || t.opened_at;
+          const dStr = dt ? dt.split('T')[0] : '';
+          return `${t.contact_id}_${dStr}`;
+        })
+      );
+
+      if (resolvedConvs && resolvedConvs.length > 0) {
+        resolvedConvs.forEach(conv => {
+          const dt = conv.updated_at || conv.created_at || new Date().toISOString();
+          const dStr = dt.split('T')[0];
+          const key = `${conv.contact_id}_${dStr}`;
+          
+          if (!existingTicketContactDateSet.has(key) && conv.contact_id) {
+            existingTicketContactDateSet.add(key);
+            resolvedList.push({
+              id: `conv_${conv.id.substring(0, 8)}`,
+              tenant_id: tenantId,
+              contact_id: conv.contact_id,
+              status: 'resolved',
+              opened_at: conv.created_at || dt,
+              closed_at: dt,
+              problem_description: 'Atendimento finalizado pelo atendente',
+              resolution_summary: 'Resolvido pelo atendente.',
+              metadata: { synthetic: true },
+              instance_id: conv.instance_id
+            });
+          }
+        });
+      }
 
       // 2. Obter todos os contact IDs envolvidos
       const contactIds = Array.from(new Set(resolvedList.map(t => t.contact_id).filter(Boolean)));
@@ -4893,7 +4937,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           ...t,
           subTickets: [t],
           chamadosCount: 1,
-          combinedChecklist: checklist,
+          combinedChecklist: sanitizeChecklistItems(checklist),
           ticketIds: [t.id]
         });
       } else {
@@ -4916,7 +4960,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           ? problemList.join(' • ')
           : (firstTicket.problem_description || "Atendimento finalizado");
 
-        const combinedChecklist: any[] = [];
+        const rawCombinedChecklist: any[] = [];
         const seenTexts = new Set<string>();
 
         subTickets.forEach((st: any) => {
@@ -4926,14 +4970,14 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               const key = (item.text || '').toLowerCase().trim();
               if (key && !seenTexts.has(key)) {
                 seenTexts.add(key);
-                combinedChecklist.push({ ...item, ticketId: st.id });
+                rawCombinedChecklist.push({ ...item, ticketId: st.id });
               }
             });
           } else if (st.problem_description && st.problem_description !== "Nenhum problema ou solicitação iniciada no atendimento.") {
             const key = st.problem_description.toLowerCase().trim();
             if (!seenTexts.has(key)) {
               seenTexts.add(key);
-              combinedChecklist.push({
+              rawCombinedChecklist.push({
                 text: st.problem_description,
                 resolved: true,
                 ticketId: st.id
@@ -4941,6 +4985,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             }
           }
         });
+
+        const combinedChecklist = sanitizeChecklistItems(rawCombinedChecklist);
 
         const totalMessages = subTickets.reduce((acc: number, st: any) => acc + (st.metadata?.total_messages || 0), 0);
 
@@ -5083,7 +5129,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     <div className="fixed inset-0 z-[120] flex items-center justify-center">
       <div className="absolute inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
       
-      <div className="relative w-full h-full max-h-screen bg-slate-50 dark:bg-[#0c1317] border-none rounded-none shadow-none p-0 md:p-6 flex flex-col gap-4 animate-in fade-in duration-300 overflow-y-auto md:overflow-hidden text-left md:max-w-7xl md:h-[90dvh] md:max-h-[900px] md:rounded-[32px] md:border md:border-white/5 md:shadow-2xl">
+      <div className="relative w-full h-full max-h-screen bg-slate-50 dark:bg-[#0c1317] border-none rounded-none shadow-none p-0 md:p-6 flex flex-col gap-4 animate-in fade-in duration-300 overflow-y-auto md:overflow-hidden text-left md:max-w-[1440px] md:h-[90dvh] md:max-h-[900px] md:rounded-[32px] md:border md:border-white/5 md:shadow-2xl">
         
         {/* Mobile Header & Filter Toggle Bar */}
         <div className="md:hidden sticky top-0 z-50 flex items-center justify-between px-5 py-4 bg-[#0c1317]/80 backdrop-blur-xl border-b border-white/5 shadow-sm shrink-0">
@@ -5328,10 +5374,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
         {/* Kanban Tab Selector for Mobile / Tablet */}
         {activeView === 'kanban' && (
-          <div className={cn(
-            "mx-5 md:mx-0 gap-1.5 bg-slate-200/60 dark:bg-[#182229]/40 p-1.5 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner",
-            selectedTicket ? "flex xl:hidden" : "flex md:hidden"
-          )}>
+          <div className="mx-5 md:mx-0 gap-1.5 bg-slate-200/60 dark:bg-[#182229]/40 p-1.5 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[38px] items-center shadow-inner flex md:hidden">
             {columns.map(col => (
               <button
                 key={col.id}
@@ -5359,8 +5402,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           {activeView === 'dashboard' ? (
             <ClosedTicketsDashboard tickets={filteredTickets} />
           ) : (
-            /* Kanban Board columns container */
-            <div className={cn("flex-grow overflow-visible md:overflow-hidden flex flex-col md:flex-row gap-5 min-w-0 transition-all duration-300 md:h-full", selectedTicket && "hidden md:flex md:w-[50%] md:flex-grow-0 xl:w-[68%]")}>
+            /* Kanban Board columns container (Always 100% wide for maximum visibility) */
+            <div className="flex-grow overflow-visible md:overflow-hidden flex flex-col md:flex-row gap-5 min-w-0 transition-all duration-300 md:h-full w-full">
             {loading ? (
               <div className="flex-1 flex items-center justify-center flex-col gap-3 text-slate-400 dark:text-slate-500">
                 <Loader2 className="animate-spin text-emerald-500" size={28} />
@@ -5376,9 +5419,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                       key={col.id}
                       className={cn(
                         "flex flex-col h-fit md:h-full bg-slate-100/50 dark:bg-[#182229]/20 border rounded-3xl overflow-hidden transition-all duration-200 shadow-sm border-slate-200/60 dark:border-white/5",
-                        selectedTicket 
-                          ? (!isVisible ? "hidden xl:flex" : "flex") 
-                          : (!isVisible ? "hidden md:flex" : "flex")
+                        !isVisible ? "hidden md:flex" : "flex"
                       )}
                     >
                       {/* Column Header */}
@@ -5547,53 +5588,56 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             )}
           </div>
           )}
-
-          {/* Ticket Details Panel */}
-          {selectedTicket && (
-            <div className="w-full md:w-[50%] xl:w-[32%] border border-gray-200/50 dark:border-white/10 bg-white/70 dark:bg-[#182229]/40 backdrop-blur-md rounded-[24px] p-5 flex flex-col gap-4.5 min-h-0 md:overflow-y-auto custom-scrollbar animate-in slide-in-from-right-4 duration-300 text-left">
-              
-              {/* Header Details */}
-              <div className="flex items-center justify-between border-b border-gray-200/50 dark:border-white/5 pb-3 shrink-0 relative">
-                <div className="flex flex-col gap-1">
-                  <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-                    <span>Detalhes do Ticket #{selectedTicket.ticketIds ? selectedTicket.ticketIds.join(', #') : selectedTicket.id}</span>
-                    {selectedTicket.chamadosCount > 1 && (
-                      <span className="px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-300 border border-purple-500/25 dark:border-purple-500/15">
-                        {selectedTicket.chamadosCount} Chamados Unificados
-                      </span>
-                    )}
-                  </h4>
-                  <span className="text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex flex-col gap-0.5 mt-0.5">
-                    <span>🏢 {selectedTicket.companyFantasyName || 'Empresa Própria'}</span>
-                    {selectedTicket.companyName && selectedTicket.companyName.toLowerCase() !== selectedTicket.companyFantasyName?.toLowerCase() && (
-                      <span className="text-[9px] font-semibold text-slate-400 dark:text-gray-500 pl-4 lowercase first-letter:uppercase">
-                        Empresa: {selectedTicket.companyName}
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-xs font-bold text-gray-700 dark:text-gray-250 mt-1">
-                    👤 Cliente: {selectedTicket.contactName}
-                  </span>
-                  <span className="text-xs font-bold text-gray-500 dark:text-gray-400 mt-0.5">
-                    🧑‍💻 Atendente: {selectedTicket.operatorName}
-                  </span>
+        </div>
+        {selectedTicket && (
+          <div 
+            className="fixed inset-0 z-[130] bg-slate-900/80 dark:bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200"
+            onClick={() => setSelectedTicket(null)}
+          >
+            <div 
+              className="w-full max-w-4xl max-h-[90dvh] bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-white/10 rounded-[32px] shadow-[0_25px_60px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 text-left relative"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Detail Modal Header */}
+              <div className="px-6 py-4.5 bg-white dark:bg-[#202c33] border-b border-slate-200/60 dark:border-white/10 flex items-center justify-between shrink-0 shadow-xs">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="p-2.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl border border-emerald-500/20 shrink-0">
+                    <Ticket size={22} />
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-base font-black text-slate-800 dark:text-white uppercase tracking-wider">
+                        Ticket #{selectedTicket.ticketIds ? selectedTicket.ticketIds.join(', #') : selectedTicket.id}
+                      </h4>
+                      {selectedTicket.chamadosCount > 1 && (
+                        <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-300 border border-purple-500/25 dark:border-purple-500/15">
+                          {selectedTicket.chamadosCount} Chamados Unificados
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide truncate mt-0.5">
+                      🏢 {selectedTicket.companyFantasyName || 'Empresa Própria'}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5 align-top self-start shrink-0">
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Menu de Opções */}
                   <div className="relative">
                     <button
                       onClick={() => setShowTicketMenu(!showTicketMenu)}
-                      className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                      className="p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer flex items-center justify-center border border-slate-200/50 dark:border-white/5"
                       title="Mais opções"
                     >
-                      <MoreVertical size={14} />
+                      <MoreVertical size={16} />
                     </button>
                     {showTicketMenu && (
-                      <div className="absolute right-0 mt-1 w-64 bg-white dark:bg-[#202c33] border border-black/10 dark:border-white/10 rounded-2xl shadow-xl z-50 p-3.5 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-150 text-left">
+                      <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-[#202c33] border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl z-50 p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-150 text-left">
                         <div className="flex flex-col gap-1">
-                          <span className="text-[10.5px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-wider flex items-center gap-1">
+                          <span className="text-xs font-black uppercase text-rose-600 dark:text-rose-400 tracking-wider flex items-center gap-1">
                             🚫 Excluir de Relatórios & I.A.
                           </span>
-                          <span className="text-[9.5px] font-semibold text-gray-550 dark:text-gray-400 leading-normal">
+                          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 leading-normal">
                             Ignorar este contato e seus chamados nas métricas, dashboards e análise de I.A. ao encerrar.
                           </span>
                         </div>
@@ -5620,176 +5664,218 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                             }
                           }}
                           className={cn(
-                            "w-full py-1.5 rounded-xl text-[9.5px] font-black uppercase transition-all duration-200 border cursor-pointer text-center",
+                            "w-full py-2 rounded-xl text-xs font-black uppercase transition-all duration-200 border cursor-pointer text-center",
                             selectedTicket.exclude_reports
                               ? "bg-rose-500 text-white border-rose-500 hover:bg-rose-600 shadow-sm"
                               : "bg-transparent text-rose-500 border-rose-500/20 hover:bg-rose-500/10"
                           )}
                         >
-                          {selectedTicket.exclude_reports ? 'Ignorado' : 'Ignorar'}
+                          {selectedTicket.exclude_reports ? 'Ignorado nos Relatórios' : 'Ignorar nos Relatórios'}
                         </button>
                       </div>
                     )}
                   </div>
+                  
                   <button
                     onClick={() => setSelectedTicket(null)}
-                    className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-white transition-colors cursor-pointer shrink-0"
+                    className="p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer shrink-0 border border-slate-200/50 dark:border-white/5"
+                    title="Fechar (Esc)"
                   >
-                    <X size={14} />
+                    <X size={18} />
                   </button>
                 </div>
               </div>
 
-              {/* AI Processing Error Log Alert */}
-              {(selectedTicket.metadata?.error_log || selectedTicket.problem_description === "Erro no processamento do problema." || selectedTicket.metadata?.summary === "Erro ao gerar resumo da solução.") && (
-                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 p-4 rounded-xl text-xs flex flex-col gap-2 leading-relaxed font-sans shrink-0 border-l-[4px] border-l-rose-500 shadow-sm">
-                  <div className="flex items-center gap-1.5 font-black uppercase tracking-wider text-[10px]">
-                    <AlertTriangle size={14} className="text-rose-500 animate-pulse" />
-                    <span>Falha no Processamento da I.A.</span>
-                  </div>
-                  <p className="font-semibold text-slate-800 dark:text-rose-250 select-text">
-                    {selectedTicket.metadata?.error_log || "A chave de API do Gemini pode estar incorreta, ausente ou instável. O chamado foi encerrado manualmente sem o preenchimento automático das anotações."}
-                  </p>
-                </div>
-              )}
-
-              {/* Timing Metadata Info */}
-              <div className="grid grid-cols-2 gap-2 text-[10.5px]">
-                <div className="p-3 bg-white/50 dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col shadow-sm">
-                  <span className="text-gray-400 dark:text-gray-550 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Início</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-205">
-                    {formatDateSafe(selectedTicket.opened_at)}
-                  </span>
-                </div>
-                <div className="p-3 bg-white/50 dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col shadow-sm">
-                  <span className="text-gray-400 dark:text-gray-555 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Fim</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-205">
-                    {formatDateSafe(selectedTicket.closed_at)}
-                  </span>
-                </div>
-                <div className="p-3 bg-white/50 dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col shadow-sm">
-                  <span className="text-gray-400 dark:text-gray-550 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Duração</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-205">{selectedTicket.duration}</span>
-                </div>
-                <div className="p-3 bg-white/50 dark:bg-black/25 rounded-xl border border-gray-150/10 dark:border-white/5 flex flex-col shadow-sm">
-                  <span className="text-gray-400 dark:text-gray-550 font-extrabold uppercase text-[8.5px] tracking-wider mb-0.5">Mensagens</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-205">{selectedTicket.metadata?.total_messages || 0} trocadas</span>
-                </div>
-              </div>
-
-              {/* Description */}
-              {selectedTicket.problem_description && (
-                <div className="flex flex-col gap-1.5 bg-white/50 dark:bg-[#202c33]/30 p-4 rounded-xl border border-gray-150/20 dark:border-white/5 shadow-sm">
-                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-555 tracking-wider">
-                    {selectedTicket.chamadosCount > 1 ? `Descrição de Problemas do Dia (${selectedTicket.chamadosCount})` : 'Descrição do Problema'}
-                  </span>
-                  <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold leading-relaxed select-text whitespace-pre-line">
-                    {selectedTicket.problem_description}
-                  </p>
-                </div>
-              )}
-
-              {/* Summary */}
-              {selectedTicket.metadata?.summary && (
-                <div className="flex flex-col gap-1.5 bg-blue-500/5 p-4 rounded-xl border border-blue-500/10 dark:border-blue-500/5 shadow-sm border-l-[3.5px] border-l-blue-500">
-                  <span className="text-[9.5px] uppercase font-black text-blue-600 dark:text-blue-400 tracking-wider">Resumo Inteligente</span>
-                  <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold leading-relaxed select-text whitespace-pre-line">
-                    {selectedTicket.metadata.summary}
-                  </p>
-                </div>
-              )}
-
-              {/* Combined Checklist of Problems */}
-              {(selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist) && Array.isArray(selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist) && (selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist).length > 0 && (
-                <div className="flex flex-col gap-2.5 bg-slate-100/30 dark:bg-black/20 p-4 rounded-xl border border-gray-150/10 dark:border-white/5 shadow-sm">
-                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-500 tracking-wider">
-                    Checklist de Problemas {selectedTicket.chamadosCount > 1 ? `do Dia (${selectedTicket.chamadosCount} Chamados)` : ''}
-                  </span>
-                  <div className="flex flex-col gap-2">
-                    {(selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist).map((item: any, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between text-xs bg-white/50 dark:bg-black/45 p-2 rounded-xl border border-gray-150/10 dark:border-white/5 shadow-sm animate-in fade-in duration-200">
-                        <span className="text-slate-700 dark:text-gray-200 font-semibold pr-3 text-left select-text">
-                          {item.ticketId && <strong className="text-emerald-600 dark:text-emerald-400 font-extrabold mr-1">[#{item.ticketId}]</strong>}
-                          {item.text}
-                        </span>
-                        <span className={cn(
-                          "px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase shrink-0 border",
-                          item.resolved 
-                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/15" 
-                            : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/15"
-                        )}>
-                          {item.resolved ? "Resolvido" : "Pendente"}
-                        </span>
+              {/* Modal Body */}
+              <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 custom-scrollbar">
+                {/* Contact & Operator Info Banner */}
+                <div className="bg-white dark:bg-[#202c33]/70 p-4 rounded-2xl border border-slate-200/60 dark:border-white/5 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    {selectedTicket.profile_picture_url ? (
+                      <img 
+                        src={selectedTicket.profile_picture_url} 
+                        alt={selectedTicket.contactName} 
+                        className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/30 shadow-md shrink-0"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-500 text-white font-black text-base flex items-center justify-center shadow-md shrink-0">
+                        {selectedTicket.contactName.charAt(0).toUpperCase()}
                       </div>
-                    ))}
+                    )}
+                    <div className="flex flex-col text-left">
+                      <span className="text-base font-black text-slate-800 dark:text-white">
+                        {selectedTicket.contactName}
+                      </span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold flex items-center gap-1 mt-0.5">
+                        <User size={13} className="text-emerald-500 shrink-0" /> Atendente responsável: <strong className="text-slate-700 dark:text-slate-200 font-bold">{selectedTicket.operatorName}</strong>
+                      </span>
+                    </div>
                   </div>
                 </div>
-              )}
 
-              {/* Sub-Tickets Individual Breakdown */}
-              {selectedTicket.subTickets && selectedTicket.subTickets.length > 1 && (
-                <div className="flex flex-col gap-2.5 bg-slate-100/30 dark:bg-black/20 p-4 rounded-xl border border-gray-150/10 dark:border-white/5 shadow-sm">
-                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-500 tracking-wider">
-                    Histórico de Chamados Unificados ({selectedTicket.subTickets.length})
-                  </span>
-                  <div className="flex flex-col gap-3">
-                    {selectedTicket.subTickets.map((st: any) => (
-                      <div key={st.id} className="p-3 bg-white/60 dark:bg-[#202c33]/50 rounded-xl border border-gray-200/50 dark:border-white/5 flex flex-col gap-2">
-                        <div className="flex items-center justify-between">
-                          <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black text-[10px] rounded-md border border-emerald-500/20">
-                            Chamado #{st.id}
+                {/* AI Error Log Warning */}
+                {(selectedTicket.metadata?.error_log || selectedTicket.problem_description === "Erro no processamento do problema." || selectedTicket.metadata?.summary === "Erro ao gerar resumo da solução.") && (
+                  <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 p-4 rounded-2xl text-xs flex flex-col gap-2 leading-relaxed font-sans shrink-0 border-l-[4px] border-l-rose-500 shadow-xs">
+                    <div className="flex items-center gap-1.5 font-black uppercase tracking-wider text-[11px]">
+                      <AlertTriangle size={15} className="text-rose-500 animate-pulse" />
+                      <span>Falha no Processamento da I.A.</span>
+                    </div>
+                    <p className="font-semibold text-slate-800 dark:text-rose-250 select-text">
+                      {selectedTicket.metadata?.error_log || "A chave de API do Gemini pode estar incorreta, ausente ou instável. O chamado foi encerrado manualmente sem o preenchimento automático das anotações."}
+                    </p>
+                  </div>
+                )}
+
+                {/* Timing Cards Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="p-3.5 bg-white dark:bg-[#202c33]/50 rounded-2xl border border-slate-200/60 dark:border-white/5 flex flex-col shadow-xs">
+                    <span className="text-slate-400 dark:text-slate-500 font-extrabold uppercase text-[9px] tracking-wider mb-1 flex items-center gap-1">
+                      <Clock size={11} className="text-blue-500" /> Início
+                    </span>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">
+                      {formatDateSafe(selectedTicket.opened_at)}
+                    </span>
+                  </div>
+                  <div className="p-3.5 bg-white dark:bg-[#202c33]/50 rounded-2xl border border-slate-200/60 dark:border-white/5 flex flex-col shadow-xs">
+                    <span className="text-slate-400 dark:text-slate-500 font-extrabold uppercase text-[9px] tracking-wider mb-1 flex items-center gap-1">
+                      <CheckCircle2 size={11} className="text-emerald-500" /> Encerramento
+                    </span>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">
+                      {formatDateSafe(selectedTicket.closed_at)}
+                    </span>
+                  </div>
+                  <div className="p-3.5 bg-white dark:bg-[#202c33]/50 rounded-2xl border border-slate-200/60 dark:border-white/5 flex flex-col shadow-xs">
+                    <span className="text-slate-400 dark:text-slate-500 font-extrabold uppercase text-[9px] tracking-wider mb-1 flex items-center gap-1">
+                      <Clock size={11} className="text-amber-500" /> Duração Total
+                    </span>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">{selectedTicket.duration}</span>
+                  </div>
+                  <div className="p-3.5 bg-white dark:bg-[#202c33]/50 rounded-2xl border border-slate-200/60 dark:border-white/5 flex flex-col shadow-xs">
+                    <span className="text-slate-400 dark:text-slate-500 font-extrabold uppercase text-[9px] tracking-wider mb-1 flex items-center gap-1">
+                      <MessageSquare size={11} className="text-indigo-500" /> Mensagens
+                    </span>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">{selectedTicket.metadata?.total_messages || 0} trocadas</span>
+                  </div>
+                </div>
+
+                {/* Problem Description */}
+                {selectedTicket.problem_description && (
+                  <div className="flex flex-col gap-2 bg-white dark:bg-[#202c33]/60 p-4 rounded-2xl border border-slate-200/60 dark:border-white/5 shadow-xs">
+                    <span className="text-[10px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-wider">
+                      {selectedTicket.chamadosCount > 1 ? `Descrição de Problemas do Dia (${selectedTicket.chamadosCount})` : 'Descrição do Problema'}
+                    </span>
+                    <p className="text-xs text-slate-700 dark:text-slate-200 font-semibold leading-relaxed select-text whitespace-pre-line">
+                      {selectedTicket.problem_description}
+                    </p>
+                  </div>
+                )}
+
+                {/* Smart Summary */}
+                {selectedTicket.metadata?.summary && (
+                  <div className="flex flex-col gap-2 bg-blue-500/5 p-4 rounded-2xl border border-blue-500/15 dark:border-blue-500/10 shadow-xs border-l-[4px] border-l-blue-500">
+                    <span className="text-[10px] uppercase font-black text-blue-600 dark:text-blue-400 tracking-wider flex items-center gap-1.5">
+                      <Sparkles size={13} /> Resumo Inteligente I.A.
+                    </span>
+                    <p className="text-xs text-slate-700 dark:text-slate-200 font-semibold leading-relaxed select-text whitespace-pre-line">
+                      {selectedTicket.metadata.summary}
+                    </p>
+                  </div>
+                )}
+
+                {/* Combined Checklist */}
+                {(selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist) && Array.isArray(selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist) && (selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist).length > 0 && (
+                  <div className="flex flex-col gap-3 bg-white dark:bg-[#202c33]/60 p-4 rounded-2xl border border-slate-200/60 dark:border-white/5 shadow-xs">
+                    <span className="text-[10px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-wider flex items-center gap-1.5">
+                      <CheckSquare size={13} className="text-emerald-500" /> Checklist de Problemas {selectedTicket.chamadosCount > 1 ? `do Dia (${selectedTicket.chamadosCount} Chamados)` : ''}
+                    </span>
+                    <div className="flex flex-col gap-2">
+                      {(selectedTicket.combinedChecklist || selectedTicket.metadata?.checklist).map((item: any, idx: number) => (
+                        <div key={idx} className="flex items-center justify-between text-xs bg-slate-50 dark:bg-[#182229] p-3 rounded-xl border border-slate-200/60 dark:border-white/5 shadow-xs">
+                          <span className="text-slate-700 dark:text-slate-200 font-semibold pr-3 text-left select-text">
+                            {item.ticketId && <strong className="text-emerald-600 dark:text-emerald-400 font-extrabold mr-1.5">[#{item.ticketId}]</strong>}
+                            {item.text}
                           </span>
-                          <span className="text-[9.5px] font-bold text-gray-400 dark:text-gray-500">
-                            {formatOvernightTime(st.opened_at, st.closed_at)} às {formatOvernightTime(st.closed_at, st.opened_at)} ({st.duration})
+                          <span className={cn(
+                            "px-2.5 py-1 rounded-lg text-[9.5px] font-black uppercase shrink-0 border",
+                            item.resolved 
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" 
+                              : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20"
+                          )}>
+                            {item.resolved ? "Resolvido" : "Pendente"}
                           </span>
                         </div>
-                        {st.problem_description && (
-                          <p className="text-xs text-slate-700 dark:text-gray-200 font-semibold select-text">
-                            <strong className="text-gray-400 dark:text-gray-500 uppercase text-[9px] block mb-0.5">Problema:</strong>
-                            {st.problem_description}
-                          </p>
-                        )}
-                        {st.resolution_summary && (
-                          <p className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold bg-emerald-500/5 p-2 rounded-lg border border-emerald-500/10 select-text">
-                            <strong className="text-emerald-600 dark:text-emerald-400 uppercase text-[9px] block mb-0.5">Solução:</strong>
-                            {st.resolution_summary}
-                          </p>
-                        )}
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Resolution Summary */}
-              {selectedTicket.resolution_summary && (!selectedTicket.subTickets || selectedTicket.subTickets.length <= 1) && (
-                <div className="flex flex-col gap-2 bg-emerald-500/5 p-4 rounded-xl border border-emerald-500/10 dark:border-emerald-500/5 shadow-sm border-l-[3.5px] border-l-emerald-500 animate-in fade-in duration-200">
-                  <span className="text-[9.5px] uppercase font-black text-emerald-600 dark:text-emerald-400 tracking-wider">Resolução Completa</span>
-                  <p className="text-xs text-gray-800 dark:text-white font-bold leading-relaxed whitespace-pre-wrap select-text">
-                    {selectedTicket.resolution_summary}
-                  </p>
-                </div>
-              )}
-
-              {/* Operators List */}
-              {selectedTicket.metadata?.operators && selectedTicket.metadata.operators.length > 0 && (
-                <div className="flex flex-col gap-2 bg-white/50 dark:bg-[#202c33]/30 p-4 rounded-xl border border-gray-150/20 dark:border-white/5 shadow-sm">
-                  <span className="text-[9.5px] uppercase font-black text-gray-400 dark:text-gray-550 tracking-wider">Participação de Atendentes</span>
-                  <div className="flex flex-col gap-2">
-                    {selectedTicket.metadata.operators.map((op: any, idx: number) => (
-                      <div key={idx} className="flex justify-between text-xs text-slate-600 dark:text-gray-300 font-semibold border-b border-gray-150/30 dark:border-white/5 pb-1.5 last:border-b-0 last:pb-0">
-                        <span>{op.name}</span>
-                        <span className="font-bold text-slate-800 dark:text-white">{op.percentage}% ({op.count} msgs)</span>
-                      </div>
-                    ))}
+                {/* Sub-Tickets Breakdown */}
+                {selectedTicket.subTickets && selectedTicket.subTickets.length > 1 && (
+                  <div className="flex flex-col gap-3 bg-white dark:bg-[#202c33]/60 p-4 rounded-2xl border border-slate-200/60 dark:border-white/5 shadow-xs">
+                    <span className="text-[10px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-wider flex items-center gap-1.5">
+                      <History size={13} className="text-indigo-500" /> Histórico de Chamados Unificados ({selectedTicket.subTickets.length})
+                    </span>
+                    <div className="flex flex-col gap-3">
+                      {selectedTicket.subTickets.map((st: any) => (
+                        <div key={st.id} className="p-3.5 bg-slate-50 dark:bg-[#182229] rounded-xl border border-slate-200/60 dark:border-white/5 flex flex-col gap-2 text-left">
+                          <div className="flex items-center justify-between">
+                            <span className="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black text-[10px] rounded-md border border-emerald-500/20">
+                              Chamado #{st.id}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                              {formatOvernightTime(st.opened_at, st.closed_at)} às {formatOvernightTime(st.closed_at, st.opened_at)} ({st.duration})
+                            </span>
+                          </div>
+                          {st.problem_description && (
+                            <p className="text-xs text-slate-700 dark:text-slate-200 font-semibold select-text">
+                              <strong className="text-slate-400 dark:text-slate-500 uppercase text-[9px] block mb-0.5">Problema:</strong>
+                              {st.problem_description}
+                            </p>
+                          )}
+                          {st.resolution_summary && (
+                            <p className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/15 select-text">
+                              <strong className="text-emerald-600 dark:text-emerald-400 uppercase text-[9px] block mb-0.5">Solução:</strong>
+                              {st.resolution_summary}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
+                {/* Resolution Summary */}
+                {selectedTicket.resolution_summary && (!selectedTicket.subTickets || selectedTicket.subTickets.length <= 1) && (
+                  <div className="flex flex-col gap-2 bg-emerald-500/5 p-4 rounded-2xl border border-emerald-500/15 dark:border-emerald-500/10 shadow-xs border-l-[4px] border-l-emerald-500">
+                    <span className="text-[10px] uppercase font-black text-emerald-600 dark:text-emerald-400 tracking-wider flex items-center gap-1.5">
+                      <CheckCircle2 size={13} /> Resolução Completa
+                    </span>
+                    <p className="text-xs text-slate-800 dark:text-white font-bold leading-relaxed whitespace-pre-wrap select-text">
+                      {selectedTicket.resolution_summary}
+                    </p>
+                  </div>
+                )}
+
+                {/* Operators Breakdown */}
+                {selectedTicket.metadata?.operators && selectedTicket.metadata.operators.length > 0 && (
+                  <div className="flex flex-col gap-2 bg-white dark:bg-[#202c33]/60 p-4 rounded-2xl border border-slate-200/60 dark:border-white/5 shadow-xs">
+                    <span className="text-[10px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-wider flex items-center gap-1.5">
+                      <Users size={13} className="text-blue-500" /> Participação de Atendentes
+                    </span>
+                    <div className="flex flex-col gap-2">
+                      {selectedTicket.metadata.operators.map((op: any, idx: number) => (
+                        <div key={idx} className="flex justify-between text-xs text-slate-600 dark:text-slate-300 font-semibold border-b border-slate-200/40 dark:border-white/5 pb-2 last:border-b-0 last:pb-0">
+                          <span>{op.name}</span>
+                          <span className="font-bold text-slate-800 dark:text-white">{op.percentage}% ({op.count} msgs)</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-
-        </div>
+          </div>
+        )}
 
       </div>
     </div>

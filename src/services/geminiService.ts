@@ -708,6 +708,7 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
             },
             problems_checklist: {
               type: "array",
+              description: "Lista de problemas REAIS E DISTINTOS relatados pelo cliente. ATENÇÃO: NUNCA gere múltiplos itens redundantes para o mesmo assunto/equipamento (ex: se relatou impressora não imprime fiscal, não imprime cupom, ou erro no spooler, UNIFIQUE em APENAS UM ITEM: 'Falha ou erro na impressão de cupons e documentos fiscais'). Cada item deve ser uma falha tecnicamente diferente.",
               items: {
                 type: "object",
                 properties: {
@@ -737,7 +738,12 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
     const historyText = params.messages.slice(-65).map(m => `[${m.timestamp}] ${m.sender === 'human' ? 'Atendente' : 'Cliente'}: ${m.text}`).join('\n');
 
     const prompt = `Você é um analista de suporte especialista em auditoria e controle de qualidade de chamados (tickets).
-Sua missão é analisar o histórico de conversação de atendimento a seguir e preencher a descrição do problema, o resumo da solução, a lista cronológica de problemas discutidos e o relato detalhado da solução.
+Sua missão é analisar o histórico de conversação de atendimento a seguir e preencher a descrição do problema, o resumo da solução, a lista de problemas discutidos e o relato detalhado da solução.
+
+--- REGRAS DE UNIFICAÇÃO DE CHECKLIST (CRÍTICO) ---
+1. Agrupe problemas do mesmo assunto ou equipamento em APENAS UM ITEM DO CHECKLIST.
+2. Exemplo: Se o cliente citar 'impressora não imprime fiscal', 'impressora não imprime cupom' e 'erro ao imprimir', NUNCA crie 3 itens parecidos. Crie um ÚNICO item consolidado: 'Falha ou erro na impressão de cupons e documentos fiscais'.
+3. O checklist deve conter apenas falhas categoricamente DISTINTAS ocorridas no chamado.
 
 --- METADADOS DO CHAMADO ---
 - Horário de Abertura: ${params.opened_at}
@@ -776,4 +782,97 @@ ${historyText}
 }
 
 export const geminiService = new GeminiService();
+
+export interface ChecklistItem {
+  text: string;
+  resolved: boolean;
+  ticketId?: number | string;
+}
+
+export function sanitizeChecklistItems(items: ChecklistItem[]): ChecklistItem[] {
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return [];
+  }
+
+  // Clusters de tópicos conhecidos para consolidar variações redundantes do mesmo problema
+  const TOPIC_CLUSTERS = [
+    {
+      key: 'IMPRESSAO',
+      pattern: /impress|imprim|spooler|toner|papel|etiqueta/i,
+      unifiedText: 'Falha ou erro na impressão de cupons e documentos fiscais'
+    },
+    {
+      key: 'NFE_EMISSAO',
+      pattern: /nfe|nota fiscal|danfe|sat|nfce|conting/i,
+      unifiedText: 'Falha ou travamento na emissão de NFe / notas fiscais'
+    },
+    {
+      key: 'LENTIDAO_SISTEMA',
+      pattern: /lento|lentid|travan|congel|parou de responder/i,
+      unifiedText: 'Sistema lento ou travando'
+    },
+    {
+      key: 'BALANCA',
+      pattern: /balan[cç]a|peso|pesagem|filizola|toledo/i,
+      unifiedText: 'Problema ou falha na integração com balança'
+    },
+    {
+      key: 'TEF_CARTAO',
+      pattern: /tef|cart[aã]o|maquininha|pos|stone|rede|cielo|bin/i,
+      unifiedText: 'Erro de comunicação com TEF / maquininha de cartão'
+    },
+    {
+      key: 'RELATORIO_FINANCEIRO',
+      pattern: /relat[oó]rio|cupo.*contab|financeiro/i,
+      unifiedText: 'Envio ou geração de relatórios / documentos contábeis'
+    },
+    {
+      key: 'REDE_INTERNET',
+      pattern: /internet|wifi|roteador|sem sinal|rede/i,
+      unifiedText: 'Instabilidade de conexão de rede ou internet'
+    }
+  ];
+
+  const processedList: ChecklistItem[] = [];
+  const matchedClusterKeys = new Set<string>();
+  const seenTexts = new Set<string>();
+
+  for (const item of items) {
+    const rawText = (item.text || '').trim();
+    if (!rawText) continue;
+
+    // Verificar se o item pertence a algum cluster de assunto técnico conhecido
+    let matchedCluster = null;
+    for (const cluster of TOPIC_CLUSTERS) {
+      if (cluster.pattern.test(rawText)) {
+        matchedCluster = cluster;
+        break;
+      }
+    }
+
+    if (matchedCluster) {
+      if (!matchedClusterKeys.has(matchedCluster.key)) {
+        matchedClusterKeys.add(matchedCluster.key);
+        processedList.push({
+          text: matchedCluster.unifiedText,
+          resolved: item.resolved !== false,
+          ticketId: item.ticketId
+        });
+      }
+    } else {
+      // Normalização e desduplicação por similaridade direta de texto
+      const normalizedKey = rawText.toLowerCase().replace(/[^\w\s]/g, '').trim();
+      if (!seenTexts.has(normalizedKey)) {
+        seenTexts.add(normalizedKey);
+        processedList.push({
+          text: rawText,
+          resolved: item.resolved !== false,
+          ticketId: item.ticketId
+        });
+      }
+    }
+  }
+
+  return processedList;
+}
 

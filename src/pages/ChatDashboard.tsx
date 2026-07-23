@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck } from 'lucide-react';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
-import { useChatStore, instanceCache } from '../store/chatStore';
+import { useChatStore, instanceCache, resolveInstanceUuid } from '../store/chatStore';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import { Phone } from 'lucide-react';
 import { playNotificationSound } from '../utils/AudioEngine';
@@ -2203,11 +2203,22 @@ export default function ChatDashboard() {
       const instId = contact.instance_id || useChatStore.getState().tenantInfo?.evolution_api_instance;
       if (instId) {
         try {
-          const { data: instData } = await supabase
+          const tenantId = useChatStore.getState().tenantInfo?.id;
+          const resolvedUuid = tenantId ? await resolveInstanceUuid(tenantId, instId) : null;
+          const targetInstId = resolvedUuid || instId;
+          const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+          let instQuery = supabase
             .from('whatsapp_instances')
-            .select('ticket_mode, hide_ticket_modal')
-            .eq('id', instId)
-            .maybeSingle();
+            .select('ticket_mode, hide_ticket_modal');
+
+          if (uuidRegex.test(targetInstId)) {
+            instQuery = instQuery.eq('id', targetInstId);
+          } else if (tenantId) {
+            instQuery = instQuery.eq('tenant_id', tenantId).or(`display_name.eq.${targetInstId},name.eq.${targetInstId}`);
+          }
+
+          const { data: instData } = await instQuery.maybeSingle();
 
           if (instData?.ticket_mode) {
             if (instData?.hide_ticket_modal) {
@@ -5854,7 +5865,7 @@ export default function ChatDashboard() {
                                const missingCnpj = !hasCnpj && !hasGroup;
                                return (
                                  <div className="flex items-center gap-1.5 truncate">
-                                   <span className={cn("text-[11px] truncate flex items-center gap-1", missingCnpj ? "text-rose-500 dark:text-rose-400 font-medium" : "text-gray-500 dark:text-[#8696a0]")}>
+                                   <span className={cn("text-[11px] truncate flex items-center gap-1", missingCnpj ? "text-rose-500 dark:text-rose-400 font-medium" : "text-emerald-600 dark:text-emerald-400 font-medium")}>
                                      {missingCnpj ? <AlertTriangle size={10} className="shrink-0 text-rose-500 animate-pulse" /> : <Building2 size={10} className="shrink-0" />}
                                      {contact.fantasy_name}
                                    </span>

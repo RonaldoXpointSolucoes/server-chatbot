@@ -161,13 +161,13 @@ export const resolveInstanceUuid = async (tenantId: string, identifier: string |
   try {
      const { data } = await supabase
         .from('whatsapp_instances')
-        .select('id, display_name, api_key, phone_number')
+        .select('id, display_name, name, api_key, phone_number')
         .eq('tenant_id', tenantId)
-        .eq('display_name', identifier)
+        .or(`display_name.eq.${identifier},name.eq.${identifier}`)
         .limit(1);
      if (data && data.length > 0) {
         const inst = data[0];
-        instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '', inst.phone_number || '');
+        instanceCache.set(inst.id, inst.display_name || inst.name || '', inst.api_key || '', inst.phone_number || '');
         return inst.id;
      }
   } catch (e) {
@@ -4164,11 +4164,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     try {
-      const { data: instData } = await supabase
+      const resolvedUuid = await resolveInstanceUuid(tenantInfo.id, instId);
+      const targetInstId = resolvedUuid || instId;
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      let instQuery = supabase
         .from('whatsapp_instances')
-        .select('ticket_mode')
-        .eq('id', instId)
-        .maybeSingle();
+        .select('ticket_mode');
+
+      if (uuidRegex.test(targetInstId)) {
+        instQuery = instQuery.eq('id', targetInstId);
+      } else {
+        instQuery = instQuery.eq('tenant_id', tenantInfo.id).or(`display_name.eq.${targetInstId},name.eq.${targetInstId}`);
+      }
+
+      const { data: instData } = await instQuery.maybeSingle();
 
       if (!instData?.ticket_mode) {
         set({ contactTickets: [], activeTicket: null });
