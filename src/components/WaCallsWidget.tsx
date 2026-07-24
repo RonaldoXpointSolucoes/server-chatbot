@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useWaCallsStore, CallSummary } from "../store/useWaCallsStore";
-import { useChatStore, instanceCache } from "../store/chatStore";
+import { useChatStore, instanceCache, hasUserAccessToInstance } from "../store/chatStore";
 import { 
   Phone, 
   PhoneOff, 
@@ -120,9 +120,13 @@ export default function WaCallsWidget() {
     };
   }, [activeCall, ownConnections]);
 
-  // Toca o ringtone se houver chamada recebida
+  // Validação de permissões para chamada recebida
+  const isIncomingPermitted = incoming ? hasUserAccessToInstance(incoming.sessionId) : false;
+  const effectiveIncoming = (incoming && isIncomingPermitted) ? incoming : null;
+
+  // Toca o ringtone apenas se houver chamada recebida e o usuário tiver permissão
   useEffect(() => {
-    if (incoming) {
+    if (effectiveIncoming) {
       if (!ringtoneRef.current) {
         // Criar elemento de áudio oscilador sintético para chamada telefônica
         // para evitar carregar arquivos externos que possam dar 404
@@ -132,7 +136,7 @@ export default function WaCallsWidget() {
         let playInterval: ReturnType<typeof setInterval>;
         const startSynthRing = () => {
           playInterval = setInterval(() => {
-            if (!incoming) return;
+            if (!effectiveIncoming) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.connect(gain);
@@ -171,7 +175,7 @@ export default function WaCallsWidget() {
         } catch(e){}
       }
     };
-  }, [incoming]);
+  }, [effectiveIncoming]);
 
   // Controla o mute do microfone
   const handleToggleMute = () => {
@@ -249,7 +253,7 @@ export default function WaCallsWidget() {
   const isCurrentBoxVoipReady = chatInstanceNameResolved 
     ? (sessions || []).some(s => s && (s.id === chatInstanceNameResolved || s.id === chatInstanceId) && s.paired) 
     : false;
-  const shouldShowPanel = !!(isOpenWidget || activeCall || incoming);
+  const shouldShowPanel = !!(isOpenWidget || activeCall || effectiveIncoming);
 
   return (
     <AnimatePresence>
@@ -380,7 +384,7 @@ export default function WaCallsWidget() {
                   </button>
                 </div>
               </div>
-            ) : incoming ? (
+            ) : effectiveIncoming ? (
               /* 2. Tela de Chamada Recebida */
               <div className="flex flex-col items-center justify-center text-center flex-1 py-3 animate-in fade-in duration-200">
                 <div className="relative mb-4 flex items-center justify-center">
@@ -395,7 +399,7 @@ export default function WaCallsWidget() {
                   Recebendo Chamada...
                 </h3>
                 <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mt-1 mb-6">
-                  {formatPeer(incoming.peer)}
+                  {formatPeer(effectiveIncoming.peer)}
                 </p>
 
                 <div className="flex items-center gap-6 mt-1">

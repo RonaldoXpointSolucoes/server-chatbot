@@ -480,6 +480,7 @@ export default function ChecklistBuilder() {
   const [sectors, setSectors] = useState<any[]>([]);
   const [units, setUnits] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [cargos, setCargos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Estados para Categorias e Setores Rápidos
@@ -632,27 +633,31 @@ export default function ChecklistBuilder() {
     setLoading(true);
     try {
       // Executar todas as requisições principais de forma concorrente em paralelo (Promise.all)
-      const [secRes, uniRes, usersRes, checklistsRes] = await Promise.all([
+      const [secRes, uniRes, usersRes, checklistsRes, cargosRes] = await Promise.all([
         supabase.from('sectors').select('id, name, unit_id').eq('tenant_id', tenantId),
         supabase.from('units').select('id, name').eq('tenant_id', tenantId),
-        supabase.from('v_checklist_operators').select('id, name, role').eq('tenant_id', tenantId).eq('is_active', true),
+        supabase.from('v_checklist_operators').select('id, name, role, cargo_id').eq('tenant_id', tenantId).eq('is_active', true),
         // Faz o join leve para obter os IDs dos itens e contar a quantidade sem N+1 HTTP queries!
-        supabase.from('checklists').select('*, checklist_items(id)').eq('tenant_id', tenantId).order('created_at', { ascending: false })
+        supabase.from('checklists').select('*, checklist_items(id)').eq('tenant_id', tenantId).order('created_at', { ascending: false }),
+        supabase.from('cargos').select('*').eq('tenant_id', tenantId)
       ]);
 
       if (secRes.error) throw secRes.error;
       if (uniRes.error) throw uniRes.error;
       if (usersRes.error) throw usersRes.error;
       if (checklistsRes.error) throw checklistsRes.error;
+      if (cargosRes.error) throw cargosRes.error;
 
       const secData = secRes.data || [];
       const uniData = uniRes.data || [];
       const usersData = usersRes.data || [];
       const checklistsData = checklistsRes.data || [];
+      const cargosData = cargosRes.data || [];
 
       setSectors(secData);
       setUnits(uniData);
       setUsers(usersData);
+      setCargos(cargosData);
 
       // Calcular contagem de itens em memória local para evitar N+1 HTTP queries
       const checklistsWithCounts = checklistsData.map((chk: any) => {
@@ -1152,6 +1157,20 @@ export default function ChecklistBuilder() {
         prev.map(c => c.id === chk.id ? { ...c, is_active: chk.is_active } : c)
       );
     }
+  };
+
+  const getJobBadgeText = (cargoId: string) => {
+    const cargo = cargos.find(c => c.id === cargoId);
+    if (!cargo) return '';
+    const DAYS_NAMES: Record<string, string> = {
+      seg: 'Seg', ter: 'Ter', qua: 'Qua', qui: 'Qui', sex: 'Sex', sab: 'Sáb', dom: 'Dom'
+    };
+    const formattedDays = cargo.work_days && cargo.work_days.length > 0
+      ? cargo.work_days.map((d: string) => DAYS_NAMES[d] || d).join(',')
+      : 'Sem escala';
+    const start = cargo.start_time?.slice(0, 5) || '08:00';
+    const end = cargo.end_time?.slice(0, 5) || '18:00';
+    return `${cargo.name} (${formattedDays} • ${start}-${end})`;
   };
 
   const handleUpdateCardResponsibles = async (chk: Checklist, userId: string) => {
@@ -2349,7 +2368,14 @@ export default function ChecklistBuilder() {
                                               }`}>
                                                 {initials}
                                               </div>
-                                              <span className="truncate pr-1 font-medium">{user.name}</span>
+                                              <div className="flex flex-col min-w-0">
+                                                <span className="truncate pr-1 font-medium text-white">{user.name}</span>
+                                                {user.cargo_id && (
+                                                  <span className="text-[9px] text-indigo-400 truncate">
+                                                    {getJobBadgeText(user.cargo_id)}
+                                                  </span>
+                                                )}
+                                              </div>
                                             </div>
                                             <div className="shrink-0">
                                               {isSelected ? (
@@ -2666,7 +2692,14 @@ export default function ChecklistBuilder() {
                                           }`}>
                                             {initials}
                                           </div>
-                                          <span className="truncate pr-2 font-medium">{user.name}</span>
+                                          <div className="flex flex-col min-w-0">
+                                            <span className="truncate pr-2 font-medium text-white">{user.name}</span>
+                                            {user.cargo_id && (
+                                              <span className="text-[10px] text-indigo-400 truncate">
+                                                {getJobBadgeText(user.cargo_id)}
+                                              </span>
+                                            )}
+                                          </div>
                                         </div>
                                         <div className="shrink-0">
                                           {isSelected ? (

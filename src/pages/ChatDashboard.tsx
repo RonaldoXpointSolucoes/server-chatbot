@@ -1586,6 +1586,11 @@ export default function ChatDashboard() {
           }
        }
 
+       // Esconde contatos que são apenas resultados de busca global quando a pesquisa é limpa (a menos que seja o chat ativo)
+       if (!searchTerm && c.isSearchResult && c.id !== activeChatId) {
+          return false;
+       }
+
        return true;
     }).sort((a,b) => {
         const aPinned = isContactPinned(a);
@@ -2215,7 +2220,7 @@ export default function ChatDashboard() {
           if (uuidRegex.test(targetInstId)) {
             instQuery = instQuery.eq('id', targetInstId);
           } else if (tenantId) {
-            instQuery = instQuery.eq('tenant_id', tenantId).or(`display_name.eq.${targetInstId},name.eq.${targetInstId}`);
+            instQuery = instQuery.eq('tenant_id', tenantId).or(`display_name.eq.${targetInstId},whatsapp_name.eq.${targetInstId}`);
           }
 
           const { data: instData } = await instQuery.maybeSingle();

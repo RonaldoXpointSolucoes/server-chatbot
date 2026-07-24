@@ -54,6 +54,7 @@ export type ContactType = ContactRow & {
   ai_paused?: boolean;
   ai_paused_manually?: boolean;
   isManuallyUnread?: boolean;
+  isSearchResult?: boolean;
 };
 
 export interface ChatTicket {
@@ -161,19 +162,79 @@ export const resolveInstanceUuid = async (tenantId: string, identifier: string |
   try {
      const { data } = await supabase
         .from('whatsapp_instances')
-        .select('id, display_name, name, api_key, phone_number')
+        .select('id, display_name, whatsapp_name, api_key, phone_number')
         .eq('tenant_id', tenantId)
-        .or(`display_name.eq.${identifier},name.eq.${identifier}`)
+        .or(`display_name.eq.${identifier},whatsapp_name.eq.${identifier}`)
         .limit(1);
      if (data && data.length > 0) {
         const inst = data[0];
-        instanceCache.set(inst.id, inst.display_name || inst.name || '', inst.api_key || '', inst.phone_number || '');
+        instanceCache.set(inst.id, inst.display_name || inst.whatsapp_name || '', inst.api_key || '', inst.phone_number || '');
         return inst.id;
      }
   } catch (e) {
      console.error('[resolveInstanceUuid] Error:', e);
   }
   return null;
+};
+
+export const hasUserAccessToInstance = (sessionId: string | null | undefined): boolean => {
+  if (!sessionId) return false;
+
+  const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+  const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+  const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+
+  const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+
+  const targetUuid = instanceCache.getUuid(sessionId) || (sessionId.includes('-') ? sessionId : null);
+  const targetName = instanceCache.getName(sessionId) || (sessionId.includes('-') ? null : sessionId);
+
+  // Proteção da caixa Ronaldo-Web (ID: 5c78d358-d449-41c4-b396-a04ab20a39e4)
+  const isRonaldoWebInstance = 
+    sessionId === '5c78d358-d449-41c4-b396-a04ab20a39e4' || 
+    sessionId === 'Ronaldo-Web' || 
+    targetUuid === '5c78d358-d449-41c4-b396-a04ab20a39e4' || 
+    targetName === 'Ronaldo-Web';
+
+  if (isRonaldoWebInstance && !isRonaldo) {
+    if (allowedStr) {
+      try {
+        const allowedArr = JSON.parse(allowedStr);
+        if (Array.isArray(allowedArr)) {
+          const hasExplicit = allowedArr.some((inst: string) => 
+            inst === '5c78d358-d449-41c4-b396-a04ab20a39e4' || inst === 'Ronaldo-Web'
+          );
+          if (!hasExplicit) return false;
+        } else {
+          return false;
+        }
+      } catch(e) {
+        return false;
+      }
+    } else {
+      return false;
+    }
+  }
+
+  const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
+
+  if (allowedStr) {
+    try {
+      const allowedArr = JSON.parse(allowedStr);
+      if (Array.isArray(allowedArr) && allowedArr.length > 0) {
+        return allowedArr.some((inst: string) => 
+          inst === sessionId || 
+          (targetUuid && inst === targetUuid) || 
+          (targetName && inst === targetName)
+        );
+      }
+    } catch(e) {}
+  }
+
+  if (isGlobalAdmin) return true;
+  if (roleStr === 'agent' || roleStr === 'Agente') return false;
+
+  return true;
 };
 
 
@@ -2936,7 +2997,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 priority: conv?.priority,
                 assigned_to: conv?.assigned_to,
                 conv_labels: conv?.conversation_labels || [],
-                instance_id: targetInstanceId
+                instance_id: targetInstanceId,
+                isSearchResult: true
             } as ContactType;
         });
 
@@ -4175,7 +4237,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (uuidRegex.test(targetInstId)) {
         instQuery = instQuery.eq('id', targetInstId);
       } else {
-        instQuery = instQuery.eq('tenant_id', tenantInfo.id).or(`display_name.eq.${targetInstId},name.eq.${targetInstId}`);
+        instQuery = instQuery.eq('tenant_id', tenantInfo.id).or(`display_name.eq.${targetInstId},whatsapp_name.eq.${targetInstId}`);
       }
 
       const { data: instData } = await instQuery.maybeSingle();

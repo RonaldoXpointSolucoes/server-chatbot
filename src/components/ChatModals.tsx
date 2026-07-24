@@ -4590,11 +4590,6 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         resolvedQuery = resolvedQuery.eq('tenant_id', tenantId);
       }
 
-      const { data: resolvedData, error: resolvedErr } = await resolvedQuery.order('closed_at', { ascending: false });
-      if (resolvedErr) throw resolvedErr;
-
-      const resolvedList = [...(resolvedData || [])];
-
       // 1.5. Busca conversas com status 'resolved' ou 'closed' como fallback
       let convResolvedQuery = supabase
         .from('conversations')
@@ -4605,6 +4600,43 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         convResolvedQuery = convResolvedQuery.eq('tenant_id', tenantId);
       }
 
+      if (selectedInstanceId && selectedInstanceId !== 'all') {
+        convResolvedQuery = convResolvedQuery.eq('instance_id', selectedInstanceId);
+      }
+
+      // Aplicar filtros de data diretamente nas queries de banco de dados
+      if (dateFilter === 'today') {
+        const startOfDay = new Date(selectedDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(selectedDate);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        resolvedQuery = resolvedQuery.gte('closed_at', startOfDay.toISOString()).lte('closed_at', endOfDay.toISOString());
+        convResolvedQuery = convResolvedQuery.gte('updated_at', startOfDay.toISOString()).lte('updated_at', endOfDay.toISOString());
+      } else if (dateFilter === 'week') {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+
+        resolvedQuery = resolvedQuery.gte('closed_at', sevenDaysAgo.toISOString());
+        convResolvedQuery = convResolvedQuery.gte('updated_at', sevenDaysAgo.toISOString());
+      } else if (dateFilter === 'month') {
+        const startOfMonth = new Date();
+        startOfMonth.setDate(1);
+        startOfMonth.setHours(0, 0, 0, 0);
+
+        resolvedQuery = resolvedQuery.gte('closed_at', startOfMonth.toISOString());
+        convResolvedQuery = convResolvedQuery.gte('updated_at', startOfMonth.toISOString());
+      } else {
+        // limit to 100 on 'all' to prevent HTTP 400 URI too large on contact details
+        resolvedQuery = resolvedQuery.limit(100);
+        convResolvedQuery = convResolvedQuery.limit(100);
+      }
+
+      const { data: resolvedData, error: resolvedErr } = await resolvedQuery.order('closed_at', { ascending: false });
+      if (resolvedErr) throw resolvedErr;
+
+      const resolvedList = [...(resolvedData || [])];
       const { data: resolvedConvs } = await convResolvedQuery;
 
       const existingTicketContactDateSet = new Set(
@@ -4685,10 +4717,14 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       // Mapeamento de operadores e fallbacks das conversas
       const operatorFallbacks = new Map<string, string>();
       
-      const { data: allConvsData } = await supabase
-        .from('conversations')
-        .select('contact_id, assigned_to')
-        .in('contact_id', contactIds);
+      let allConvsData: any[] = [];
+      if (contactIds.length > 0) {
+        const { data: convsData } = await supabase
+          .from('conversations')
+          .select('contact_id, assigned_to')
+          .in('contact_id', contactIds);
+        if (convsData) allConvsData = convsData;
+      }
         
       let tenantUsersData: any[] = [];
       if (tenantId) {
@@ -4699,7 +4735,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         if (uData) tenantUsersData = uData;
       }
       
-      if (allConvsData) {
+      if (allConvsData.length > 0) {
         allConvsData.forEach(c => {
           if (c.contact_id) {
             let opName = 'Atendente';
@@ -4774,7 +4810,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       fetchInstances();
       setSelectedTicket(null);
     }
-  }, [isOpen, tenantInfo?.id]);
+  }, [isOpen, tenantInfo?.id, selectedInstanceId, dateFilter, selectedDate]);
 
   // Sincronizar aba ativa do Kanban com a coluna correspondente ao ticket selecionado
   useEffect(() => {
@@ -5131,7 +5167,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     <div className="fixed inset-0 z-[120] flex items-center justify-center">
       <div className="absolute inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
       
-      <div className="relative w-full h-full max-h-screen bg-slate-50 dark:bg-[#0c1317] border-none rounded-none shadow-none p-0 md:p-6 flex flex-col gap-4 animate-in fade-in duration-300 overflow-y-auto md:overflow-hidden text-left md:max-w-[1440px] md:h-[90dvh] md:max-h-[900px] md:rounded-[32px] md:border md:border-white/5 md:shadow-2xl">
+      <div className="relative w-full h-full max-h-screen bg-slate-50 dark:bg-[#0c1317] border-none rounded-none shadow-none p-0 md:p-6 flex flex-col gap-4 animate-in fade-in duration-300 overflow-y-auto md:overflow-hidden text-left md:max-w-[1440px] md:h-[93dvh] md:max-h-[980px] md:rounded-[32px] md:border md:border-white/5 md:shadow-2xl">
         
         {/* Mobile Header & Filter Toggle Bar */}
         <div className="md:hidden sticky top-0 z-50 flex items-center justify-between px-5 py-4 bg-[#0c1317]/80 backdrop-blur-xl border-b border-white/5 shadow-sm shrink-0">
@@ -5233,7 +5269,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             </div>
 
             {/* Caixa de Entrada Selector */}
-            <div className="relative min-w-[200px] shrink-0">
+            <div className="relative min-w-[180px] shrink-0">
               <Inbox className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={14} />
               <select
                 value={selectedInstanceId}
@@ -5278,39 +5314,39 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 </button>
               ))}
             </div>
-          </div>
-        </div>
 
-        {/* Weekly Day Selector */}
-        <div className="flex justify-center items-center gap-2 bg-white dark:bg-[#182229]/20 p-2.5 rounded-2xl border border-slate-200/60 dark:border-white/5 select-none overflow-x-auto shrink-0 custom-scrollbar mx-5 md:mx-0">
-          {daysList.map((day, idx) => {
-            const isToday = day.toDateString() === new Date().toDateString();
-            const isSelected = dateFilter === 'today' && day.toDateString() === selectedDate.toDateString();
-            const weekdayLabel = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'][day.getDay()];
-            const dayOfMonth = day.getDate();
-            
-            return (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => {
-                  setSelectedDate(day);
-                  setDateFilter('today');
-                }}
-                className={cn(
-                  "flex flex-col items-center gap-0.5 py-1.5 w-11 rounded-xl transition-all duration-200 shrink-0 cursor-pointer border",
-                  isSelected
-                    ? "bg-gradient-to-tr from-emerald-500 to-teal-500 text-white font-extrabold shadow-md shadow-emerald-500/25 border-emerald-500 scale-105"
-                    : isToday
-                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border-emerald-500/20 hover:bg-emerald-500/20"
-                      : "bg-slate-100 dark:bg-[#202c33]/30 text-slate-600 dark:text-[#aebac1] hover:bg-slate-200 dark:hover:bg-white/5 border-slate-200/40 dark:border-white/5"
-                )}
-              >
-                <span className="text-[8px] uppercase tracking-wider opacity-60 font-black">{weekdayLabel}</span>
-                <span className="text-xs font-black">{dayOfMonth}</span>
-              </button>
-            );
-          })}
+            {/* Weekly Day Selector */}
+            <div className="flex justify-center items-center gap-1 bg-slate-200/60 dark:bg-[#182229]/40 p-1 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none overflow-x-auto shrink-0 custom-scrollbar h-[38px] w-full md:w-auto">
+              {daysList.map((day, idx) => {
+                const isToday = day.toDateString() === new Date().toDateString();
+                const isSelected = dateFilter === 'today' && day.toDateString() === selectedDate.toDateString();
+                const weekdayLabel = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'][day.getDay()];
+                const dayOfMonth = day.getDate();
+                
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDate(day);
+                      setDateFilter('today');
+                    }}
+                    className={cn(
+                      "flex flex-col items-center justify-center py-0.5 w-8 h-[28px] rounded-xl transition-all duration-200 shrink-0 cursor-pointer border",
+                      isSelected
+                        ? "bg-gradient-to-tr from-emerald-500 to-teal-500 text-white font-extrabold shadow-md shadow-emerald-500/25 border-emerald-500"
+                        : isToday
+                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border-emerald-500/20 hover:bg-emerald-500/20"
+                          : "bg-slate-100 dark:bg-[#202c33]/30 text-slate-600 dark:text-[#aebac1] hover:bg-slate-200 dark:hover:bg-white/5 border-slate-200/40 dark:border-white/5"
+                    )}
+                  >
+                    <span className="text-[7px] uppercase tracking-wider opacity-60 font-black leading-none">{weekdayLabel}</span>
+                    <span className="text-[9.5px] font-black leading-none mt-0.5">{dayOfMonth}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {/* Top Metrics Row */}
@@ -5399,20 +5435,20 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         )}
 
         {/* Main Body */}
-        <div className="flex-1 flex flex-col md:flex-row gap-5 min-h-0 md:h-full px-5 md:px-0 pb-5 md:pb-0">
+        <div className="flex-1 flex flex-col md:flex-row gap-4 min-h-0 md:h-full px-5 md:px-0 pb-5 md:pb-0">
           
           {activeView === 'dashboard' ? (
             <ClosedTicketsDashboard tickets={filteredTickets} />
           ) : (
             /* Kanban Board columns container (Always 100% wide for maximum visibility) */
-            <div className="flex-grow overflow-visible md:overflow-hidden flex flex-col md:flex-row gap-5 min-w-0 transition-all duration-300 md:h-full w-full">
+            <div className="flex-grow overflow-visible md:overflow-hidden flex flex-col md:flex-row gap-4 min-w-0 transition-all duration-300 md:h-full w-full">
             {loading ? (
               <div className="flex-1 flex items-center justify-center flex-col gap-3 text-slate-400 dark:text-slate-500">
                 <Loader2 className="animate-spin text-emerald-500" size={28} />
                 <span className="text-xs font-semibold">Carregando tickets...</span>
               </div>
             ) : (
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-5 h-fit md:h-full">
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 h-fit md:h-full">
                 {columns.map(col => {
                   const isVisible = activeKanbanTab === col.id;
                   
@@ -5420,23 +5456,23 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     <div 
                       key={col.id}
                       className={cn(
-                        "flex flex-col h-fit md:h-full bg-slate-100/50 dark:bg-[#182229]/20 border rounded-3xl overflow-hidden transition-all duration-200 shadow-sm border-slate-200/60 dark:border-white/5",
+                        "flex flex-col h-fit md:h-full bg-slate-100/50 dark:bg-[#182229]/20 border rounded-[24px] overflow-hidden transition-all duration-200 shadow-sm border-slate-200/60 dark:border-white/5",
                         !isVisible ? "hidden md:flex" : "flex"
                       )}
                     >
                       {/* Column Header */}
-                      <div className={cn("px-5 py-4 flex flex-col gap-1 shrink-0 select-none border-b border-slate-200/40 dark:border-white/5", col.headerBg)}>
+                      <div className={cn("px-4 py-3 flex flex-col gap-0.5 shrink-0 select-none border-b border-slate-200/40 dark:border-white/5", col.headerBg)}>
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-black uppercase tracking-wider">{col.title}</span>
-                          <span className={cn("px-2.5 py-0.5 rounded-full text-[9.5px] font-black shrink-0", col.badgeBg)}>
+                          <span className={cn("px-2 py-0.5 rounded-full text-[9px] font-black shrink-0", col.badgeBg)}>
                             {col.tickets.length}
                           </span>
                         </div>
-                        <span className="text-[9px] font-bold opacity-75 uppercase tracking-wide text-left">{col.subtitle}</span>
+                        <span className="text-[8.5px] font-bold opacity-75 uppercase tracking-wide text-left">{col.subtitle}</span>
                       </div>
 
                       {/* Column Content */}
-                      <div className="flex-1 md:overflow-y-auto custom-scrollbar p-3.5 flex flex-col gap-3.5">
+                      <div className="flex-1 md:overflow-y-auto custom-scrollbar p-2.5 flex flex-col gap-2.5">
                         {col.tickets.length > 0 ? (
                           col.tickets.map(t => {
                             const totalMsg = t.metadata?.total_messages || 0;
@@ -5449,54 +5485,47 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 key={t.id}
                                 onClick={() => setSelectedTicket(t)}
                                 className={cn(
-                                  "group p-3.5 rounded-2xl border text-left cursor-pointer transition-all duration-300 bg-white hover:bg-slate-50 dark:bg-[#1f2c34]/40 dark:hover:bg-[#1f2c34]/60 hover:scale-[1.015] hover:-translate-y-0.5 hover:shadow-md dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.3)] flex flex-col gap-2 relative border-slate-200/60 dark:border-white/5",
+                                  "group p-2.5 md:p-3 rounded-2xl border text-left cursor-pointer transition-all duration-300 bg-white hover:bg-slate-50 dark:bg-[#1f2c34]/40 dark:hover:bg-[#1f2c34]/60 hover:scale-[1.01] hover:-translate-y-0.5 hover:shadow-md dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.3)] flex flex-col gap-1.5 relative border-slate-200/60 dark:border-white/5",
                                   selectedTicket?.id === t.id && "border-emerald-500 dark:border-emerald-500/50 ring-1 ring-emerald-500/30 dark:ring-emerald-500/10 shadow-md",
                                   col.cardHoverBorder,
                                   col.cardLeftBorder
                                 )}
                               >
                                 {/* Top: Ticket ID + Company + Date */}
-                                <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-white/5 pb-2.5">
-                                  <div className="flex flex-col gap-1.5 min-w-0">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="px-2 py-0.5 rounded-lg text-[9.5px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-500/25 dark:border-emerald-500/15 shrink-0 shadow-2xs">
-                                        {t.chamadosCount > 1 ? `#${t.ticketIds.join(', #')}` : `#${t.id}`}
+                                <div className="flex items-start justify-between gap-2 border-b border-slate-100 dark:border-white/5 pb-2">
+                                  <div className="flex flex-col gap-1 min-w-0">
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      <span className="px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-500/25 dark:border-emerald-500/15 shrink-0">
+                                        {t.chamadosCount > 1 ? `#${t.ticketIds.length > 2 ? t.ticketIds.slice(0, 2).join(', #') + ' (+' + (t.ticketIds.length - 2) + ')' : t.ticketIds.join(', #')}` : `#${t.id}`}
                                       </span>
-                                      <span className={cn("text-[9.5px] font-black px-2 py-0.5 rounded-lg truncate max-w-[140px] md:max-w-[170px] uppercase tracking-wider inline-block", col.companyBadgeClass)}>
+                                      <span className={cn("text-[8.5px] font-black px-1.5 py-0.5 rounded truncate max-w-[120px] md:max-w-[150px] uppercase tracking-wider inline-block", col.companyBadgeClass)}>
                                         🏢 {t.companyFantasyName || 'Empresa Própria'}
                                       </span>
-                                      {t.chamadosCount > 1 && (
-                                        <span className="px-2 py-0.5 rounded-lg text-[9.5px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-300 border border-purple-500/25 dark:border-purple-500/15 shrink-0">
-                                          {t.chamadosCount} Chamados
-                                        </span>
-                                      )}
                                     </div>
                                     {t.companyName && t.companyName.toLowerCase() !== t.companyFantasyName?.toLowerCase() && (
-                                      <span className="text-[9px] font-semibold text-slate-400 dark:text-slate-500 pl-1.5 truncate max-w-[150px] md:max-w-[200px]">
+                                      <span className="text-[8px] font-semibold text-slate-400 dark:text-slate-500 pl-0.5 truncate max-w-[125px] md:max-w-[160px]">
                                         {t.companyName}
                                       </span>
                                     )}
                                   </div>
-                                  <div className="flex flex-col items-end text-right shrink-0 mt-0.5 text-[8.5px] font-black text-slate-400 dark:text-slate-500 gap-0.5">
-                                    <span className="flex items-center gap-1 font-semibold text-slate-400 dark:text-[#aebac1]">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
+                                  <div className="flex flex-col items-end text-right shrink-0 text-[8px] font-bold text-slate-400 dark:text-slate-500 gap-0.5">
+                                    <span className="text-slate-400 dark:text-[#aebac1]">
                                       {formatOvernightTime(t.opened_at, t.closed_at)}
                                     </span>
-                                    <span className="flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">
                                       {formatOvernightTime(t.closed_at, t.opened_at)}
                                     </span>
                                   </div>
                                 </div>
 
                                 {/* Middle: Avatar + Info */}
-                                <div className="flex items-center gap-3 py-1">
+                                <div className="flex items-center gap-2 py-0.5">
                                   <div className="relative shrink-0">
                                     {t.profile_picture_url ? (
                                       <img 
                                         src={t.profile_picture_url} 
                                         alt={t.contactName} 
-                                        className="w-9 h-9 rounded-full object-cover border border-slate-200 dark:border-white/10 shadow-sm shrink-0"
+                                        className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-white/10 shadow-sm shrink-0"
                                         onError={(e) => {
                                           e.currentTarget.style.display = 'none';
                                           if (e.currentTarget.nextElementSibling) {
@@ -5507,7 +5536,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                       />
                                     ) : null}
                                     <div className={cn(
-                                      "w-9 h-9 rounded-full bg-gradient-to-tr text-white font-black text-[12px] flex items-center justify-center shadow-inner shrink-0",
+                                      "w-8 h-8 rounded-full bg-gradient-to-tr text-white font-black text-[10px] flex items-center justify-center shadow-inner shrink-0",
                                       col.avatarGradient,
                                       t.profile_picture_url ? "hidden" : "flex"
                                     )}>
@@ -5518,58 +5547,63 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                     <span className="text-xs font-black text-slate-800 dark:text-[#e9edef] truncate">
                                       {t.contactName}
                                     </span>
-                                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold flex items-center gap-1 mt-0.5">
-                                      <User size={11} className="text-slate-400 dark:text-slate-500 shrink-0" /> Atendente: <strong className="text-slate-700 dark:text-slate-350 font-black">{t.operatorName}</strong>
+                                    <span className="text-[9.5px] text-slate-500 dark:text-slate-400 font-bold truncate mt-0.5">
+                                      Atendente: <strong className="text-slate-700 dark:text-slate-300 font-black">{t.operatorName}</strong>
                                     </span>
                                   </div>
                                 </div>
 
                                 {/* Problem description / Multiple Chamados Problems */}
                                 {t.chamadosCount > 1 && t.subTickets ? (
-                                  <div className="bg-slate-50 dark:bg-black/15 p-2.5 rounded-[14px] border border-slate-100 dark:border-white/5 flex flex-col gap-1">
-                                    <span className="font-extrabold text-[8.5px] text-slate-400 dark:text-slate-500 uppercase tracking-wide flex items-center justify-between select-none">
+                                  <div className="bg-slate-50/50 dark:bg-black/15 p-2 rounded-xl border border-slate-100 dark:border-white/5 flex flex-col gap-0.5">
+                                    <span className="font-extrabold text-[8px] text-slate-400 dark:text-slate-500 uppercase tracking-wide flex items-center justify-between select-none">
                                       <span>Problemas do Dia ({t.chamadosCount}):</span>
                                     </span>
-                                    <div className="flex flex-col gap-1 text-[10.5px] text-slate-600 dark:text-[#e9edef] leading-relaxed">
-                                      {t.subTickets.map((st: any) => (
-                                        <div key={st.id} className="line-clamp-2">
+                                    <div className="flex flex-col gap-0.5 text-[9.5px] text-slate-600 dark:text-[#e9edef] leading-tight">
+                                      {t.subTickets.slice(0, 2).map((st: any) => (
+                                        <div key={st.id} className="line-clamp-1">
                                           <strong className="text-emerald-600 dark:text-emerald-400 font-extrabold mr-1">#{st.id}:</strong>
                                           {st.problem_description || 'Atendimento/Solicitação'}
                                         </div>
                                       ))}
+                                      {t.subTickets.length > 2 && (
+                                        <span className="text-[8px] font-bold text-slate-400 dark:text-slate-500 pl-0.5 mt-0.5">
+                                          + {t.subTickets.length - 2} chamados unificados
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
                                 ) : (
                                   t.problem_description && (
-                                    <p className="text-[10.5px] text-slate-600 dark:text-[#e9edef] leading-relaxed line-clamp-2 bg-slate-50 dark:bg-black/15 p-2.5 rounded-[14px] border border-slate-100 dark:border-white/5">
-                                      <span className="font-extrabold text-[8.5px] text-slate-400 dark:text-slate-500 uppercase tracking-wide mr-1 select-none text-left block mb-0.5">Problema:</span>
+                                    <p className="text-[9.5px] text-slate-600 dark:text-[#e9edef] leading-snug line-clamp-2 bg-slate-50/50 dark:bg-black/15 p-2 rounded-xl border border-slate-100 dark:border-white/5">
+                                      <span className="font-extrabold text-[8px] text-slate-400 dark:text-slate-500 uppercase tracking-wide mr-1 select-none text-left block mb-0.5">Problema:</span>
                                       {t.problem_description}
                                     </p>
                                   )
                                 )}
 
                                 {/* Bottom Statistics Footer */}
-                                <div className="pt-2 border-t border-slate-100 dark:border-white/5 flex items-center justify-between flex-wrap gap-2 text-[9px] font-black text-slate-400 select-none">
-                                  <div className="flex items-center gap-2">
-                                    <span className="flex items-center gap-1"><Clock size={11} className="text-slate-400 dark:text-slate-500" /> <span className="font-bold text-slate-600 dark:text-[#e9edef]">{t.duration}</span></span>
+                                <div className="pt-1.5 border-t border-slate-100 dark:border-white/5 flex items-center justify-between flex-wrap gap-1.5 text-[8.5px] font-black text-slate-400 select-none">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="flex items-center gap-0.5"><Clock size={10} className="text-slate-400 dark:text-slate-500" /> <span className="font-bold text-slate-600 dark:text-[#e9edef]">{t.duration}</span></span>
                                     <span>•</span>
-                                    <span className="flex items-center gap-1"><MessageSquare size={11} className="text-slate-400 dark:text-slate-500" /> <span className="font-bold text-slate-600 dark:text-[#e9edef]">{totalMsg}</span></span>
+                                    <span className="flex items-center gap-0.5"><MessageSquare size={10} className="text-slate-400 dark:text-slate-500" /> <span className="font-bold text-slate-600 dark:text-[#e9edef]">{totalMsg}</span></span>
                                   </div>
                                   
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center gap-1">
                                     {(t.metadata?.error_log || t.problem_description === "Erro no processamento do problema." || t.metadata?.summary === "Erro ao gerar resumo da solução.") && (
-                                      <span className="px-2 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md text-[8.5px] font-black animate-pulse flex items-center gap-1 shrink-0 border border-rose-500/20">
-                                        <AlertTriangle size={10} /> Falha I.A.
+                                      <span className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded text-[8px] font-black animate-pulse flex items-center gap-0.5 shrink-0 border border-rose-500/20">
+                                        <AlertTriangle size={9} /> Falha I.A.
                                       </span>
                                     )}
                                     {checklistItems.length > 0 && (
                                       <span className={cn(
-                                        "px-2 py-0.5 rounded-md text-[8.5px] font-black flex items-center gap-1 shrink-0 transition-colors border",
+                                        "px-1.5 py-0.5 rounded text-[8px] font-black flex items-center gap-0.5 shrink-0 transition-colors border",
                                         resolvedCount === checklistItems.length
                                           ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
                                           : "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
                                       )}>
-                                        <CheckCircle2 size={10} /> {resolvedCount}/{checklistItems.length} Checklist
+                                        <CheckCircle2 size={9} /> {resolvedCount}/{checklistItems.length} Checklist
                                       </span>
                                     )}
                                   </div>

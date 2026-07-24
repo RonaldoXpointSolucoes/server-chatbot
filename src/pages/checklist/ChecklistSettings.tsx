@@ -1243,6 +1243,186 @@ export default function ChecklistSettings() {
         </div>
       )}
 
+      {/* CONTEÚDO DA ABA: CARGOS */}
+      {activeTab === 'cargos' && (
+        <div className={`grid grid-cols-1 ${editingCargo ? 'lg:grid-cols-3' : 'grid-cols-1'} gap-6 items-start animate-in fade-in duration-200`}>
+          
+          {/* Listagem dos Cargos */}
+          <div className={`${editingCargo ? 'lg:col-span-2' : 'col-span-1'} space-y-4`}>
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-semibold text-[#e9edef]">Lista de Cargos Operacionais</h2>
+              {!editingCargo && (
+                <button
+                  onClick={() => setEditingCargo({ name: '', start_time: '08:00', end_time: '18:00', work_days: ['seg', 'ter', 'qua', 'qui', 'sex'] })}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-lg shadow-indigo-500/10 active:scale-95"
+                >
+                  <Plus size={14} /> Novo Cargo
+                </button>
+              )}
+            </div>
+
+            {loading ? (
+              <div className="p-12 text-center text-[#8696a0] bg-[#202c33]/50 rounded-3xl border border-[#2a3942]/40 animate-pulse">
+                Carregando cargos...
+              </div>
+            ) : cargos.length === 0 ? (
+              <div className="p-12 text-center text-[#8696a0] bg-[#202c33]/40 rounded-3xl border border-dashed border-[#2a3942]/60">
+                Nenhum cargo cadastrado. Adicione um cargo para organizar a escala da sua equipe.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {cargos.map((cargo) => (
+                  <div
+                    key={cargo.id}
+                    className={`bg-[#202c33]/80 rounded-[28px] border p-5 transition-all flex flex-col justify-between ${editingCargo?.id === cargo.id ? 'border-indigo-500 shadow-indigo-500/10 shadow-lg' : 'border-[#2a3942]/60 hover:shadow-md'}`}
+                  >
+                    <div>
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="min-w-0">
+                          <h3 className="font-semibold text-white text-base truncate flex items-center gap-1.5">
+                            <Briefcase size={16} className="text-indigo-400 shrink-0" />
+                            {cargo.name}
+                          </h3>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t border-[#2a3942]/30 space-y-1.5 text-xs text-[#8696a0]">
+                        <p className="flex items-center gap-1.5">
+                          <Clock size={13} className="text-slate-400" />
+                          Escala: <span className="text-[#d1d7db] font-medium">{cargo.start_time?.slice(0, 5)} - {cargo.end_time?.slice(0, 5)}</span>
+                        </p>
+                        <p className="flex items-start gap-1.5">
+                          <Calendar size={13} className="text-slate-400 mt-0.5" />
+                          <span>
+                            Dias: <span className="text-[#d1d7db] font-medium">
+                              {cargo.work_days && cargo.work_days.length > 0 
+                                ? cargo.work_days.map(d => DAYS_OF_WEEK.find(day => day.key === d)?.short).filter(Boolean).join(', ')
+                                : 'Sem dias definidos'}
+                            </span>
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 mt-4 pt-4 border-t border-[#2a3942]/40">
+                      <button
+                        onClick={() => setEditingCargo(cargo)}
+                        className="flex-1 bg-[#2a3942] hover:bg-[#3b4a54] text-[#d1d7db] text-xs font-semibold py-2 rounded-xl flex items-center justify-center gap-1 transition-all"
+                      >
+                        <Edit2 size={12} /> Editar
+                      </button>
+                      <button
+                        onClick={() => deleteCargo(cargo.id)}
+                        className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold px-3 py-2 rounded-xl transition-all border border-rose-500/10"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Painel Lateral de Formulário */}
+          {editingCargo && (
+            <div className="bg-[#202c33]/85 backdrop-blur-md rounded-[32px] border border-black/5 dark:border-white/5 p-6 shadow-xl animate-in slide-in-from-right-4 duration-300">
+              <div className="flex justify-between items-center border-b border-[#2a3942]/60 pb-3 mb-4">
+                <h3 className="font-semibold text-white text-md flex items-center gap-1.5">
+                  <Briefcase size={16} className="text-indigo-400" />
+                  {editingCargo.id ? 'Editar Cargo' : 'Novo Cargo'}
+                </h3>
+                <button onClick={() => setEditingCargo(null)} className="p-1 hover:bg-white/10 rounded-lg text-[#8696a0]">
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Nome */}
+                <div>
+                  <label className="block text-xs font-medium text-[#8696a0] mb-1">Nome do Cargo *</label>
+                  <input
+                    type="text"
+                    value={editingCargo.name || ''}
+                    onChange={e => setEditingCargo(p => ({ ...p, name: e.target.value }))}
+                    placeholder="Ex: Garçom, Cozinheiro, Recepcionista"
+                    className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all"
+                  />
+                </div>
+
+                {/* Horários */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-[#8696a0] mb-1">Entrada *</label>
+                    <input
+                      type="time"
+                      value={editingCargo.start_time || '08:00'}
+                      onChange={e => setEditingCargo(p => ({ ...p, start_time: e.target.value }))}
+                      className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#8696a0] mb-1">Saída *</label>
+                    <input
+                      type="time"
+                      value={editingCargo.end_time || '18:00'}
+                      onChange={e => setEditingCargo(p => ({ ...p, end_time: e.target.value }))}
+                      className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Dias Trabalhados */}
+                <div>
+                  <label className="block text-xs font-medium text-[#8696a0] mb-2">Dias Trabalhados (Escala)</label>
+                  <div className="flex flex-wrap gap-2">
+                    {DAYS_OF_WEEK.map(day => {
+                      const isSelected = editingCargo.work_days?.includes(day.key) || false;
+                      return (
+                        <button
+                          type="button"
+                          key={day.key}
+                          onClick={() => {
+                            const currentDays = editingCargo.work_days || [];
+                            const newDays = isSelected
+                              ? currentDays.filter(d => d !== day.key)
+                              : [...currentDays, day.key];
+                            setEditingCargo(prev => ({ ...prev, work_days: newDays }));
+                          }}
+                          className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                            isSelected 
+                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/15' 
+                              : 'bg-[#111b21] border-[#2a3942] text-[#8696a0] hover:text-[#d1d7db]'
+                          }`}
+                        >
+                          {day.short}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-4 border-t border-[#2a3942]/40">
+                  <button
+                    onClick={saveCargo}
+                    disabled={saving}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {saving ? 'Salvando...' : 'Salvar Cargo'}
+                  </button>
+                  <button
+                    onClick={() => setEditingCargo(null)}
+                    className="bg-[#2a3942] hover:bg-[#3b4a54] text-[#d1d7db] px-4 py-2.5 rounded-xl transition-all"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }

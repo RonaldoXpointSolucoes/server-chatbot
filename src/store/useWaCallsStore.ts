@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { openCall, OpenCall } from "../lib/webrtc";
+import { hasUserAccessToInstance } from "./chatStore";
 
 const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -228,8 +229,9 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
     if (!response.ok) throw new Error("Erro ao buscar sessões WaCalls.");
     const data = await response.json();
     const sessionsList = data.sessions || [];
-    set({ sessions: sessionsList });
-    return sessionsList;
+    const filteredSessions = sessionsList.filter((s: any) => hasUserAccessToInstance(s.id));
+    set({ sessions: filteredSessions });
+    return filteredSessions;
   },
 
   createSession: async (sid) => {
@@ -276,16 +278,19 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
         console.log("[useWaCallsStore/SSE Event]:", ev);
 
         if (ev.type === "session-list") {
-          set({ sessions: ev.sessions });
+          const filteredSessions = (ev.sessions || []).filter((s: any) => hasUserAccessToInstance(s.id));
+          set({ sessions: filteredSessions });
         } else if (ev.type === "session-qr") {
-          set((state) => ({
-            qrCodes: { ...state.qrCodes, [ev.sessionId]: ev.qr }
-          }));
+          if (hasUserAccessToInstance(ev.sessionId)) {
+            set((state) => ({
+              qrCodes: { ...state.qrCodes, [ev.sessionId]: ev.qr }
+            }));
+          }
         } else if (ev.type === "auth-state") {
           set((state) => {
             const nextQr = { ...state.qrCodes };
             if (ev.paired) delete nextQr[ev.sessionId];
-            else if (ev.qr) nextQr[ev.sessionId] = ev.qr;
+            else if (ev.qr && hasUserAccessToInstance(ev.sessionId)) nextQr[ev.sessionId] = ev.qr;
 
             return {
               qrCodes: nextQr,
@@ -295,15 +300,18 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
             };
           });
         } else if (ev.type === "call-list") {
-          set({ calls: ev.calls });
+          const filteredCalls = (ev.calls || []).filter((c: any) => hasUserAccessToInstance(c.sessionId));
+          set({ calls: filteredCalls });
         } else if (ev.type === "call-status") {
-          set((state) => ({
-            calls: state.calls.map((c) =>
-              c.callId === ev.id
-                ? { ...c, sessionId: ev.sessionId, status: ev.status, peer: ev.peer, startedAt: ev.startedAt }
-                : c
-            ),
-          }));
+          if (hasUserAccessToInstance(ev.sessionId)) {
+            set((state) => ({
+              calls: state.calls.map((c) =>
+                c.callId === ev.id
+                  ? { ...c, sessionId: ev.sessionId, status: ev.status, peer: ev.peer, startedAt: ev.startedAt }
+                  : c
+              ),
+            }));
+          }
         } else if (ev.type === "call-ended") {
           set((state) => {
             const conn = state.ownConnections.get(ev.id);
@@ -313,16 +321,18 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
             const next = new Map(state.ownConnections);
             next.delete(ev.id);
 
-            // Se for uma chamada encerrada, dispara evento no DOM para que o chat possa registrar no histórico de forma reativa
-            const domEvent = new CustomEvent("wacall:ended", {
-              detail: {
-                sessionId: ev.sessionId,
-                callId: ev.id,
-                reason: ev.reason,
-                endedAt: ev.endedAt
-              }
-            });
-            window.dispatchEvent(domEvent);
+            // Se for uma chamada encerrada, dispara evento no DOM apenas se o usuário tiver acesso a esta sessão
+            if (hasUserAccessToInstance(ev.sessionId)) {
+              const domEvent = new CustomEvent("wacall:ended", {
+                detail: {
+                  sessionId: ev.sessionId,
+                  callId: ev.id,
+                  reason: ev.reason,
+                  endedAt: ev.endedAt
+                }
+              });
+              window.dispatchEvent(domEvent);
+            }
 
             return {
               calls: state.calls.filter((c) => c.callId !== ev.id),
@@ -331,9 +341,14 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
             };
           });
         } else if (ev.type === "incoming") {
-          set({
-            incoming: { sessionId: ev.sessionId, callId: ev.id, peer: ev.peer, offeredAt: ev.offeredAt }
-          });
+          // RBAC / Permissões: Só notifica chamada recebida se o operador atual tiver acesso a esta instância/caixa
+          if (hasUserAccessToInstance(ev.sessionId)) {
+            set({
+              incoming: { sessionId: ev.sessionId, callId: ev.id, peer: ev.peer, offeredAt: ev.offeredAt }
+            });
+          } else {
+            console.log(`[useWaCallsStore/SSE] Chamada recebida para a caixa "${ev.sessionId}" ignorada pois o operador não tem acesso.`);
+          }
         } else if (ev.type === "incoming-claimed") {
           set((state) => (state.incoming?.callId === ev.id ? { incoming: null } : state));
         }
