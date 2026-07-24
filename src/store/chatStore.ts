@@ -4866,7 +4866,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                          updatedContact.isManuallyUnread = false;
                      }
                      
-                     if (!isIgnoredSilent) {
+                     if (!isIgnoredSilent && hasUserAccessToInstance(effectiveInstanceId)) {
                          if (effectiveInstanceId) {
                              supabase.from('whatsapp_instances').select('notification_sound').eq('id', effectiveInstanceId).single()
                                .then(({ data }) => {
