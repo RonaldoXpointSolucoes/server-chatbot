@@ -22,6 +22,9 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
     persistSession: false
   },
+  global: {
+    fetch: (url, options) => fetch(url, { ...options, keepalive: true })
+  },
   realtime: {
     transport: WebSocket
   }
@@ -44,7 +47,7 @@ export async function retryWithBackoff(fn, retries = 3, delay = 1000) {
       error.status >= 500;
         
     if (retries > 0 && isNetworkError) {
-      console.warn(`[Supabase/Network] Falha de rede/timeout (${error.message || error}). Retentando em ${delay}ms... (${retries} restantes)`);
+      console.info(`[Supabase/Network] Oscilação temporária de rede (${error.message || error}). Auto-recuperando em ${delay}ms... (${retries} retentativas)`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return retryWithBackoff(fn, retries - 1, delay * 2);
     }
