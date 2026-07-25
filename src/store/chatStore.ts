@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { supabase, ContactRow } from '../services/supabase';
 import { playNotificationSound } from '../utils/AudioEngine';
 import { useDevStore } from './devStore';
+import { shouldNotifyForEvent, NotificationEventType } from '../services/notificationPreferences';
+
 
 export type MessageType = {
   id: string;
@@ -4850,15 +4852,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
                  const isHistorical = (Date.now() - msgTimestamp) > (5 * 60000); // Mais de 5 minutos = histórico
                  const currentLastMsgTs = updatedContact.lastMsgTimestamp || 0;
                  
-                 // Garante que uma mensagem velha não sobrescreva o último lastMsgTimestamp caso existam msg mais novas
                  if (msgTimestamp > currentLastMsgTs) {
                      updatedContact.lastMsgTimestamp = msgTimestamp;
                  }
-                 
+
                  const isClient = (m.sender_type === 'client' || !m.sender_type);
                  
                  // Impede notificação/Unread em mensagens antigas de sincronismo de histórico
-                  if (isClient && !isHistorical && !updatedContact.is_blocked) {
+                 if (isClient && !isHistorical && !updatedContact.is_blocked) {
                      const isFocused = typeof document !== 'undefined' && document.hasFocus();
                      if (s.activeChatId !== cid || !isFocused) {
                          updatedContact.unread = (updatedContact.unread || 0) + 1;
@@ -4867,15 +4868,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      }
                      
                      if (!isIgnoredSilent && hasUserAccessToInstance(effectiveInstanceId)) {
-                         if (effectiveInstanceId) {
-                             supabase.from('whatsapp_instances').select('notification_sound').eq('id', effectiveInstanceId).single()
-                               .then(({ data }) => {
-                                   playNotificationSound(data?.notification_sound || 'default');
-                               }).catch(() => {
-                                   playNotificationSound('default');
-                               });
-                         } else {
-                             playNotificationSound('default');
+                         const curUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email') || '';
+                         const curUserId = localStorage.getItem('current_user_id') || sessionStorage.getItem('current_user_id') || curUserEmail;
+                         const isAssignedToMe = updatedContact.assigned_to ? updatedContact.assigned_to.split(',').some((id: string) => id.trim() === curUserId || id.trim() === curUserEmail) : false;
+                         const isMention = m.content && (m.content.includes('@') || (curUserId && m.content.includes(curUserId)));
+
+                         let evType: NotificationEventType = 'unassigned_message';
+                         if (isMention) {
+                             evType = 'mention';
+                         } else if (isAssignedToMe) {
+                             evType = 'new_message';
+                         }
+
+                         if (shouldNotifyForEvent(effectiveInstanceId, evType, 'sound')) {
+                             if (effectiveInstanceId) {
+                                 supabase.from('whatsapp_instances').select('notification_sound').eq('id', effectiveInstanceId).single()
+                                   .then(({ data }) => {
+                                       playNotificationSound(data?.notification_sound || 'default');
+                                   }).catch(() => {
+                                       playNotificationSound('default');
+                                   });
+                             } else {
+                                 playNotificationSound('default');
+                             }
                          }
                      }
                  }

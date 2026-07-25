@@ -2843,7 +2843,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                       }
                       return (
                         <span 
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-500/10 border border-slate-500/20 text-slate-650 dark:text-slate-400 select-none shadow-sm"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-500/10 border border-slate-500/20 text-slate-500 dark:text-slate-400 select-none shadow-sm"
                           title="Contato regular ou colaborador vinculado"
                         >
                           📞 Contato
@@ -2905,15 +2905,15 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
 
                 {/* Ficha Cadastral Wrapper */}
                 <div className="flex flex-col gap-2">
-                  <p className="text-[10px] uppercase tracking-wider font-extrabold text-slate-450 dark:text-slate-400 pl-1">Ficha Cadastral</p>
-                  <div className="flex flex-col gap-3.5 bg-slate-50/80 dark:bg-black/20 p-4.5 rounded-2xl border border-slate-100 dark:border-white/5">
+                  <p className="text-[10px] uppercase tracking-wider font-extrabold text-slate-555 dark:text-slate-400 pl-1">Ficha Cadastral</p>
+                  <div className="flex flex-col gap-4 bg-slate-50/80 dark:bg-black/20 p-5 rounded-2xl border border-slate-100 dark:border-white/5">
                     
                     {/* CNPJ / CPF Section */}
                     {contact.document_type === 'cnpj' ? (
                       <>
-                        <div className="flex items-center justify-between group">
-                          <div className="flex items-center gap-3.5 w-full">
-                            <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-450 shrink-0">
+                        <div className="flex items-start justify-between group">
+                          <div className="flex items-start gap-3.5 w-full">
+                            <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-500 shrink-0 mt-0.5">
                               <FileText size={16} />
                             </div>
                             {editingCnpj ? (
@@ -2935,7 +2935,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                 </button>
                                 <button 
                                   onClick={() => { setEditingCnpj(false); setCnpjInput(contact.document_number || ''); }} 
-                                  className="p-1.5 rounded bg-slate-200 dark:bg-white/5 hover:bg-slate-300 dark:hover:bg-white/10 text-gray-555 transition-colors"
+                                  className="p-1.5 rounded bg-slate-200 dark:bg-white/5 hover:bg-slate-300 dark:hover:bg-white/10 text-gray-500 transition-colors"
                                 >
                                   <X size={12} />
                                 </button>
@@ -2952,7 +2952,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                     <Pencil size={11} />
                                   </button>
                                 </div>
-                                <span className="text-xs font-mono font-semibold text-[#111b21] dark:text-[#e9edef] truncate mt-0.5">
+                                <span className="text-xs font-mono font-semibold text-[#111b21] dark:text-[#e9edef] mt-0.5">
                                   {contact.document_number ? formatDocument(contact.document_number) : 'Não informado'}
                                 </span>
                               </div>
@@ -2969,9 +2969,9 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                       </>
                     ) : (
                       <>
-                        <div className="flex items-center justify-between group">
-                          <div className="flex items-center gap-3.5 w-full">
-                            <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-450 shrink-0">
+                        <div className="flex items-start justify-between group">
+                          <div className="flex items-start gap-3.5 w-full">
+                            <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-500 shrink-0 mt-0.5">
                               <Building size={16} />
                             </div>
                             {editingCnpj ? (
@@ -2998,7 +2998,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                           setSearchCompanyQuery('');
                                           setSelectedCompanyId('');
                                         }}
-                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-655 dark:hover:text-slate-200 p-0.5 rounded-full"
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-500 dark:hover:text-slate-200 p-0.5 rounded-full"
                                         title="Limpar seleção"
                                       >
                                         <X size={11} />
@@ -3043,7 +3043,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                                 )}
                                               </div>
                                               {c.document_number && (
-                                                <span className="shrink-0 font-mono text-[9px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/5 border border-slate-250/50 dark:border-white/5 px-1.5 py-0.5 rounded-md">
+                                                <span className="shrink-0 font-mono text-[9px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/5 px-1.5 py-0.5 rounded-md">
                                                   {formatDocument(c.document_number)}
                                                 </span>
                                               )}
@@ -3097,7 +3097,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                             ) : (
                               <div className="flex flex-col w-full min-w-0">
                                 <div className="flex items-center justify-between">
-                                  <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Empresa / Grupo</span>
+                                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 dark:text-slate-400">Empresa / Grupo</span>
                                   <button 
                                     onClick={() => { setEditingCnpj(true); setSelectedCompanyId(''); setSelectedGroupId(''); }}
                                     className="p-1 text-slate-400 hover:text-emerald-500 transition-colors rounded hover:bg-black/5 dark:hover:bg-white/5"
@@ -3107,7 +3107,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                   </button>
                                 </div>
                                 
-                                <div className="flex flex-col gap-1 mt-1">
+                                <div className="flex flex-col gap-1.5 mt-1.5">
                                   {/* List of associated companies */}
                                   {(() => {
                                     const linked = (contact.company_ids || [])
@@ -3115,9 +3115,9 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                       .filter(Boolean);
                                     
                                     return linked.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1 mt-0.5">
+                                      <div className="flex flex-wrap gap-1.5">
                                         {linked.map((comp: any) => (
-                                          <span key={comp.id} className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-650 dark:text-emerald-400 pl-2 pr-1 py-0.5 rounded-full text-[10px] font-bold shadow-sm">
+                                          <span key={comp.id} className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 pl-2.5 pr-1 py-0.5 rounded-full text-[10px] font-bold shadow-sm">
                                             <Building2 size={9} className="shrink-0" />
                                             <span className="truncate max-w-[120px]">{comp.fantasy_name || comp.name}</span>
                                             <button
@@ -3125,7 +3125,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                                 e.stopPropagation();
                                                 handleRemoveCompanyAssociation(comp.id);
                                               }}
-                                              className="p-0.5 hover:bg-emerald-500/20 rounded text-emerald-655 dark:text-emerald-400 shrink-0"
+                                              className="p-0.5 hover:bg-emerald-500/20 rounded text-emerald-600 dark:text-emerald-400 shrink-0"
                                               title="Desvincular"
                                             >
                                               <X size={9} strokeWidth={2.5} />
@@ -3146,7 +3146,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                     return linkedGroups.length > 0 ? (
                                       <div className="flex flex-wrap gap-1 mt-1">
                                         {linkedGroups.map((g: any) => (
-                                          <span key={g.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-white shadow-sm" style={{ backgroundColor: g.color || '#3b82f6' }}>
+                                          <span key={g.id} className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-white shadow-sm" style={{ backgroundColor: g.color || '#3b82f6' }}>
                                             <Building size={9} className="shrink-0" />
                                             <span className="truncate max-w-[120px]">{g.name}</span>
                                             <button
@@ -3175,9 +3175,9 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                     )}
 
                     {/* Celular Section */}
-                    <div className="flex items-center justify-between group">
-                      <div className="flex items-center gap-3.5">
-                        <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-455">
+                    <div className="flex items-start justify-between group">
+                      <div className="flex items-start gap-3.5">
+                        <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-500 shrink-0 mt-0.5">
                           <Phone size={16} />
                         </div>
                         <div className="flex flex-col">
@@ -3200,7 +3200,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                 <div className="pt-3 border-t border-slate-100 dark:border-white/5 flex flex-col gap-2.5 mt-auto">
                   <button 
                     onClick={() => window.open(`https://mensalidadedatadivas.vercel.app/?e=${rawCnpj || ''}`, '_blank')}
-                    className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-655 active:scale-[0.98] text-white rounded-2xl font-bold shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/20 transition-all duration-200 group cursor-pointer"
+                    className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-[#00a884] hover:bg-emerald-600 active:scale-[0.98] text-white rounded-2xl font-bold shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/20 transition-all duration-200 group cursor-pointer"
                   >
                     <CircleDollarSign size={16} className="group-hover:rotate-12 transition-transform" />
                     <span>Ver Faturamento (NF-e)</span>
@@ -3230,13 +3230,13 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                 
                 {/* Group Companies */}
                 {matchingGroups.length > 0 && groupCompanies.length > 0 && (
-                  <div className="flex flex-col animate-in fade-in duration-500 bg-gradient-to-br from-indigo-500/5 to-purple-500/5 dark:from-indigo-500/10 dark:to-purple-500/10 border border-indigo-500/15 rounded-3xl p-4 shadow-sm">
+                  <div className="flex flex-col gap-2.5 animate-in fade-in duration-500 bg-gradient-to-br from-indigo-500/5 to-purple-500/5 dark:from-indigo-500/10 dark:to-purple-500/10 border border-indigo-500/15 rounded-3xl p-4 shadow-sm">
                     <div className="flex items-center gap-2.5 mb-3">
                       <div className="p-2 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-xl text-white shadow-sm shrink-0">
                         <Building2 size={15} />
                       </div>
                       <div className="flex flex-col min-w-0">
-                        <span className="text-[10px] uppercase font-black tracking-wider text-indigo-650 dark:text-indigo-400">
+                        <span className="text-[10px] uppercase font-black tracking-wider text-indigo-600 dark:text-indigo-400">
                           Grupo Empresarial
                         </span>
                         <span className="text-[11px] font-extrabold text-slate-800 dark:text-slate-200 mt-0.5 truncate">
@@ -3274,14 +3274,14 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                           </span>
 
                           {c.document_number && (
-                            <div className="mt-2 pt-2 border-t border-slate-100 dark:border-white/5">
+                            <div className="mt-2.5 pt-2.5 border-t border-slate-100 dark:border-white/5">
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const cleanCnpj = c.document_number.replace(/\D/g, '');
                                   window.open(`https://mensalidadedatadivas.vercel.app/?e=${cleanCnpj}`, '_blank');
                                 }}
-                                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-[0.98] text-emerald-600 dark:text-emerald-450 rounded-xl font-bold text-[10px] transition-all duration-200"
+                                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-[0.98] text-emerald-600 dark:text-emerald-500 rounded-xl font-bold text-[10px] transition-all duration-200"
                               >
                                 <CircleDollarSign size={12} />
                                 <span>Ver Faturamento</span>
@@ -3299,7 +3299,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                 {instanceTicketMode && (
                   <div className="flex flex-col gap-3 bg-gradient-to-br from-teal-500/[0.03] to-emerald-500/[0.03] dark:from-emerald-500/[0.03] dark:to-emerald-500/[0.02] border border-emerald-500/10 rounded-3xl p-4 shadow-sm">
                     <div className="flex items-center gap-2.5">
-                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-450 shrink-0 animate-pulse">
+                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-500 shrink-0 animate-pulse">
                         <CalendarClock size={15} />
                       </div>
                       <div className="flex flex-col min-w-0">
@@ -3314,7 +3314,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                       {!activeTicket && (
                         <button
                           onClick={() => openTicketForContact(contact.id)}
-                          className="ml-auto flex items-center gap-1 py-1.5 px-3 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white rounded-xl text-[10px] font-bold transition-all shadow-sm shadow-emerald-500/10"
+                          className="ml-auto flex items-center gap-1 py-1.5 px-3 bg-[#00a884] hover:bg-emerald-600 active:scale-95 text-white rounded-xl text-[10px] font-bold transition-all shadow-sm shadow-emerald-500/10"
                         >
                           <Plus size={11} />
                           <span>Novo Ticket</span>
@@ -3334,7 +3334,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                               Início: {new Date(activeTicket.opened_at).toLocaleString('pt-BR')}
                             </span>
                           </div>
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider bg-emerald-500/15 text-emerald-655 dark:text-emerald-400 uppercase select-none">
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 uppercase select-none">
                             Em Andamento
                           </span>
                         </div>
@@ -3359,7 +3359,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                   setIsSavingDesc(false);
                                 }}
                                 disabled={isSavingDesc}
-                                className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-all shadow-md shadow-emerald-500/10 shrink-0"
+                                className="p-2 bg-[#00a884] hover:bg-emerald-600 text-white rounded-xl transition-all shadow-md shadow-emerald-500/10 shrink-0"
                                 title="Salvar"
                               >
                                 {isSavingDesc ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
@@ -3373,7 +3373,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                           <span className="text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
                             Resumo Parcial das Mensagens:
                           </span>
-                          <div className="flex items-center justify-between text-xs font-semibold text-slate-650 dark:text-gray-300">
+                          <div className="flex items-center justify-between text-xs font-semibold text-[#111b21] dark:text-gray-300">
                             <span>Total de Mensagens:</span>
                             <span className="font-bold text-slate-800 dark:text-white bg-slate-100 dark:bg-white/5 px-2 py-0.5 rounded-md font-mono">{activeTicketStats.total_messages}</span>
                           </div>
@@ -3385,9 +3385,9 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                               </span>
                               {activeTicketStats.operators.map(op => (
                                 <div key={op.name} className="flex flex-col gap-1">
-                                  <div className="flex justify-between text-[10px] font-semibold text-slate-600 dark:text-gray-300">
+                                  <div className="flex justify-between text-[10px] font-semibold text-slate-650 dark:text-gray-300">
                                     <span>{op.name}</span>
-                                    <span className="font-bold font-mono">{op.percentage}% ({op.count} msgs)</span>
+                                    <span className="font-bold font-mono text-[10px]">{op.percentage}% ({op.count} msgs)</span>
                                   </div>
                                   <div className="h-1.5 w-full bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
                                     <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${op.percentage}%` }}></div>
@@ -3396,13 +3396,13 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                               ))}
                             </div>
                           ) : (
-                            <span className="text-[10px] text-slate-405 dark:text-slate-500 italic mt-0.5">Nenhuma mensagem dos atendentes registrada.</span>
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 italic mt-0.5">Nenhuma mensagem dos atendentes registrada.</span>
                           )}
                         </div>
                       </div>
                     ) : (
                       <div className="text-center py-5 bg-black/[0.01] dark:bg-white/[0.01] border border-dashed border-slate-200 dark:border-white/10 rounded-2xl">
-                        <span className="text-xs text-slate-400 dark:text-slate-550 italic">Não há ticket aberto para este cliente.</span>
+                        <span className="text-xs text-slate-400 dark:text-slate-500 italic">Não há ticket aberto para este cliente.</span>
                       </div>
                     )}
 
@@ -3432,7 +3432,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                 <div key={t.id} className="flex flex-col p-3.5 rounded-2xl bg-white dark:bg-black/20 border border-slate-100 dark:border-white/5 text-[11px] gap-2.5 shadow-sm">
                                   <div className="flex justify-between items-center border-b border-slate-100 dark:border-white/5 pb-2">
                                     <span className="font-bold text-slate-800 dark:text-white">Ticket #{t.id}</span>
-                                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-[9px] font-black text-emerald-655 dark:text-emerald-400 uppercase select-none">
+                                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase select-none">
                                       Resolvido
                                     </span>
                                   </div>
@@ -3453,27 +3453,27 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                   {t.problem_description && (
                                     <div className="bg-slate-50/60 dark:bg-black/10 p-2.5 rounded-xl border border-slate-100 dark:border-white/5">
                                       <span className="font-extrabold uppercase text-[9px] text-slate-400 block mb-0.5">Descrição:</span>
-                                      <p className="text-slate-700 dark:text-slate-300 leading-normal font-medium whitespace-pre-wrap">{t.problem_description}</p>
+                                      <p className="text-[#111b21] dark:text-slate-350 leading-normal font-medium whitespace-pre-wrap">{t.problem_description}</p>
                                     </div>
                                   )}
 
                                   {t.metadata?.summary && (
                                     <div className="bg-blue-500/5 p-2.5 rounded-xl border border-blue-500/10">
-                                      <span className="font-extrabold uppercase text-[9px] text-blue-600 dark:text-blue-450 block mb-0.5">Resumo IA:</span>
-                                      <p className="text-slate-700 dark:text-slate-300 leading-normal font-medium whitespace-pre-wrap">{t.metadata.summary}</p>
+                                      <span className="font-extrabold uppercase text-[9px] text-blue-600 dark:text-blue-400 block mb-0.5">Resumo IA:</span>
+                                      <p className="text-[#111b21] dark:text-slate-350 leading-normal font-medium whitespace-pre-wrap">{t.metadata.summary}</p>
                                     </div>
                                   )}
 
                                   {t.resolution_summary && (
                                     <div className="bg-emerald-500/5 p-2.5 rounded-xl border border-emerald-500/10">
-                                      <span className="font-extrabold uppercase text-[9px] text-emerald-600 dark:text-emerald-455 block mb-0.5">Resolução:</span>
-                                      <p className="text-slate-805 dark:text-slate-200 leading-normal font-semibold whitespace-pre-wrap">{t.resolution_summary}</p>
+                                      <span className="font-extrabold uppercase text-[9px] text-emerald-600 dark:text-emerald-450 block mb-0.5">Resolução:</span>
+                                      <p className="text-[#111b21] dark:text-slate-350 leading-normal font-semibold whitespace-pre-wrap">{t.resolution_summary}</p>
                                     </div>
                                   )}
 
                                   {t.metadata?.total_messages !== undefined && (
                                     <div className="pt-2 border-t border-slate-100 dark:border-white/5 flex flex-col gap-1.5 text-[10px]">
-                                      <div className="flex justify-between font-semibold text-slate-650 dark:text-slate-400">
+                                      <div className="flex justify-between font-semibold text-slate-600 dark:text-slate-400">
                                         <span>Total de Mensagens:</span>
                                         <span className="font-bold text-slate-800 dark:text-white font-mono">{t.metadata.total_messages}</span>
                                       </div>

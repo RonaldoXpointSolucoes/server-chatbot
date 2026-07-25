@@ -161,14 +161,22 @@ self.addEventListener('push', (event) => {
       }
     }
 
-    // --- Filtro RBAC (Role-Based Access Control) via IndexedDB ---
-    // Impede que atendentes vejam notificações de instâncias às quais não têm acesso (mesmo em background).
+    // Filtro RBAC e Preferências por Caixa de Entrada
     const instanceId = data.data?.instanceId;
     const userConfig = await getConfigFromDB();
     
     if (userConfig && userConfig.isLoggedIn === false) {
         console.log('[SW] Push abortado (Background): Usuário deslogado na aplicação.');
         return; // Cancela a exibição
+    }
+
+    // Se as notificações desta caixa especificamente foram silenciadas pelo usuário
+    if (instanceId && (userConfig as any)?.notifPrefs && (userConfig as any).notifPrefs[instanceId]) {
+        const pref = (userConfig as any).notifPrefs[instanceId];
+        if (pref.is_enabled === false) {
+            console.log(`[SW] Push abortado (Background): Caixa ${instanceId} silenciada pelo usuário.`);
+            return; // Cancela a exibição
+        }
     }
 
     const role = userConfig?.role?.toLowerCase() || '';

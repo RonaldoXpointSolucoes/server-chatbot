@@ -105,9 +105,15 @@ export function usePushNotifications() {
                 try { allowedInstances = JSON.parse(allowedStr); } catch (e) {}
             }
 
+            const notifPrefsStr = localStorage.getItem('user_inbox_notif_prefs_v1') || sessionStorage.getItem('user_inbox_notif_prefs_v1');
+            let notifPrefs = {};
+            if (notifPrefsStr) {
+                try { notifPrefs = JSON.parse(notifPrefsStr); } catch (e) {}
+            }
+
             navigator.serviceWorker.controller.postMessage({
                 type: 'SYNC_USER_CONFIG',
-                config: { role, allowedInstances, isLoggedIn }
+                config: { role, allowedInstances, isLoggedIn, notifPrefs }
             });
           }
         };

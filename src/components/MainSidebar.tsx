@@ -42,12 +42,16 @@ import {
   X,
   QrCode,
   ClipboardList,
-  Target
+  Target,
+  Bell,
+  BellOff
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 import { createPortal } from 'react-dom';
+import { getLocalNotificationPrefs, fetchUserInboxNotificationPreferences, toggleInboxNotification } from '../services/notificationPreferences';
+
 import { formatPhoneNumber } from '../utils/format';
 import KanbanBoardCreator from './KanbanBoardCreator';
 
@@ -193,6 +197,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const tenantInfo = useChatStore(state => state.tenantInfo);
   const tenantIdFromStore = tenantInfo?.id;
   const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+  const currentUserId = (localStorage.getItem('current_user_id') || sessionStorage.getItem('current_user_id') || currentUserEmail || '') as string;
+  const [notifPrefs, setNotifPrefs] = useState<Record<string, any>>(getLocalNotificationPrefs());
   const [instances, setInstances] = useState<any[]>([]);
 
   useEffect(() => {
@@ -202,8 +208,14 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   useEffect(() => {
     if (tenantId) {
       useChatStore.getState().fetchCrmBoards();
+      if (currentUserId) {
+        fetchUserInboxNotificationPreferences(tenantId, currentUserId).then(map => {
+          setNotifPrefs(map);
+        });
+      }
     }
-  }, [tenantId]);
+  }, [tenantId, currentUserId]);
+
 
   useEffect(() => {
     if (!tenantId) return;
@@ -757,17 +769,24 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                              }
                            }}
                         />
-                        {unreadCount > 0 && (
-                          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none animate-in zoom-in duration-300">
-                            <span 
-                              className="text-white text-[9px] font-bold min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full shadow-sm border border-white/20"
-                              style={{ 
-                                background: inst.color ? `linear-gradient(135deg, ${inst.color}ee 0%, ${inst.color} 100%)` : 'linear-gradient(135deg, #00a884ee 0%, #00a884 100%)',
-                                textShadow: '0 1px 2px rgba(0,0,0,0.4)'
-                              }}
-                            >
-                              {unreadCount > 99 ? '99+' : unreadCount}
-                            </span>
+                        {(unreadCount > 0 || notifPrefs[inst.id]?.is_enabled === false) && (
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none animate-in zoom-in duration-300">
+                            {notifPrefs[inst.id]?.is_enabled === false && (
+                              <span className="text-red-400 bg-red-500/10 border border-red-500/20 p-0.5 rounded" title="Notificações desta caixa silenciadas">
+                                <BellOff size={11} />
+                              </span>
+                            )}
+                            {unreadCount > 0 && (
+                              <span 
+                                className="text-white text-[9px] font-bold min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full shadow-sm border border-white/20"
+                                style={{ 
+                                  background: inst.color ? `linear-gradient(135deg, ${inst.color}ee 0%, ${inst.color} 100%)` : 'linear-gradient(135deg, #00a884ee 0%, #00a884 100%)',
+                                  textShadow: '0 1px 2px rgba(0,0,0,0.4)'
+                                }}
+                              >
+                                {unreadCount > 99 ? '99+' : unreadCount}
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1112,6 +1131,40 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
             </div>
             <button 
               className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2"
+              onClick={async (e) => {
+                 e.stopPropagation();
+                 const instId = instanceContextMenu.id;
+                 const isEnabled = notifPrefs[instId]?.is_enabled !== false;
+                 const updated = await toggleInboxNotification(tenantId, currentUserId, instId, !isEnabled);
+                 setNotifPrefs(prev => ({ ...prev, [instId]: updated }));
+                 setInstanceContextMenu(null);
+              }}
+            >
+              {notifPrefs[instanceContextMenu.id]?.is_enabled !== false ? (
+                <>
+                  <BellOff size={14} className="text-red-400" />
+                  <span>Silenciar Notificações</span>
+                </>
+              ) : (
+                <>
+                  <Bell size={14} className="text-emerald-400" />
+                  <span>Ativar Notificações</span>
+                </>
+              )}
+            </button>
+            <button 
+              className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2"
+              onClick={(e) => {
+                 e.stopPropagation();
+                 navigate(`/instances/${instanceContextMenu.id}/settings`);
+                 setInstanceContextMenu(null);
+              }}
+            >
+              <Settings size={14} />
+              Configurar Notificações
+            </button>
+            <button 
+              className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2 border-t border-[#2a3942] mt-1 pt-2"
               onClick={(e) => {
                  e.stopPropagation();
                  useChatStore.getState().openQRModal(instanceContextMenu.id);

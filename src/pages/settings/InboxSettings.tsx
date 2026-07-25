@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
-import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X, QrCode, RefreshCcw, LogOut, CheckCircle, Sparkles } from 'lucide-react';
+import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X, QrCode, RefreshCcw, LogOut, CheckCircle, Sparkles, Bell, BellOff, Volume2, VolumeX, Smartphone, PhoneCall, AtSign, Ticket, CheckCircle2 } from 'lucide-react';
 import { NOTIFICATION_SOUNDS, playNotificationSound } from '../../utils/AudioEngine';
+import { fetchUserInboxNotificationPreferences, toggleInboxNotification, updateInboxEventTypePreference, NotificationEventType, UserInboxNotificationPreference } from '../../services/notificationPreferences';
 interface InstanceData {
   id: string;
   display_name: string;
@@ -53,6 +54,10 @@ export default function InboxSettings() {
   const [botInstructions, setBotInstructions] = useState('');
   const [previousSettings, setPreviousSettings] = useState<any>(null);
   const [toast, setToast] = useState<{ message: string; isSuccess: boolean; showUndo?: boolean } | null>(null);
+  const [notifPref, setNotifPref] = useState<UserInboxNotificationPreference | null>(null);
+
+  const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email') || '';
+  const currentUserId = localStorage.getItem('current_user_id') || sessionStorage.getItem('current_user_id') || currentUserEmail;
 
   const INSTANCE_COLORS = [
     { value: '#10b981', label: 'Esmeralda' },
@@ -107,6 +112,34 @@ export default function InboxSettings() {
           setBotTestNumbers(data.settings?.bot_test_numbers || '');
           setBotDelay(data.settings?.bot_delay ?? 5);
           setBotInstructions(data.settings?.bot_instructions || '');
+
+          if (tenantId) {
+            fetchUserInboxNotificationPreferences(tenantId, currentUserId).then(map => {
+              if (map[data.id]) {
+                setNotifPref(map[data.id]);
+              } else {
+                setNotifPref({
+                  tenant_id: tenantId,
+                  user_id: currentUserId,
+                  instance_id: data.id,
+                  is_enabled: true,
+                  event_types: {
+                    new_message: true,
+                    unassigned_message: true,
+                    new_ticket: true,
+                    ticket_assigned: true,
+                    incoming_call: true,
+                    mention: true
+                  },
+                  channels: {
+                    sound_enabled: true,
+                    push_enabled: true,
+                    sound_id: data.notification_sound || 'default'
+                  }
+                });
+              }
+            });
+          }
         }
       } catch (err) {
         console.error('Falha ao buscar instância:', err);
@@ -116,7 +149,21 @@ export default function InboxSettings() {
     };
     
     fetchInstance();
-  }, [id, tenantId]);
+  }, [id, tenantId, currentUserId]);
+
+  const handleToggleMasterNotification = async (enabled: boolean) => {
+    if (!id || !tenantId) return;
+    const updated = await toggleInboxNotification(tenantId, currentUserId, id, enabled);
+    setNotifPref(updated);
+    showToast(enabled ? 'Notificações da caixa ativadas com sucesso!' : 'Notificações da caixa silenciadas!', true, false);
+  };
+
+  const handleToggleEventType = async (eventType: NotificationEventType, enabled: boolean) => {
+    if (!id || !tenantId) return;
+    const updated = await updateInboxEventTypePreference(tenantId, currentUserId, id, eventType, enabled);
+    setNotifPref(updated);
+  };
+
 
   const handleSaveSettings = async () => {
     if (!instance) return;
@@ -325,6 +372,7 @@ export default function InboxSettings() {
 
   const tabs = [
     { id: 'settings', label: 'Configurações' },
+    { id: 'notifications', label: 'Notificações' },
     { id: 'agents', label: 'Usuários' },
     { id: 'hours', label: 'Horário de funcionamento' },
     { id: 'csat', label: 'CSAT' },
@@ -362,6 +410,133 @@ export default function InboxSettings() {
           {/* ACTIVE TAB CONTENT */}
           <div className="flex flex-col gap-10 mt-6 pb-20 animate-in fade-in duration-300">
              
+              {/* NOTIFICATIONS TAB */}
+              {activeTab === 'notifications' && (
+                 <div className="flex flex-col gap-6 max-w-3xl animate-in fade-in duration-300">
+                    
+                    {/* Master Switch Box */}
+                    <div className="bg-[#182229] border border-white/10 rounded-2xl p-6 flex items-center justify-between shadow-lg">
+                       <div className="flex items-center gap-4">
+                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${notifPref?.is_enabled !== false ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border border-red-500/20 text-red-400'}`}>
+                             {notifPref?.is_enabled !== false ? <Bell size={24} /> : <BellOff size={24} />}
+                          </div>
+                          <div className="flex flex-col">
+                             <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                Notificações desta Caixa de Entrada
+                                {notifPref?.is_enabled !== false ? (
+                                   <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Ativadas</span>
+                                ) : (
+                                   <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30">Silenciadas</span>
+                                )}
+                             </h3>
+                             <p className="text-xs text-gray-400 mt-1">
+                                Ative ou desative todos os alertas e sons para esta caixa de entrada especificamente no seu perfil.
+                             </p>
+                          </div>
+                       </div>
+                       
+                       <button
+                          onClick={() => handleToggleMasterNotification(notifPref?.is_enabled === false)}
+                          className="focus:outline-none transition-transform active:scale-95"
+                       >
+                          {notifPref?.is_enabled !== false ? (
+                             <ToggleRight size={44} className="text-emerald-500 drop-shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
+                          ) : (
+                             <ToggleLeft size={44} className="text-gray-500" />
+                          )}
+                       </button>
+                    </div>
+
+                    {/* Channels & Sound */}
+                    <div className="bg-[#182229] border border-white/10 rounded-2xl p-6 flex flex-col gap-5 shadow-lg">
+                       <h4 className="text-sm font-bold text-gray-200 uppercase tracking-wider flex items-center gap-2">
+                          <Volume2 size={16} className="text-blue-400" /> Canais & Alertas Sonoros
+                       </h4>
+
+                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="bg-[#111b21] border border-white/5 rounded-xl p-4 flex items-center justify-between">
+                             <div className="flex items-center gap-3">
+                                <Volume2 size={18} className="text-emerald-400" />
+                                <div className="flex flex-col">
+                                   <span className="text-sm font-semibold text-white">Efeito Sonoro in-app</span>
+                                   <span className="text-[11px] text-gray-400">Toca áudio em novas mensagens/alertas</span>
+                                </div>
+                             </div>
+                             <button
+                                onClick={() => playNotificationSound(notificationSound || 'default')}
+                                className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded-lg border border-emerald-500/20 transition-all flex items-center gap-1.5"
+                                title="Ouvir som de notificação"
+                             >
+                                <Volume2 size={12} /> Testar
+                             </button>
+                          </div>
+
+                          <div className="bg-[#111b21] border border-white/5 rounded-xl p-4 flex items-center justify-between">
+                             <div className="flex items-center gap-3">
+                                <Smartphone size={18} className="text-blue-400" />
+                                <div className="flex flex-col">
+                                   <span className="text-sm font-semibold text-white">Notificações Web Push (PWA)</span>
+                                   <span className="text-[11px] text-gray-400">Alertas de área de trabalho e mobile</span>
+                                </div>
+                             </div>
+                             <CheckCircle2 size={18} className="text-emerald-500" />
+                          </div>
+                       </div>
+                    </div>
+
+                    {/* Notification Event Types Matrix */}
+                    <div className="bg-[#182229] border border-white/10 rounded-2xl p-6 flex flex-col gap-4 shadow-lg">
+                       <div className="flex flex-col gap-1">
+                          <h4 className="text-sm font-bold text-gray-200 uppercase tracking-wider flex items-center gap-2">
+                             <Sparkles size={16} className="text-purple-400" /> Eventos Notificáveis nesta Caixa
+                          </h4>
+                          <p className="text-xs text-gray-400">
+                             Marque os eventos específicos que devem gerar alertas visuais e sonoros para o seu usuário.
+                          </p>
+                       </div>
+
+                       <div className="grid grid-cols-1 gap-3 mt-2">
+                          {[
+                             { id: 'new_message', label: 'Mensagens Diretas', desc: 'Nova mensagem recebida em conversas atribuídas a você', icon: MessageSquare, color: 'text-blue-400' },
+                             { id: 'unassigned_message', label: 'Mensagens da Fila da Caixa', desc: 'Nova mensagem em conversa não atribuída (na fila desta caixa)', icon: MessageSquare, color: 'text-indigo-400' },
+                             { id: 'new_ticket', label: 'Novo Ticket Aberto', desc: 'Quando um novo ticket de atendimento for iniciado nesta caixa', icon: Ticket, color: 'text-emerald-400' },
+                             { id: 'ticket_assigned', label: 'Atribuição de Ticket', desc: 'Quando um atendimento for transferido ou atribuído a você', icon: Ticket, color: 'text-amber-400' },
+                             { id: 'incoming_call', label: 'Chamadas de Voz (VoIP)', desc: 'Recebimento de chamadas telefônicas via WaCalls nesta caixa', icon: PhoneCall, color: 'text-rose-400' },
+                             { id: 'mention', label: 'Menções da Equipe (@você)', desc: 'Quando outro membro da equipe marcar o seu nome', icon: AtSign, color: 'text-purple-400' },
+                          ].map(item => {
+                             const isChecked = notifPref?.event_types ? notifPref.event_types[item.id as NotificationEventType] !== false : true;
+                             const IconComp = item.icon;
+                             return (
+                                <div key={item.id} className="bg-[#111b21] border border-white/5 rounded-xl p-4 flex items-center justify-between hover:border-white/10 transition-colors">
+                                   <div className="flex items-center gap-3.5">
+                                      <div className="p-2.5 rounded-xl bg-white/5">
+                                         <IconComp size={18} className={item.color} />
+                                      </div>
+                                      <div className="flex flex-col">
+                                         <span className="text-sm font-semibold text-white">{item.label}</span>
+                                         <span className="text-xs text-gray-400">{item.desc}</span>
+                                      </div>
+                                   </div>
+
+                                   <button
+                                      onClick={() => handleToggleEventType(item.id as NotificationEventType, !isChecked)}
+                                      className="focus:outline-none transition-transform active:scale-95"
+                                   >
+                                      {isChecked ? (
+                                         <ToggleRight size={32} className="text-emerald-500" />
+                                      ) : (
+                                         <ToggleLeft size={32} className="text-gray-500" />
+                                      )}
+                                   </button>
+                                </div>
+                             );
+                          })}
+                       </div>
+                    </div>
+
+                 </div>
+              )}
+
              {/* SETTINGS TAB */}
              {activeTab === 'settings' && (
                 <>

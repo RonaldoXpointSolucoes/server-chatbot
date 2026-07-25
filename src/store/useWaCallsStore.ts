@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { openCall, OpenCall } from "../lib/webrtc";
 import { hasUserAccessToInstance } from "./chatStore";
+import { shouldNotifyForEvent } from "../services/notificationPreferences";
+
 
 const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -341,10 +343,15 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
             };
           });
         } else if (ev.type === "incoming") {
-          // RBAC / Permissões: Só notifica chamada recebida se o operador atual tiver acesso a esta instância/caixa
-          if (hasUserAccessToInstance(ev.sessionId)) {
+          // RBAC & Preferências: Só notifica chamada recebida se o operador tiver acesso e a notificação de chamada estiver ativada
+          if (hasUserAccessToInstance(ev.sessionId) && shouldNotifyForEvent(ev.sessionId, 'incoming_call', 'sound')) {
             set({
-              incoming: { sessionId: ev.sessionId, callId: ev.id, peer: ev.peer, offeredAt: ev.offeredAt }
+              incoming: {
+                sessionId: ev.sessionId,
+                callId: ev.callId,
+                peer: ev.peer,
+                offeredAt: ev.offeredAt,
+              },
             });
           } else {
             console.log(`[useWaCallsStore/SSE] Chamada recebida para a caixa "${ev.sessionId}" ignorada pois o operador não tem acesso.`);
