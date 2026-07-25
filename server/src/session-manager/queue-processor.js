@@ -168,10 +168,23 @@ class QueueProcessor {
                                         queryJid = `${mappedPhone}@s.whatsapp.net`;
                                     }
                                 }
-                                console.log(`[QueueProcessor] Token de segurança não encontrado para ${targetJid}. Sincronizando via onWhatsApp utilizando o JID de telefone ${queryJid}...`);
-                                await sock.onWhatsApp(queryJid);
-                                // Pequeno delay de 2 segundos para garantir o handshake E2E e a persistência dos tokens na RAM
-                                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                                const cleanPhone = queryJid.split('@')[0];
+                                const { data: contactExists } = await supabase
+                                    .from('contacts')
+                                    .select('id')
+                                    .eq('tenant_id', tenantId)
+                                    .eq('phone', cleanPhone)
+                                    .maybeSingle();
+
+                                if (!contactExists) {
+                                    console.log(`[QueueProcessor] Token de segurança não encontrado e contato novo para ${targetJid}. Sincronizando via onWhatsApp utilizando o JID de telefone ${queryJid}...`);
+                                    await sock.onWhatsApp(queryJid);
+                                    // Pequeno delay de 300ms para garantir o handshake E2E e a persistência dos tokens na RAM
+                                    await new Promise(resolve => setTimeout(resolve, 300));
+                                } else {
+                                    console.log(`[QueueProcessor] Token não encontrado no cache para ${targetJid}, mas contato já cadastrado. Enviando diretamente.`);
+                                }
                             }
                         }
                     } catch (err) {

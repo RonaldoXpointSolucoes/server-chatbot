@@ -16,8 +16,8 @@ class EventProcessor {
         this.messageQueue = [];
         this.isFlushing = false;
         
-        // Loop de processamento em lote a cada 2 segundos.
-        setInterval(() => this.flushQueue(), 2000);
+        // Loop de processamento em lote a cada 500ms.
+        setInterval(() => this.flushQueue(), 500);
         
         this.tenantConfigs = new Map();
         this.instanceConfigs = new Map();
@@ -29,8 +29,8 @@ class EventProcessor {
         this.aiSendRateLimiter = new Map(); // Rastreio de taxa de disparos automáticos por conversa para anti-spam
         this.isFlushingStatus = false;
         
-        // Loop de reconciliation assíncrono para status (a cada 4s)
-        setInterval(() => this.flushStatusQueue(), 4000);
+        // Loop de reconciliation assíncrono para status (a cada 1s)
+        setInterval(() => this.flushStatusQueue(), 1000);
         
         // Cleanup loop para evitar memory leaks nos status pendentes e cache de mensagens processadas
         setInterval(() => {
@@ -775,9 +775,11 @@ class EventProcessor {
                  // Busca IDs já existentes para evitar código 23505 (Unique Violation)
                  for(let i = 0; i < allMessageIds.length; i += 500) {
                      const chunk = allMessageIds.slice(i, i + 500);
-                     const { data: existingMessages } = await supabase.from('messages')
-                         .select('whatsapp_message_id, instance_id')
-                         .in('whatsapp_message_id', chunk);
+                      const uniqueTenantIds = Array.from(new Set(batch.map(b => b.tenantId).filter(Boolean)));
+                      const { data: existingMessages } = await supabase.from('messages')
+                          .select('whatsapp_message_id, instance_id')
+                          .in('tenant_id', uniqueTenantIds)
+                          .in('whatsapp_message_id', chunk);
                      if (existingMessages) {
                          for (const m of existingMessages) {
                              // Garantindo suporte para instance_id nulo de legado
