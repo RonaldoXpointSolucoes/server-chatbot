@@ -129,6 +129,12 @@ export const instanceCache = {
 
   getPhoneNumber(id: string): string | null {
     return this.phoneNumbers[id] || null;
+  },
+
+  getUuid(identifier: string): string | null {
+    if (!identifier) return null;
+    if (identifier.includes('-')) return identifier;
+    return this.byName[identifier.toLowerCase()] || null;
   }
 };
 

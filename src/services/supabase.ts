@@ -127,6 +127,7 @@ supabase.auth.onAuthStateChange((event, session) => {
     localStorage.removeItem('current_user_name');
     localStorage.removeItem('current_user_role');
     localStorage.removeItem('current_user_email');
+    localStorage.removeItem('current_user_id');
     localStorage.removeItem('allowed_instances');
     localStorage.removeItem('allowed_companies');
     localStorage.removeItem('keep_logged');
@@ -136,6 +137,7 @@ supabase.auth.onAuthStateChange((event, session) => {
     sessionStorage.removeItem('current_user_name');
     sessionStorage.removeItem('current_user_role');
     sessionStorage.removeItem('current_user_email');
+    sessionStorage.removeItem('current_user_id');
     sessionStorage.removeItem('allowed_instances');
     sessionStorage.removeItem('allowed_companies');
     sessionStorage.removeItem('admin_token');

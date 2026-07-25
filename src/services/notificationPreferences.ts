@@ -27,6 +27,7 @@ export interface UserInboxNotificationPreference {
   id?: string;
   tenant_id: string;
   user_id: string;
+  user_email?: string;
   instance_id: string;
   is_enabled: boolean;
   event_types: EventTypePreferences;
@@ -50,6 +51,12 @@ const DEFAULT_CHANNELS: ChannelPreferences = {
 
 const PREF_CACHE_KEY = 'user_inbox_notif_prefs_v1';
 
+export function getCurrentUserIdentity() {
+  const email = (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email') || '').trim().toLowerCase();
+  const userId = (localStorage.getItem('current_user_id') || sessionStorage.getItem('current_user_id') || email).trim();
+  return { email, userId };
+}
+
 export function getLocalNotificationPrefs(): Record<string, UserInboxNotificationPreference> {
   try {
     const raw = localStorage.getItem(PREF_CACHE_KEY) || sessionStorage.getItem(PREF_CACHE_KEY);
@@ -66,15 +73,34 @@ export function saveLocalNotificationPrefs(prefsMap: Record<string, UserInboxNot
   } catch (e) {}
 }
 
-export async function fetchUserInboxNotificationPreferences(tenantId: string, userId: string): Promise<Record<string, UserInboxNotificationPreference>> {
-  if (!tenantId || !userId) return getLocalNotificationPrefs();
+export async function fetchUserInboxNotificationPreferences(
+  tenantId: string, 
+  userId?: string | null, 
+  userEmail?: string | null
+): Promise<Record<string, UserInboxNotificationPreference>> {
+  if (!tenantId) return getLocalNotificationPrefs();
+
+  const identity = getCurrentUserIdentity();
+  const email = (userEmail || identity.email).trim().toLowerCase();
+  const uid = (userId || identity.userId || email).trim();
+
+  if (!email && !uid) return getLocalNotificationPrefs();
 
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('user_inbox_notification_preferences')
       .select('*')
-      .eq('tenant_id', tenantId)
-      .eq('user_id', userId);
+      .eq('tenant_id', tenantId);
+
+    if (email && uid && uid !== email) {
+      query = query.or(`user_email.eq.${email},user_id.eq.${uid},user_id.eq.${email}`);
+    } else if (email) {
+      query = query.or(`user_email.eq.${email},user_id.eq.${email}`);
+    } else {
+      query = query.eq('user_id', uid);
+    }
+
+    const { data, error } = await query;
 
     if (!error && data) {
       const prefsMap: Record<string, UserInboxNotificationPreference> = {};
@@ -82,7 +108,8 @@ export async function fetchUserInboxNotificationPreferences(tenantId: string, us
         prefsMap[item.instance_id] = {
           id: item.id,
           tenant_id: item.tenant_id,
-          user_id: item.user_id,
+          user_id: item.user_id || item.user_email,
+          user_email: item.user_email || item.user_id,
           instance_id: item.instance_id,
           is_enabled: item.is_enabled ?? true,
           event_types: { ...DEFAULT_EVENT_TYPES, ...(item.event_types || {}) },
@@ -103,12 +130,18 @@ export async function toggleInboxNotification(
   tenantId: string,
   userId: string,
   instanceId: string,
-  isEnabled: boolean
+  isEnabled: boolean,
+  userEmail?: string
 ): Promise<UserInboxNotificationPreference> {
+  const identity = getCurrentUserIdentity();
+  const email = (userEmail || identity.email).trim().toLowerCase();
+  const uid = (userId || identity.userId || email).trim();
+
   const currentMap = getLocalNotificationPrefs();
   const existing = currentMap[instanceId] || {
     tenant_id: tenantId,
-    user_id: userId,
+    user_id: uid,
+    user_email: email || uid,
     instance_id: instanceId,
     is_enabled: true,
     event_types: { ...DEFAULT_EVENT_TYPES },
@@ -124,17 +157,20 @@ export async function toggleInboxNotification(
   saveLocalNotificationPrefs(currentMap);
 
   try {
-    await supabase
-      .from('user_inbox_notification_preferences')
-      .upsert({
-        tenant_id: tenantId,
-        user_id: userId,
-        instance_id: instanceId,
-        is_enabled: isEnabled,
-        event_types: updated.event_types,
-        channels: updated.channels,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'tenant_id,user_id,instance_id' });
+    if (tenantId && (email || uid)) {
+      await supabase
+        .from('user_inbox_notification_preferences')
+        .upsert({
+          tenant_id: tenantId,
+          user_id: uid,
+          user_email: email || uid,
+          instance_id: instanceId,
+          is_enabled: isEnabled,
+          event_types: updated.event_types,
+          channels: updated.channels,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'tenant_id,user_email,instance_id' });
+    }
   } catch (e) {
     console.error('[NotificationPreferences] Erro ao salvar toggle no Supabase:', e);
   }
@@ -147,12 +183,18 @@ export async function updateInboxEventTypePreference(
   userId: string,
   instanceId: string,
   eventType: NotificationEventType,
-  isEnabled: boolean
+  isEnabled: boolean,
+  userEmail?: string
 ): Promise<UserInboxNotificationPreference> {
+  const identity = getCurrentUserIdentity();
+  const email = (userEmail || identity.email).trim().toLowerCase();
+  const uid = (userId || identity.userId || email).trim();
+
   const currentMap = getLocalNotificationPrefs();
   const existing = currentMap[instanceId] || {
     tenant_id: tenantId,
-    user_id: userId,
+    user_id: uid,
+    user_email: email || uid,
     instance_id: instanceId,
     is_enabled: true,
     event_types: { ...DEFAULT_EVENT_TYPES },
@@ -171,17 +213,20 @@ export async function updateInboxEventTypePreference(
   saveLocalNotificationPrefs(currentMap);
 
   try {
-    await supabase
-      .from('user_inbox_notification_preferences')
-      .upsert({
-        tenant_id: tenantId,
-        user_id: userId,
-        instance_id: instanceId,
-        is_enabled: updated.is_enabled,
-        event_types: updated.event_types,
-        channels: updated.channels,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'tenant_id,user_id,instance_id' });
+    if (tenantId && (email || uid)) {
+      await supabase
+        .from('user_inbox_notification_preferences')
+        .upsert({
+          tenant_id: tenantId,
+          user_id: uid,
+          user_email: email || uid,
+          instance_id: instanceId,
+          is_enabled: updated.is_enabled,
+          event_types: updated.event_types,
+          channels: updated.channels,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'tenant_id,user_email,instance_id' });
+    }
   } catch (e) {
     console.error('[NotificationPreferences] Erro ao salvar preferência de evento:', e);
   }

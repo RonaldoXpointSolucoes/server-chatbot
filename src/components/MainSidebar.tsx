@@ -241,6 +241,10 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
        const userRole = storage ? storage.getItem('current_user_role') : null;
        const userEmail = storage ? storage.getItem('current_user_email') : null;
        
+       if (storage && session?.user?.id && !storage.getItem('current_user_id')) {
+          storage.setItem('current_user_id', session.user.id);
+       }
+
        if (userEmail && storage) {
            const { data: userData } = await supabase
              .from('tenant_users')

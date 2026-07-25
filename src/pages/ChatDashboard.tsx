@@ -1475,6 +1475,20 @@ export default function ChatDashboard() {
     }).length;
   }, [contacts, activeChannelFilter, activeChannelName, connectedInstanceName]);
 
+  const getRemainingSnoozeText = (dateStr: string) => {
+    const diff = new Date(dateStr).getTime() - Date.now();
+    if (diff <= 0) return 'reabrendo';
+    
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 60) return `${minutes}m`;
+    
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h`;
+    
+    const days = Math.floor(hours / 24);
+    return `${days}d`;
+  };
+
   const isContactPinned = (c: any) => {
     if (c.is_pinned) return true;
     const currentBox = activeChannelFilter || c.instance_id || connectedInstanceName;
@@ -1574,8 +1588,8 @@ export default function ChatDashboard() {
        if (c.conv_status === 'snoozed' && c.snoozed_until) {
           const untilTimestamp = new Date(c.snoozed_until).getTime();
           if (untilTimestamp > Date.now()) {
-             // Esconde se ainda não expirou, a menos que o usuário esteja forçando a pesquisa ativamente
-             if (!searchTerm) return false;
+             // Esconde se ainda não expirou e se o modo ticket estiver ativo, a menos que o usuário esteja forçando a pesquisa ativamente
+             if (ticketMode && !searchTerm) return false;
           }
        }
 
@@ -5750,6 +5764,7 @@ export default function ChatDashboard() {
                   className={cn(
                     "group flex items-center gap-3 px-3 py-3 cursor-pointer transition-colors border-b border-[#f2f2f2] dark:border-[#222d34] overflow-visible select-none",
                     activeChatId === contact.id ? "bg-[#f0f2f5] dark:bg-[#2a3942]" : "hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]",
+                    contact.conv_status === 'snoozed' && contact.snoozed_until && new Date(contact.snoozed_until).getTime() > Date.now() && "opacity-75 bg-[#fafafa]/50 dark:bg-black/5",
                     activeDropdown === contact.id ? "z-30 relative" : "relative z-0"
                   )}
                 >
@@ -5808,9 +5823,12 @@ export default function ChatDashboard() {
                                  </span>
                                )}
                                {contact.conv_status === 'snoozed' && contact.snoozed_until && new Date(contact.snoozed_until).getTime() > Date.now() && (
-                                 <span className="px-1.5 py-[2px] rounded-md text-[8px] font-extrabold uppercase bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30 flex items-center gap-0.5 shadow-sm">
-                                   <Clock size={8} />
-                                   Adiado
+                                 <span 
+                                   className="px-1.5 py-[2px] rounded-md text-[8px] font-extrabold uppercase bg-amber-500/15 dark:bg-amber-500/25 text-amber-700 dark:text-amber-400 border border-amber-500/20 flex items-center gap-0.5 shadow-sm shrink-0"
+                                   title={`Adiado até ${new Date(contact.snoozed_until).toLocaleString('pt-BR')}`}
+                                 >
+                                   <Clock size={8} className="animate-pulse text-amber-500" />
+                                   <span>Adiado ({getRemainingSnoozeText(contact.snoozed_until)})</span>
                                  </span>
                                )}
                              </div>

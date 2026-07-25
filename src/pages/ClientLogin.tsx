@@ -249,7 +249,7 @@ export default function ClientLogin() {
         }
 
         localStorage.setItem('keep_logged', 'true');
-        const { error: signInError } = await supabase.auth.signInWithPassword({
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
            email: matchedEmail.trim().toLowerCase(),
            password: decryptedPwd
         });
@@ -266,6 +266,9 @@ export default function ClientLogin() {
         storage.setItem('current_user_name', userName);
         storage.setItem('current_user_role', userRole);
         storage.setItem('current_user_email', matchedEmail.trim().toLowerCase());
+        if (signInData?.user?.id) {
+           storage.setItem('current_user_id', signInData.user.id);
+        }
         storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
         storage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
 
@@ -381,7 +384,7 @@ export default function ClientLogin() {
 
       // 3. Efetua a autenticação oficial no Supabase Auth
       localStorage.setItem('keep_logged', 'true');
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
          email: faceLinkEmail.trim().toLowerCase(),
          password: faceLinkPassword.trim()
       });
@@ -435,6 +438,9 @@ export default function ClientLogin() {
       storage.setItem('current_user_name', userName);
       storage.setItem('current_user_role', userRole);
       storage.setItem('current_user_email', faceLinkEmail.trim().toLowerCase());
+      if (signInData?.user?.id) {
+         storage.setItem('current_user_id', signInData.user.id);
+      }
       storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
       storage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
 
@@ -562,7 +568,7 @@ export default function ClientLogin() {
       
       addDevLog('SUPABASE_AUTH_START', 'Iniciando sessão real no Supabase Auth...', 'info');
       localStorage.setItem('keep_logged', keepLogged ? 'true' : 'false');
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
          email: email.trim().toLowerCase(),
          password: password.trim()
       });
@@ -584,6 +590,7 @@ export default function ClientLogin() {
       localStorage.removeItem('current_user_role');
       localStorage.removeItem('allowed_instances');
       localStorage.removeItem('allowed_companies');
+      localStorage.removeItem('current_user_id');
       
       sessionStorage.removeItem('current_tenant_id');
       sessionStorage.removeItem('current_tenant_name');
@@ -591,6 +598,7 @@ export default function ClientLogin() {
       sessionStorage.removeItem('current_user_role');
       sessionStorage.removeItem('allowed_instances');
       sessionStorage.removeItem('allowed_companies');
+      sessionStorage.removeItem('current_user_id');
 
       const storage = keepLogged ? localStorage : sessionStorage;
       storage.setItem('current_tenant_id', tenantData.id);
@@ -598,6 +606,9 @@ export default function ClientLogin() {
       storage.setItem('current_user_name', userName);
       storage.setItem('current_user_role', userRole);
       storage.setItem('current_user_email', email.trim().toLowerCase());
+      if (signInData?.user?.id) {
+         storage.setItem('current_user_id', signInData.user.id);
+      }
       
       // RBAC Global: Salva as instâncias e empresas permitidas independentemente do papel
       storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
