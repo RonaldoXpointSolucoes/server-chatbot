@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical, Inbox } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical, Inbox, Ticket, Sparkles, CheckSquare, History } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -2772,713 +2772,739 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
     }
   })();
 
+  const hasRightColumnContent = instanceTicketMode || (matchingGroups.length > 0 && groupCompanies.length > 0);
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/45 dark:bg-black/65 backdrop-blur-sm animate-in fade-in duration-300" onClick={onClose} />
       
-      <div className="relative w-full max-w-sm bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl border border-white/40 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col gap-5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
+      <div className={cn(
+        "relative w-full bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl border border-slate-200/40 dark:border-white/10 rounded-[32px] shadow-2xl p-6 flex flex-col max-h-[90vh] animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 transition-all",
+        hasRightColumnContent ? "max-w-4xl" : "max-w-md"
+      )}>
         
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
           <div 
-            className="w-12 h-12 rounded-full flex items-center justify-center shadow-inner border transition-all duration-300"
+            className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner border transition-all duration-300"
             style={{ 
               backgroundColor: `${companyColor}15`, 
               borderColor: `${companyColor}30`,
               color: companyColor 
             }}
           >
-            <Building2 className="w-6 h-6" />
+            <Building2 className="w-6 h-6 animate-pulse" />
           </div>
-          <button onClick={onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 transition-colors">
-            <X size={20} />
+          <button onClick={onClose} className="p-2.5 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-gray-550 dark:text-gray-400 transition-all active:scale-95">
+            <X size={18} />
           </button>
         </div>
 
-        {/* Info Blocks */}
-        <div className="flex flex-col gap-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef] leading-tight break-words">
-              {contact.fantasy_name || contact.name || contact.custom_name || 'Empresa'}
-            </h2>
+        {/* Scrollable Container */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 my-3">
+          
+          <div className={cn(
+            "grid grid-cols-1 gap-6",
+            hasRightColumnContent && "lg:grid-cols-2"
+          )}>
             
-            {/* Tipo de Contato Badge */}
-            {(() => {
-              if (contact.document_type === 'cnpj') {
-                return (
-                  <span 
-                    className="inline-flex items-center gap-1 px-2.5 py-0.5 border rounded-full text-[10px] font-black uppercase tracking-wider select-none shadow-sm transition-all duration-300"
-                    style={{ backgroundColor: `${companyColor}15`, borderColor: `${companyColor}30`, color: companyColor }}
-                    title="Este contato representa a própria empresa (Matriz/Filial)"
-                  >
-                    🏢 CNPJ (Empresa)
-                  </span>
-                );
-              }
-              if (contact.document_type === 'cpf') {
-                return (
-                  <span 
-                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 select-none shadow-sm"
-                    title="Pessoa Física"
-                  >
-                    👤 CPF
-                  </span>
-                );
-              }
-              return (
-                <span 
-                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-gray-500/10 border border-gray-500/20 text-gray-600 dark:text-gray-400 select-none shadow-sm"
-                  title="Contato regular ou colaborador vinculado"
-                >
-                  📞 Contato
-                </span>
-              );
-            })()}
-          </div>
-
-          {contact.document_type === 'cnpj' && (
-            <p className="text-[10.5px] text-emerald-600 dark:text-emerald-400 font-semibold leading-none flex items-center gap-1">
-              • Contato principal da própria empresa
-            </p>
-          )}
-
-          {/* Associated Companies list for collaborators */}
-          {contact.document_type !== 'cnpj' && (() => {
-            const linked = (contact.company_ids || [])
-              .map((id: string) => allAvailableCompanies.find(c => c.id === id))
-              .filter(Boolean);
-            
-            if (linked.length > 0) {
-              return (
-                <div className="flex flex-wrap gap-1.5 mt-0.5">
-                  {linked.map((comp: any) => {
-                    const compGroup = (contactGroups || []).find((g: any) => (comp.tags || []).includes(g.id));
-                    const cColor = compGroup?.color || '#3b82f6';
-                    return (
-                      <span 
-                        key={comp.id}
-                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[10.5px] font-bold text-white shadow-sm transition-all duration-300"
-                        style={{ backgroundColor: cColor }}
-                        title={`Empresa vinculada: ${comp.name}`}
-                      >
-                        🏢 {comp.fantasy_name || comp.name}
-                      </span>
-                    );
-                  })}
-                </div>
-              );
-            }
-            return (
-              <p className="text-[10.5px] text-gray-500 dark:text-gray-400 font-medium leading-none flex items-center gap-1">
-                • Colaborador ou contato comum
-              </p>
-            );
-          })()}
-
-          {(contact.fantasy_name && contact.name) && (
-            <p className="text-[13px] text-gray-500 dark:text-[#8696a0] leading-snug break-words mt-0.5">
-              {contact.name}
-            </p>
-          )}
-          {(!contact.fantasy_name && contact.custom_name && contact.name) && (
-            <p className="text-[13px] text-gray-500 dark:text-[#8696a0] leading-snug break-words mt-0.5">
-              {contact.name}
-            </p>
-          )}
-                  </div>
-
-        {/* Group Companies */}
-        {matchingGroups.length > 0 && groupCompanies.length > 0 && (
-          <div className="flex flex-col animate-in fade-in duration-500 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/20 rounded-3xl p-4.5 shadow-[0_4px_25px_rgba(99,102,241,0.08)]">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="p-2 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-xl text-white shadow-sm shrink-0">
-                <Building2 size={16} />
-              </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-[10px] uppercase font-black tracking-wider text-indigo-650 dark:text-indigo-400">
-                  Grupo Empresarial
-                </span>
-                <span className="text-xs font-extrabold text-[#111b21] dark:text-[#e9edef] mt-0.5 truncate">
-                  {matchingGroups.map(g => g.name).join(', ')}
-                </span>
-              </div>
-            </div>
-            
-            <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
-              {groupCompanies.map(c => (
-                <div key={c.id} className="flex flex-col p-3.5 rounded-2xl bg-white/40 dark:bg-black/20 hover:bg-white/60 dark:hover:bg-black/30 border border-black/[0.03] dark:border-white/[0.03] hover:border-indigo-500/15 dark:hover:border-indigo-500/15 transition-all">
-                  <span className="text-[12px] font-bold text-[#111b21] dark:text-[#e9edef] truncate" title={c.fantasy_name || c.name}>
-                    {c.fantasy_name || c.name}
-                  </span>
-                  {(c.fantasy_name && c.name) && (
-                    <span className="text-[10px] text-gray-555 dark:text-[#8696a0] truncate" title={c.name}>
-                      {c.name}
-                    </span>
-                  )}
-                  <span className="text-[10px] font-mono text-gray-400 mt-1.5 flex justify-between items-center">
-                    {c.document_number ? formatDocument(c.document_number) : 'CNPJ indisponível'}
+            {/* Left Column / Core Cadastre */}
+            <div className="flex flex-col gap-5 justify-between h-full">
+              <div className="flex flex-col gap-5">
+                {/* Info Blocks */}
+                <div className="flex flex-col gap-2 mt-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-lg md:text-xl font-extrabold text-[#111b21] dark:text-[#e9edef] leading-tight break-words tracking-tight">
+                      {contact.fantasy_name || contact.name || contact.custom_name || 'Empresa'}
+                    </h2>
                     
-                    {c.document_number && (
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigator.clipboard.writeText(c.document_number);
-                        }}
-                        className="opacity-60 hover:opacity-100 hover:text-[#00a884] transition-colors p-0.5"
-                        title="Copiar CNPJ"
-                      >
-                        <Copy size={12} />
-                      </button>
-                    )}
-                  </span>
-
-                  {c.document_number && (
-                    <div className="mt-2.5 pt-2.5 border-t border-black/5 dark:border-white/5">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const cleanCnpj = c.document_number.replace(/\D/g, '');
-                          window.open(`https://mensalidadedatadivas.vercel.app/?e=${cleanCnpj}`, '_blank');
-                        }}
-                        className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-[#00a884]/15 hover:bg-[#00a884]/25 active:scale-[0.98] text-[#00a884] dark:text-[#00c99e] rounded-xl font-bold text-[10px] transition-all duration-200"
-                      >
-                        <CircleDollarSign size={13} />
-                        <span>Ver Faturamento</span>
-                        <ExternalLink size={11} className="opacity-70 ml-auto" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="flex flex-col gap-2">
-          <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-600 dark:text-emerald-500">Ficha Cadastral</p>
-          <div className="flex flex-col gap-3 bg-[#f0f2f5]/80 dark:bg-black/20 p-4 rounded-2xl border border-black/5 dark:border-white/5">
-          {/* CNPJ */}
-          {/* CNPJ ou Associação de Empresa / Grupo */}
-          {contact.document_type === 'cnpj' ? (
-            <>
-              <div className="flex items-center justify-between group">
-                <div className="flex items-center gap-3 w-full">
-                  <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-400 shrink-0">
-                    <FileText size={18} />
-                  </div>
-                  {editingCnpj ? (
-                    <div className="flex items-center gap-2 w-full pr-2">
-                      <input
-                        type="text"
-                        placeholder="CNPJ ou CPF"
-                        value={cnpjInput}
-                        onChange={e => setCnpjInput(e.target.value)}
-                        className="w-full bg-white dark:bg-[#202c33] border border-emerald-500/40 rounded-lg px-2.5 py-1 text-xs text-[#111b21] dark:text-[#e9edef] font-mono focus:outline-none focus:border-emerald-500"
-                        autoFocus
-                      />
-                      <button 
-                        onClick={handleSaveCnpj} 
-                        disabled={savingCnpj} 
-                        className="p-1 rounded bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
-                      >
-                        {savingCnpj ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                      </button>
-                      <button 
-                        onClick={() => { setEditingCnpj(false); setCnpjInput(contact.document_number || ''); }} 
-                        className="p-1 rounded bg-gray-200 dark:bg-white/5 hover:bg-gray-300 dark:hover:bg-white/10 text-gray-500 transition-colors"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col w-full min-w-0">
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">CNPJ / CPF</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[13px] font-mono font-semibold text-[#111b21] dark:text-[#e9edef] truncate">
-                          {contact.document_number ? formatDocument(contact.document_number) : 'Não informado'}
-                        </span>
-                        <button 
-                          onClick={() => { setEditingCnpj(true); setCnpjInput(contact.document_number || ''); }}
-                          className="p-1 text-gray-400 hover:text-emerald-500 transition-colors rounded hover:bg-black/5 dark:hover:bg-white/5"
-                          title="Editar Documento"
+                    {/* Tipo de Contato Badge */}
+                    {(() => {
+                      if (contact.document_type === 'cnpj') {
+                        return (
+                          <span 
+                            className="inline-flex items-center gap-1.5 px-3 py-1 border rounded-full text-[10px] font-black uppercase tracking-wider select-none shadow-sm transition-all duration-300"
+                            style={{ backgroundColor: `${companyColor}15`, borderColor: `${companyColor}30`, color: companyColor }}
+                            title="Este contato representa a própria empresa (Matriz/Filial)"
+                          >
+                            🏢 CNPJ (Empresa)
+                          </span>
+                        );
+                      }
+                      if (contact.document_type === 'cpf') {
+                        return (
+                          <span 
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 select-none shadow-sm"
+                            title="Pessoa Física"
+                          >
+                            👤 CPF
+                          </span>
+                        );
+                      }
+                      return (
+                        <span 
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-500/10 border border-slate-500/20 text-slate-650 dark:text-slate-400 select-none shadow-sm"
+                          title="Contato regular ou colaborador vinculado"
                         >
-                          <Pencil size={12} />
-                        </button>
-                      </div>
-                    </div>
+                          📞 Contato
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  {contact.document_type === 'cnpj' && (
+                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold leading-none flex items-center gap-1">
+                      • Contato principal da própria empresa
+                    </p>
+                  )}
+
+                  {/* Associated Companies list for collaborators */}
+                  {contact.document_type !== 'cnpj' && (() => {
+                    const linked = (contact.company_ids || [])
+                      .map((id: string) => allAvailableCompanies.find(c => c.id === id))
+                      .filter(Boolean);
+                    
+                    if (linked.length > 0) {
+                      return (
+                        <div className="flex flex-wrap gap-1.5 mt-0.5">
+                          {linked.map((comp: any) => {
+                            const compGroup = (contactGroups || []).find((g: any) => (comp.tags || []).includes(g.id));
+                            const cColor = compGroup?.color || '#3b82f6';
+                            return (
+                              <span 
+                                key={comp.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[10.5px] font-bold text-white shadow-sm transition-all duration-300"
+                                style={{ backgroundColor: cColor }}
+                                title={`Empresa vinculada: ${comp.name}`}
+                              >
+                                🏢 {comp.fantasy_name || comp.name}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      );
+                    }
+                    return (
+                      <p className="text-[11px] text-slate-500 dark:text-gray-400 font-semibold leading-none flex items-center gap-1">
+                        • Colaborador ou contato comum
+                      </p>
+                    );
+                  })()}
+
+                  {(contact.fantasy_name && contact.name) && (
+                    <p className="text-xs text-slate-500 dark:text-[#8696a0] leading-snug break-words mt-1">
+                      {contact.name}
+                    </p>
+                  )}
+                  {(!contact.fantasy_name && contact.custom_name && contact.name) && (
+                    <p className="text-xs text-slate-500 dark:text-[#8696a0] leading-snug break-words mt-1">
+                      {contact.name}
+                    </p>
                   )}
                 </div>
-                {!editingCnpj && contact.document_number && (
-                  <button onClick={handleCopyDoc} className="p-2 text-gray-400 hover:text-emerald-500 transition-colors bg-white dark:bg-[#202c33] rounded-lg shadow-sm border border-gray-100 dark:border-white/5 opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0">
-                    {copiedDoc ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Copy size={16} />}
-                  </button>
-                )}
-              </div>
 
-              {/* Divider */}
-              <div className="h-px w-full bg-gradient-to-r from-transparent via-gray-200 dark:via-gray-700 to-transparent my-1"></div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center justify-between group">
-                <div className="flex items-center gap-3 w-full">
-                  <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-400 shrink-0">
-                    <Building size={18} />
-                  </div>
-                  {editingCnpj ? (
-                    <div className="flex flex-col gap-2 w-full pr-2">
-                      <div className="flex flex-col gap-1 relative" ref={companySelectRef}>
-                        <span className="text-[9px] uppercase font-bold text-gray-400">Associar a uma Empresa</span>
-                        
-                        <div className="relative">
-                          <input
-                            type="text"
-                            placeholder="Buscar por Nome, Fantasia ou CNPJ..."
-                            value={searchCompanyQuery}
-                            onChange={(e) => {
-                              setSearchCompanyQuery(e.target.value);
-                              setDropdownOpen(true);
-                            }}
-                            onFocus={() => setDropdownOpen(true)}
-                            className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/10 rounded-lg pl-2.5 pr-8 py-1.5 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                          />
-                          {searchCompanyQuery && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSearchCompanyQuery('');
-                                setSelectedCompanyId('');
-                              }}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-0.5 rounded-full"
-                              title="Limpar seleção"
-                            >
-                              <X size={12} />
+                {/* Ficha Cadastral Wrapper */}
+                <div className="flex flex-col gap-2">
+                  <p className="text-[10px] uppercase tracking-wider font-extrabold text-slate-450 dark:text-slate-400 pl-1">Ficha Cadastral</p>
+                  <div className="flex flex-col gap-3.5 bg-slate-50/80 dark:bg-black/20 p-4.5 rounded-2xl border border-slate-100 dark:border-white/5">
+                    
+                    {/* CNPJ / CPF Section */}
+                    {contact.document_type === 'cnpj' ? (
+                      <>
+                        <div className="flex items-center justify-between group">
+                          <div className="flex items-center gap-3.5 w-full">
+                            <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-450 shrink-0">
+                              <FileText size={16} />
+                            </div>
+                            {editingCnpj ? (
+                              <div className="flex items-center gap-2 w-full pr-2">
+                                <input
+                                  type="text"
+                                  placeholder="CNPJ ou CPF"
+                                  value={cnpjInput}
+                                  onChange={e => setCnpjInput(e.target.value)}
+                                  className="w-full bg-white dark:bg-[#202c33] border border-emerald-500/40 rounded-lg px-2.5 py-1 text-xs text-[#111b21] dark:text-[#e9edef] font-mono focus:outline-none focus:border-emerald-500"
+                                  autoFocus
+                                />
+                                <button 
+                                  onClick={handleSaveCnpj} 
+                                  disabled={savingCnpj} 
+                                  className="p-1.5 rounded bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
+                                >
+                                  {savingCnpj ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                                </button>
+                                <button 
+                                  onClick={() => { setEditingCnpj(false); setCnpjInput(contact.document_number || ''); }} 
+                                  className="p-1.5 rounded bg-slate-200 dark:bg-white/5 hover:bg-slate-300 dark:hover:bg-white/10 text-gray-555 transition-colors"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col w-full min-w-0">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400">CNPJ / CPF</span>
+                                  <button 
+                                    onClick={() => { setEditingCnpj(true); setCnpjInput(contact.document_number || ''); }}
+                                    className="p-1 text-slate-400 hover:text-emerald-500 transition-colors rounded hover:bg-black/5 dark:hover:bg-white/5"
+                                    title="Editar Documento"
+                                  >
+                                    <Pencil size={11} />
+                                  </button>
+                                </div>
+                                <span className="text-xs font-mono font-semibold text-[#111b21] dark:text-[#e9edef] truncate mt-0.5">
+                                  {contact.document_number ? formatDocument(contact.document_number) : 'Não informado'}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          {!editingCnpj && contact.document_number && (
+                            <button onClick={handleCopyDoc} className="p-2 text-slate-400 hover:text-emerald-500 transition-all bg-white dark:bg-[#202c33] rounded-lg shadow-sm border border-slate-100 dark:border-white/5 opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0">
+                              {copiedDoc ? <CheckCircle2 size={15} className="text-emerald-500 animate-in zoom-in-50" /> : <Copy size={15} />}
                             </button>
                           )}
                         </div>
 
-                        {dropdownOpen && (
-                          <div className="absolute left-0 right-0 top-full mt-1 max-h-60 overflow-y-auto bg-white dark:bg-[#1a2329] border border-gray-200 dark:border-white/10 rounded-xl shadow-xl z-50 divide-y divide-gray-100 dark:divide-white/5 animate-in fade-in slide-in-from-top-1 duration-150 custom-scrollbar">
-                            {(() => {
-                              const searchLower = searchCompanyQuery.toLowerCase().replace(/\D/g, '');
-                              const searchLowerText = searchCompanyQuery.toLowerCase();
-                              const filtered = allAvailableCompanies
-                                .filter(c => c.id !== contact.id && !(contact.company_ids || []).includes(c.id))
-                                .filter(c => {
-                                  const nameMatch = (c.name || '').toLowerCase().includes(searchLowerText);
-                                  const fantasyMatch = (c.fantasy_name || '').toLowerCase().includes(searchLowerText);
-                                  const docMatch = (c.document_number || '').includes(searchLower);
-                                  return nameMatch || fantasyMatch || docMatch;
-                                });
-
-                              return filtered.length > 0 ? (
-                                filtered.map(c => (
-                                  <button
-                                    key={c.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedCompanyId(c.id);
-                                      setSearchCompanyQuery(c.fantasy_name || c.name);
-                                      setDropdownOpen(false);
-                                    }}
-                                    className="w-full text-left px-3 py-2 hover:bg-emerald-500/5 dark:hover:bg-emerald-500/10 flex items-center justify-between gap-3 group transition-colors"
-                                  >
-                                    <div className="flex flex-col min-w-0 flex-1">
-                                      <span className="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate group-hover:text-emerald-500 transition-colors">
-                                        {c.fantasy_name || c.name}
-                                      </span>
-                                      {c.fantasy_name && c.name && (
-                                        <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate mt-0.5">
-                                          {c.name}
-                                        </span>
-                                      )}
-                                    </div>
-                                    {c.document_number && (
-                                      <span className="shrink-0 font-mono text-[9px] font-bold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-white/5 border border-gray-200/50 dark:border-white/5 px-1.5 py-0.5 rounded-md">
-                                        {formatDocument(c.document_number)}
-                                      </span>
+                        <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-200/60 dark:via-gray-800 to-transparent my-1"></div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between group">
+                          <div className="flex items-center gap-3.5 w-full">
+                            <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-450 shrink-0">
+                              <Building size={16} />
+                            </div>
+                            {editingCnpj ? (
+                              <div className="flex flex-col gap-2.5 w-full pr-2">
+                                <div className="flex flex-col gap-1 relative" ref={companySelectRef}>
+                                  <span className="text-[9px] uppercase font-bold text-slate-400">Associar a uma Empresa</span>
+                                  
+                                  <div className="relative">
+                                    <input
+                                      type="text"
+                                      placeholder="Buscar por Nome, Fantasia ou CNPJ..."
+                                      value={searchCompanyQuery}
+                                      onChange={(e) => {
+                                        setSearchCompanyQuery(e.target.value);
+                                        setDropdownOpen(true);
+                                      }}
+                                      onFocus={() => setDropdownOpen(true)}
+                                      className="w-full bg-white dark:bg-[#202c33] border border-slate-200 dark:border-white/10 rounded-lg pl-2.5 pr-8 py-1.5 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                                    />
+                                    {searchCompanyQuery && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSearchCompanyQuery('');
+                                          setSelectedCompanyId('');
+                                        }}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-655 dark:hover:text-slate-200 p-0.5 rounded-full"
+                                        title="Limpar seleção"
+                                      >
+                                        <X size={11} />
+                                      </button>
                                     )}
-                                  </button>
-                                ))
-                              ) : (
-                                <div className="px-3 py-4 text-center text-xs text-gray-400 dark:text-gray-500 italic">
-                                  Nenhuma empresa encontrada
+                                  </div>
+
+                                  {dropdownOpen && (
+                                    <div className="absolute left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto bg-white dark:bg-[#1a2329] border border-slate-200 dark:border-white/10 rounded-xl shadow-xl z-50 divide-y divide-slate-100 dark:divide-white/5 animate-in fade-in slide-in-from-top-1 duration-150 custom-scrollbar">
+                                      {(() => {
+                                        const searchLower = searchCompanyQuery.toLowerCase().replace(/\D/g, '');
+                                        const searchLowerText = searchCompanyQuery.toLowerCase();
+                                        const filtered = allAvailableCompanies
+                                          .filter(c => c.id !== contact.id && !(contact.company_ids || []).includes(c.id))
+                                          .filter(c => {
+                                            const nameMatch = (c.name || '').toLowerCase().includes(searchLowerText);
+                                            const fantasyMatch = (c.fantasy_name || '').toLowerCase().includes(searchLowerText);
+                                            const docMatch = (c.document_number || '').includes(searchLower);
+                                            return nameMatch || fantasyMatch || docMatch;
+                                          });
+
+                                        return filtered.length > 0 ? (
+                                          filtered.map(c => (
+                                            <button
+                                              key={c.id}
+                                              type="button"
+                                              onClick={() => {
+                                                setSelectedCompanyId(c.id);
+                                                setSearchCompanyQuery(c.fantasy_name || c.name);
+                                                setDropdownOpen(false);
+                                              }}
+                                              className="w-full text-left px-3 py-2 hover:bg-emerald-500/5 dark:hover:bg-emerald-500/10 flex items-center justify-between gap-3 group transition-colors"
+                                            >
+                                              <div className="flex flex-col min-w-0 flex-1">
+                                                <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate group-hover:text-emerald-500 transition-colors">
+                                                  {c.fantasy_name || c.name}
+                                                </span>
+                                                {c.fantasy_name && c.name && (
+                                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate mt-0.5">
+                                                    {c.name}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              {c.document_number && (
+                                                <span className="shrink-0 font-mono text-[9px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/5 border border-slate-250/50 dark:border-white/5 px-1.5 py-0.5 rounded-md">
+                                                  {formatDocument(c.document_number)}
+                                                </span>
+                                              )}
+                                            </button>
+                                          ))
+                                        ) : (
+                                          <div className="px-3 py-3 text-center text-xs text-slate-400 dark:text-slate-500 italic">
+                                            Nenhuma empresa encontrada
+                                          </div>
+                                        );
+                                      })()}
+                                    </div>
+                                  )}
                                 </div>
-                              );
-                            })()}
-                          </div>
-                        )}
-                      </div>
-                      
-                      <div className="flex flex-col gap-1">
-                        <span className="text-[9px] uppercase font-bold text-gray-400">Associar a um Grupo</span>
-                        <select
-                          value={selectedGroupId}
-                          onChange={e => setSelectedGroupId(e.target.value)}
-                          className="w-full bg-white dark:bg-[#202c33] border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none"
-                        >
-                          <option value="">Selecione um Grupo...</option>
-                          {(contactGroups || [])
-                            .filter(g => !(contact.tags || []).includes(g.id))
-                            .map(g => (
-                              <option key={g.id} value={g.id}>
-                                {g.name}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-                      
-                      <div className="flex gap-2 justify-end mt-1">
-                        <button 
-                          onClick={handleSaveAssociation} 
-                          disabled={savingCnpj} 
-                          className="px-3 py-1 text-xs font-semibold rounded bg-emerald-500 hover:bg-emerald-600 text-white flex items-center gap-1 transition-colors"
-                        >
-                          {savingCnpj ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                          Salvar
-                        </button>
-                        <button 
-                          onClick={() => { setEditingCnpj(false); setSelectedCompanyId(''); setSelectedGroupId(''); }} 
-                          className="px-3 py-1 text-xs font-semibold rounded bg-gray-200 dark:bg-white/5 hover:bg-gray-300 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 transition-colors"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col w-full min-w-0">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Empresa / Grupo</span>
-                        <button 
-                          onClick={() => { setEditingCnpj(true); setSelectedCompanyId(''); setSelectedGroupId(''); }}
-                          className="p-1 text-gray-400 hover:text-emerald-500 transition-colors rounded hover:bg-black/5 dark:hover:bg-white/5"
-                          title="Editar Associações"
-                        >
-                          <Pencil size={12} />
-                        </button>
-                      </div>
-                      
-                      <div className="flex flex-col gap-1 mt-1">
-                        {/* List of associated companies */}
-                        {(() => {
-                          const linked = (contact.company_ids || [])
-                            .map((id: string) => allAvailableCompanies.find(c => c.id === id))
-                            .filter(Boolean);
-                          
-                          return linked.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {linked.map((comp: any) => (
-                                <span key={comp.id} className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 pl-2 pr-1 py-0.5 rounded-full text-[11px] font-semibold">
-                                  <Building2 size={10} className="shrink-0" />
-                                  <span className="truncate max-w-[120px]">{comp.fantasy_name || comp.name}</span>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleRemoveCompanyAssociation(comp.id);
-                                    }}
-                                    className="p-0.5 hover:bg-emerald-500/20 rounded text-emerald-600 dark:text-emerald-400 shrink-0"
-                                    title="Desvincular"
+                                
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[9px] uppercase font-bold text-slate-400">Associar a um Grupo</span>
+                                  <select
+                                    value={selectedGroupId}
+                                    onChange={e => setSelectedGroupId(e.target.value)}
+                                    className="w-full bg-white dark:bg-[#202c33] border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-[#111b21] dark:text-[#e9edef] focus:outline-none"
                                   >
-                                    <X size={10} strokeWidth={2.5} />
-                                  </button>
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-[11px] text-gray-500 dark:text-gray-400 italic">Nenhuma empresa vinculada</span>
-                          );
-                        })()}
-                        
-                        {/* List of associated groups */}
-                        {(() => {
-                          const linkedGroups = (contactGroups || [])
-                            .filter((g: any) => (contact.tags || []).includes(g.id));
-                          
-                          return linkedGroups.length > 0 ? (
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {linkedGroups.map((g: any) => (
-                                <span key={g.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold text-white shadow-sm" style={{ backgroundColor: g.color || '#3b82f6' }}>
-                                  <Building size={10} className="shrink-0" />
-                                  <span className="truncate max-w-[120px]">{g.name}</span>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleRemoveGroupAssociation(g.id);
-                                    }}
-                                    className="p-0.5 hover:bg-black/20 rounded text-white shrink-0"
-                                    title="Remover do Grupo"
+                                    <option value="">Selecione um Grupo...</option>
+                                    {(contactGroups || [])
+                                      .filter(g => !(contact.tags || []).includes(g.id))
+                                      .map(g => (
+                                        <option key={g.id} value={g.id}>
+                                          {g.name}
+                                        </option>
+                                      ))}
+                                  </select>
+                                </div>
+                                
+                                <div className="flex gap-2 justify-end mt-1">
+                                  <button 
+                                    onClick={handleSaveAssociation} 
+                                    disabled={savingCnpj} 
+                                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white flex items-center gap-1 transition-all active:scale-95"
                                   >
-                                    <X size={10} strokeWidth={2.5} />
+                                    {savingCnpj ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                                    Salvar
                                   </button>
-                                </span>
-                              ))}
-                            </div>
-                          ) : null;
-                        })()}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Divider */}
-              <div className="h-px w-full bg-gradient-to-r from-transparent via-gray-200 dark:via-gray-700 to-transparent my-1"></div>
-            </>
-          )}
-
-          {/* Telefone */}
-          <div className="flex items-center justify-between group">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-400">
-                <Phone size={18} />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Celular</span>
-                <span className="text-[13px] font-mono font-semibold text-[#111b21] dark:text-[#e9edef]">
-                  {contact.phone ? formatPhone(contact.phone) : 'Não informado'}
-                </span>
-              </div>
-            </div>
-            {contact.phone && (
-              <button onClick={handleCopyPhone} className="p-2 text-gray-400 hover:text-emerald-500 transition-colors bg-white dark:bg-[#202c33] rounded-lg shadow-sm border border-gray-100 dark:border-white/5 opacity-0 group-hover:opacity-100 focus:opacity-100">
-                {copiedPhone ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Copy size={16} />}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-
-
-        {instanceTicketMode && (
-          <div className="flex flex-col gap-2.5 bg-gradient-to-br from-teal-500/5 to-emerald-500/5 border border-emerald-500/10 rounded-3xl p-4.5">
-            {/* Histórico de Tickets */}
-            <div className="flex items-center gap-2 mb-2">
-              <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400">
-                <CalendarClock size={16} />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase font-black tracking-wider text-emerald-600 dark:text-emerald-400">
-                  Atendimentos & Tickets
-                </span>
-                <span className="text-xs font-bold text-gray-500 dark:text-[#8696a0]">
-                  Controle de sessões de suporte
-                </span>
-              </div>
-              
-              {!activeTicket && (
-                <button
-                  onClick={() => openTicketForContact(contact.id)}
-                  className="ml-auto flex items-center gap-1 py-1 px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-bold transition-all"
-                >
-                  <Plus size={10} />
-                  <span>Novo Ticket</span>
-                </button>
-              )}
-            </div>
-
-            {activeTicket ? (
-              <div className="flex flex-col gap-3 p-3.5 rounded-2xl bg-white/60 dark:bg-black/30 border border-emerald-500/20">
-                {/* Active Ticket Header */}
-                <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-2">
-                  <div className="flex flex-col">
-                    <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400">
-                      TICKET EM ABERTO: #{activeTicket.id}
-                    </span>
-                    <span className="text-[9px] font-mono text-gray-400 mt-0.5">
-                      Início: {new Date(activeTicket.opened_at).toLocaleString('pt-BR')}
-                    </span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider bg-emerald-500/20 text-emerald-600 uppercase">
-                    Em Andamento
-                  </span>
-                </div>
-
-                {/* Editable Problem Description */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
-                    Descrição do Problema:
-                  </label>
-                  <div className="flex items-start gap-1">
-                    <textarea
-                      value={activeTicketDesc}
-                      onChange={(e) => setActiveTicketDesc(e.target.value)}
-                      placeholder="Descreva o motivo do contato..."
-                      className="w-full text-xs p-2.5 bg-white dark:bg-[#111b21] border border-black/10 dark:border-white/10 rounded-xl focus:outline-none focus:border-emerald-500 resize-none h-[64px]"
-                    />
-                    {activeTicketDesc !== (activeTicket.problem_description || '') && (
-                      <button
-                        onClick={async () => {
-                          setIsSavingDesc(true);
-                          await updateActiveTicketDescription(activeTicket.id, activeTicketDesc);
-                          setIsSavingDesc(false);
-                        }}
-                        disabled={isSavingDesc}
-                        className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-all"
-                        title="Salvar"
-                      >
-                        {isSavingDesc ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Real-time statistics */}
-                <div className="pt-2 border-t border-black/5 dark:border-white/5 flex flex-col gap-1.5">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wide text-gray-400">
-                    Resumo Parcial das Mensagens:
-                  </span>
-                  <div className="flex items-center justify-between text-[11px] font-semibold text-gray-600 dark:text-gray-300">
-                    <span>Total de Mensagens:</span>
-                    <span className="font-bold text-gray-800 dark:text-white">{activeTicketStats.total_messages}</span>
-                  </div>
-                  {activeTicketStats.operators.length > 0 ? (
-                    <div className="flex flex-col gap-1 mt-1">
-                      <span className="text-[9px] uppercase font-black tracking-wider text-gray-400">
-                        Participação dos Atendentes:
-                      </span>
-                      {activeTicketStats.operators.map(op => (
-                        <div key={op.name} className="flex flex-col gap-0.5">
-                          <div className="flex justify-between text-[10px] font-semibold text-gray-550 dark:text-gray-300">
-                            <span>{op.name}</span>
-                            <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
-                          </div>
-                          <div className="h-1 w-full bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
-                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${op.percentage}%` }}></div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-[10px] text-gray-400 italic">Nenhuma mensagem dos atendentes registrada.</span>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-4 bg-black/[0.02] dark:bg-white/[0.02] border border-dashed border-black/10 dark:border-white/10 rounded-2xl">
-                <span className="text-xs text-gray-400 italic">Não há ticket aberto para este cliente.</span>
-              </div>
-            )}
-
-            {/* Histórico Anterior */}
-            {pastTickets.length > 0 && (
-              <div className="mt-2 flex flex-col gap-2">
-                <button
-                  onClick={() => setShowPastTickets(!showPastTickets)}
-                  className="flex items-center gap-1.5 text-[11px] font-black text-gray-500 hover:text-emerald-500 transition-colors uppercase"
-                >
-                  <span>Histórico de Chamados ({pastTickets.length})</span>
-                  <ChevronDown size={14} className={cn("transition-transform duration-200", showPastTickets && "rotate-180")} />
-                </button>
-
-                {showPastTickets && (
-                  <div className="flex flex-col gap-2 max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
-                    {pastTickets.map(t => {
-                      const start = new Date(t.opened_at);
-                      const end = t.closed_at ? new Date(t.closed_at) : null;
-                      const ops = t.metadata?.operators || [];
-                      const formatDateTimeSafe = (d: Date | null) => {
-                        if (!d || isNaN(d.getTime())) return 'N/A';
-                        return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-                      };
-                      
-                      return (
-                        <div key={t.id} className="flex flex-col p-3 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 text-[11px] gap-2">
-                          <div className="flex justify-between items-center border-b border-black/5 dark:border-white/5 pb-1.5">
-                            <span className="font-bold text-gray-800 dark:text-white">Ticket #{t.id}</span>
-                            <span className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-white/5 text-[9px] font-black text-gray-505 uppercase">
-                              Resolvido
-                            </span>
-                          </div>
-
-                          <div className="flex flex-col gap-1 text-[10px] text-gray-600 dark:text-gray-300">
-                            <div>
-                              <span className="font-extrabold uppercase text-gray-400 mr-1">Início:</span>
-                              {formatDateTimeSafe(start)}
-                            </div>
-                            {end && (
-                              <div>
-                                <span className="font-extrabold uppercase text-gray-400 mr-1">Fim:</span>
-                                {formatDateTimeSafe(end)}
+                                  <button 
+                                    onClick={() => { setEditingCnpj(false); setSelectedCompanyId(''); setSelectedGroupId(''); }} 
+                                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-500 dark:text-slate-400 transition-colors"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col w-full min-w-0">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Empresa / Grupo</span>
+                                  <button 
+                                    onClick={() => { setEditingCnpj(true); setSelectedCompanyId(''); setSelectedGroupId(''); }}
+                                    className="p-1 text-slate-400 hover:text-emerald-500 transition-colors rounded hover:bg-black/5 dark:hover:bg-white/5"
+                                    title="Editar Associações"
+                                  >
+                                    <Pencil size={11} />
+                                  </button>
+                                </div>
+                                
+                                <div className="flex flex-col gap-1 mt-1">
+                                  {/* List of associated companies */}
+                                  {(() => {
+                                    const linked = (contact.company_ids || [])
+                                      .map((id: string) => allAvailableCompanies.find(c => c.id === id))
+                                      .filter(Boolean);
+                                    
+                                    return linked.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1 mt-0.5">
+                                        {linked.map((comp: any) => (
+                                          <span key={comp.id} className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-650 dark:text-emerald-400 pl-2 pr-1 py-0.5 rounded-full text-[10px] font-bold shadow-sm">
+                                            <Building2 size={9} className="shrink-0" />
+                                            <span className="truncate max-w-[120px]">{comp.fantasy_name || comp.name}</span>
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleRemoveCompanyAssociation(comp.id);
+                                              }}
+                                              className="p-0.5 hover:bg-emerald-500/20 rounded text-emerald-655 dark:text-emerald-400 shrink-0"
+                                              title="Desvincular"
+                                            >
+                                              <X size={9} strokeWidth={2.5} />
+                                            </button>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-[11px] text-slate-400 dark:text-slate-500 italic mt-0.5">Nenhuma empresa vinculada</span>
+                                    );
+                                  })()}
+                                  
+                                  {/* List of associated groups */}
+                                  {(() => {
+                                    const linkedGroups = (contactGroups || [])
+                                      .filter((g: any) => (contact.tags || []).includes(g.id));
+                                    
+                                    return linkedGroups.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1 mt-1">
+                                        {linkedGroups.map((g: any) => (
+                                          <span key={g.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-white shadow-sm" style={{ backgroundColor: g.color || '#3b82f6' }}>
+                                            <Building size={9} className="shrink-0" />
+                                            <span className="truncate max-w-[120px]">{g.name}</span>
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleRemoveGroupAssociation(g.id);
+                                              }}
+                                              className="p-0.5 hover:bg-black/20 rounded text-white shrink-0"
+                                              title="Remover do Grupo"
+                                            >
+                                              <X size={9} strokeWidth={2.5} />
+                                            </button>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : null;
+                                  })()}
+                                </div>
                               </div>
                             )}
                           </div>
+                        </div>
 
-                          {t.problem_description && (
-                            <div className="bg-white/40 dark:bg-black/10 p-2 rounded-xl border border-black/[0.02] dark:border-white/[0.02]">
-                              <span className="font-extrabold uppercase text-[9px] text-gray-400 block mb-0.5">Descrição:</span>
-                              <p className="text-gray-750 dark:text-gray-200 leading-normal font-medium whitespace-pre-wrap">{t.problem_description}</p>
-                            </div>
+                        <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-200/60 dark:via-gray-800 to-transparent my-1"></div>
+                      </>
+                    )}
+
+                    {/* Celular Section */}
+                    <div className="flex items-center justify-between group">
+                      <div className="flex items-center gap-3.5">
+                        <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-455">
+                          <Phone size={16} />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400">Celular</span>
+                          <span className="text-xs font-mono font-semibold text-[#111b21] dark:text-[#e9edef] mt-0.5">
+                            {contact.phone ? formatPhone(contact.phone) : 'Não informado'}
+                          </span>
+                        </div>
+                      </div>
+                      {contact.phone && (
+                        <button onClick={handleCopyPhone} className="p-2 text-slate-400 hover:text-emerald-500 transition-all bg-white dark:bg-[#202c33] rounded-lg shadow-sm border border-slate-100 dark:border-white/5 opacity-0 group-hover:opacity-100 focus:opacity-100">
+                          {copiedPhone ? <CheckCircle2 size={15} className="text-emerald-500 animate-in zoom-in-50" /> : <Copy size={15} />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Buttons (Sticky at bottom of Left Column) */}
+                <div className="pt-3 border-t border-slate-100 dark:border-white/5 flex flex-col gap-2.5 mt-auto">
+                  <button 
+                    onClick={() => window.open(`https://mensalidadedatadivas.vercel.app/?e=${rawCnpj || ''}`, '_blank')}
+                    className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-655 active:scale-[0.98] text-white rounded-2xl font-bold shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/20 transition-all duration-200 group cursor-pointer"
+                  >
+                    <CircleDollarSign size={16} className="group-hover:rotate-12 transition-transform" />
+                    <span>Ver Faturamento (NF-e)</span>
+                    <ExternalLink size={14} className="ml-auto opacity-75 group-hover:opacity-100 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 transition-all" />
+                  </button>
+
+                  {onClearAssociation && (
+                    (parentContact && parentContact.company_ids?.includes(contact.id)) ||
+                    (contact.company_ids && contact.company_ids.length > 0) ||
+                    !!contact.fantasy_name
+                  ) && (
+                    <button 
+                      onClick={onClearAssociation}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-rose-500/5 hover:bg-rose-500/10 text-rose-500 border border-rose-500/10 hover:border-rose-500/20 rounded-2xl font-bold text-xs transition-all duration-200 cursor-pointer"
+                    >
+                      <span>{(contact.company_ids && contact.company_ids.length > 0) || contact.fantasy_name ? "Desvincular Empresa" : "Desvincular desta Empresa"}</span>
+                    </button>
+                  )}
+                </div>
+
+              </div>
+            </div>
+
+            {/* Right Column / Dynamic Info */}
+            {hasRightColumnContent && (
+              <div className="flex flex-col gap-5 lg:border-l lg:border-slate-100 dark:lg:border-white/5 lg:pl-6">
+                
+                {/* Group Companies */}
+                {matchingGroups.length > 0 && groupCompanies.length > 0 && (
+                  <div className="flex flex-col animate-in fade-in duration-500 bg-gradient-to-br from-indigo-500/5 to-purple-500/5 dark:from-indigo-500/10 dark:to-purple-500/10 border border-indigo-500/15 rounded-3xl p-4 shadow-sm">
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <div className="p-2 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-xl text-white shadow-sm shrink-0">
+                        <Building2 size={15} />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[10px] uppercase font-black tracking-wider text-indigo-650 dark:text-indigo-400">
+                          Grupo Empresarial
+                        </span>
+                        <span className="text-[11px] font-extrabold text-slate-800 dark:text-slate-200 mt-0.5 truncate">
+                          {matchingGroups.map(g => g.name).join(', ')}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex flex-col gap-2.5 pr-1">
+                      {groupCompanies.map(c => (
+                        <div key={c.id} className="flex flex-col p-3.5 rounded-2xl bg-white/70 dark:bg-black/20 hover:bg-white dark:hover:bg-black/35 border border-slate-100 dark:border-white/5 hover:border-indigo-500/15 dark:hover:border-indigo-500/15 transition-all">
+                          <span className="text-xs font-bold text-[#111b21] dark:text-[#e9edef] truncate" title={c.fantasy_name || c.name}>
+                            {c.fantasy_name || c.name}
+                          </span>
+                          {(c.fantasy_name && c.name) && (
+                            <span className="text-[10px] text-slate-500 dark:text-[#8696a0] truncate" title={c.name}>
+                              {c.name}
+                            </span>
                           )}
+                          <span className="text-[10px] font-mono text-slate-400 mt-1.5 flex justify-between items-center">
+                            {c.document_number ? formatDocument(c.document_number) : 'CNPJ indisponível'}
+                            
+                            {c.document_number && (
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigator.clipboard.writeText(c.document_number);
+                                }}
+                                className="opacity-60 hover:opacity-100 hover:text-emerald-500 transition-colors p-0.5"
+                                title="Copiar CNPJ"
+                              >
+                                <Copy size={11} />
+                              </button>
+                            )}
+                          </span>
 
-                          {t.metadata?.summary && (
-                            <div className="bg-blue-500/5 p-2 rounded-xl border border-blue-500/10">
-                              <span className="font-extrabold uppercase text-[9px] text-blue-600 dark:text-blue-450 block mb-0.5">Resumo:</span>
-                              <p className="text-gray-750 dark:text-gray-200 leading-normal font-medium whitespace-pre-wrap">{t.metadata.summary}</p>
-                            </div>
-                          )}
-
-                          {t.resolution_summary && (
-                            <div className="bg-emerald-500/5 p-2 rounded-xl border border-emerald-500/10">
-                              <span className="font-extrabold uppercase text-[9px] text-emerald-600 dark:text-emerald-400 block mb-0.5">Resolução:</span>
-                              <p className="text-gray-750 dark:text-gray-255 leading-normal font-semibold whitespace-pre-wrap">{t.resolution_summary}</p>
-                            </div>
-                          )}
-
-                          {t.metadata?.total_messages !== undefined && (
-                            <div className="pt-1.5 border-t border-black/5 dark:border-white/5 flex flex-col gap-1 text-[10px]">
-                              <div className="flex justify-between font-semibold">
-                                <span>Total de Mensagens:</span>
-                                <span className="font-bold text-gray-800 dark:text-white">{t.metadata.total_messages}</span>
-                              </div>
-                              {ops.length > 0 && (
-                                <div className="flex flex-col gap-1 mt-1">
-                                  <span className="text-[9px] uppercase font-black text-gray-400">Atendentes:</span>
-                                  {ops.map((op: any) => (
-                                    <div key={op.name} className="flex justify-between text-gray-500 dark:text-gray-405">
-                                      <span>{op.name}</span>
-                                      <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
+                          {c.document_number && (
+                            <div className="mt-2 pt-2 border-t border-slate-100 dark:border-white/5">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const cleanCnpj = c.document_number.replace(/\D/g, '');
+                                  window.open(`https://mensalidadedatadivas.vercel.app/?e=${cleanCnpj}`, '_blank');
+                                }}
+                                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-[0.98] text-emerald-600 dark:text-emerald-450 rounded-xl font-bold text-[10px] transition-all duration-200"
+                              >
+                                <CircleDollarSign size={12} />
+                                <span>Ver Faturamento</span>
+                                <ExternalLink size={10} className="opacity-70 ml-auto" />
+                              </button>
                             </div>
                           )}
                         </div>
-                      );
-                    })}
+                      ))}
+                    </div>
                   </div>
                 )}
+                
+                {/* Atendimentos & Tickets Container */}
+                {instanceTicketMode && (
+                  <div className="flex flex-col gap-3 bg-gradient-to-br from-teal-500/[0.03] to-emerald-500/[0.03] dark:from-emerald-500/[0.03] dark:to-emerald-500/[0.02] border border-emerald-500/10 rounded-3xl p-4 shadow-sm">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-450 shrink-0 animate-pulse">
+                        <CalendarClock size={15} />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[10px] uppercase font-black tracking-wider text-emerald-600 dark:text-emerald-400">
+                          Atendimentos & Tickets
+                        </span>
+                        <span className="text-[11px] font-bold text-slate-500 dark:text-[#8696a0]">
+                          Controle de sessões de suporte
+                        </span>
+                      </div>
+                      
+                      {!activeTicket && (
+                        <button
+                          onClick={() => openTicketForContact(contact.id)}
+                          className="ml-auto flex items-center gap-1 py-1.5 px-3 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white rounded-xl text-[10px] font-bold transition-all shadow-sm shadow-emerald-500/10"
+                        >
+                          <Plus size={11} />
+                          <span>Novo Ticket</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {activeTicket ? (
+                      <div className="flex flex-col gap-3.5 p-4 rounded-2xl bg-white/70 dark:bg-black/30 border border-emerald-500/15 shadow-sm">
+                        {/* Active Ticket Header */}
+                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/5 pb-2">
+                          <div className="flex flex-col">
+                            <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400">
+                              TICKET EM ABERTO: #{activeTicket.id}
+                            </span>
+                            <span className="text-[9px] font-mono text-slate-400 dark:text-slate-500 mt-0.5">
+                              Início: {new Date(activeTicket.opened_at).toLocaleString('pt-BR')}
+                            </span>
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider bg-emerald-500/15 text-emerald-655 dark:text-emerald-400 uppercase select-none">
+                            Em Andamento
+                          </span>
+                        </div>
+
+                        {/* Editable Problem Description */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
+                            Descrição do Problema:
+                          </label>
+                          <div className="flex items-start gap-2">
+                            <textarea
+                              value={activeTicketDesc}
+                              onChange={(e) => setActiveTicketDesc(e.target.value)}
+                              placeholder="Descreva o motivo do contato..."
+                              className="w-full text-xs p-3 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 resize-none h-[68px] font-medium leading-relaxed"
+                            />
+                            {activeTicketDesc !== (activeTicket.problem_description || '') && (
+                              <button
+                                onClick={async () => {
+                                  setIsSavingDesc(true);
+                                  await updateActiveTicketDescription(activeTicket.id, activeTicketDesc);
+                                  setIsSavingDesc(false);
+                                }}
+                                disabled={isSavingDesc}
+                                className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-all shadow-md shadow-emerald-500/10 shrink-0"
+                                title="Salvar"
+                              >
+                                {isSavingDesc ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Real-time statistics */}
+                        <div className="pt-2.5 border-t border-slate-100 dark:border-white/5 flex flex-col gap-2">
+                          <span className="text-[9px] font-extrabold uppercase tracking-wide text-slate-400">
+                            Resumo Parcial das Mensagens:
+                          </span>
+                          <div className="flex items-center justify-between text-xs font-semibold text-slate-650 dark:text-gray-300">
+                            <span>Total de Mensagens:</span>
+                            <span className="font-bold text-slate-800 dark:text-white bg-slate-100 dark:bg-white/5 px-2 py-0.5 rounded-md font-mono">{activeTicketStats.total_messages}</span>
+                          </div>
+                          
+                          {activeTicketStats.operators.length > 0 ? (
+                            <div className="flex flex-col gap-2 mt-1">
+                              <span className="text-[9px] uppercase font-black tracking-wider text-slate-400">
+                                Participação dos Atendentes:
+                              </span>
+                              {activeTicketStats.operators.map(op => (
+                                <div key={op.name} className="flex flex-col gap-1">
+                                  <div className="flex justify-between text-[10px] font-semibold text-slate-600 dark:text-gray-300">
+                                    <span>{op.name}</span>
+                                    <span className="font-bold font-mono">{op.percentage}% ({op.count} msgs)</span>
+                                  </div>
+                                  <div className="h-1.5 w-full bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
+                                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${op.percentage}%` }}></div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-slate-405 dark:text-slate-500 italic mt-0.5">Nenhuma mensagem dos atendentes registrada.</span>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-5 bg-black/[0.01] dark:bg-white/[0.01] border border-dashed border-slate-200 dark:border-white/10 rounded-2xl">
+                        <span className="text-xs text-slate-400 dark:text-slate-550 italic">Não há ticket aberto para este cliente.</span>
+                      </div>
+                    )}
+
+                    {/* Histórico Anterior */}
+                    {pastTickets.length > 0 && (
+                      <div className="mt-2.5 flex flex-col gap-2">
+                        <button
+                          onClick={() => setShowPastTickets(!showPastTickets)}
+                          className="flex items-center gap-1.5 text-[10px] font-black text-slate-500 hover:text-emerald-500 transition-colors uppercase select-none w-fit"
+                        >
+                          <span>Histórico de Chamados ({pastTickets.length})</span>
+                          <ChevronDown size={12} className={cn("transition-transform duration-200", showPastTickets && "rotate-180")} />
+                        </button>
+
+                        {showPastTickets && (
+                          <div className="flex flex-col gap-2.5 max-h-[220px] overflow-y-auto pr-1 custom-scrollbar">
+                            {pastTickets.map(t => {
+                              const start = new Date(t.opened_at);
+                              const end = t.closed_at ? new Date(t.closed_at) : null;
+                              const ops = t.metadata?.operators || [];
+                              const formatDateTimeSafe = (d: Date | null) => {
+                                if (!d || isNaN(d.getTime())) return 'N/A';
+                                return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                              };
+                              
+                              return (
+                                <div key={t.id} className="flex flex-col p-3.5 rounded-2xl bg-white dark:bg-black/20 border border-slate-100 dark:border-white/5 text-[11px] gap-2.5 shadow-sm">
+                                  <div className="flex justify-between items-center border-b border-slate-100 dark:border-white/5 pb-2">
+                                    <span className="font-bold text-slate-800 dark:text-white">Ticket #{t.id}</span>
+                                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-[9px] font-black text-emerald-655 dark:text-emerald-400 uppercase select-none">
+                                      Resolvido
+                                    </span>
+                                  </div>
+
+                                  <div className="flex flex-col gap-1 text-[10px] text-slate-500 dark:text-gray-400">
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-bold uppercase text-[9px] text-slate-400">Início:</span>
+                                      <span className="font-semibold">{formatDateTimeSafe(start)}</span>
+                                    </div>
+                                    {end && (
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-bold uppercase text-[9px] text-slate-400">Fim:</span>
+                                        <span className="font-semibold">{formatDateTimeSafe(end)}</span>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {t.problem_description && (
+                                    <div className="bg-slate-50/60 dark:bg-black/10 p-2.5 rounded-xl border border-slate-100 dark:border-white/5">
+                                      <span className="font-extrabold uppercase text-[9px] text-slate-400 block mb-0.5">Descrição:</span>
+                                      <p className="text-slate-700 dark:text-slate-300 leading-normal font-medium whitespace-pre-wrap">{t.problem_description}</p>
+                                    </div>
+                                  )}
+
+                                  {t.metadata?.summary && (
+                                    <div className="bg-blue-500/5 p-2.5 rounded-xl border border-blue-500/10">
+                                      <span className="font-extrabold uppercase text-[9px] text-blue-600 dark:text-blue-450 block mb-0.5">Resumo IA:</span>
+                                      <p className="text-slate-700 dark:text-slate-300 leading-normal font-medium whitespace-pre-wrap">{t.metadata.summary}</p>
+                                    </div>
+                                  )}
+
+                                  {t.resolution_summary && (
+                                    <div className="bg-emerald-500/5 p-2.5 rounded-xl border border-emerald-500/10">
+                                      <span className="font-extrabold uppercase text-[9px] text-emerald-600 dark:text-emerald-455 block mb-0.5">Resolução:</span>
+                                      <p className="text-slate-805 dark:text-slate-200 leading-normal font-semibold whitespace-pre-wrap">{t.resolution_summary}</p>
+                                    </div>
+                                  )}
+
+                                  {t.metadata?.total_messages !== undefined && (
+                                    <div className="pt-2 border-t border-slate-100 dark:border-white/5 flex flex-col gap-1.5 text-[10px]">
+                                      <div className="flex justify-between font-semibold text-slate-650 dark:text-slate-400">
+                                        <span>Total de Mensagens:</span>
+                                        <span className="font-bold text-slate-800 dark:text-white font-mono">{t.metadata.total_messages}</span>
+                                      </div>
+                                      {ops.length > 0 && (
+                                        <div className="flex flex-col gap-1 mt-1">
+                                          <span className="text-[9px] uppercase font-black text-slate-400">Atendentes:</span>
+                                          {ops.map((op: any) => (
+                                            <div key={op.name} className="flex justify-between text-slate-550 dark:text-slate-405 font-mono text-[9px]">
+                                              <span>{op.name}</span>
+                                              <span className="font-bold">{op.percentage}% ({op.count} msgs)</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
               </div>
             )}
+
           </div>
-        )}
-
-      {/* Action Button */}
-        <div className="mt-2 flex flex-col gap-2">
-          <button 
-            onClick={() => window.open(`https://mensalidadedatadivas.vercel.app/?e=${rawCnpj || ''}`, '_blank')}
-            className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-[#00a884] hover:bg-emerald-600 active:scale-[0.98] text-white rounded-2xl font-semibold shadow-lg shadow-emerald-500/20 transition-all duration-200 group"
-          >
-            <CircleDollarSign size={18} className="group-hover:rotate-12 transition-transform" />
-            <span>Ver Faturamento (NF-e)</span>
-            <ExternalLink size={16} className="ml-auto opacity-70 group-hover:opacity-100 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 transition-all" />
-          </button>
-
-          {onClearAssociation && (
-            (parentContact && parentContact.company_ids?.includes(contact.id)) ||
-            (contact.company_ids && contact.company_ids.length > 0) ||
-            !!contact.fantasy_name
-          ) && (
-            <button 
-              onClick={onClearAssociation}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl font-semibold transition-all duration-200"
-            >
-              <span>{(contact.company_ids && contact.company_ids.length > 0) || contact.fantasy_name ? "Desvincular Empresa" : "Desvincular desta Empresa"}</span>
-            </button>
-          )}
         </div>
-
 
       </div>
     </div>

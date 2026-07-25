@@ -47,6 +47,17 @@ function interceptConsole() {
         return;
     }
 
+    // Silencia erros rotineiros de reconexão / descriptografia do protocolo Signal (Baileys Bad MAC) do DevLogger UI
+    const isBaileysDecryptError = text.includes('Bad MAC') ||
+                                  text.includes('Failed to decrypt message with any known session') ||
+                                  text.includes('Session error:Error: Bad MAC') ||
+                                  text.includes('verifyMAC') ||
+                                  (text.includes('libsignal') && text.includes('session_cipher'));
+    if (isBaileysDecryptError) {
+        originalFn.apply(console, args);
+        return;
+    }
+
     // Silencia completamente erros de comunicação com o WaCalls do buffer de erros e da UI (reduz ruído)
     const isWaCallsConnectionError = text.includes('[WaCalls SSE Proxy Error]') || 
                                      text.includes('[WaCalls Background Listener Error]') ||
