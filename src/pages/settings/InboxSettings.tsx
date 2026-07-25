@@ -33,6 +33,10 @@ export default function InboxSettings() {
   const tabFromUrl = searchParams.get('tab');
   const [activeTab, setActiveTab] = useState(tabFromUrl || 'notifications');
 
+  useEffect(() => {
+    setActiveTab(tabFromUrl || 'notifications');
+  }, [tabFromUrl]);
+
   // QR Code States
   const [showQr, setShowQr] = useState(false);
   const [qrCode, setQrCode] = useState<string | null>(null);

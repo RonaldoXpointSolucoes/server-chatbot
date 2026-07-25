@@ -4862,7 +4862,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      updatedContact.lastMsgTimestamp = msgTimestamp;
                  }
 
-                 const isClient = (m.sender_type === 'client' || !m.sender_type);
+                 const isOutbound = m.from_me === true || m.sender_type === 'agent' || m.sender_type === 'bot' || m.sender_type === 'system' || m.sender_type === 'automation';
+                 const isClient = !isOutbound && (m.sender_type === 'client' || !m.sender_type);
                  
                  // Impede notificação/Unread em mensagens antigas de sincronismo de histórico
                  if (isClient && !isHistorical && !updatedContact.is_blocked) {
