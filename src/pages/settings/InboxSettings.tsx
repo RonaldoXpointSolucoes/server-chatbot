@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
 import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X, QrCode, RefreshCcw, LogOut, CheckCircle, Sparkles, Bell, BellOff, Volume2, VolumeX, Smartphone, PhoneCall, AtSign, Ticket, CheckCircle2 } from 'lucide-react';
@@ -19,6 +19,7 @@ const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://l
 export default function InboxSettings() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
   const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || tenantIdFromStore;
   const users = useChatStore(state => state.tenantInfo?.users);
@@ -29,7 +30,8 @@ export default function InboxSettings() {
   const [saving, setSaving] = useState(false);
   const [engineStatus, setEngineStatus] = useState<string>('offline');
   
-  const [activeTab, setActiveTab] = useState('config'); // Changed default to 'config' to focus on connection
+  const tabFromUrl = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(tabFromUrl || 'notifications');
 
   // QR Code States
   const [showQr, setShowQr] = useState(false);

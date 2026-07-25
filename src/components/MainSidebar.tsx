@@ -1160,7 +1160,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2"
               onClick={(e) => {
                  e.stopPropagation();
-                 navigate(`/instances/${instanceContextMenu.id}/settings`);
+                 navigate(`/instances/${instanceContextMenu.id}/settings?tab=notifications`);
                  setInstanceContextMenu(null);
               }}
             >
@@ -1171,7 +1171,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2 border-t border-[#2a3942] mt-1 pt-2"
               onClick={(e) => {
                  e.stopPropagation();
-                 useChatStore.getState().openQRModal(instanceContextMenu.id);
+                 navigate(`/instances/${instanceContextMenu.id}/settings?tab=config`);
                  setInstanceContextMenu(null);
               }}
             >
