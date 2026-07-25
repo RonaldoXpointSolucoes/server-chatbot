@@ -54,6 +54,7 @@ import { getLocalNotificationPrefs, fetchUserInboxNotificationPreferences, toggl
 
 import { formatPhoneNumber } from '../utils/format';
 import KanbanBoardCreator from './KanbanBoardCreator';
+import { AgentSettingsModal } from './AgentSettingsModal';
 
 const SidebarContext = React.createContext<{ onClose?: () => void }>({});
 
@@ -193,6 +194,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const toggleGlobalAi = useChatStore(state => state.toggleGlobalAi);
   const [instanceContextMenu, setInstanceContextMenu] = useState<{ id: string, name: string, x: number, y: number } | null>(null);
   const [myConversationsMenu, setMyConversationsMenu] = useState<{ x: number, y: number } | null>(null);
+  const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
+  const [agentSettingsTab, setAgentSettingsTab] = useState<'profile' | 'notifications'>('profile');
 
   const tenantInfo = useChatStore(state => state.tenantInfo);
   const tenantIdFromStore = tenantInfo?.id;
@@ -1009,6 +1012,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                 isOpen={expandedSections.settings} 
                 onToggle={() => toggleSection('settings')}
               >
+                <NavItem icon={<Bell size={16} />} title="Notificações Pessoais" isSub onClick={() => { setAgentSettingsTab('notifications'); setIsAgentSettingsOpen(true); }} />
+                <NavItem icon={<User size={16} />} title="Meu Perfil" isSub onClick={() => { setAgentSettingsTab('profile'); setIsAgentSettingsOpen(true); }} />
                 <NavItem icon={<Briefcase size={16} />} title="Conta" isSub onClick={() => navigate('/settings/account')} />
                 <NavItem icon={<UserSquare2 size={16} />} title="Usuários" isSub onClick={() => navigate('/settings/agents')} />
                 <NavItem icon={<Inbox size={16} />} title="Caixas de Entrada" isSub onClick={() => navigate('/settings/inboxes')} />
@@ -1065,7 +1070,13 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       )}
 
       {/* User Footer Profile */}
-      <div className="absolute bottom-0 w-full h-[60px] bg-[#e9edef] dark:bg-[#202c33] border-t border-gray-250/80 dark:border-[#2a3942] flex items-center px-4 cursor-pointer hover:bg-gray-200 dark:hover:bg-[#2a3942] transition-colors group">
+      <div 
+        onClick={() => {
+          setAgentSettingsTab('profile');
+          setIsAgentSettingsOpen(true);
+        }}
+        className="absolute bottom-0 w-full h-[60px] bg-[#e9edef] dark:bg-[#202c33] border-t border-gray-250/80 dark:border-[#2a3942] flex items-center px-4 cursor-pointer hover:bg-gray-200 dark:hover:bg-[#2a3942] transition-colors group"
+      >
         <div className="relative">
           <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-500 p-[1px] shadow-sm">
             <div className="w-full h-full bg-white dark:bg-[#111b21] rounded-full flex items-center justify-center overflow-hidden">
@@ -1107,7 +1118,10 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           <p className="text-[11px] text-[#54656f] dark:text-[#8696a0] truncate opacity-80">{currentUserEmail || ''}</p>
         </div>
         <button 
-          onClick={handleLogout}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleLogout();
+          }}
           className={cn("ml-2 p-2 rounded-md text-[#54656f] dark:text-[#8696a0] hover:text-[#f15c6d] hover:bg-gray-200 dark:hover:bg-[#2a3942] transition-all opacity-0 group-hover/sidebar:opacity-100 focus:opacity-100", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:pointer-events-none group-hover/sidebar:!opacity-100 group-hover/sidebar:!pointer-events-auto")}
           title="Sair da conta"
         >
@@ -1251,6 +1265,11 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           setIsBoardCreatorOpen(false);
           useChatStore.getState().fetchCrmBoards();
         }}
+      />
+      <AgentSettingsModal
+        isOpen={isAgentSettingsOpen}
+        onClose={() => setIsAgentSettingsOpen(false)}
+        defaultTab={agentSettingsTab}
       />
       </div>
     </SidebarContext.Provider>

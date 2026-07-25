@@ -676,15 +676,11 @@ class SessionManager {
             });
 
             sock.ev.on('messaging-history.set', async (history) => {
-                if (history.peerDataRequestSessionId) {
-                    console.log(`[SessionManager] Recebido messaging-history.set (On-Demand) para a instância ${instanceId}. Processando de forma imediata.`);
-                    eventProcessor.handleMessagingHistorySet(tenantId, instanceId, sock, history).catch(err => {
-                        console.error(`[SessionManager] Erro ao processar histórico on-demand:`, err);
-                    });
-                } else {
-                    console.log(`[SessionManager] Recebido messaging-history.set para a instância ${instanceId}. Armazenando no cache para sincronização manual.`);
-                    this.pendingHistorySyncs.set(instanceId, history);
-                }
+                console.log(`[SessionManager] Recebido messaging-history.set para a instância ${instanceId}. Processando histórico automaticamente para prevenir perda de mensagens.`);
+                this.pendingHistorySyncs.set(instanceId, history);
+                eventProcessor.handleMessagingHistorySet(tenantId, instanceId, sock, history).catch(err => {
+                    console.error(`[SessionManager] Erro ao processar histórico automático de mensagens:`, err);
+                });
             });
 
             sock.ev.on('chats.upsert', async (chats) => {

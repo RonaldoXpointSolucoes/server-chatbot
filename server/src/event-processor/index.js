@@ -31,6 +31,9 @@ class EventProcessor {
         
         // Loop de reconciliation assíncrono para status (a cada 1s)
         setInterval(() => this.flushStatusQueue(), 1000);
+
+        // Loop de auto-recuperação de mensagens não sincronizadas (Self-Healing a cada 2 min)
+        setInterval(() => this.reconcileMissingMessages(), 120000);
         
         // Cleanup loop para evitar memory leaks nos status pendentes e cache de mensagens processadas
         setInterval(() => {
@@ -48,6 +51,38 @@ class EventProcessor {
                 }
             }
         }, 60000);
+    }
+
+    async reconcileMissingMessages() {
+        try {
+            const fifteenMinutesAgo = new Date(Date.now() - 15 * 60000).toISOString();
+            const { data: rawMessages, error } = await supabase
+                .from('wa_incoming_messages')
+                .select('instance_id, tenant_id, message_id, raw_payload')
+                .gte('created_at', fifteenMinutesAgo)
+                .order('created_at', { ascending: true })
+                .limit(100);
+
+            if (error || !rawMessages || rawMessages.length === 0) return;
+
+            const messageIds = rawMessages.map(r => r.message_id).filter(Boolean);
+            const { data: existingMessages } = await supabase
+                .from('messages')
+                .select('whatsapp_message_id')
+                .in('whatsapp_message_id', messageIds);
+
+            const existingSet = new Set((existingMessages || []).map(m => m.whatsapp_message_id));
+            const missingRaw = rawMessages.filter(r => r.message_id && !existingSet.has(r.message_id) && r.raw_payload);
+
+            if (missingRaw.length > 0) {
+                console.warn(`[EventProcessor] Self-Healing: Encontradas ${missingRaw.length} mensagens em wa_incoming_messages ausentes na tabela messages. Re-processando para evitar perda de dados...`);
+                for (const r of missingRaw) {
+                    await this.handleMessageUpsert(r.tenant_id, r.instance_id, null, { messages: [r.raw_payload], type: 'notify' });
+                }
+            }
+        } catch (e) {
+            console.error('[EventProcessor] Erro no reconcileMissingMessages:', e);
+        }
     }
     
     updatePendingStatus(msgId, newStatus) {
@@ -270,8 +305,9 @@ class EventProcessor {
                 // Ignora stubs de falha de descriptografia (ex: Message absent from node) na validação do cache,
                 // permitindo que o retry natural do WhatsApp/Baileys seja processado com sucesso.
                 const isDecryptionFailureStub = msg.messageStubType && !msg.message;
+                const isHistorySync = m.type === 'append';
                 
-                if (!isDecryptionFailureStub && this.processedMessagesCache.has(cacheKey)) {
+                if (!isDecryptionFailureStub && !isHistorySync && this.processedMessagesCache.has(cacheKey)) {
                     console.log(`[EventProcessor] Mensagem Duplicada Detectada em Cache de Memória (Ignorando). ID: ${msgId}`);
                     continue;
                 }
@@ -1235,11 +1271,10 @@ class EventProcessor {
     async handleMessagingHistorySet(tenantId, instanceId, sock, payload) {
         if (!instanceId) return;
 
-        // Verifica se a instância de fato existe para evitar violação de chave estrangeira
         try {
             const { data: instCheck } = await supabase.from('whatsapp_instances').select('id').eq('id', instanceId).limit(1);
             if (!instCheck || instCheck.length === 0) {
-                console.warn(`[EventProcessor] Instância ${instanceId} não existe mais no banco de dados. Ignorando sincronização de histórico.`);
+                console.warn(`[EventProcessor] Instância ${instanceId} não existe mais no banco de dados. Ignorando histórico.`);
                 return;
             }
         } catch (e) {
@@ -1250,18 +1285,16 @@ class EventProcessor {
         const chats = payload.chats || [];
         const contacts = payload.contacts || [];
         const messages = payload.messages || [];
-        const isLatest = payload.isLatest || false;
         
-        console.log(`[EventProcessor] Histórico Recebido: ${chats.length} chats, ${contacts.length} contatos, ${messages.length} msgs. IsLatest: ${isLatest}`);
-        
-        
+        console.log(`[EventProcessor] Histórico de Conexão/Reconexão Recebido: ${chats.length} chats, ${contacts.length} contatos, ${messages.length} mensagens.`);
+
         const ownerJid = sock?.user?.id;
         let ownerPhone = null;
         if (ownerJid) {
              ownerPhone = ownerJid.split('@')[0].split(':')[0];
         }
 
-        // Contacts (Fazemos um lote imediato pro Histórico base)
+        // 1. Sincronização de Contatos do Histórico
         const mappedContactsToHistory = {};
         for (const c of contacts) {
             let jid = c.id;
@@ -1269,106 +1302,44 @@ class EventProcessor {
             
             if (this.isLid(jid)) {
                 const resolvedPn = await this.resolveLidToPhone(instanceId, jid, sock);
-                if (resolvedPn) {
-                    jid = resolvedPn;
-                }
+                if (resolvedPn) jid = resolvedPn;
             }
             
             const phone = jid.split('@')[0].split(':')[0];
             const cleanJid = phone + '@' + jid.split('@')[1];
-            jid = cleanJid; // Limpa o JID removendo sufixo de dispositivo
+            jid = cleanJid;
             
-            // Pula o próprio número
             if (ownerPhone && phone === ownerPhone) continue;
 
             const pushName = c.notify || c.name || phone;
             mappedContactsToHistory[`${tenantId}_${phone}`] = { tenant_id: tenantId, phone: phone, name: pushName, whatsapp_jid: jid, instance_id: instanceId };
         }
         const histContacts = Object.values(mappedContactsToHistory);
-        if(histContacts.length > 0) {
+        if (histContacts.length > 0) {
              const chunkLimit = 500;
              for (let i = 0; i < histContacts.length; i += chunkLimit) {
                  const chunk = histContacts.slice(i, i + chunkLimit);
-                 await supabase.from('contacts').upsert(chunk, { onConflict: 'tenant_id, phone', ignoreDuplicates: true });
+                 await supabase.from('contacts').upsert(chunk, { onConflict: 'tenant_id, phone', ignoreDuplicates: true }).catch(() => {});
              }
         }
 
-        if (payload.peerDataRequestSessionId && messages && messages.length > 0) {
-            console.log(`[EventProcessor] Sincronização On-Demand Detectada. Processando ${messages.length} mensagens para o banco.`);
+        // 2. Sincronização de Mensagens (Prevenção Total de Perda de Mensagens Offline/Reconexão)
+        if (messages && messages.length > 0) {
+            console.log(`[EventProcessor] Processando ${messages.length} mensagens do histórico para garantir integridade total...`);
             const chronologicMessages = [...messages].reverse();
-            await this.handleMessageUpsert(tenantId, instanceId, sock, { messages: chronologicMessages, type: 'append' });
             
-            // Emitir trigger de recarregamento para o frontend recarregar a conversa atualizada
+            // Processa em lotes de 100 mensagens por vez para alta performance sem travar a CPU
+            for (let i = 0; i < chronologicMessages.length; i += 100) {
+                const chunk = chronologicMessages.slice(i, i + 100);
+                await this.handleMessageUpsert(tenantId, instanceId, sock, { messages: chunk, type: 'append' });
+            }
+
             await realtime.publishInboxEvent(tenantId, 'history.sync.completed', {
                 count: chronologicMessages.length
-            });
-            return;
-        }
-
-        // Verifica se a caixa já possui histórico de conversas gravado no Supabase
-        let hasExistingHistory = false;
-        try {
-            const { count, error } = await supabase
-                .from('conversations')
-                .select('*', { count: 'exact', head: true })
-                .eq('instance_id', instanceId);
-            
-            if (!error && count > 0) {
-                hasExistingHistory = true;
-                console.log(`[EventProcessor] Instância ${instanceId} já possui ${count} conversas no banco de dados. Ignorando sincronização de histórico de mensagens.`);
-            }
-        } catch (e) {
-            console.error(`[EventProcessor] Erro ao verificar histórico de conversas no Supabase:`, e);
-        }
-
-        // Histórico em Massa de Mensagens: Distribuir em Timers (apenas se for primeira conexão)
-        if (!hasExistingHistory && messages && messages.length > 0) {
-            // Regra Anti-Ban e Anti-Loop: Limitar a 50 Contatos, 50 mensagens por contato, fatiados a cada 10 min
-            const chatMap = new Map();
-            for (const m of messages) {
-                const jid = m.key.remoteJid;
-                // Excluir grupos e broadcasts e ids vazios
-                if (!jid || jid.includes('@g.us') || jid.includes('broadcast')) continue;
-                
-                if (!chatMap.has(jid)) chatMap.set(jid, []);
-                // Limite de 50 mensagens de histórico por conversa
-                if (chatMap.get(jid).length < 50) {
-                     chatMap.get(jid).push(m);
-                }
-            }
-            
-            const validJids = Array.from(chatMap.keys());
-            // Teto Global: 50 Contatos 
-            const top50 = validJids.slice(0, 50);
-            
-            const batches = [];
-            for (let i = 0; i < top50.length; i += 5) {
-                batches.push(top50.slice(i, i + 5)); // Lotes de 5 contatos
-            }
-            
-            console.log(`[EventProcessor] Sincronização Fragmentada de Histórico. Batches: ${batches.length} (5 contatos a cada 10m, cap de 50 contatos)`);
-
-            batches.forEach((batch, index) => {
-                 const msgsToProcess = [];
-                 batch.forEach(jid => msgsToProcess.push(...chatMap.get(jid)));
-                 
-                 const chronologicMessages = msgsToProcess.reverse();
-                 
-                 // Lote 0 (Ponto de contato inicial) roda quase imediato. O restante avança em 10 Min (600,000 milissegundos)
-                 const delayMs = index === 0 ? 5000 : index * 600000;
-                 
-                 setTimeout(async () => {
-                      if (!sock) {
-                          console.log(`[EventProcessor] Abortando Lote ${index+1}/${batches.length} do History Sync. Sock is undefined.`);
-                          return;
-                      }
-                      await this.handleMessageUpsert(tenantId, instanceId, sock, { messages: chronologicMessages, type: 'append' });
-                      console.log(`[EventProcessor] Sync Histórico do Lote ${index+1}/${batches.length} finalizado e enviado p/ UPSERT. (Registros no Lote: ${chronologicMessages.length})`);
-                 }, delayMs);
-            });
+            }).catch(() => {});
         }
         
-        console.log(`[EventProcessor] Sync histórico absorvido e em processamento background.`);
+        console.log(`[EventProcessor] Sync de histórico concluído com sucesso para instância ${instanceId}.`);
     }
 
     async handleChatsUpsert(tenantId, instanceId, sock, chats) {
