@@ -6795,6 +6795,33 @@ export default function ChatDashboard() {
                 const nextMsg = msgsFilteredByMode[idx + 1];
                 return !nextMsg || nextMsg.sender !== 'system';
               });
+
+              if (ticketMode && messageFilter === 'today' && rawMsgs.length > 0 && dedupedMsgs.length === 0) {
+                return (
+                  <div className="flex-grow flex flex-col items-center justify-center p-6 select-none animate-in fade-in duration-300">
+                    <div className="max-w-sm p-6 bg-white/75 dark:bg-[#202c33]/75 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/10 shadow-lg flex flex-col items-center text-center gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-500 shadow-inner">
+                        <Ticket size={24} />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <h4 className="text-sm font-bold text-[#111b21] dark:text-[#e9edef]">
+                          Nenhuma mensagem hoje
+                        </h4>
+                        <p className="text-[11px] text-[#54656f] dark:text-[#8696a0] leading-relaxed">
+                          Esta conversa possui mensagens anteriores, mas nenhuma de hoje.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setMessageFilter('all')}
+                        className="mt-1 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98] cursor-pointer"
+                      >
+                        Exibir Histórico Completo
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
               
               return dedupedMsgs.map((msg, index, arr) => {
                 const isMe = msg.sender === 'human' || msg.sender === 'bot';

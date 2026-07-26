@@ -123,33 +123,32 @@ export const MessageBubble = memo(({
   };
   
   const separatorNode = showDateSeparator ? (
-    <div className="flex items-center justify-center my-6 w-full gap-2.5 select-none px-2 md:px-6">
-       {dateSeparatorText === 'HOJE' && ticketMode ? (
-         <>
-           <div className="flex-1 h-[1px] bg-gradient-to-r from-transparent via-emerald-500/35 to-emerald-500/20 dark:via-emerald-500/40 dark:to-emerald-500/25"></div>
-           <button
-              type="button"
-              onClick={() => setMessageFilter?.(messageFilter === 'today' ? 'all' : 'today')}
-              className={cn(
-                "flex items-center gap-2 text-[11px] font-extrabold px-4 py-2 rounded-full border shadow-md transition-all duration-300 cursor-pointer select-none hover:scale-[1.02] active:scale-95 backdrop-blur-md shrink-0",
-                messageFilter === 'all'
-                  ? "bg-gradient-to-r from-emerald-600/90 via-teal-600/90 to-emerald-700/90 text-white border-emerald-400/40 shadow-emerald-500/20 ring-2 ring-emerald-500/20"
-                  : "bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border-emerald-500/35 dark:border-emerald-500/45 hover:bg-emerald-500/20 shadow-emerald-500/10"
-              )}
-            >
-              <Ticket size={14} className="shrink-0 animate-pulse text-emerald-500 dark:text-emerald-400" />
-              <span className="font-extrabold uppercase tracking-wider text-[11px]">HOJE</span>
-              <span className="opacity-30 dark:opacity-40">|</span>
-              <span className="uppercase tracking-wider font-extrabold text-[10px]">
-                Modo Ticket: {messageFilter === 'today' ? 'Apenas Hoje' : 'Exibindo Todo Histórico'}
-              </span>
-              <span className="font-black text-[9.5px] ml-0.5 px-2 py-0.5 rounded-full bg-emerald-500/20 dark:bg-emerald-500/30 text-emerald-700 dark:text-emerald-200 border border-emerald-500/30">
-                {messageFilter === 'today' ? 'Ver Anteriores ▲' : 'Ocultar Anteriores ▼'}
-              </span>
-            </button>
-           <div className="flex-1 h-[1px] bg-gradient-to-l from-transparent via-emerald-500/35 to-emerald-500/20 dark:via-emerald-500/40 dark:to-emerald-500/25"></div>
-         </>
-       ) : (
+    <div className="flex items-center justify-center my-6 w-full gap-2.5 select-none px-2 md:px-6">       {ticketMode && index === 0 ? (
+          <>
+            <div className="flex-1 h-[1px] bg-gradient-to-r from-transparent via-emerald-500/35 to-emerald-500/20 dark:via-emerald-500/40 dark:to-emerald-500/25"></div>
+            <button
+               type="button"
+               onClick={() => setMessageFilter?.(messageFilter === 'today' ? 'all' : 'today')}
+               className={cn(
+                 "flex items-center gap-2 text-[11px] font-extrabold px-4 py-2 rounded-full border shadow-md transition-all duration-300 cursor-pointer select-none hover:scale-[1.02] active:scale-95 backdrop-blur-md shrink-0",
+                 messageFilter === 'all'
+                   ? "bg-gradient-to-r from-emerald-600/90 via-teal-600/90 to-emerald-700/90 text-white border-emerald-400/40 shadow-emerald-500/20 ring-2 ring-emerald-500/20"
+                   : "bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border-emerald-500/35 dark:border-emerald-500/45 hover:bg-emerald-500/20 shadow-emerald-500/10"
+               )}
+             >
+               <Ticket size={14} className="shrink-0 animate-pulse text-emerald-500 dark:text-emerald-400" />
+               <span className="font-extrabold uppercase tracking-wider text-[11px]">{dateSeparatorText}</span>
+               <span className="opacity-30 dark:opacity-40">|</span>
+               <span className="uppercase tracking-wider font-extrabold text-[10px]">
+                 Modo Ticket: {messageFilter === 'today' ? 'Apenas Hoje' : 'Exibindo Todo Histórico'}
+               </span>
+               <span className="font-black text-[9.5px] ml-0.5 px-2 py-0.5 rounded-full bg-emerald-500/20 dark:bg-emerald-500/30 text-emerald-700 dark:text-emerald-200 border border-emerald-500/30">
+                 {messageFilter === 'today' ? 'Ver Anteriores ▲' : 'Ocultar Anteriores ▼'}
+               </span>
+             </button>
+            <div className="flex-1 h-[1px] bg-gradient-to-l from-transparent via-emerald-500/35 to-emerald-500/20 dark:via-emerald-500/40 dark:to-emerald-500/25"></div>
+          </>
+        ) : (
          <span className="bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 text-[#54656f] dark:text-[#8696a0] text-[11px] px-3.5 py-1 rounded-lg border border-black/5 dark:border-white/5 font-bold shadow-sm uppercase tracking-wider">
             {dateSeparatorText}
          </span>
