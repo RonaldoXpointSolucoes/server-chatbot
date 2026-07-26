@@ -552,9 +552,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           }
         }}
       >
-        <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center shrink-0 border border-indigo-400 shadow-sm">
-          <div className="w-2 h-2 bg-white rounded-sm"></div>
-        </div>
+        <img src="/pwa-192x192.png" alt="Logo" className="w-7 h-7 object-contain rounded-lg shadow-sm shrink-0" />
         <div className={cn("flex-1 min-w-0 ml-3 transition-all duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto group-hover/sidebar:!block")}>
           <h2 className="font-semibold text-[#111b21] dark:text-[#e9edef] truncate text-[15px] tracking-tight group-hover:text-emerald-600 dark:group-hover:text-white transition-colors">
             {tenantInfo?.name || currentCompanyContext?.name || 'Carregando...'}

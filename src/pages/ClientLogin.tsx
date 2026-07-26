@@ -632,9 +632,7 @@ export default function ClientLogin() {
       </div>
       <div className="w-full max-w-sm p-8 bg-white dark:bg-[#202c33] rounded-3xl shadow-xl animate-in slide-in-from-bottom-4 fade-in duration-500">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-blue-500/10 rounded-2xl flex items-center justify-center mb-4 text-blue-500">
-             <Building2 size={32} />
-          </div>
+          <img src="/pwa-192x192.png" alt="Logo" className="w-16 h-16 object-contain rounded-2xl shadow-sm mb-4" />
           <h1 className="text-2xl font-bold text-[#111b21] dark:text-[#e9edef]">Workspace Login</h1>
           <p className="text-[#54656f] text-sm mt-1 text-center font-medium">Acesse a central de mensageria da sua empresa.</p>
         </div>

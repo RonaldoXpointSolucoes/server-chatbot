@@ -193,8 +193,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'ChatBoot CRM';
   const options = {
     body: data.body || 'Você tem uma nova mensagem',
-    icon: data.icon || '/pwa-192x192.svg',
-    badge: data.badge || '/pwa-192x192.svg',
+    icon: data.icon || '/pwa-192x192.png',
+    badge: data.badge || '/pwa-192x192.png',
     vibrate: [200, 100, 200],
     data: data.data || { url: '/' },
     actions: [

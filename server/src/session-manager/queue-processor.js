@@ -53,7 +53,7 @@ class QueueProcessor {
             }
         } catch (err) {
             if (err.message && (err.message.includes('fetch failed') || err.message.includes('timeout') || err.message.includes('Network'))) {
-                console.warn(`[QueueProcessor/Loop] Falha de rede temporária no loop de outbox:`, err.message);
+                console.info(`[QueueProcessor/Loop] Oscilação temporária de rede no loop de outbox. Auto-recuperando em 3s...`);
             } else {
                 console.error(`[QueueProcessor/Loop] Erro no loop de outbox:`, err.message);
             }

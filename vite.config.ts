@@ -22,9 +22,10 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 5000000,
       },
       includeAssets: [
-        'vite.svg', 
-        'pwa-192x192.svg', 
-        'pwa-512x512.svg',
+        'favicon.ico',
+        'favicon-16x16.png',
+        'favicon-32x32.png',
+        'favicon-48x48.png',
         'pwa-72x72.png',
         'pwa-96x96.png',
         'pwa-128x128.png',
@@ -34,8 +35,9 @@ export default defineConfig({
         'pwa-192x192.png',
         'pwa-384x384.png',
         'pwa-512x512.png',
-        'apple-touch-icon.png',
-        'apple-splash.png'
+        'maskable-icon-192x192.png',
+        'maskable-icon-512x512.png',
+        'apple-touch-icon.png'
       ],
       devOptions: {
         enabled: true,
@@ -98,7 +100,13 @@ export default defineConfig({
             src: 'pwa-192x192.png',
             sizes: '192x192',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
+          },
+          {
+            src: 'maskable-icon-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'maskable'
           },
           {
             src: 'pwa-384x384.png',
@@ -110,7 +118,13 @@ export default defineConfig({
             src: 'pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
+          },
+          {
+            src: 'maskable-icon-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable'
           }
         ]
       }
