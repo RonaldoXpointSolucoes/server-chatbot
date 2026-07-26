@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, User, Edit3, CheckCircle, Save, Bell, BellOff, Volume2, Smartphone, PhoneCall, AtSign, Ticket, CheckCircle2, Play, MessageSquare } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { supabase } from '../services/supabase';
@@ -164,10 +165,11 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({
   };
 
   if (!isOpen) return null;
+  if (typeof window === 'undefined' || typeof document === 'undefined') return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in duration-200 p-3 overflow-y-auto">
-      <div className="bg-[#111b21] text-white w-full max-w-lg md:max-w-xl rounded-2xl shadow-2xl border border-[#2a3942] overflow-hidden animate-in slide-in-from-bottom-4 duration-300 my-auto max-h-[94vh] flex flex-col">
+      <div className="bg-[#111b21] text-white w-full max-w-2xl md:max-w-3xl rounded-2xl shadow-2xl border border-[#2a3942] overflow-hidden animate-in slide-in-from-bottom-4 duration-300 my-auto max-h-[94vh] flex flex-col">
         
         {/* Cabeçalho Limpo e Não-Espremido */}
         <div className="flex items-center justify-between p-4 border-b border-[#2a3942] bg-[#1a252d] shrink-0 gap-3">
@@ -218,65 +220,107 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({
         
         {/* Conteúdo da Aba 1: Perfil */}
         {activeTab === 'profile' && (
-          <div className="p-4 sm:p-5 space-y-5 overflow-y-auto styled-scrollbar flex-1">
-            <div>
-              <label className="block text-xs font-bold text-[#8696a0] uppercase tracking-wider mb-2">
-                 Nome de Exibição
-              </label>
-              <div className="relative">
-                <input 
-                  type="text" 
-                  value={fullName}
-                  onChange={e => setFullName(e.target.value)}
-                  className="w-full bg-[#1a252d] border border-[#2a3942] rounded-xl px-4 py-2.5 text-white focus:ring-2 focus:ring-[#00a884]/40 focus:border-[#00a884] outline-none transition pl-10 text-sm"
-                  placeholder="Seu nome completo"
-                />
-                <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8696a0]" />
-              </div>
-            </div>
-            
-            <div className="bg-[#1a252d] border border-[#2a3942] rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                 <span className="text-xs font-semibold text-white">Assinatura de Atendimento</span>
-                 <button
-                   type="button"
-                   onClick={() => setUseSignature(!useSignature)}
-                   className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${useSignature ? 'bg-[#00a884]' : 'bg-[#2a3942]'}`}
-                 >
-                   <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${useSignature ? 'translate-x-4' : 'translate-x-1'}`} />
-                 </button>
-              </div>
+          <div className="p-4 sm:p-5 overflow-y-auto styled-scrollbar flex-1">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
               
-              {useSignature ? (
-                <div className="space-y-2 pt-1">
+              {/* Coluna 1: Avatar e Dados da Conta */}
+              <div className="md:col-span-5 flex flex-col items-center p-4 bg-[#1a252d]/50 border border-[#2a3942]/50 rounded-2xl shadow-inner text-center select-none">
+                <div className="relative group">
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-500 p-[2px] shadow-lg shadow-[#00a884]/10 transition-transform duration-300 group-hover:scale-105">
+                    <div className="w-full h-full bg-[#111b21] rounded-full flex items-center justify-center overflow-hidden">
+                      <span className="text-white font-extrabold text-2xl tracking-tight">
+                        {(() => {
+                          if (!fullName) return 'OP';
+                          const parts = fullName.trim().split(/\s+/);
+                          if (parts.length >= 2) {
+                            return (parts[0][0] + parts[1][0]).toUpperCase();
+                          }
+                          return parts[0].substring(0, 2).toUpperCase();
+                        })()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <h3 className="font-bold text-white text-base mt-3.5 tracking-tight truncate max-w-full">
+                  {fullName || 'Operador'}
+                </h3>
+
+                <span className="mt-1 px-2.5 py-0.5 bg-[#00a884]/10 border border-[#00a884]/25 text-[#00a884] text-[9px] font-black uppercase rounded-full tracking-wider">
+                  {(() => {
+                    const role = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+                    return role === 'admin' || role === 'Admin' ? 'Administrador' : 'Agente / Operador';
+                  })()}
+                </span>
+
+                <p className="text-[11px] text-[#8696a0] font-mono mt-3.5 truncate max-w-full px-2 bg-black/10 py-1 rounded-lg border border-white/[0.03]">
+                  {identity.email || 'email@sistema.com'}
+                </p>
+              </div>
+
+              {/* Coluna 2: Formulário */}
+              <div className="md:col-span-7 space-y-5">
+                <div>
+                  <label className="block text-xs font-bold text-[#8696a0] uppercase tracking-wider mb-2">
+                     Nome de Exibição
+                  </label>
                   <div className="relative">
                     <input 
                       type="text" 
-                      value={signature}
-                      onChange={e => setSignature(e.target.value)}
-                      className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#00a884]/40 focus:border-[#00a884] outline-none transition pl-10 text-xs"
-                      placeholder="Ex: Ronaldo - Suporte Técnico"
+                      value={fullName}
+                      onChange={e => setFullName(e.target.value)}
+                      className="w-full bg-[#1a252d] border border-[#2a3942] rounded-xl px-4 py-2.5 text-white focus:ring-2 focus:ring-[#00a884]/40 focus:border-[#00a884] outline-none transition pl-10 text-sm"
+                      placeholder="Seu nome completo"
                     />
-                    <Edit3 size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8696a0]" />
+                    <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8696a0]" />
                   </div>
-                  <p className="text-[11px] text-[#8696a0] leading-relaxed">
-                     Sua assinatura será adicionada em negrito no topo de cada mensagem enviada.
-                  </p>
                 </div>
-              ) : (
-                <p className="text-[11px] text-[#8696a0]">Ative para incluir uma assinatura fixa no envio das mensagens.</p>
-              )}
-            </div>
+                
+                <div className="bg-[#1a252d] border border-[#2a3942] rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                     <span className="text-xs font-semibold text-white">Assinatura de Atendimento</span>
+                     <button
+                       type="button"
+                       onClick={() => setUseSignature(!useSignature)}
+                       className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${useSignature ? 'bg-[#00a884]' : 'bg-[#2a3942]'}`}
+                     >
+                       <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${useSignature ? 'translate-x-4' : 'translate-x-1'}`} />
+                     </button>
+                  </div>
+                  
+                  {useSignature ? (
+                    <div className="space-y-2 pt-1">
+                      <div className="relative">
+                        <input 
+                          type="text" 
+                          value={signature}
+                          onChange={e => setSignature(e.target.value)}
+                          className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-4 py-2 text-white focus:ring-2 focus:ring-[#00a884]/40 focus:border-[#00a884] outline-none transition pl-10 text-xs"
+                          placeholder="Ex: Ronaldo - Suporte Técnico"
+                        />
+                        <Edit3 size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8696a0]" />
+                      </div>
+                      <p className="text-[11px] text-[#8696a0] leading-relaxed">
+                         Sua assinatura será adicionada em negrito no topo de cada mensagem enviada.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-[#8696a0]">Ative para incluir uma assinatura fixa no envio das mensagens.</p>
+                  )}
+                </div>
 
-            <div className="pt-2">
-              <button 
-                 onClick={handleSaveProfile}
-                 disabled={loading}
-                 className="w-full py-3 rounded-xl bg-[#00a884] hover:bg-[#008f6f] text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition disabled:opacity-50 shadow-md shadow-[#00a884]/20 active:scale-[0.98]"
-              >
-                 {loading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : (success ? <CheckCircle size={16}/> : <Save size={16}/>)}
-                 {success ? 'Salvo!' : 'Salvar Alterações'}
-              </button>
+                <div className="pt-2">
+                  <button 
+                     onClick={handleSaveProfile}
+                     disabled={loading}
+                     className="w-full py-3 rounded-xl bg-[#00a884] hover:bg-[#008f6f] text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition disabled:opacity-50 shadow-md shadow-[#00a884]/20 active:scale-[0.98]"
+                  >
+                     {loading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : (success ? <CheckCircle size={16}/> : <Save size={16}/>)}
+                     {success ? 'Salvo!' : 'Salvar Alterações'}
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
         )}
@@ -478,6 +522,7 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({
         )}
 
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

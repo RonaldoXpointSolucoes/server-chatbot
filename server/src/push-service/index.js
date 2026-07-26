@@ -173,7 +173,8 @@ class PushService {
                 icon: contactAvatar,
                 data: {
                     url: `/?conversation=${conversationId}`,
-                    instanceId: instanceId
+                    instanceId: instanceId,
+                    createdAt: new Date().toISOString()
                 }
             });
 

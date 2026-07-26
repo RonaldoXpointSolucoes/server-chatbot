@@ -22,6 +22,8 @@ import {
   History,
   Mails,
   Bot,
+  MoreVertical,
+  RotateCcw,
   Network,
   ScrollText,
   MessageSquareReply,
@@ -196,6 +198,21 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const [myConversationsMenu, setMyConversationsMenu] = useState<{ x: number, y: number } | null>(null);
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
   const [agentSettingsTab, setAgentSettingsTab] = useState<'profile' | 'notifications'>('profile');
+  const [isChannelsCollapsed, setIsChannelsCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('chatboot_sidebar_channels_collapsed') === 'true';
+    }
+    return false;
+  });
+
+  const toggleChannelsCollapse = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const newVal = !isChannelsCollapsed;
+    setIsChannelsCollapsed(newVal);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chatboot_sidebar_channels_collapsed', String(newVal));
+    }
+  };
 
   const tenantInfo = useChatStore(state => state.tenantInfo);
   const tenantIdFromStore = tenantInfo?.id;
@@ -685,18 +702,37 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               }} 
             />
             {instances.length !== 1 && (
-              <NavItem title="Todas as conversas" isActive={filterType !== 'mine' && filterType !== 'blocked'} onClick={() => {
-                if (activeChannelFilter === null && filterType === 'all' && window.location.pathname === '/chat') return;
-                setActiveChannelFilter(null, null);
-                setFilterType('all');
-                if (window.location.pathname !== '/chat') {
-                  navigate('/chat');
-                }
-              }} />
+              <div className="relative flex-1">
+                <NavItem 
+                  title="Todas as conversas" 
+                  isActive={filterType !== 'mine' && filterType !== 'blocked'} 
+                  onClick={() => {
+                    if (activeChannelFilter === null && filterType === 'all' && window.location.pathname === '/chat') return;
+                    setActiveChannelFilter(null, null);
+                    setFilterType('all');
+                    if (window.location.pathname !== '/chat') {
+                      navigate('/chat');
+                    }
+                  }} 
+                  alwaysShowAction={true}
+                  actionNode={
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleChannelsCollapse();
+                      }}
+                      className="p-1 rounded hover:bg-gray-200 dark:hover:bg-[#2a3942] text-[#8696a0] hover:text-white transition-all flex items-center justify-center"
+                      title={isChannelsCollapsed ? "Expandir caixas" : "Recolher caixas"}
+                    >
+                      {isChannelsCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                    </button>
+                  }
+                />
+              </div>
             )}
             
             {/* Lista de Canais (Inboxes) inserida abaixo de Todas as conversas */}
-            {instances.length > 0 && (
+            {instances.length > 0 && !isChannelsCollapsed && (
                <div className="pl-1 border-l-2 border-[#2a3942]/50 ml-5 my-1 py-0.5 space-y-0.5">
                  {instances.map(inst => {
                     const unreadCount = contacts.filter(c => c.instance_id === inst.id && c.unread > 0 && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length;
@@ -1284,6 +1320,7 @@ function NavItem({
   isActive = false, 
   isSub = false, 
   actionNode,
+  alwaysShowAction = false,
   className,
   onClick 
 }: { 
@@ -1293,6 +1330,7 @@ function NavItem({
   isActive?: boolean, 
   isSub?: boolean,
   actionNode?: React.ReactNode,
+  alwaysShowAction?: boolean,
   className?: string,
   onClick?: () => void
 }) {
@@ -1341,7 +1379,7 @@ function NavItem({
         "group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto group-hover/sidebar:!pointer-events-auto"
       )}>
          {actionNode && (
-            <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className={cn(alwaysShowAction ? "opacity-100" : "opacity-0 group-hover:opacity-100 transition-opacity")}>
                {actionNode}
             </div>
          )}

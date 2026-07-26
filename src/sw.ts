@@ -161,6 +161,17 @@ self.addEventListener('push', (event) => {
       }
     }
 
+    // Filtro de mensagens antigas (evita enxurrada de notificações acumuladas ao abrir o navegador/sistema)
+    const createdAt = data.data?.createdAt;
+    if (createdAt) {
+      const ageMs = Date.now() - new Date(createdAt).getTime();
+      const maxAgeMs = 3 * 60 * 1000; // 3 minutos
+      if (ageMs > maxAgeMs) {
+        console.log(`[SW] Push descartado por ser muito antigo (${Math.round(ageMs / 1000)}s de idade).`);
+        return;
+      }
+    }
+
     // Filtro RBAC e Preferências por Caixa de Entrada
     const instanceId = data.data?.instanceId;
     const userConfig = await getConfigFromDB();

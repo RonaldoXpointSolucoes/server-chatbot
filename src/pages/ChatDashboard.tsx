@@ -6780,7 +6780,17 @@ export default function ChatDashboard() {
               const msgsFilteredByMode = (ticketMode && messageFilter === 'today')
                 ? rawMsgs.filter(m => {
                     try {
-                      return isToday(new Date(m.timestamp));
+                      const msgDate = new Date(m.timestamp);
+                      // Se a mensagem for de fuso horário futuro/drift de relógio, sempre exibe
+                      if (msgDate.getTime() > Date.now()) return true;
+
+                      // Se houver um ticket ativo para o contato selecionado, exibe todas as mensagens desde a abertura do ticket
+                      const realContactId = activeChat.id.includes('_') ? activeChat.id.split('_')[0] : activeChat.id;
+                      if (activeTicket && String(activeTicket.contact_id) === String(realContactId) && activeTicket.opened_at) {
+                        return msgDate.getTime() >= new Date(activeTicket.opened_at).getTime() || isToday(msgDate);
+                      }
+
+                      return isToday(msgDate);
                     } catch (e) {
                       return false;
                     }
