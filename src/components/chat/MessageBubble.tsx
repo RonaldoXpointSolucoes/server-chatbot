@@ -144,7 +144,7 @@ export const MessageBubble = memo(({
                 Modo Ticket: {messageFilter === 'today' ? 'Apenas Hoje' : 'Exibindo Todo Histórico'}
               </span>
               <span className="font-black text-[9.5px] ml-0.5 px-2 py-0.5 rounded-full bg-emerald-500/20 dark:bg-emerald-500/30 text-emerald-700 dark:text-emerald-200 border border-emerald-500/30">
-                {messageFilter === 'today' ? 'Ver Anteriores ▼' : 'Ocultar Anteriores ▲'}
+                {messageFilter === 'today' ? 'Ver Anteriores ▲' : 'Ocultar Anteriores ▼'}
               </span>
             </button>
            <div className="flex-1 h-[1px] bg-gradient-to-l from-transparent via-emerald-500/35 to-emerald-500/20 dark:via-emerald-500/40 dark:to-emerald-500/25"></div>
