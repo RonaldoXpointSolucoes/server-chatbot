@@ -29,13 +29,15 @@ class QueueProcessor {
 
         try {
             // 1. Busca instâncias que estão conectadas e são controladas por este worker (assigned_node_id = NODE_ID)
-            const { data: instances, error } = await supabase
-                .from('whatsapp_instances')
-                .select('id, tenant_id')
-                .eq('status', 'connected')
-                .eq('assigned_node_id', NODE_ID);
-
-            if (error) throw error;
+            const instances = await retryWithBackoff(async () => {
+                const { data, error } = await supabase
+                    .from('whatsapp_instances')
+                    .select('id, tenant_id')
+                    .eq('status', 'connected')
+                    .eq('assigned_node_id', NODE_ID);
+                if (error) throw error;
+                return data;
+            });
 
             if (instances && instances.length > 0) {
                 for (const inst of instances) {
@@ -68,17 +70,19 @@ class QueueProcessor {
             let msg = null;
             try {
                 // Busca a próxima mensagem pendente da fila para esta instância
-                const { data: messages, error } = await supabase
-                    .from('wa_outgoing_messages')
-                    .select('*')
-                    .eq('instance_id', instanceId)
-                    .eq('status', 'pending')
-                    .lte('scheduled_at', new Date().toISOString())
-                    .order('priority', { ascending: true })
-                    .order('created_at', { ascending: true })
-                    .limit(1);
-
-                if (error) throw error;
+                const messages = await retryWithBackoff(async () => {
+                    const { data, error } = await supabase
+                        .from('wa_outgoing_messages')
+                        .select('*')
+                        .eq('instance_id', instanceId)
+                        .eq('status', 'pending')
+                        .lte('scheduled_at', new Date().toISOString())
+                        .order('priority', { ascending: true })
+                        .order('created_at', { ascending: true })
+                        .limit(1);
+                    if (error) throw error;
+                    return data;
+                });
                 if (!messages || messages.length === 0) {
                     break; // Fila vazia, sai do loop de processamento contínuo
                 }
