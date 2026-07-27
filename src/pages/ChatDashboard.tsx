@@ -6797,6 +6797,19 @@ export default function ChatDashboard() {
               });
 
               if (ticketMode && messageFilter === 'today' && rawMsgs.length > 0 && dedupedMsgs.length === 0) {
+                const lastMsg = rawMsgs[rawMsgs.length - 1];
+                const lastMsgDate = lastMsg ? new Date(lastMsg.timestamp) : null;
+                let lastMsgDateText = '';
+                if (lastMsgDate) {
+                  if (isToday(lastMsgDate)) {
+                    lastMsgDateText = 'hoje';
+                  } else if (isYesterday(lastMsgDate)) {
+                    lastMsgDateText = 'ontem';
+                  } else {
+                    lastMsgDateText = `em ${format(lastMsgDate, 'dd/MM/yyyy')}`;
+                  }
+                }
+
                 return (
                   <div className="flex-grow flex flex-col items-center justify-center p-6 select-none animate-in fade-in duration-300">
                     <div className="max-w-sm p-6 bg-white/75 dark:bg-[#202c33]/75 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/10 shadow-lg flex flex-col items-center text-center gap-3">
@@ -6805,7 +6818,7 @@ export default function ChatDashboard() {
                       </div>
                       <div className="flex flex-col gap-1">
                         <h4 className="text-sm font-bold text-[#111b21] dark:text-[#e9edef]">
-                          Nenhuma mensagem hoje
+                          Última mensagem foi {lastMsgDateText}
                         </h4>
                         <p className="text-[11px] text-[#54656f] dark:text-[#8696a0] leading-relaxed">
                           Esta conversa possui mensagens anteriores, mas nenhuma de hoje.
