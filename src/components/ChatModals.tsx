@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical, Inbox, Ticket, Sparkles, CheckSquare, History } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, UserMinus, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical, Inbox, Ticket, Sparkles, CheckSquare, History } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -5803,14 +5803,65 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                       </div>
                     )}
                     <div className="flex flex-col text-left">
-                      <span className="text-base font-black text-slate-800 dark:text-white">
-                        {selectedTicket.contactName}
-                      </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-base font-black text-slate-800 dark:text-white">
+                          {selectedTicket.contactName}
+                        </span>
+                        {selectedTicket.exclude_reports && (
+                          <span className="px-2 py-0.5 rounded-md text-[9.5px] font-black uppercase tracking-wider bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/25 flex items-center gap-1">
+                            🚫 Colaborador (Excluído das Análises)
+                          </span>
+                        )}
+                      </div>
                       <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold flex items-center gap-1 mt-0.5">
                         <User size={13} className="text-emerald-500 shrink-0" /> Atendente responsável: <strong className="text-slate-700 dark:text-slate-200 font-bold">{selectedTicket.operatorName}</strong>
                       </span>
                     </div>
                   </div>
+
+                  {/* Action Button: Toggle exclude from reports & AI */}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const newExcl = !selectedTicket.exclude_reports;
+                        const { supabase } = await import('../services/supabase');
+                        const { error } = await supabase
+                          .from('contacts')
+                          .update({ exclude_reports: newExcl })
+                          .eq('id', selectedTicket.contact_id);
+                        
+                        if (!error) {
+                          setSelectedTicket({
+                            ...selectedTicket,
+                            exclude_reports: newExcl
+                          });
+                          fetchClosedTickets();
+                        }
+                      } catch (err) {
+                        console.error('Erro ao atualizar exclusão de relatórios do contato:', err);
+                      }
+                    }}
+                    className={cn(
+                      "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 cursor-pointer shrink-0 border shadow-sm active:scale-95",
+                      selectedTicket.exclude_reports
+                        ? "bg-rose-500 text-white border-rose-500 hover:bg-rose-600 shadow-rose-500/20"
+                        : "bg-slate-100 dark:bg-white/5 hover:bg-rose-500/10 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 border-slate-200 dark:border-white/10"
+                    )}
+                    title={selectedTicket.exclude_reports ? "Clique para voltar a incluir este contato nos relatórios e análises de I.A." : "Ignorar este colaborador/contato das métricas, relatórios e análises de I.A."}
+                  >
+                    {selectedTicket.exclude_reports ? (
+                      <>
+                        <ShieldAlert size={15} className="shrink-0 animate-pulse" />
+                        <span>Ignorado nas Análises</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserMinus size={15} className="text-rose-500 shrink-0" />
+                        <span>Remover das Análises</span>
+                      </>
+                    )}
+                  </button>
                 </div>
 
                 {/* AI Error Log Warning */}
