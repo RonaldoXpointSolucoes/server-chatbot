@@ -427,27 +427,8 @@ class SessionManager {
                     
                     const status = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.message || '';
-                    const isCode405 = status === 405 || String(reason).includes('405') || lastDisconnect?.error?.data === 405;
 
-                    if (isCode405) {
-                        console.log(`[SessionManager] Código 405 (Credenciais desatualizadas) na instância ${instanceId}. Resetando credenciais para forçar novo QR Code...`);
-                        sessionCaches.delete(instanceId);
-                        await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
-                        await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
-                        await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
-                        await supabase.from('whatsapp_instances').update({ status: 'connecting', last_error: null }).eq('id', instanceId);
-                        this.sessions.delete(instanceId);
-                        setTimeout(() => {
-                            if (!this.sessions.has(instanceId)) {
-                                this.createSession(tenantId, instanceId).catch(err => {
-                                    console.error(`[SessionManager] Erro na regeneração de sessão após 405 para ${instanceId}:`, err.message);
-                                });
-                            }
-                        }, 1000);
-                        return;
-                    }
-
-                    if (status === 515 || status === 503 || status === 502 || status === 504 || status === 408 || status === DisconnectReason.restartRequired) {
+                    if (status === 515 || status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || status === DisconnectReason.restartRequired) {
                         console.log(`[SessionManager] Oscilação temporária de conexão com servidores WhatsApp (código ${status}) na instância ${instanceId}. Reconectando sessão em 2s...`);
                         this.sessions.delete(instanceId);
                         setTimeout(() => {
@@ -458,6 +439,7 @@ class SessionManager {
                             }
                         }, 2000);
                         return;
+                    }
                     }
                     
                     // Clear stable connection timeouts if it disconnected early
