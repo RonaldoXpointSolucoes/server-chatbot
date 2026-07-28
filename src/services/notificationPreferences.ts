@@ -126,6 +126,48 @@ export async function fetchUserInboxNotificationPreferences(
   return getLocalNotificationPrefs();
 }
 
+async function safeUpsertPreference(payload: {
+  tenant_id: string;
+  user_id: string;
+  user_email: string;
+  instance_id: string;
+  is_enabled: boolean;
+  event_types: any;
+  channels: any;
+  updated_at: string;
+}) {
+  if (!payload.tenant_id || (!payload.user_email && !payload.user_id) || !payload.instance_id) return;
+
+  // 1. Tenta upsert primário usando onConflict por email
+  const { error: err1 } = await supabase
+    .from('user_inbox_notification_preferences')
+    .upsert(payload, { onConflict: 'tenant_id,user_email,instance_id' });
+
+  if (!err1) return;
+
+  // 2. Se ocorreu 409 Conflict por causa do índice user_id, tenta onConflict por user_id
+  const { error: err2 } = await supabase
+    .from('user_inbox_notification_preferences')
+    .upsert(payload, { onConflict: 'tenant_id,user_id,instance_id' });
+
+  if (!err2) return;
+
+  // 3. Fallback de resiliência: UPDATE direto caso ambos os índices já tenham registro antigo
+  await supabase
+    .from('user_inbox_notification_preferences')
+    .update({
+      user_email: payload.user_email,
+      user_id: payload.user_id,
+      is_enabled: payload.is_enabled,
+      event_types: payload.event_types,
+      channels: payload.channels,
+      updated_at: payload.updated_at
+    })
+    .eq('tenant_id', payload.tenant_id)
+    .eq('instance_id', payload.instance_id)
+    .or(`user_email.eq.${payload.user_email},user_id.eq.${payload.user_id}`);
+}
+
 export async function toggleInboxNotification(
   tenantId: string,
   userId: string,
@@ -158,18 +200,16 @@ export async function toggleInboxNotification(
 
   try {
     if (tenantId && (email || uid)) {
-      await supabase
-        .from('user_inbox_notification_preferences')
-        .upsert({
-          tenant_id: tenantId,
-          user_id: uid,
-          user_email: email || uid,
-          instance_id: instanceId,
-          is_enabled: isEnabled,
-          event_types: updated.event_types,
-          channels: updated.channels,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'tenant_id,user_email,instance_id' });
+      await safeUpsertPreference({
+        tenant_id: tenantId,
+        user_id: uid,
+        user_email: email || uid,
+        instance_id: instanceId,
+        is_enabled: isEnabled,
+        event_types: updated.event_types,
+        channels: updated.channels,
+        updated_at: new Date().toISOString()
+      });
     }
   } catch (e) {
     console.error('[NotificationPreferences] Erro ao salvar toggle no Supabase:', e);
@@ -214,18 +254,16 @@ export async function updateInboxEventTypePreference(
 
   try {
     if (tenantId && (email || uid)) {
-      await supabase
-        .from('user_inbox_notification_preferences')
-        .upsert({
-          tenant_id: tenantId,
-          user_id: uid,
-          user_email: email || uid,
-          instance_id: instanceId,
-          is_enabled: updated.is_enabled,
-          event_types: updated.event_types,
-          channels: updated.channels,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'tenant_id,user_email,instance_id' });
+      await safeUpsertPreference({
+        tenant_id: tenantId,
+        user_id: uid,
+        user_email: email || uid,
+        instance_id: instanceId,
+        is_enabled: updated.is_enabled,
+        event_types: updated.event_types,
+        channels: updated.channels,
+        updated_at: new Date().toISOString()
+      });
     }
   } catch (e) {
     console.error('[NotificationPreferences] Erro ao salvar preferência de evento:', e);

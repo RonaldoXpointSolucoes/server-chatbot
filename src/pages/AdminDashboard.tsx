@@ -43,19 +43,40 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       const [compRes, plansRes, groupsRes] = await Promise.all([
-        fetch(`${apiUrl}/api/v1/admin/companies`),
-        fetch(`${apiUrl}/api/v1/admin/plans`),
-        fetch(`${apiUrl}/api/v1/admin/economic-groups`)
+        fetch(`${apiUrl}/api/v1/admin/companies`).catch(() => null),
+        fetch(`${apiUrl}/api/v1/admin/plans`).catch(() => null),
+        fetch(`${apiUrl}/api/v1/admin/economic-groups`).catch(() => null)
       ]);
-      const companiesData = await compRes.json();
-      const plansData = await plansRes.json();
-      const groupsData = await groupsRes.json();
       
-      if (companiesData && !companiesData.error) setCompanies(companiesData);
-      if (plansData && !plansData.error) setPlans(plansData);
-      if (groupsData && !groupsData.error) setEconomicGroups(groupsData);
+      const companiesData = compRes && compRes.ok ? await compRes.json() : null;
+      const plansData = plansRes && plansRes.ok ? await plansRes.json() : null;
+      const groupsData = groupsRes && groupsRes.ok ? await groupsRes.json() : null;
+      
+      if (companiesData && Array.isArray(companiesData)) {
+        setCompanies(companiesData);
+      } else {
+        const { data: sbCompanies } = await supabase.from('companies').select('*').order('created_at', { ascending: false });
+        if (sbCompanies) setCompanies(sbCompanies);
+      }
+
+      if (plansData && Array.isArray(plansData)) {
+        setPlans(plansData);
+      } else {
+        const { data: sbPlans } = await supabase.from('plans').select('*');
+        if (sbPlans) setPlans(sbPlans);
+      }
+
+      if (groupsData && Array.isArray(groupsData)) {
+        setEconomicGroups(groupsData);
+      } else {
+        const { data: sbGroups } = await supabase.from('economic_groups').select('*');
+        if (sbGroups) setEconomicGroups(sbGroups);
+      }
     } catch (e) {
       console.error('Error fetching admin data:', e);
+      // Supabase fallback
+      const { data: sbCompanies } = await supabase.from('companies').select('*').order('created_at', { ascending: false });
+      if (sbCompanies) setCompanies(sbCompanies);
     }
     setLoading(false);
   };
@@ -63,11 +84,15 @@ export default function AdminDashboard() {
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await fetch(`${apiUrl}/api/v1/admin/economic-groups`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newGroup)
-    });
+    try {
+      await fetch(`${apiUrl}/api/v1/admin/economic-groups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newGroup)
+      });
+    } catch (err) {
+      await supabase.from('economic_groups').insert(newGroup);
+    }
     setShowNewGroup(false);
     setNewGroup({ name: '', owner_email: '' });
     fetchData();
@@ -79,9 +104,14 @@ export default function AdminDashboard() {
     setLoading(true);
     const endpoint = showDeleteModal.type === 'company' ? 'companies' : 'economic-groups';
     
-    await fetch(`${apiUrl}/api/v1/admin/${endpoint}/${showDeleteModal.id}`, {
-      method: 'DELETE',
-    });
+    try {
+      await fetch(`${apiUrl}/api/v1/admin/${endpoint}/${showDeleteModal.id}`, {
+        method: 'DELETE',
+      });
+    } catch (err) {
+      const table = showDeleteModal.type === 'company' ? 'companies' : 'economic_groups';
+      await supabase.from(table).delete().eq('id', showDeleteModal.id);
+    }
     
     setShowDeleteModal(null);
     setDeleteConfirmText('');
@@ -92,20 +122,55 @@ export default function AdminDashboard() {
     e.preventDefault();
     setLoading(true);
     
-    await fetch(`${apiUrl}/api/v1/admin/companies`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: newCompany.name,
-        plan_id: newCompany.plan_id,
-        evolution_api_instance: newCompany.instance,
-        email: newCompany.email,
-        password: newCompany.password,
-        economic_group_id: newCompany.economic_group_id || null,
-        status: 'active',
-        current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-      })
-    });
+    let success = false;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/admin/companies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newCompany.name,
+          plan_id: newCompany.plan_id || null,
+          evolution_api_instance: newCompany.instance || null,
+          email: newCompany.email,
+          password: newCompany.password,
+          economic_group_id: newCompany.economic_group_id || null,
+          status: 'active',
+          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        })
+      });
+      if (res.ok) success = true;
+    } catch (err) {
+      console.warn('API error, using Supabase fallback', err);
+    }
+
+    if (!success) {
+      const { data: compData, error: compErr } = await supabase
+        .from('companies')
+        .insert({
+          name: newCompany.name,
+          plan_id: newCompany.plan_id || null,
+          evolution_api_instance: newCompany.instance || null,
+          email: newCompany.email,
+          password: newCompany.password,
+          economic_group_id: newCompany.economic_group_id || null,
+          status: 'active',
+          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        })
+        .select()
+        .single();
+
+      if (compErr) {
+        alert(`Erro ao criar empresa: ${compErr.message}`);
+      } else if (compData && newCompany.email) {
+        await supabase.from('tenant_users').insert({
+          tenant_id: compData.id,
+          email: newCompany.email,
+          password: newCompany.password,
+          full_name: `Admin - ${newCompany.name}`,
+          role: 'admin'
+        });
+      }
+    }
     
     setShowNewCompany(false);
     setNewCompany({ name: '', plan_id: '', instance: '', email: '', password: '', economic_group_id: '' });

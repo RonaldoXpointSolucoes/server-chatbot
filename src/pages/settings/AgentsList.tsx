@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Search, ChevronRight, Edit3, Trash2, Shield, User, Loader2, AlertTriangle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, ChevronRight, Edit3, Trash2, Shield, User, Loader2, AlertTriangle, Building, Plus } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import { AgentModal } from '../../components/modals/AgentModal';
 
 export default function AgentsList() {
+  const navigate = useNavigate();
   const { agents, fetchTenantAgents, deleteAgent, tenantInfo } = useChatStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -91,15 +93,24 @@ export default function AgentsList() {
               />
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <span className="text-sm text-white/40 font-medium">
                 {filteredAgents.length} usuários
               </span>
               <button
+                onClick={() => navigate('/admin')}
+                className="px-4 py-2 bg-emerald-600/90 hover:bg-emerald-500 text-white text-sm font-medium rounded-xl transition-all duration-200 shadow-md flex items-center gap-2"
+                title="Cadastrar uma nova empresa/cliente SaaS completa no sistema"
+              >
+                <Building className="w-4 h-4" />
+                <span>+ Cadastrar Nova Empresa (Master)</span>
+              </button>
+              <button
                 onClick={handleAddNewClick}
                 className="px-4 py-2 bg-blue-600/90 hover:bg-blue-500 text-white text-sm font-medium rounded-xl transition-all duration-200 shadow-[0_0_20px_rgba(37,99,235,0.15)] hover:shadow-[0_0_25px_rgba(37,99,235,0.25)] flex items-center gap-2"
               >
-                Adicionar Usuário
+                <Plus className="w-4 h-4" />
+                Adicionar Usuário da Empresa
               </button>
             </div>
           </div>

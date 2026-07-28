@@ -180,98 +180,17 @@ export default function ChecklistTablet() {
       
       if (opsErr) throw opsErr;
       
-      // Guarda todos os perfis ativos (com ou sem PIN) para resolução resiliente de nomes
+      // Guarda todos os perfis ativos
       const allOps = opsData || [];
       setAllProfiles(allOps);
 
-      // 2. Carrega todos os checklists ativos do tenant
-      const { data: chksData, error: chksErr } = await supabase
-        .from('checklists')
-        .select('id, responsible_ids, sector_id, sectors(id, name, unit_id)')
-        .eq('tenant_id', tenantId)
-        .eq('is_active', true);
+      // 2. Todos os colaboradores que possuem PIN de 5 dígitos cadastrado são listados para troca rápida no Totem
+      const opsWithPin = allOps.filter(o => o.pin && o.pin.trim().length === 5);
 
-      if (chksErr) throw chksErr;
-      const activeChecklists = chksData || [];
-
-      // Se não houver nenhum checklist ativo no tenant, não exibe ninguém para operar
-      if (activeChecklists.length === 0) {
-        setOperators([]);
-        return;
-      }
-
-      // 3. Classifica os checklists (com responsável vs sem responsável)
-      const explicitUserIds = new Set<string>();
-      const explicitUserNames = new Set<string>();
-      const checklistsWithoutResponsibles: any[] = [];
-
-      activeChecklists.forEach((chk: any) => {
-        const rIds = chk.responsible_ids || [];
-        if (rIds.length > 0) {
-          rIds.forEach((id: string) => {
-            explicitUserIds.add(id);
-            // Busca o nome correspondente na lista completa de operadores para mapeamento por nome resiliente
-            const matchedOp = allOps.find(p => p.id === id);
-            if (matchedOp) {
-              explicitUserNames.add(matchedOp.name.toLowerCase().trim());
-            }
-          });
-        } else {
-          checklistsWithoutResponsibles.push(chk);
-        }
-      });
-
-      // 4. Define os operadores elegíveis para exibição no totem (com PIN ou associados a rotinas ativas)
-      const validOperators = allOps.filter(o => {
-        const hasPin = o.pin && o.pin.length === 5;
-        if (hasPin) return true;
-
-        const opNameClean = o.name.toLowerCase().trim();
-        return explicitUserIds.has(o.id) || explicitUserNames.has(opNameClean);
-      });
-
-      // 5. Carrega permissões de setores e unidades concorrentemente em background
-      const [uPermsRes, sPermsRes] = await Promise.all([
-        supabase.from('user_unit_permissions').select('user_id, unit_id'),
-        supabase.from('user_sector_permissions').select('user_id, sector_id')
-      ]);
-
-      const uPerms = uPermsRes.data || [];
-      const sPerms = sPermsRes.data || [];
-
-      // 5. Aplica a filtragem lógica de qualificação na lista
-      const qualifiedOperators = validOperators.filter(op => {
-        const opNameClean = op.name.toLowerCase().trim();
-
-        // Regra A: Se o operador está vinculado explicitamente como responsável (por ID ou correspondência de Nome)
-        if (explicitUserIds.has(op.id) || explicitUserNames.has(opNameClean)) return true;
-
-        const isPowerUser = ['company_admin', 'super_admin', 'manager'].includes(op.role);
-
-        // Regra B: Se for Administrador e houver checklists ativos sem responsável explícito (públicos)
-        if (isPowerUser && checklistsWithoutResponsibles.length > 0) return true;
-
-        // Regra C: Se for operador comum e possuir permissões de acesso a checklists sem responsável (públicos)
-        const opUnits = uPerms.filter(p => p.user_id === op.id).map(p => p.unit_id);
-        const opSectors = sPerms.filter(p => p.user_id === op.id).map(p => p.sector_id);
-
-        const hasAccessToAnyUnassignedChecklist = checklistsWithoutResponsibles.some(chk => {
-          const sector = chk.sectors;
-          const unitId = sector?.unit_id;
-          const sectorId = chk.sector_id;
-
-          const hasUnitAccess = opUnits.includes(unitId);
-          const hasSectorAccess = opSectors.length === 0 || opSectors.includes(sectorId);
-
-          return hasUnitAccess && hasSectorAccess;
-        });
-
-        return hasAccessToAnyUnassignedChecklist;
-      });
-
-      setOperators(qualifiedOperators);
+      // Se houver membros com PIN cadastrado, exibe-os. Se nenhum tiver PIN ainda, exibe a equipe inteira para facilitar o acesso inicial.
+      setOperators(opsWithPin.length > 0 ? opsWithPin : allOps);
     } catch (e) {
-      console.error('Erro ao buscar e filtrar operadores habilitados:', e);
+      console.error('Erro ao buscar e carregar operadores no totem:', e);
     }
   };
 

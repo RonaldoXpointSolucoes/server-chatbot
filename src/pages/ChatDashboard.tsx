@@ -10,6 +10,7 @@ import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal,
 import ImageEditorModal from '../components/ImageEditorModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { AgentSettingsModal } from '../components/AgentSettingsModal';
+import { CreateInboxModal } from '../components/modals/CreateInboxModal';
 import { ChatOmniMenu } from '../components/ChatOmniMenu';
 import { MainSidebar } from '../components/MainSidebar';
 import { GeminiEditorModal } from '../components/GeminiEditorModal';
@@ -518,6 +519,7 @@ export default function ChatDashboard() {
   const [editingMessage, setEditingMessage] = useState<{ id: string, text: string } | null>(null);
   const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
   const [resolvingTicketContactId, setResolvingTicketContactId] = useState<string | null>(null);
+  const [isCreateInboxModalOpen, setIsCreateInboxModalOpen] = useState(false);
   const activeTicket = useChatStore(s => s.activeTicket);
 
   const calculateFinalStats = async (contactId: string, customTicket?: any) => {
@@ -8104,6 +8106,34 @@ export default function ChatDashboard() {
             )}
           </div>
         </div>
+      ) : availableInstancesList.length === 0 ? (
+        <div className="hidden sm:flex flex-1 flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#111b21] p-8 border-l border-white/5 relative z-10 text-center animate-in fade-in zoom-in-95 duration-300">
+          <div className="w-20 h-20 bg-[#00a884]/15 border border-[#00a884]/30 rounded-3xl flex items-center justify-center mb-5 text-[#00a884] shadow-lg shadow-[#00a884]/10 animate-bounce">
+            <Smartphone size={38} />
+          </div>
+          <h2 className="text-2xl font-bold text-[#111b21] dark:text-white mb-2 tracking-tight">
+            Nenhuma Caixa de Entrada Conectada
+          </h2>
+          <p className="text-sm text-[#54656f] dark:text-[#8696a0] max-w-md mb-6 leading-relaxed">
+            Sua conta ainda não possui nenhuma caixa de entrada configurada. Crie e conecte sua primeira caixa do WhatsApp para começar a receber e enviar mensagens.
+          </p>
+
+          <div className="flex flex-col sm:flex-row items-center gap-3">
+            <button
+              onClick={() => setIsCreateInboxModalOpen(true)}
+              className="px-6 py-3.5 bg-[#00a884] hover:bg-[#008f6f] text-white font-bold text-sm rounded-2xl transition-all shadow-lg shadow-[#00a884]/25 flex items-center gap-2.5 active:scale-95 cursor-pointer"
+            >
+              <Plus size={18} />
+              <span>Criar e Conectar Primeira Caixa</span>
+            </button>
+            <button
+              onClick={() => navigate('/settings/inboxes')}
+              className="px-5 py-3.5 bg-gray-200 dark:bg-[#202c33] hover:bg-gray-300 dark:hover:bg-[#2a3942] text-gray-700 dark:text-white font-semibold text-sm rounded-2xl transition-all border border-gray-300 dark:border-[#2a3942]"
+            >
+              Gerenciar Caixas
+            </button>
+          </div>
+        </div>
       ) : (
         <div className="hidden sm:flex flex-1 flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#222d34] border-l border-white/5 relative z-10">
           <Bot size={80} className="text-gray-300 dark:text-[#2a3942] mb-6" />
@@ -9078,6 +9108,10 @@ export default function ChatDashboard() {
         </div>
       )}
 
+      <CreateInboxModal 
+        isOpen={isCreateInboxModalOpen} 
+        onClose={() => setIsCreateInboxModalOpen(false)} 
+      />
     </div>
   );
 }

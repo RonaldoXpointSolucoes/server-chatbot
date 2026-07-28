@@ -2191,41 +2191,50 @@ export default function ChecklistBuilder() {
                 return (
                   <div 
                     key={chk.id}
-                    className="relative bg-[#202c33]/80 rounded-[32px] border border-[#2a3942]/60 p-5 hover:shadow-lg hover:scale-[1.01] transition-all flex flex-col justify-between"
+                    className="relative bg-gradient-to-b from-[#202c33]/90 to-[#182229]/95 backdrop-blur-md rounded-3xl border border-[#2a3942]/50 p-6 shadow-[0_8px_32px_rgba(0,0,0,0.24)] hover:border-indigo-500/40 hover:shadow-[0_12px_40px_rgba(99,102,241,0.12)] hover:scale-[1.01] transition-all duration-300 flex flex-col justify-between"
                   >
                     <div>
-                      <div className="flex justify-between items-start gap-2">
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-500/10 text-indigo-400">
+                      <div className="flex justify-between items-center gap-2">
+                        <span className="text-[9px] px-2.5 py-1 rounded-md font-bold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 uppercase tracking-wider">
                           {chk.category || 'Operação'}
                         </span>
                         <button
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleToggleChecklistStatus(chk);
                           }}
-                          className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition-all duration-200 active:scale-95 ${
+                          className={`flex items-center gap-1.5 text-[10px] px-3 py-1 rounded-full font-extrabold transition-all duration-200 active:scale-95 border cursor-pointer ${
                             chk.is_active 
-                              ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/35 border border-emerald-500/10' 
-                              : 'bg-rose-500/20 text-rose-400 hover:bg-rose-500/35 border border-rose-500/10'
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20' 
+                              : 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
                           }`}
                           title="Clique para alternar o status rápido"
                         >
+                          <span className={`w-1.5 h-1.5 rounded-full ${chk.is_active ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
                           {chk.is_active ? 'Ativo' : 'Inativo'}
                         </button>
                       </div>
                       
-                      <h3 className="font-bold text-white text-base mt-3 leading-snug">{chk.title}</h3>
-                      <p className="text-xs text-[#8696a0] mt-1.5 line-clamp-2">{chk.description || 'Sem descrição cadastrada.'}</p>
+                      <h3 className="font-extrabold text-[#f1f5f9] text-base mt-4 tracking-tight leading-snug hover:text-white transition-colors">{chk.title}</h3>
+                      <p className="text-xs text-[#94a3b8] mt-2 leading-relaxed line-clamp-2">{chk.description || 'Sem descrição cadastrada.'}</p>
 
-                      <div className="mt-4 pt-3 border-t border-[#2a3942]/40 space-y-1.5 text-xs text-[#8696a0]">
-                        <p className="flex items-center gap-1.5">
-                          <Layers size={13} className="text-slate-400" />
-                          Setor: <span className="text-[#d1d7db]">{sector?.name || 'Geral'}</span>
-                        </p>
-                        <p className="flex items-center gap-1.5">
-                          <CalendarDays size={13} className="text-slate-400" />
-                          Itens do Roteiro: <span className="text-white font-semibold">{chk.items_count || 0} Tarefas</span>
-                        </p>
+                      <div className="mt-5 pt-4 border-t border-[#2a3942]/40 grid grid-cols-2 gap-3 text-xs text-[#94a3b8]">
+                        <div className="flex flex-col gap-1 p-2.5 rounded-xl bg-black/10 border border-[#2a3942]/30">
+                          <span className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider flex items-center gap-1">
+                            <Layers size={11} className="text-slate-400" /> Setor
+                          </span>
+                          <span className="text-white font-semibold truncate" title={sector?.name || 'Geral'}>
+                            {sector?.name || 'Geral'}
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-1 p-2.5 rounded-xl bg-black/10 border border-[#2a3942]/30">
+                          <span className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider flex items-center gap-1">
+                            <CalendarDays size={11} className="text-slate-400" /> Tarefas
+                          </span>
+                          <span className="text-white font-bold">{chk.items_count || 0} Itens</span>
+                        </div>
+                      </div>
                         
                         {/* Pilha Premium de Avatares dos Responsáveis (Interativa e Clicável) */}
                         <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[#2a3942]/20">
@@ -2395,18 +2404,19 @@ export default function ChecklistBuilder() {
                           </>
                         )}
                       </div>
-                    </div>
 
-                    <div className="flex gap-2 mt-5 pt-4 border-t border-[#2a3942]/40">
+                    <div className="flex gap-2.5 mt-5 pt-4 border-t border-[#2a3942]/40">
                       <button
+                        type="button"
                         onClick={() => handleEditChecklist(chk)}
-                        className="flex-1 bg-indigo-600/15 hover:bg-indigo-600/30 text-indigo-400 text-xs font-semibold py-2 rounded-xl flex items-center justify-center gap-1 transition-all"
+                        className="flex-1 bg-gradient-to-r from-indigo-600/80 to-indigo-700/80 hover:from-indigo-600 hover:to-indigo-700 active:from-indigo-700 active:to-indigo-800 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md shadow-indigo-600/10 active:scale-[0.98] cursor-pointer"
                       >
                         <Edit2 size={12} /> Gerenciar Roteiro
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleDeleteChecklist(chk.id)}
-                        className="p-2 hover:bg-rose-500/10 text-[#8696a0] hover:text-rose-400 rounded-xl transition-all"
+                        className="p-2.5 bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-500/30 text-rose-400 hover:text-rose-300 rounded-xl border border-rose-500/20 hover:border-rose-500/40 transition-all active:scale-95 cursor-pointer"
                         title="Deletar Checklist"
                       >
                         <Trash2 size={14} />
