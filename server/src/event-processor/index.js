@@ -1593,7 +1593,15 @@ class EventProcessor {
                 try {
                     const qrBase64 = await qrcode.toDataURL(qr);
                     payload.qr_code = qrBase64;
+                    payload.status = 'qr_ready';
                     eventName = 'instance.qr_updated';
+
+                    await retryWithBackoff(() =>
+                        supabase.from('whatsapp_instances')
+                            .update({ status: 'qr_ready', qr_code: qrBase64, last_error: null })
+                            .eq('id', instanceId)
+                    );
+
                     const { data: existing } = await supabase.from('whatsapp_instance_runtime')
                         .select('instance_id')
                         .eq('instance_id', instanceId)
@@ -1607,7 +1615,9 @@ class EventProcessor {
                         await supabase.from('whatsapp_instance_runtime')
                             .insert({ instance_id: instanceId, tenant_id: tenantId, qr_code: qrBase64 });
                     }
-                } catch(e) {}
+                } catch(e) {
+                    console.error('[EventProcessor] Erro ao salvar QR code no banco:', e);
+                }
             }
 
             if (connection === 'close') {

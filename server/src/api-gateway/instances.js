@@ -47,6 +47,16 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
         const { instanceId } = req.params;
         const tenantId = req.tenantId;
 
+        // Reset total de tentativas e timers de reconexão antigos em memória
+        sessionManager.reconnectAttempts.delete(instanceId);
+        sessionManager.conflictAttempts.delete(instanceId);
+        sessionManager.authenticatedSessions.delete(instanceId);
+        sessionManager.pairingPendingSync.delete(instanceId);
+        if (sessionManager.reconnectingTimers.has(instanceId)) {
+            clearTimeout(sessionManager.reconnectingTimers.get(instanceId));
+            sessionManager.reconnectingTimers.delete(instanceId);
+        }
+
         if (sessionManager.sessions.has(instanceId)) {
             console.log(`[API] /connect chamado, mas a sessão ${instanceId} já estava em memória. Forçando fechamento prévio.`);
             await sessionManager.closeSession(instanceId);
@@ -63,9 +73,10 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
         }
         await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
         await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
+        await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
 
         await supabase.from('whatsapp_instances')
-            .update({ status: 'connecting', last_error: null })
+            .update({ status: 'connecting', reconnect_attempts: 0, last_error: null })
             .eq('id', instanceId)
             .eq('tenant_id', tenantId);
 
