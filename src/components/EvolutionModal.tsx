@@ -207,6 +207,13 @@ export default function EvolutionModal({
     fetchExistingInstances();
   }, []);
 
+  useEffect(() => {
+    if (isOpen && targetInstanceName && !activePollingId) {
+      const targetInst = existingInstances.find((i) => i.id === targetInstanceName) || { id: targetInstanceName };
+      handleConnectExisting(targetInst);
+    }
+  }, [isOpen, targetInstanceName, activePollingId, existingInstances]);
+
   // Sincroniza a URL do navegador com a abertura do modal
   useEffect(() => {
     if (isOpen && targetInstanceName) {
@@ -479,7 +486,7 @@ export default function EvolutionModal({
           setQrBase64(null);
           setActivePollingId(null);
           setConnectionStatusMessage(null);
-        } else if (st === "connecting") {
+        } else if (st === "connecting" || st === "qr_ready") {
           if (pairingCodeRef.current) {
             if (pairingCodeRef.current && !pairingLoadingRef.current) {
               if (payload.payload?.pairingSuccess) {
@@ -519,16 +526,18 @@ export default function EvolutionModal({
                 return;
               }
 
+              const runtimeQr = st?.data?.whatsapp_instance_runtime?.qr_code || st?.data?.qr_code || st?.qr_code || st?.qr_base64;
+              if (runtimeQr) {
+                setQrBase64(runtimeQr);
+                setLoading(false);
+              }
+
               if (st?.data?.status === "connected" || st?.data?.status === "connected_local") {
                 handleSuccess();
                 clearInterval(pollInterval);
-              } else if (st?.data?.status === "connecting") {
+              } else if (st?.data?.status === "connecting" || st?.data?.status === "qr_ready" || runtimeQr) {
                 if (pairingCodeRef.current) {
                   if (pairingCodeRef.current && !pairingLoadingRef.current) {
-                    const runtimeQr = st?.data?.whatsapp_instance_runtime?.qr_code;
-                    if (runtimeQr) {
-                      setQrBase64(runtimeQr);
-                    }
                     if (st?.data?.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC') {
                       setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
                     } else {
@@ -2527,32 +2536,7 @@ export default function EvolutionModal({
             </div>
           ) : (
             <div className="w-full flex flex-col items-center justify-center min-h-[260px] bg-white/30 dark:bg-black/30 p-2 sm:p-5 rounded-3xl border border-white/20 dark:border-white/5 shadow-inner">
-              {loading ? (
-                <div className="flex flex-col items-center gap-4 animate-in fade-in duration-500 py-10">
-                  <Loader2
-                    className="animate-spin text-emerald-500"
-                    size={48}
-                  />
-                  <span className="text-sm text-gray-600 dark:text-gray-400 font-medium tracking-wide">
-                    Comunicando...
-                  </span>
-                </div>
-              ) : successMsg ? (
-                <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center justify-center w-full py-8 text-center">
-                  <div className="w-20 h-20 bg-emerald-500/10 rounded-full border-2 border-emerald-500/30 flex items-center justify-center mb-6 shadow-inner animate-bounce">
-                    <CheckCircle
-                      size={44}
-                      className="text-emerald-500 drop-shadow-md"
-                    />
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">
-                    Conexão Estabelecida!
-                  </h3>
-                  <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400 max-w-xs leading-relaxed px-4">
-                    {successMsg}
-                  </p>
-                </div>
-              ) : activePollingId ? (
+              {activePollingId ? (
                 <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center w-full pb-4">
                   <div className="flex flex-col items-center w-full">
                     {/* Header customizado igual ao print */}
@@ -2699,6 +2683,31 @@ export default function EvolutionModal({
                       </button>
                     </div>
                   </div>
+                </div>
+              ) : loading ? (
+                <div className="flex flex-col items-center gap-4 animate-in fade-in duration-500 py-10">
+                  <Loader2
+                    className="animate-spin text-emerald-500"
+                    size={48}
+                  />
+                  <span className="text-sm text-gray-600 dark:text-gray-400 font-medium tracking-wide">
+                    Comunicando...
+                  </span>
+                </div>
+              ) : successMsg ? (
+                <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center justify-center w-full py-8 text-center">
+                  <div className="w-20 h-20 bg-emerald-500/10 rounded-full border-2 border-emerald-500/30 flex items-center justify-center mb-6 shadow-inner animate-bounce">
+                    <CheckCircle
+                      size={44}
+                      className="text-emerald-500 drop-shadow-md"
+                    />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">
+                    Conexão Estabelecida!
+                  </h3>
+                  <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400 max-w-xs leading-relaxed px-4">
+                    {successMsg}
+                  </p>
                 </div>
               ) : targetInstObj ? (
                 <div className="flex flex-col w-full animate-in fade-in zoom-in-95 duration-300 items-center py-6 px-4">
