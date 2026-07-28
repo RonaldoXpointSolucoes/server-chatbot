@@ -4389,7 +4389,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   const [loading, setLoading] = useState(false);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [search, setSearch] = useState('');
-  const [dateFilter, setDateFilter] = useState('week'); // all, today, yesterday, week, month
+  const [dateFilter, setDateFilter] = useState('today'); // all, today, yesterday, week, month
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
   const [activeKanbanTab, setActiveKanbanTab] = useState<'rapido' | 'medio' | 'complexo'>('rapido');
@@ -4846,7 +4846,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
   useEffect(() => {
     if (isOpen) {
-      setDateFilter('week');
+      setDateFilter('today');
       setSelectedDate(new Date());
       setSelectedTicket(null);
     }
