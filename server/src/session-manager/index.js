@@ -256,7 +256,7 @@ class SessionManager {
                 logger: this.logger,
                 printQRInTerminal: false,
                 auth: state,
-                browser: Browsers.macOS('Chrome'),
+                browser: ['Ubuntu', 'Chrome', '125.0.6422.112'],
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: false,
                 markOnlineOnConnect: true,
@@ -428,7 +428,7 @@ class SessionManager {
                     const status = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.message || '';
 
-                    if (status === 515 || status === 503 || status === 502 || status === 504 || status === 408 || status === DisconnectReason.restartRequired) {
+                    if (status === 515 || status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || status === DisconnectReason.restartRequired) {
                         console.log(`[SessionManager] Oscilação temporária de conexão com servidores WhatsApp (código ${status}) na instância ${instanceId}. Reconectando sessão em 2s...`);
                         this.sessions.delete(instanceId);
                         setTimeout(() => {
