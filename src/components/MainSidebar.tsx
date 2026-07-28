@@ -58,6 +58,7 @@ import { getLocalNotificationPrefs, fetchUserInboxNotificationPreferences, toggl
 import { formatPhoneNumber } from '../utils/format';
 import KanbanBoardCreator from './KanbanBoardCreator';
 import { AgentSettingsModal } from './AgentSettingsModal';
+import { CreateInboxModal } from './modals/CreateInboxModal';
 
 const SidebarContext = React.createContext<{ onClose?: () => void }>({});
 
@@ -68,6 +69,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const theme = useChatStore(state => state.theme);
   const reopenedTicketToast = useChatStore(state => state.reopenedTicketToast);
   const setReopenedTicketToast = useChatStore(state => state.setReopenedTicketToast);
+  const [isCreateInboxModalOpen, setIsCreateInboxModalOpen] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem('sidebar_expanded_sections');
     if (saved) {
@@ -110,8 +112,10 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     });
   };
 
-  const handleLogout = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleLogout = (e?: React.MouseEvent) => {
+    if (e && typeof e.stopPropagation === 'function') {
+      e.stopPropagation();
+    }
 
     // 1. Limpeza do Service Worker executada em background (não bloqueante)
     if ('serviceWorker' in navigator && 'PushManager' in window) {
@@ -850,6 +854,22 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                </div>
             )}
 
+            {instances.length === 0 && (
+               <div 
+                 onClick={() => setIsCreateInboxModalOpen(true)}
+                 className="mx-3 my-2 p-2.5 bg-[#00a884]/10 hover:bg-[#00a884]/20 border border-[#00a884]/30 rounded-xl flex items-center gap-2.5 cursor-pointer transition-all text-[#00a884] group shadow-sm"
+                 title="Criar e conectar primeira caixa de entrada do WhatsApp"
+               >
+                 <div className="p-1.5 bg-[#00a884]/20 rounded-lg shrink-0 text-[#00a884]">
+                   <Plus size={14} />
+                 </div>
+                 <div className="flex flex-col min-w-0 flex-1">
+                   <span className="text-xs font-bold truncate">Criar Primeira Caixa</span>
+                   <span className="text-[10px] text-[#8696a0] truncate">Conectar WhatsApp</span>
+                 </div>
+               </div>
+            )}
+
             <NavItem 
               title={
                 <div className="flex items-center gap-2">
@@ -1168,8 +1188,10 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         </div>
         <button 
           onClick={(e) => {
-            e.stopPropagation();
-            handleLogout();
+            if (e && typeof e.stopPropagation === 'function') {
+              e.stopPropagation();
+            }
+            handleLogout(e);
           }}
           className={cn("ml-2 p-2 rounded-md text-[#54656f] dark:text-[#8696a0] hover:text-[#f15c6d] hover:bg-gray-200 dark:hover:bg-[#2a3942] transition-all opacity-0 group-hover/sidebar:opacity-100 focus:opacity-100", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:pointer-events-none group-hover/sidebar:!opacity-100 group-hover/sidebar:!pointer-events-auto")}
           title="Sair da conta"
@@ -1319,6 +1341,10 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         isOpen={isAgentSettingsOpen}
         onClose={() => setIsAgentSettingsOpen(false)}
         defaultTab={agentSettingsTab}
+      />
+      <CreateInboxModal
+        isOpen={isCreateInboxModalOpen}
+        onClose={() => setIsCreateInboxModalOpen(false)}
       />
       </div>
     </SidebarContext.Provider>
