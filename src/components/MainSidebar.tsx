@@ -756,7 +756,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                     const unreadCount = contacts.filter(c => c.instance_id === inst.id && c.unread > 0 && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length;
                     const status = instancesStatus[inst.id] ?? inst.status ?? 'connected';
                     const isConnected = status === 'connected' || status === 'connected_local';
-                    const isConnecting = status === 'connecting';
+                    const isConnecting = status === 'connecting' || status === 'reconnecting' || status === 'reconnecting_local' || status === 'connecting_local';
                     return (
                       <div 
                         key={inst.id} 

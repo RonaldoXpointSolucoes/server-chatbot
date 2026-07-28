@@ -366,7 +366,7 @@ app.listen(PORT, '0.0.0.0', async () => {
             const { data: activeLeases } = await supabase
                 .from('whatsapp_instances')
                 .select('id, tenant_id')
-                .in('status', ['connected', 'connecting', 'qr_ready']);
+                .in('status', ['connected', 'connecting', 'qr_ready', 'reconnecting', 'reconnecting_local']);
                 
             if (activeLeases && activeLeases.length > 0) {
                 console.log(`[Worker Boot] Retomando ${activeLeases.length} sockets...`);
