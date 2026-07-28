@@ -425,6 +425,8 @@ class SessionManager {
                         return;
                     }
                     
+                    const status = lastDisconnect?.error?.output?.statusCode;
+                    const reason = lastDisconnect?.error?.message || '';
                     const isCode405 = status === 405 || String(reason).includes('405') || lastDisconnect?.error?.data === 405;
 
                     if (isCode405) {
