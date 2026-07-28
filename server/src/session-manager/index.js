@@ -425,15 +425,15 @@ class SessionManager {
                         return;
                     }
                     
-                    const status = lastDisconnect?.error?.output?.statusCode;
-                    const reason = lastDisconnect?.error?.message || '';
+                    const isCode405 = status === 405 || String(reason).includes('405') || lastDisconnect?.error?.data === 405;
 
-                    if (status === 405) {
+                    if (isCode405) {
                         console.log(`[SessionManager] Código 405 (Credenciais desatualizadas) na instância ${instanceId}. Resetando credenciais para forçar novo QR Code...`);
                         sessionCaches.delete(instanceId);
                         await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
                         await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
                         await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
+                        await supabase.from('whatsapp_instances').update({ status: 'connecting', last_error: null }).eq('id', instanceId);
                         this.sessions.delete(instanceId);
                         setTimeout(() => {
                             if (!this.sessions.has(instanceId)) {
