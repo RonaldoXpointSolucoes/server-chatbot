@@ -4594,6 +4594,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           }
         }
         setInstances(finalData);
+        if (selectedInstanceId !== 'all' && !finalData.some((i: any) => i.id === selectedInstanceId)) {
+          setSelectedInstanceId('all');
+          localStorage.setItem('closed_tickets_selected_instance_id', 'all');
+        }
       }
     } catch (err) {
       console.error('Erro ao buscar caixas de entrada:', err);
@@ -4842,9 +4846,16 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
   useEffect(() => {
     if (isOpen) {
+      setDateFilter('week');
+      setSelectedDate(new Date());
+      setSelectedTicket(null);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
       fetchClosedTickets();
       fetchInstances();
-      setSelectedTicket(null);
     }
   }, [isOpen, tenantInfo?.id, selectedInstanceId, dateFilter, selectedDate]);
 
