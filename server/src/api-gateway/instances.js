@@ -719,14 +719,14 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
         const { instanceId } = req.params;
         const { data, error } = await supabase
             .from('whatsapp_instances')
-            .select('status, phone_number, display_name, qr_code, last_error, whatsapp_instance_runtime(qr_code, pairing_code)')
+            .select('status, phone_number, display_name, last_error, whatsapp_instance_runtime(qr_code, pairing_code)')
             .eq('id', instanceId)
             .single();
 
         if (error) throw error;
         
         if (data) {
-            const qrCode = data.qr_code || data.whatsapp_instance_runtime?.qr_code || null;
+            const qrCode = data.whatsapp_instance_runtime?.qr_code || null;
             const pairingCode = data.whatsapp_instance_runtime?.pairing_code || null;
             return res.json({
                 data: {
