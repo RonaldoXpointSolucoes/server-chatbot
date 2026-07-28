@@ -46,7 +46,8 @@ import {
   ClipboardList,
   Target,
   Bell,
-  BellOff
+  BellOff,
+  Building2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore } from '../store/chatStore';
@@ -607,6 +608,19 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                   </div>
                 ))}
              </div>
+             <div className="p-2 border-t border-gray-200 dark:border-[#2a2a2f] bg-gray-50 dark:bg-[#18181b]">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowWorkspaceMenu(false);
+                    navigate('/admin');
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#00a884] hover:bg-[#008f6f] text-white rounded-lg text-xs font-bold transition shadow-sm"
+                >
+                  <Plus size={14} />
+                  <span>Cadastrar Nova Empresa (Painel Master)</span>
+                </button>
+             </div>
           </div>
         )}
       </div>
@@ -1049,6 +1063,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                 <NavItem icon={<Bell size={16} />} title="Notificações Pessoais" isSub onClick={() => { setAgentSettingsTab('notifications'); setIsAgentSettingsOpen(true); }} />
                 <NavItem icon={<User size={16} />} title="Meu Perfil" isSub onClick={() => { setAgentSettingsTab('profile'); setIsAgentSettingsOpen(true); }} />
                 <NavItem icon={<Briefcase size={16} />} title="Conta" isSub onClick={() => navigate('/settings/account')} />
+                <NavItem icon={<Building2 size={16} />} title="Empresas (Painel Master)" isSub onClick={() => navigate('/admin')} />
                 <NavItem icon={<UserSquare2 size={16} />} title="Usuários" isSub onClick={() => navigate('/settings/agents')} />
                 <NavItem icon={<Inbox size={16} />} title="Caixas de Entrada" isSub onClick={() => navigate('/settings/inboxes')} />
                 <NavItem icon={<Tag size={16} />} title="Etiquetas" isSub onClick={() => navigate('/settings/labels')} />
