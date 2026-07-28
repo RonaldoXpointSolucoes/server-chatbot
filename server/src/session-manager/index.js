@@ -101,6 +101,13 @@ class SessionManager {
                         }
                     }
 
+                    if (parsed.msg && parsed.msg.includes('stream errored out')) {
+                        const code = parsed.fullErrorNode?.attrs?.code || parsed.reasonNode?.attrs?.code || '503';
+                        addLog('info', `[Baileys/Stream] Oscilação temporária de conexão com o WhatsApp (code: ${code}). Reconectando automaticamente em 2s...`);
+                        process.stdout.write(msg);
+                        return;
+                    }
+
                     const lvl = parsed.level >= 50 ? 'error' : parsed.level >= 40 ? 'warn' : 'info';
                     addLog(lvl, `[Baileys] ${parsed.msg || ''} ${JSON.stringify(parsed, (k,v) => ['msg','level','time','pid','hostname'].includes(k) ? undefined : v)}`);
                 } catch(e) {
@@ -421,10 +428,16 @@ class SessionManager {
                     const status = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.message || '';
 
-                    if (status === 515 || status === DisconnectReason.restartRequired) {
-                        console.log(`[SessionManager] WhatsApp solicitou reinício de conexão (código 515 / restartRequired) para a instância ${instanceId}. Reiniciando sessão imediatamente...`);
+                    if (status === 515 || status === 503 || status === 502 || status === 504 || status === 408 || status === DisconnectReason.restartRequired) {
+                        console.log(`[SessionManager] Oscilação temporária de conexão com servidores WhatsApp (código ${status}) na instância ${instanceId}. Reconectando sessão em 2s...`);
                         this.sessions.delete(instanceId);
-                        this.createSession(tenantId, instanceId);
+                        setTimeout(() => {
+                            if (!this.sessions.has(instanceId)) {
+                                this.createSession(tenantId, instanceId).catch(err => {
+                                    console.error(`[SessionManager] Erro na reconexão automática de código ${status} para ${instanceId}:`, err.message);
+                                });
+                            }
+                        }, 2000);
                         return;
                     }
                     

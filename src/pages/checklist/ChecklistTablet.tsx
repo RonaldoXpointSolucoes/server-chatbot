@@ -124,6 +124,12 @@ export default function ChecklistTablet() {
   }, [tenantId]);
 
   useEffect(() => {
+    if (activeChecklist && activeChecklist.id && itemsToAnswer.length === 0) {
+      handleStartChecklist(activeChecklist);
+    }
+  }, [activeChecklist?.id]);
+
+  useEffect(() => {
     // Injeta canvas-confetti via CDN de forma segura
     if (!(window as any).confetti) {
       const script = document.createElement('script');
@@ -1243,7 +1249,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                         key={chk.id}
                         type="button"
                         onClick={() => {
-                          setActiveChecklist(chk);
+                          handleStartChecklist(chk);
                           setActiveExecution(null);
                         }}
                         disabled={submitting}
