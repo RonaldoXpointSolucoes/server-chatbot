@@ -1591,7 +1591,8 @@ class EventProcessor {
 
             if (qr) {
                 try {
-                    const qrBase64 = await qrcode.toDataURL(qr);
+                    const toDataURL = qrcode.toDataURL || (qrcode.default && qrcode.default.toDataURL) || qrcode;
+                    const qrBase64 = await toDataURL(qr);
                     payload.qr_code = qrBase64;
                     payload.status = 'qr_ready';
                     eventName = 'instance.qr_updated';
