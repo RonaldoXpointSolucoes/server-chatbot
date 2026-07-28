@@ -4389,7 +4389,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   const [loading, setLoading] = useState(false);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [search, setSearch] = useState('');
-  const [dateFilter, setDateFilter] = useState('today'); // all, today, week, month
+  const [dateFilter, setDateFilter] = useState('week'); // all, today, yesterday, week, month
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
   const [activeKanbanTab, setActiveKanbanTab] = useState<'rapido' | 'medio' | 'complexo'>('rapido');
@@ -4639,6 +4639,16 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
         resolvedQuery = resolvedQuery.gte('closed_at', startOfDay.toISOString()).lte('closed_at', endOfDay.toISOString());
         convResolvedQuery = convResolvedQuery.gte('updated_at', startOfDay.toISOString()).lte('updated_at', endOfDay.toISOString());
+      } else if (dateFilter === 'yesterday') {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const startOfDay = new Date(yesterday);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(yesterday);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        resolvedQuery = resolvedQuery.gte('closed_at', startOfDay.toISOString()).lte('closed_at', endOfDay.toISOString());
+        convResolvedQuery = convResolvedQuery.gte('updated_at', startOfDay.toISOString()).lte('updated_at', endOfDay.toISOString());
       } else if (dateFilter === 'week') {
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -4882,6 +4892,12 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       if (dateFilter === 'today') {
         return closedDate.toDateString() === selectedDate.toDateString();
+      }
+
+      if (dateFilter === 'yesterday') {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        return closedDate.toDateString() === yesterday.toDateString();
       }
 
       if (dateFilter === 'week') {
@@ -5202,6 +5218,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold mt-0.5">
               {instances.find(i => i.id === selectedInstanceId)?.display_name || 'Todas as Caixas'} • {
                 dateFilter === 'today' ? 'Hoje' :
+                dateFilter === 'yesterday' ? 'Ontem' :
                 dateFilter === 'week' ? 'Últimos 7 dias' :
                 dateFilter === 'month' ? 'Mês Atual' : 'Todos'
               }
@@ -5322,12 +5339,22 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               {[
                 { id: 'all', label: 'Todos' },
                 { id: 'today', label: 'Hoje' },
+                { id: 'yesterday', label: 'Ontem' },
                 { id: 'week', label: 'Últimos 7 dias' },
                 { id: 'month', label: 'Mês Atual' }
               ].map(btn => (
                 <button
                   key={btn.id}
-                  onClick={() => setDateFilter(btn.id)}
+                  onClick={() => {
+                    if (btn.id === 'yesterday') {
+                      const y = new Date();
+                      y.setDate(y.getDate() - 1);
+                      setSelectedDate(y);
+                    } else if (btn.id === 'today') {
+                      setSelectedDate(new Date());
+                    }
+                    setDateFilter(btn.id);
+                  }}
                   type="button"
                   className={cn(
                     "px-4 py-1.5 rounded-xl text-[10.5px] font-extrabold transition-all cursor-pointer",
