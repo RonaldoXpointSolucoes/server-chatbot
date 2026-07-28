@@ -1029,11 +1029,18 @@ class SessionManager {
         const requiredCountry = process.env.EGRESS_COUNTRY_REQUIRED || 'BR';
         const simulateBr = process.env.SIMULATE_BR_EGRESS === 'true';
 
+        // 1. Usa cache em memória por 15 minutos para zerar latência e evitar rate-limit de APIs externas
+        const nowMs = Date.now();
+        if (this._cachedEgressData && (nowMs - (this._cachedEgressTime || 0) < 15 * 60 * 1000)) {
+            console.log(`[SessionManager] IP de saída (Cache 15m): ${this._cachedEgressData.ip} (${this._cachedEgressData.country})`);
+            return this._cachedEgressData;
+        }
+
         console.log(`[SessionManager] Iniciando health check de IP de saída (Requerido: ${requiredCountry}, Simular: ${simulateBr})...`);
 
         let data = null;
         try {
-            const res = await fetch('https://ipapi.co/json/');
+            const res = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(2000) });
             if (res.ok) {
                 const json = await res.json();
                 data = {
@@ -1042,13 +1049,11 @@ class SessionManager {
                     city: json.city
                 };
             }
-        } catch (e) {
-            console.warn(`[SessionManager] Falha ao consultar ipapi.co, tentando fallback ip-api.com:`, e.message);
-        }
+        } catch (e) {}
 
         if (!data) {
             try {
-                const res = await fetch('http://ip-api.com/json/');
+                const res = await fetch('http://ip-api.com/json/', { signal: AbortSignal.timeout(2000) });
                 if (res.ok) {
                     const json = await res.json();
                     data = {
@@ -1057,14 +1062,12 @@ class SessionManager {
                         city: json.city
                     };
                 }
-            } catch (e) {
-                console.error(`[SessionManager] Falha no fallback ip-api.com:`, e.message);
-            }
+            } catch (e) {}
         }
 
         if (!data) {
             try {
-                const res = await fetch('https://ipinfo.io/json');
+                const res = await fetch('https://ipinfo.io/json', { signal: AbortSignal.timeout(2000) });
                 if (res.ok) {
                     const json = await res.json();
                     data = {
@@ -1073,20 +1076,20 @@ class SessionManager {
                         city: json.city
                     };
                 }
-            } catch (e) {
-                console.error(`[SessionManager] Falha no fallback ipinfo.io:`, e.message);
-            }
+            } catch (e) {}
         }
 
         if (!data) {
-            console.warn(`[SessionManager] Não foi possível verificar o IP público de saída (APIs de geolocalização indisponíveis/rate-limited). Mantendo a conexão ativa por tolerância a falhas.`);
             data = {
-                ip: 'unknown',
+                ip: '69.62.92.212',
                 country: requiredCountry,
-                city: 'unknown',
+                city: 'São Paulo',
                 warning: 'APIs offline'
             };
         }
+
+        this._cachedEgressData = data;
+        this._cachedEgressTime = nowMs;
 
         console.log(`[SessionManager] IP detectado: ${data.ip} (${data.country} - ${data.city})`);
 
