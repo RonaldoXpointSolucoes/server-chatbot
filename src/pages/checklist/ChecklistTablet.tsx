@@ -398,6 +398,7 @@ export default function ChecklistTablet() {
           const hasResponsibles = c.responsible_ids && c.responsible_ids.length > 0;
           
           let isResponsible = !hasResponsibles;
+          let hasDirectAssignment = false;
           if (hasResponsibles && c.responsible_ids) {
             const hasDirectId = c.responsible_ids.includes(userId);
             
@@ -414,12 +415,19 @@ export default function ChecklistTablet() {
             }
             
             isResponsible = hasDirectId || hasNameMatch;
+            hasDirectAssignment = isResponsible;
           }
           
           if (!isResponsible) return false;
 
           // 2. Validação padrão de permissões de unidade e setor
           if (isPowerUser) return true;
+
+          // Se o operador for de fato responsável direto atribuído, ele pode ver esta rotina (basta pertencer à unidade)
+          if (hasDirectAssignment) {
+            return allowedUnits.includes(c.unit_id);
+          }
+          
           return allowedUnits.includes(c.unit_id) && (allowedSectors.length === 0 || allowedSectors.includes(c.sector_id));
         });
 
