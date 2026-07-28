@@ -2371,6 +2371,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   updateContactCRM: async (contactId, payload) => {
     const realContactId = getRealContactId(contactId);
+
+    // Validação de CNPJ único para evitar cadastros duplicados via CRM
+    if (payload.document_type === 'cnpj' && payload.document_number) {
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      if (tenantId) {
+        const rawDocNum = payload.document_number.replace(/\D/g, '');
+        if (rawDocNum) {
+          const formattedCnpj = rawDocNum.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+          let query = supabase.from('contacts')
+            .select('id, name')
+            .eq('tenant_id', tenantId)
+            .neq('id', realContactId)
+            .or(`document_number.eq.${rawDocNum},document_number.eq.${formattedCnpj}`);
+            
+          const { data: duplicates } = await query;
+          if (duplicates && duplicates.length > 0) {
+            alert(`Erro: O CNPJ ${payload.document_number} já está cadastrado no contato/empresa "${duplicates[0].name}". Não é permitido duplicar o CNPJ.`);
+            throw new Error(`CNPJ já cadastrado no contato/empresa "${duplicates[0].name}"`);
+          }
+        }
+      }
+    }
+
     const currentState = get().contacts.find(c => c.id === contactId);
     const beforeState = currentState ? { ...currentState } : null;
 

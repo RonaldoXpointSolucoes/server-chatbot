@@ -271,6 +271,29 @@ export default function ContactsManager() {
   const handleSaveFormFromModal = async (payload: any) => {
     if (!tenantId) return;
 
+    // Validação de CNPJ único para evitar cadastros duplicados
+    if (payload.document_type === 'cnpj' && payload.document_number) {
+      const rawDocNum = payload.document_number.replace(/\D/g, '');
+      if (rawDocNum) {
+        const formattedCnpj = rawDocNum.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+        
+        let query = supabase.from('contacts')
+          .select('id, name')
+          .eq('tenant_id', tenantId)
+          .or(`document_number.eq.${rawDocNum},document_number.eq.${formattedCnpj}`);
+          
+        if (editingContact) {
+          query = query.neq('id', editingContact.id);
+        }
+        
+        const { data: duplicates } = await query;
+        if (duplicates && duplicates.length > 0) {
+          alert(`Erro: O CNPJ ${payload.document_number} já está cadastrado no contato/empresa "${duplicates[0].name}". Não é permitido duplicar o CNPJ.`);
+          return;
+        }
+      }
+    }
+
     // Remove anything that isn't a digit for phone mapping
     let cleanPhone = payload.phone?.replace(/\D/g, '') || '';
     
