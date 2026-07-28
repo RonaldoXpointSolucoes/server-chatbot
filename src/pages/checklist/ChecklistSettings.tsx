@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
 import { 
@@ -226,6 +226,17 @@ export default function ChecklistSettings() {
   const [userFilterShift, setUserFilterShift] = useState<string>('all'); // 'all' | 'cafe' | 'almoco' | 'jantar'
 
   const [loading, setLoading] = useState(true);
+
+  // Mapear PINs duplicados na lista de usuários para sinalizar alertas visuais
+  const duplicatePins = useMemo(() => {
+    const pinCounts: Record<string, number> = {};
+    users.forEach(u => {
+      if (u.pin) {
+        pinCounts[u.pin] = (pinCounts[u.pin] || 0) + 1;
+      }
+    });
+    return new Set(Object.keys(pinCounts).filter(pin => pinCounts[pin] > 1));
+  }, [users]);
 
   // Estados de Formulários / Modais
   const [editingUnit, setEditingUnit] = useState<Partial<Unit> | null>(null);
@@ -599,6 +610,15 @@ export default function ChecklistSettings() {
     if (cleanedPin && cleanedPin.length !== 5) {
       showToast('error', 'O PIN de acesso rápido deve ter exatamente 5 dígitos numéricos.');
       return;
+    }
+
+    // Validar unicidade do PIN para evitar conflitos na tela de login por PIN
+    if (cleanedPin) {
+      const duplicateUser = users.find(u => u.id !== editingUser.id && u.pin === cleanedPin);
+      if (duplicateUser) {
+        showToast('error', `⚠️ O PIN "${cleanedPin}" já está em uso pelo colaborador "${duplicateUser.name}". Cada colaborador deve ter um PIN único.`);
+        return;
+      }
     }
 
     const finalPin = cleanedPin !== '' ? cleanedPin : null;
@@ -1465,15 +1485,25 @@ export default function ChecklistSettings() {
                         {/* Lista de Atributos do Colaborador */}
                         <div className="mt-4 pt-3 border-t border-[#2a3942]/40 space-y-2 text-xs text-[#8696a0]">
                           {/* PIN */}
-                          <div className="flex items-center justify-between bg-[#111b21]/70 px-2.5 py-1.5 rounded-xl border border-[#2a3942]/40">
+                          <div className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl border ${
+                            user.pin && duplicatePins.has(user.pin)
+                              ? 'bg-rose-500/10 border-rose-500/40'
+                              : 'bg-[#111b21]/70 border-[#2a3942]/40'
+                          }`}>
                             <span className="flex items-center gap-1.5 text-xs text-[#8696a0]">
-                              <KeyRound size={13} className="text-amber-400" />
+                              <KeyRound size={13} className={user.pin && duplicatePins.has(user.pin) ? "text-rose-400" : "text-amber-400"} />
                               PIN de Acesso:
                             </span>
                             {user.pin ? (
-                              <span className="font-mono font-extrabold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg tracking-widest text-xs">
-                                {user.pin}
-                              </span>
+                              duplicatePins.has(user.pin) ? (
+                                <span className="font-mono font-extrabold text-rose-300 bg-rose-500/20 border border-rose-500/40 px-2 py-0.5 rounded-lg tracking-widest text-[11px] flex items-center gap-1 animate-pulse" title="Atenção: Este PIN está duplicado! Altere para um PIN único.">
+                                  <AlertTriangle size={11} className="text-rose-400" /> {user.pin} (Duplicado)
+                                </span>
+                              ) : (
+                                <span className="font-mono font-extrabold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg tracking-widest text-xs">
+                                  {user.pin}
+                                </span>
+                              )
                             ) : (
                               <span className="text-slate-500 italic text-[11px]">Não Definido</span>
                             )}
@@ -1575,9 +1605,28 @@ export default function ChecklistSettings() {
                     setEditingUser(p => ({ ...p, pin: cleanVal }));
                   }}
                   placeholder="Ex: 12345"
-                  className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2.5 text-sm text-white tracking-widest font-mono focus:outline-none focus:border-indigo-500 transition-all text-center font-bold"
+                  className={`w-full bg-[#111b21] border rounded-xl px-3 py-2.5 text-sm tracking-widest font-mono focus:outline-none transition-all text-center font-bold ${
+                    editingUser.pin && users.some(u => u.id !== editingUser.id && u.pin === editingUser.pin)
+                      ? 'border-rose-500 text-rose-300 focus:border-rose-500'
+                      : 'border-[#2a3942] text-white focus:border-indigo-500'
+                  }`}
                 />
                 <span className="text-[10px] text-[#8696a0] block mt-1">Usado para troca rápida de operadores em tablets fixos na cozinha.</span>
+
+                {/* Banner de alerta de PIN duplicado */}
+                {editingUser.pin && (() => {
+                  const conflictingUser = users.find(u => u.id !== editingUser.id && u.pin === editingUser.pin);
+                  if (!conflictingUser) return null;
+                  return (
+                    <div className="mt-2 bg-rose-500/10 border border-rose-500/30 rounded-xl p-2.5 flex items-center gap-2 text-xs text-rose-300 animate-in fade-in duration-200">
+                      <AlertTriangle size={16} className="text-rose-400 shrink-0" />
+                      <div>
+                        <span className="font-bold block text-rose-400">⚠️ PIN Já Cadastrado!</span>
+                        <span>O PIN "<strong>{editingUser.pin}</strong>" já está em uso pelo colaborador <strong>{conflictingUser.name}</strong>. Cada colaborador deve ter um PIN exclusivo de 5 dígitos.</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Perfil de Acesso */}
