@@ -256,7 +256,7 @@ class SessionManager {
                 logger: this.logger,
                 printQRInTerminal: false,
                 auth: state,
-                browser: ['Ubuntu', 'Chrome', '125.0.6422.112'],
+                browser: Browsers.ubuntu('Chrome'),
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: false,
                 markOnlineOnConnect: true,

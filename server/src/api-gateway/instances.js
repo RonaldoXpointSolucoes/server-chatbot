@@ -1,7 +1,7 @@
 import express from 'express';
 import sessionManager from '../session-manager/index.js';
 import queueProcessor from '../session-manager/queue-processor.js';
-import { supabase } from '../supabase.js';
+import { supabase, NODE_ID } from '../supabase.js';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
@@ -76,7 +76,7 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
         await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
 
         await supabase.from('whatsapp_instances')
-            .update({ status: 'connecting', reconnect_attempts: 0, last_error: null })
+            .update({ status: 'connecting', reconnect_attempts: 0, last_error: null, assigned_node_id: NODE_ID })
             .eq('id', instanceId)
             .eq('tenant_id', tenantId);
 
