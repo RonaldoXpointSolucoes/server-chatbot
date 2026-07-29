@@ -792,8 +792,8 @@ class EventProcessor {
              }
              
              if(toUpdateConvs.length > 0) {
-                 const { data: res, error: errUp } = await supabase.from('conversations').upsert(toUpdateConvs, { onConflict: 'id' }).select('id, tenant_id, contact_id, instance_id');
-                 if(errUp) console.error('[BatchProcessor] Aviso: falha atualizando unread batch.', errUp.message);
+                 const { data: res, error: errUp } = await supabase.from('conversations').upsert(toUpdateConvs, { onConflict: 'tenant_id, instance_id, contact_id' }).select('id, tenant_id, contact_id, instance_id');
+                 if(errUp) console.warn('[BatchProcessor] Aviso: falha atualizando unread batch.', errUp.message);
              }
              
              // Agrupa os IDs das conversas finais no MAPA
@@ -1726,17 +1726,16 @@ export default new EventProcessor();
 
 export async function dispatchWebhookTriggers(tenantId, eventType, data) {
     try {
-        const { data: triggers, error } = await supabase
-            .from('webhook_triggers')
-            .select('*')
-            .eq('tenant_id', tenantId)
-            .eq('event_type', eventType)
-            .eq('is_active', true);
-
-        if (error) {
-            console.error(`[WebhookTrigger] Erro ao buscar gatilhos para o tenant ${tenantId}:`, error);
-            return;
-        }
+        const triggers = await retryWithBackoff(async () => {
+            const { data, error } = await supabase
+                .from('webhook_triggers')
+                .select('*')
+                .eq('tenant_id', tenantId)
+                .eq('event_type', eventType)
+                .eq('is_active', true);
+            if (error) throw error;
+            return data;
+        });
 
         if (!triggers || triggers.length === 0) return;
 

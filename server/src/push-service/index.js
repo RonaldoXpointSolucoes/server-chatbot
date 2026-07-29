@@ -189,10 +189,13 @@ class PushService {
                 };
 
                 return webpush.sendNotification(pushSubscription, payload).catch(async (err) => {
-                    console.error(`[PushService] Erro enviando push para ${sub.endpoint} (Status: ${err.statusCode}): ${err.message}`);
-                    if (err.statusCode === 410 || err.statusCode === 404 || err.statusCode === 401 || err.statusCode === 400) {
-                        console.log("[PushService] Removendo subscription inválida do banco de dados (Status", err.statusCode, ")");
+                    const status = err.statusCode || 500;
+                    const isStaleToken = status === 410 || status === 404 || status === 401 || status === 400 || status === 500 || (err.message && err.message.includes('unexpected response code'));
+                    if (isStaleToken) {
+                        console.log(`[PushService] Removendo assinatura push expirada do banco de dados (Status: ${status}, ID: ${sub.id})`);
                         await supabase.from("push_subscriptions").delete().eq("id", sub.id);
+                    } else {
+                        console.warn(`[PushService] Aviso ao enviar push para ${sub.endpoint} (Status: ${status}): ${err.message}`);
                     }
                 });
             });

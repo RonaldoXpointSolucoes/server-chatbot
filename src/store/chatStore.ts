@@ -901,6 +901,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
           .in('id', chunk);
       }
 
+      // Fecha em lote também qualquer registro aberto na tabela chat_tickets sem disparar análise de I.A
+      const contactIdsForTickets = undoData.map(c => getRealContactId(c.contactId)).filter(Boolean);
+      if (contactIdsForTickets.length > 0) {
+        for (let i = 0; i < contactIdsForTickets.length; i += chunkSize) {
+          const chunk = contactIdsForTickets.slice(i, i + chunkSize);
+          await supabase.from('chat_tickets')
+            .update({ 
+              status: 'resolved', 
+              closed_at: new Date().toISOString(),
+              resolution_summary: 'Encerrado em lote (análise I.A ignorada)',
+              metadata: { skip_ai_analysis: true, closed_in_batch: true }
+            })
+            .eq('tenant_id', tenantInfo.id)
+            .eq('status', 'open')
+            .in('contact_id', chunk);
+        }
+      }
+
       set((s) => ({
         lastBatchResolvedConversations: undoData,
         contacts: s.contacts.map((c) => {
@@ -3116,14 +3134,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
            
         const activeChannel = get().activeChannelFilter;
         if (activeChannel) {
-           convQuery = convQuery.or(`instance_id.eq.${activeChannel},unread_count.gt.0`);
+           convQuery = convQuery.or(`instance_id.eq.${activeChannel},instance_id.is.null,unread_count.gt.0`);
         }
 
-        // Otimizado: Limite de 300 conversas para carregamento inicial instantâneo
+        // Puxa até 2000 conversas para garantir o carregamento do histórico completo de todas as caixas
         const { data: dbConvs } = await convQuery
            .order('is_pinned', { ascending: false })
            .order('last_message_at', { ascending: false, nullsFirst: false })
-           .limit(300);
+           .limit(2000);
            
         if (!dbConvs || dbConvs.length === 0) {
            await supportPromises;
@@ -3202,13 +3220,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
                if (!dbC) return false; // Ignora se perder integridade ou for LID bloqueado
                
                const effectiveInstanceId = conv.instance_id || dbC.instance_id;
-               
-               // --- FILTRO DE SEGURANÇA CONTRA CONVERSAS CRUZADAS ---
-                // Se o contato pertence ao Ronaldo-Web, impedimos que conversas associadas a outras instâncias
-                // (ex: Comercial) sejam listadas para outras caixas de entrada.
-                if (dbC.instance_id === '5c78d358-d449-41c4-b396-a04ab20a39e4' && conv.instance_id !== '5c78d358-d449-41c4-b396-a04ab20a39e4') {
-                    return false;
-                }
                
                // --- FILTRO DE CONVERSAS FANTASMAS ---
                 // Ignorar conversas vazias (sem mensagens) no carregamento inicial para evitar poluição no painel.

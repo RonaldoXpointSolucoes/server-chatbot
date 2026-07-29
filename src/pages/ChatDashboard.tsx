@@ -1452,12 +1452,11 @@ export default function ChatDashboard() {
 
       // 2) Filtro de Caixa Ativa
       if (activeChannelFilter) {
+        const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
         const dbInstId = c.instance_id;
-        const effectiveId = connectedInstanceName;
-        if (!dbInstId) {
-          if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
-        } else {
-          if (dbInstId !== activeChannelFilter && dbInstId !== activeChannelName) return false;
+        const targetInst = instIdFromContactId || dbInstId;
+        if (targetInst) {
+          if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
         }
       }
 
@@ -1532,12 +1531,11 @@ export default function ChatDashboard() {
 
        // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa
        if (activeChannelFilter && !searchTerm) {
-           const instanceIdFromId = c.id.includes('_') ? c.id.split('_')[1] : c.instance_id;
-           if (instanceIdFromId) {
-               if (instanceIdFromId !== activeChannelFilter && instanceIdFromId !== activeChannelName) return false;
-           } else {
-               const effectiveId = connectedInstanceName;
-               if (effectiveId !== activeChannelFilter && effectiveId !== activeChannelName) return false;
+           const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
+           const dbInstId = c.instance_id;
+           const targetInst = instIdFromContactId || dbInstId;
+           if (targetInst) {
+               if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
            }
        }
 
@@ -1595,8 +1593,8 @@ export default function ChatDashboard() {
           }
        }
 
-       // Filtro de Conversas Resolvidas/Encerradas (Oculta conversas finalizadas da lista ativa se o modo ticket estiver ativo e não houver busca)
-       if (!searchTerm && ticketMode) {
+       // Filtro de Conversas Resolvidas/Encerradas (Oculta conversas finalizadas quando o modo ticket estiver ativo ou filtros de tickets/abertos)
+       if (!searchTerm && (ticketMode || filterType === 'tickets' || filterType === 'open')) {
           if (c.conv_status === 'resolved' || c.conv_status === 'closed') {
              return false;
           }

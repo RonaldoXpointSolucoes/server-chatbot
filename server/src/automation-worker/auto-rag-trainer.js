@@ -56,7 +56,13 @@ class AutoRagTrainer {
                 return;
             }
 
-            // Filtra conversas que não possuem interações humanas reais
+            // Filtra conversas que foram encerradas em lote ou que não possuem interações humanas reais
+            const isBatchResolved = messages.some(m => m.text_content && m.text_content.includes('Resolvido em lote'));
+            if (isBatchResolved) {
+                console.log(`[AutoRagTrainer] Conversa ${conversationId} foi resolvida em lote. Análise de I.A ignorada.`);
+                return;
+            }
+
             const hasHumanMessages = messages.some(m => m.sender_type === 'human');
             if (!hasHumanMessages) {
                 console.log(`[AutoRagTrainer] Conversa ${conversationId} não possui respostas humanas. Ignorando aprendizado.`);
