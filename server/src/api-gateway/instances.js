@@ -64,15 +64,18 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
             }
         }
         
-        // Ensure absolutely fresh credentials to force new QR Code generation
-        console.log(`[API] Limpando credenciais antigas do DB e RAM para a instância ${instanceId} forçar novo QR Code...`);
-        const { sessionCaches } = await import('../session-manager/auth.js');
-        if (sessionCaches && sessionCaches.has(instanceId)) {
-            sessionCaches.delete(instanceId);
+        // Limpa credenciais apenas se for expressamente solicitado via parâmetro force_new=true
+        const forceNewQR = req.query.force_new === 'true' || req.body?.forceNew === true;
+        if (forceNewQR) {
+            console.log(`[API] Limpeza forçada de credenciais solicitada para a instância ${instanceId}...`);
+            const { sessionCaches } = await import('../session-manager/auth.js');
+            if (sessionCaches && sessionCaches.has(instanceId)) {
+                sessionCaches.delete(instanceId);
+            }
+            await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
+            await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
+            await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
         }
-        await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
-        await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
-        await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
 
         await supabase.from('whatsapp_instances')
             .update({ status: 'connecting', reconnect_attempts: 0, last_error: null, assigned_node_id: NODE_ID })

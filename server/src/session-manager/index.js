@@ -203,9 +203,12 @@ class SessionManager {
             );
 
             const now = new Date();
+            const currentNodeId = String(NODE_ID).trim();
+            const assignedNodeId = currentInstance?.assigned_node_id ? String(currentInstance.assigned_node_id).trim() : null;
+
             if (currentInstance && currentInstance.lease_until && new Date(currentInstance.lease_until) > now) {
-                if (currentInstance.assigned_node_id && currentInstance.assigned_node_id !== NODE_ID) {
-                    const errorMsg = `Instância ${instanceId} já possui um lock ativo pelo worker ${currentInstance.assigned_node_id} (lease até ${currentInstance.lease_until}). Conexão negada.`;
+                if (assignedNodeId && assignedNodeId !== currentNodeId) {
+                    const errorMsg = `Instância ${instanceId} já possui um lock ativo pelo worker ${assignedNodeId} (lease até ${currentInstance.lease_until}). Conexão negada.`;
                     console.warn(`[SessionManager] Lock negado: ${errorMsg}`);
                     throw new Error(errorMsg);
                 }

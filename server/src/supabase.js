@@ -30,7 +30,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
   }
 });
 
-export const NODE_ID = process.env.NODE_ID || `worker-local-${Math.random().toString(36).substring(7)}`;
+export const NODE_ID = (process.env.NODE_ID || `worker-local-${Math.random().toString(36).substring(7)}`).trim();
 console.log(`[Worker Boot] Inicializado com NODE_ID: ${NODE_ID}`);
 
 export async function retryWithBackoff(fn, retries = 3, delay = 1000) {
