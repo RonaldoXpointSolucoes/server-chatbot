@@ -464,7 +464,7 @@ export default function ChecklistTablet() {
         .from('checklist_items')
         .select('*')
         .eq('checklist_id', chk.id)
-        .order('order_index', { ascending: true });
+        .order('sort_order', { ascending: true });
 
       if (error) throw error;
       setItemsToAnswer(items || []);
