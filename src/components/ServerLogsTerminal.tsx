@@ -65,39 +65,101 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   };
 
   const handleCopyLogs = (mode: 'all' | 'errors') => {
-    let filteredLogs = logs;
-    
-    if (mode === 'errors') {
-      filteredLogs = logs.filter(log => log.level === 'warn' || log.level === 'error');
-      if (filteredLogs.length === 0) {
-        alert("Olha, não existe nenhum erro ou aviso para ser copiado.");
-        return;
-      }
+    if (!logs || logs.length === 0) {
+      alert("Não há logs disponíveis para cópia.");
+      return;
     }
 
     let textToCopy = '';
-    
+
     if (mode === 'errors') {
-      const counts = new Map<string, { count: number, log: LogEntry }>();
-      filteredLogs.forEach(log => {
+      // Detecta erros, avisos, falhas de lógica, reconexões e padrões de loop
+      const isErrorOrLoopOrLogicFailure = (log: LogEntry, countInLogs: number) => {
+        if (log.level === 'warn' || log.level === 'error') return true;
+        
+        const msgLower = (log.message || '').toLowerCase();
+        const errorKeywords = [
+          'error', 'erro', 'falha', 'failed', 'fail', 'loop', 'timeout', 'conectar', 'reconect',
+          'reconnecting', 'connection_lost', 'fechou', 'tentativa', 'disconnect', 'code', 'statuscode',
+          'status', 'reject', '503', '405', '502', '408', '401', '500', 'lock', 'abort', 'denied',
+          'exception', 'uncaught', 'unhandled', 'cancel'
+        ];
+        
+        const hasKeyword = errorKeywords.some(kw => msgLower.includes(kw));
+        return hasKeyword || countInLogs >= 3;
+      };
+
+      // Conta frequência global de cada log no buffer para detectar loops
+      const messageCounts = new Map<string, number>();
+      logs.forEach(log => {
+        const key = `${log.level}:${log.message}`;
+        messageCounts.set(key, (messageCounts.get(key) || 0) + 1);
+      });
+
+      const relevantLogs = logs.filter(log => {
+        const key = `${log.level}:${log.message}`;
+        const count = messageCounts.get(key) || 1;
+        return isErrorOrLoopOrLogicFailure(log, count);
+      });
+
+      if (relevantLogs.length === 0) {
+        alert("Nenhum erro, aviso ou padrão de loop identificado no log atual.");
+        return;
+      }
+
+      // Agrupa ocorrências repetidas de erros e loops com timestamp e contagem
+      const groupedMap = new Map<string, { count: number; firstTime: string; lastTime: string; log: LogEntry }>();
+      relevantLogs.forEach(log => {
         const key = `[${log.level.toUpperCase()}] ${log.message}`;
-        if (counts.has(key)) {
-          counts.get(key)!.count++;
+        const timeStr = new Date(log.timestamp).toLocaleTimeString();
+        if (groupedMap.has(key)) {
+          const item = groupedMap.get(key)!;
+          item.count++;
+          item.lastTime = timeStr;
         } else {
-          counts.set(key, { count: 1, log });
+          groupedMap.set(key, { count: 1, firstTime: timeStr, lastTime: timeStr, log });
         }
       });
-      
-      textToCopy = Array.from(counts.values()).map(({ count, log }) => {
+
+      const formattedItems = Array.from(groupedMap.values()).map(({ count, firstTime, lastTime, log }) => {
+        const timeRange = count > 1 && firstTime !== lastTime ? ` [das ${firstTime} às ${lastTime}]` : ` às ${firstTime}`;
         const baseString = `[${new Date(log.timestamp).toLocaleTimeString()}] [${log.level.toUpperCase()}] ${log.message}`;
-        if (count > 1) {
-          return `Este erro ocorreu ${count} vezes:\n${baseString}\n`;
+        
+        let detailsString = '';
+        if ((log as any).details) {
+          try {
+            detailsString = `\n  Detalhes: ${typeof (log as any).details === 'object' ? JSON.stringify((log as any).details) : (log as any).details}`;
+          } catch(e) {}
         }
-        return baseString;
-      }).join('\n');
+
+        if (count > 1) {
+          return `Este erro/evento de loop ocorreu ${count} vezes${timeRange}:\n${baseString}${detailsString}\n`;
+        }
+        return `${baseString}${detailsString}`;
+      });
+
+      const startTime = new Date(relevantLogs[0].timestamp).toLocaleTimeString();
+      const endTime = new Date(relevantLogs[relevantLogs.length - 1].timestamp).toLocaleTimeString();
+
+      textToCopy = `=== RELATÓRIO DIAGNÓSTICO DE ERROS, FALHAS E LOOPS ===\n` +
+        `Total de eventos críticos/loops analisados: ${relevantLogs.length} (em ${groupedMap.size} padrões únicos)\n` +
+        `Janela de Horário: [${startTime} até ${endTime}]\n\n` +
+        `--- LISTA DE ERROS, AVISOS E PADRÕES DE LOOP ---\n` +
+        formattedItems.join('\n');
+
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+        alert(`Erros, avisos e padrões de loop copiados com sucesso! (${relevantLogs.length} eventos formatados)`);
+      }).catch(err => {
+        console.error('Failed to copy logs', err);
+        alert('Falha ao copiar os logs!');
+      });
+
     } else {
+      // Log Completo com agregação sequencial
       const aggregatedLogs: { count: number; log: LogEntry }[] = [];
-      for (const log of filteredLogs) {
+      for (const log of logs) {
         if (aggregatedLogs.length > 0) {
           const last = aggregatedLogs[aggregatedLogs.length - 1];
           if (last.log.message === log.message && last.log.level === log.level) {
@@ -115,18 +177,16 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
         }
         return baseString;
       }).join('\n');
-    }
 
-    navigator.clipboard.writeText(textToCopy).then(() => {
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
-      if (mode === 'errors') {
-        alert(`Erros copiados com sucesso! Foram copiados ${filteredLogs.length} erros/avisos.`);
-      }
-    }).catch(err => {
-      console.error('Failed to copy logs', err);
-      alert('Falha ao copiar os logs!');
-    });
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+        alert(`Log completo copiado com sucesso! (${logs.length} linhas copiadas)`);
+      }).catch(err => {
+        console.error('Failed to copy logs', err);
+        alert('Falha ao copiar os logs!');
+      });
+    }
   };
   
   const logsRef = useRef(logs);
