@@ -75,18 +75,37 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
     if (mode === 'errors') {
       // Detecta erros, avisos, falhas de lógica, reconexões e padrões de loop
       const isErrorOrLoopOrLogicFailure = (log: LogEntry, countInLogs: number) => {
+        const msgLower = (log.message || '').toLowerCase();
+        
+        // Ignora logs normais de operação/inicialização do Baileys e proxies de monitoramento
+        const normalOperationalLogs = [
+          'ip de saída',
+          'usando wa v2',
+          'current prekey id',
+          'handled 0 offline messages',
+          'awaitinginitialsync',
+          'history sync is enabled',
+          'opened connection to wa',
+          'chave recuperada via db fallback',
+          'carregadas',
+          'wacalls sse proxy',
+          'unhandled mex newsletter notification'
+        ];
+        
+        const isNormalOp = normalOperationalLogs.some(op => msgLower.includes(op));
+        if (isNormalOp && log.level !== 'error' && log.level !== 'warn') return false;
+
         if (log.level === 'warn' || log.level === 'error') return true;
         
-        const msgLower = (log.message || '').toLowerCase();
         const errorKeywords = [
-          'error', 'erro', 'falha', 'failed', 'fail', 'loop', 'timeout', 'conectar', 'reconect',
-          'reconnecting', 'connection_lost', 'fechou', 'tentativa', 'disconnect', 'code', 'statuscode',
-          'status', 'reject', '503', '405', '502', '408', '401', '500', 'lock', 'abort', 'denied',
-          'exception', 'uncaught', 'unhandled', 'cancel'
+          'error', 'erro', 'falha', 'failed', 'fail', 'loop', 'timeout',
+          'reconnecting', 'connection_lost', 'fechou', 'disconnect', 'code', 'statuscode',
+          'reject', '503', '405', '502', '408', '401', '500', 'lock', 'abort', 'denied',
+          'exception', 'uncaught', 'unhandled'
         ];
         
         const hasKeyword = errorKeywords.some(kw => msgLower.includes(kw));
-        return hasKeyword || countInLogs >= 3;
+        return hasKeyword || (!isNormalOp && countInLogs >= 3);
       };
 
       // Conta frequência global de cada log no buffer para detectar loops
