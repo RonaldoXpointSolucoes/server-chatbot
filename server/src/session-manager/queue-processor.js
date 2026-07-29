@@ -147,14 +147,8 @@ class QueueProcessor {
                         const memCache = sessionCaches.get(instanceId);
                         const cleanJid = targetJid.split('@')[0];
                         
-                        // 1. Tenta resolver o LID localmente via lid-mapping se JID for telefone
-                        if (targetJid.endsWith('@s.whatsapp.net') && memCache) {
-                            const mappedLid = memCache.get(`lid-mapping-${cleanJid}`);
-                            if (mappedLid) {
-                                targetJid = `${mappedLid}@lid`;
-                                console.log(`[QueueProcessor] JID de telefone ${msg.chat_jid} resolvido via cache para LID: ${targetJid}`);
-                            }
-                        }
+                        // 1. O JID de destino para envio de mensagens DEVE ser mantido como @s.whatsapp.net (ou @g.us) para entrega no WhatsApp do destinatário.
+                        // LID (@lid) é apenas identidade interna do protocolo e não deve ser usado como destino primário de mensagens ativas.
                         
                         // 2. Garante o tctoken no cache
                         if (typeof sock.onWhatsApp === 'function') {

@@ -727,13 +727,9 @@ class EventProcessor {
                       }
                       
                       finalStatus = nextStatus;
-                      finalAiPaused = nextAiPaused;
                       
                       const updatePayload = {
                           id: exist.id,
-                          tenant_id: data.tenant_id,
-                          instance_id: data.instance_id || exist.instance_id,
-                          contact_id: data.contact_id,
                           unread_count: Number(exist.unread_count || 0) + Number(data.unread_count || 0),
                           last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
                           last_message_at: new Date(data.last_message_at).toISOString(),
@@ -792,7 +788,7 @@ class EventProcessor {
               }
              
              if(toUpdateConvs.length > 0) {
-                 const { data: res, error: errUp } = await supabase.from('conversations').upsert(toUpdateConvs, { onConflict: 'tenant_id, instance_id, contact_id' }).select('id, tenant_id, contact_id, instance_id');
+                 const { data: res, error: errUp } = await supabase.from('conversations').upsert(toUpdateConvs, { onConflict: 'id' }).select('id, tenant_id, contact_id, instance_id');
                  if(errUp) console.warn('[BatchProcessor] Aviso: falha atualizando unread batch.', errUp.message);
              }
              
