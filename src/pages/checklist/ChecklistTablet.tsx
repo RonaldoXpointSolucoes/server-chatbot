@@ -108,6 +108,10 @@ export default function ChecklistTablet() {
   const [responses, setResponses] = useState<Record<string, ExecutionResponse>>({});
   const [checkedSubtasks, setCheckedSubtasks] = useState<Record<string, boolean>>({});
 
+  // Estado de persistência em tempo real (Auto-Save)
+  const [currentExecutionId, setCurrentExecutionId] = useState<string | null>(null);
+  const [inProgressExecutions, setInProgressExecutions] = useState<Record<string, { executionId: string; completedCount: number }>>({});
+
   // Filtros locais e ordenação
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -424,6 +428,31 @@ export default function ChecklistTablet() {
         });
 
       setChecklists(list);
+
+      // Busca execuções em andamento (in_progress) para este operador
+      const { data: inProgData } = await supabase
+        .from('checklist_executions')
+        .select(`
+          id,
+          checklist_id,
+          checklist_item_responses(id, is_done)
+        `)
+        .eq('tenant_id', tenantId)
+        .eq('user_id', userId)
+        .eq('status', 'in_progress');
+
+      if (inProgData) {
+        const inProgMap: Record<string, { executionId: string; completedCount: number }> = {};
+        inProgData.forEach((ep: any) => {
+          const resps = ep.checklist_item_responses || [];
+          const doneCount = Array.isArray(resps) ? resps.filter((r: any) => r.is_done).length : 0;
+          inProgMap[ep.checklist_id] = {
+            executionId: ep.id,
+            completedCount: doneCount
+          };
+        });
+        setInProgressExecutions(inProgMap);
+      }
     } catch (e) {
       console.error(e);
       showToast('error', 'Falha ao buscar checklists do operador.');
@@ -452,14 +481,13 @@ export default function ChecklistTablet() {
 
   const handleStartChecklist = async (chk: ChecklistToExecute) => {
     setActiveChecklist(chk);
-    setStartedAt(new Date().toISOString());
     setResponses({});
     setCheckedSubtasks({});
     setSearchQuery('');
     setCategoryFilter('');
 
-    // Busca itens do checklist usando a coluna correta 'sort_order'
     try {
+      // 1. Busca itens do checklist usando 'sort_order'
       const { data: items, error } = await supabase
         .from('checklist_items')
         .select('*')
@@ -469,7 +497,82 @@ export default function ChecklistTablet() {
       if (error) throw error;
       setItemsToAnswer(items || []);
 
-      // Inicia geolocalização se exigido
+      // 2. Busca se existe uma execução em andamento (in_progress) no banco para este operador
+      if (loggedInUser) {
+        // Restaura de localStorage primeiro como backup instantâneo
+        const storageKey = `subtasks_${loggedInUser.id}_${chk.id}`;
+        const cachedSubtasks = localStorage.getItem(storageKey);
+        let restoredSubtasks: Record<string, boolean> = {};
+        if (cachedSubtasks) {
+          try {
+            restoredSubtasks = JSON.parse(cachedSubtasks);
+          } catch (e) {}
+        }
+
+        const { data: activeExec } = await supabase
+          .from('checklist_executions')
+          .select('id, started_at')
+          .eq('tenant_id', tenantId)
+          .eq('checklist_id', chk.id)
+          .eq('user_id', loggedInUser.id)
+          .eq('status', 'in_progress')
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (activeExec) {
+          setCurrentExecutionId(activeExec.id);
+          setStartedAt(activeExec.started_at);
+
+          // Restaura respostas salvas previamente no banco
+          const { data: savedResps } = await supabase
+            .from('checklist_item_responses')
+            .select(`
+              id, item_id, response_value, is_conforming, is_meta_ok, is_done, observation, created_at,
+              checklist_evidences(url)
+            `)
+            .eq('execution_id', activeExec.id);
+
+          if (savedResps && savedResps.length > 0) {
+            const restoredResps: Record<string, ExecutionResponse> = {};
+            savedResps.forEach((sr: any) => {
+              const evs = sr.checklist_evidences || [];
+              const evUrl = Array.isArray(evs) ? evs[0]?.url : (evs as any)?.url;
+              
+              // Restaura sub-tarefas se houver a tag [SUBTASKS:0,1,2] na observação
+              if (sr.observation && sr.observation.includes('[SUBTASKS:')) {
+                const match = sr.observation.match(/\[SUBTASKS:(.*?)\]/);
+                if (match && match[1]) {
+                  const indices = match[1].split(',').map((n: string) => parseInt(n.trim(), 10)).filter((n: number) => !isNaN(n));
+                  indices.forEach((idx: number) => {
+                    restoredSubtasks[`${sr.item_id}_${idx}`] = true;
+                  });
+                }
+              }
+
+              restoredResps[sr.item_id] = {
+                itemId: sr.item_id,
+                value: sr.response_value,
+                isConforming: sr.is_conforming,
+                isMetaOk: sr.is_meta_ok,
+                isDone: sr.is_done,
+                observation: sr.observation || undefined,
+                evidenceUrl: evUrl || undefined,
+                answeredAt: sr.created_at,
+                answeredBy: loggedInUser.name
+              };
+            });
+            setResponses(restoredResps);
+          }
+        } else {
+          setCurrentExecutionId(null);
+          setStartedAt(new Date().toISOString());
+        }
+
+        setCheckedSubtasks(restoredSubtasks);
+      }
+
+      // 3. Inicia geolocalização se exigido
       if (chk.require_geolocation) {
         setLocating(true);
         navigator.geolocation.getCurrentPosition(
@@ -498,6 +601,134 @@ export default function ChecklistTablet() {
     }
   };
 
+  // ==========================================
+  // SALVAMENTO EM TEMPO REAL (REAL-TIME AUTO-SAVE)
+  // ==========================================
+  const autoSaveResponseToDatabase = async (
+    itemId: string,
+    val: string,
+    isConf: boolean,
+    isMeta: boolean,
+    observationStr?: string
+  ) => {
+    if (!loggedInUser || !activeChecklist || !tenantId) return;
+
+    try {
+      let execId = currentExecutionId;
+      const nowIso = new Date().toISOString();
+
+      if (!execId) {
+        // Cria a execução em andamento (in_progress) no banco
+        const { data: newExec, error: execErr } = await supabase
+          .from('checklist_executions')
+          .insert({
+            tenant_id: tenantId,
+            checklist_id: activeChecklist.id,
+            user_id: loggedInUser.id,
+            unit_id: activeChecklist.unit_id,
+            sector_id: activeChecklist.sector_id,
+            started_at: startedAt || nowIso,
+            status: 'in_progress',
+            score: 0,
+            latitude: currentCoords?.lat || null,
+            longitude: currentCoords?.lng || null,
+            lat_lng_precision: currentCoords?.precision || null,
+            distance_calculated: distanceFromUnit
+          })
+          .select('id')
+          .single();
+
+        if (execErr) {
+          console.error('Erro ao criar execução em andamento:', execErr);
+          return;
+        }
+
+        execId = newExec.id;
+        setCurrentExecutionId(execId);
+      }
+
+      // Upsert em tempo real da resposta do item no banco
+      const { error: respErr } = await supabase
+        .from('checklist_item_responses')
+        .upsert({
+          tenant_id: tenantId,
+          execution_id: execId,
+          item_id: itemId,
+          user_id: loggedInUser.id,
+          response_value: val,
+          is_conforming: isConf,
+          is_meta_ok: isMeta,
+          is_done: val.trim().length > 0,
+          observation: observationStr !== undefined ? observationStr : (responses[itemId]?.observation || null),
+          updated_at: nowIso
+        }, {
+          onConflict: 'execution_id, item_id'
+        });
+
+      if (respErr) {
+        console.error('Erro no auto-save da resposta:', respErr);
+      }
+
+      // Atualiza mapa de execuções em andamento
+      setInProgressExecutions(prev => ({
+        ...prev,
+        [activeChecklist.id]: {
+          executionId: execId!,
+          completedCount: Object.values(responses).filter(r => r.isDone).length + 1
+        }
+      }));
+
+    } catch (e) {
+      console.error('Erro no salvamento em tempo real:', e);
+    }
+  };
+
+  const handleSubtaskToggle = (itemId: string, itemOptions: string[], subIndex: number, checked: boolean) => {
+    const subtaskKey = `${itemId}_${subIndex}`;
+    
+    setCheckedSubtasks(prev => {
+      const updatedSubtasks = { ...prev, [subtaskKey]: checked };
+      
+      // Salva no localStorage imediatamente por usuário e checklist
+      if (loggedInUser && activeChecklist) {
+        const storageKey = `subtasks_${loggedInUser.id}_${activeChecklist.id}`;
+        localStorage.setItem(storageKey, JSON.stringify(updatedSubtasks));
+      }
+
+      // Coleta os índices de sub-tarefas marcados para este item
+      const checkedIndices: number[] = [];
+      itemOptions.forEach((_, idx) => {
+        if (updatedSubtasks[`${itemId}_${idx}`]) {
+          checkedIndices.push(idx);
+        }
+      });
+
+      const subtaskObsTag = checkedIndices.length > 0 ? `[SUBTASKS:${checkedIndices.join(',')}]` : '';
+      
+      const currentResp = responses[itemId];
+      const val = currentResp?.value || 'Feito';
+      const isConf = currentResp ? currentResp.isConforming : true;
+      const isMeta = currentResp ? currentResp.isMetaOk : true;
+
+      setResponses(prevResp => ({
+        ...prevResp,
+        [itemId]: {
+          ...(prevResp[itemId] || { itemId, value: val, isConforming: isConf, isMetaOk: isMeta, isDone: true }),
+          value: val,
+          isDone: true,
+          observation: subtaskObsTag,
+          answeredAt: new Date().toISOString(),
+          answeredBy: loggedInUser?.name || 'Operador'
+        }
+      }));
+
+      // Dispara salvamento em tempo real no Supabase com a tag de sub-tarefas
+      autoSaveResponseToDatabase(itemId, val, isConf, isMeta, subtaskObsTag);
+
+      return updatedSubtasks;
+    });
+  };
+
   const handleAnswerChange = (
     itemId: string, 
     responseType: string, 
@@ -521,6 +752,9 @@ export default function ChecklistTablet() {
         if (maxMeta !== null && maxMeta !== undefined && numVal > maxMeta) isMetaOk = false;
       }
     }
+
+    // Auto-save em tempo real no Supabase
+    autoSaveResponseToDatabase(itemId, value, isConforming, isMetaOk);
 
     setResponses(prev => {
       const current = prev[itemId] || { itemId, value: '', isConforming: true, isMetaOk: true, isDone: false };
@@ -690,48 +924,68 @@ export default function ChecklistTablet() {
         score = Math.round((conformCount / totalItems) * 100);
       }
 
-      // Cria a execução no banco
-      const { data: execData, error: execErr } = await supabase
-        .from('checklist_executions')
-        .insert({
-          tenant_id: tenantId,
-          checklist_id: activeChecklist.id,
-          user_id: loggedInUser.id,
-          unit_id: activeChecklist.unit_id,
-          sector_id: activeChecklist.sector_id,
-          started_at: startedAt,
-          completed_at: now.toISOString(),
-          duration_seconds: durationSeconds,
-          status: 'completed_on_time',
-          score,
-          latitude: currentCoords?.lat || null,
-          longitude: currentCoords?.lng || null,
-          lat_lng_precision: currentCoords?.precision || null,
-          distance_calculated: distanceFromUnit
-        })
-        .select('id')
-        .single();
+      // Atualiza execução existente em andamento ou cria uma nova se não existir
+      let executionId = currentExecutionId;
 
-      if (execErr) throw execErr;
-      const executionId = execData.id;
+      if (executionId) {
+        const { error: updateErr } = await supabase
+          .from('checklist_executions')
+          .update({
+            completed_at: now.toISOString(),
+            duration_seconds: durationSeconds,
+            status: 'completed_on_time',
+            score,
+            updated_at: now.toISOString()
+          })
+          .eq('id', executionId);
 
-      // Grava respostas dos itens
-      const insertResponses = itemsToAnswer.map(item => {
+        if (updateErr) throw updateErr;
+      } else {
+        const { data: execData, error: execErr } = await supabase
+          .from('checklist_executions')
+          .insert({
+            tenant_id: tenantId,
+            checklist_id: activeChecklist.id,
+            user_id: loggedInUser.id,
+            unit_id: activeChecklist.unit_id,
+            sector_id: activeChecklist.sector_id,
+            started_at: startedAt || now.toISOString(),
+            completed_at: now.toISOString(),
+            duration_seconds: durationSeconds,
+            status: 'completed_on_time',
+            score,
+            latitude: currentCoords?.lat || null,
+            longitude: currentCoords?.lng || null,
+            lat_lng_precision: currentCoords?.precision || null,
+            distance_calculated: distanceFromUnit
+          })
+          .select('id')
+          .single();
+
+        if (execErr) throw execErr;
+        executionId = execData.id;
+      }
+
+      // Upsert de todas as respostas para garantir consistência total no banco
+      const upsertResponses = itemsToAnswer.map(item => {
         const r = responses[item.id] || { itemId: item.id, value: '', isConforming: true, isMetaOk: true, isDone: false };
         return {
+          tenant_id: tenantId,
           execution_id: executionId,
           item_id: item.id,
+          user_id: loggedInUser.id,
           response_value: r.value,
           is_conforming: r.isConforming,
           is_meta_ok: r.isMetaOk,
           is_done: r.isDone,
-          observation: r.observation || null
+          observation: r.observation || null,
+          updated_at: now.toISOString()
         };
       });
 
       const { data: savedResponses, error: respErr } = await supabase
         .from('checklist_item_responses')
-        .insert(insertResponses)
+        .upsert(upsertResponses, { onConflict: 'execution_id, item_id' })
         .select('id, item_id');
 
       if (respErr) throw respErr;
@@ -759,6 +1013,10 @@ export default function ChecklistTablet() {
       triggerConfetti(true);
 
       // Reseta ativo
+      if (loggedInUser && activeChecklist) {
+        localStorage.removeItem(`subtasks_${loggedInUser.id}_${activeChecklist.id}`);
+      }
+      setCurrentExecutionId(null);
       setActiveChecklist(null);
       setItemsToAnswer([]);
       setResponses({});
@@ -1086,7 +1344,13 @@ export default function ChecklistTablet() {
                             <span className="text-[10px] px-3 py-1 rounded-full font-bold bg-indigo-500/25 text-indigo-300 shrink-0 border border-indigo-500/40 uppercase tracking-wider">
                               {chk.category || 'Geral'}
                             </span>
-                            <span className="text-xs text-[#8696a0] font-semibold truncate">{chk.unit_name}</span>
+                            {inProgressExecutions[chk.id] ? (
+                              <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wider animate-pulse flex items-center gap-1 shrink-0">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Em Andamento
+                              </span>
+                            ) : (
+                              <span className="text-xs text-[#8696a0] font-semibold truncate">{chk.unit_name}</span>
+                            )}
                           </div>
                           <h4 className="font-black text-white text-base mt-3 leading-snug line-clamp-2 group-hover:text-indigo-300 transition-colors">
                             {chk.title}
@@ -1581,12 +1845,7 @@ export default function ChecklistTablet() {
                                           <input
                                             type="checkbox"
                                             checked={isChecked}
-                                            onChange={(e) => {
-                                              setCheckedSubtasks(prev => ({
-                                                ...prev,
-                                                [subtaskKey]: e.target.checked
-                                              }));
-                                            }}
+                                            onChange={(e) => handleSubtaskToggle(item.id, item.options, sIdx, e.target.checked)}
                                             className="rounded-lg border-white/30 text-indigo-500 bg-[#202c33] focus:ring-indigo-500/40 focus:ring-offset-0 w-5 h-5 cursor-pointer shrink-0"
                                           />
                                           <span className="leading-snug">{sub}</span>
