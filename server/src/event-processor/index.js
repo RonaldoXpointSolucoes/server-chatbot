@@ -334,7 +334,6 @@ class EventProcessor {
                     const resolvedPn = await this.resolveLidToPhone(instanceId, jid, sock);
                     if (resolvedPn) {
                         jid = resolvedPn;
-                        console.log(`[EventProcessor] LID Resgatado com sucesso: ${msg.key.remoteJid} -> ${jid}`);
                     }
                 }
             }
@@ -381,15 +380,12 @@ class EventProcessor {
             
             // Ignora status e LIDs isolados sem conteúdo de mensagem
             if (this.isBroadcast(jid) || (this.isLid(jid) && !msg.message)) {
-                // Silenciado ou reduzido para não floodar os logs
-                console.log(`[EventProcessor] Mensagem Descartada - Motivo: É um Broadcast ou LID isolado sem conteúdo. JID: ${jid}`);
                 continue;
             }
             
             // Ignora grupos se não estiverem na lista de permitidos
             if (this.isGroup(jid)) {
                 if (!allowedGroups.includes(jid)) {
-                    console.log(`[EventProcessor] Mensagem Descartada - Motivo: Grupo não sincronizado manualmente. JID: ${jid}. Allowed: ${JSON.stringify(allowedGroups)}`);
                     continue;
                 }
             }
@@ -398,7 +394,6 @@ class EventProcessor {
             // Ignora stubs de falha de descriptografia (ex: Message absent from node)
             // Se salvarmos isso como mensagem vazia, o retry natural da Baileys será descartado por duplicidade de ID.
             if (msg.messageStubType && !msg.message) {
-                console.log(`[EventProcessor] Ignorando Stub Type ${msg.messageStubType} s/conteudo. (Evitando perda por dup-id no retry) - JID: ${jid}`);
                 continue;
             }
 
