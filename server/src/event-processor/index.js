@@ -730,6 +730,9 @@ class EventProcessor {
                       
                       const updatePayload = {
                           id: exist.id,
+                          tenant_id: exist.tenant_id || data.tenant_id,
+                          instance_id: exist.instance_id || data.instance_id,
+                          contact_id: exist.contact_id || data.contact_id,
                           unread_count: Number(exist.unread_count || 0) + Number(data.unread_count || 0),
                           last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
                           last_message_at: new Date(data.last_message_at).toISOString(),
