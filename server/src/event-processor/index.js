@@ -32,8 +32,8 @@ class EventProcessor {
         // Loop de reconciliation assíncrono para status (a cada 1s)
         setInterval(() => this.flushStatusQueue(), 1000);
 
-        // Loop de auto-recuperação de mensagens não sincronizadas (Self-Healing a cada 2 min)
-        setInterval(() => this.reconcileMissingMessages(), 120000);
+        // Loop de auto-recuperação de mensagens não sincronizadas (Self-Healing a cada 30s)
+        setInterval(() => this.reconcileMissingMessages(), 30000);
         
         // Cleanup loop para evitar memory leaks nos status pendentes e cache de mensagens processadas
         setInterval(() => {
@@ -77,7 +77,7 @@ class EventProcessor {
             if (missingRaw.length > 0) {
                 console.warn(`[EventProcessor] Self-Healing: Encontradas ${missingRaw.length} mensagens em wa_incoming_messages ausentes na tabela messages. Re-processando para evitar perda de dados...`);
                 for (const r of missingRaw) {
-                    await this.handleMessageUpsert(r.tenant_id, r.instance_id, null, { messages: [r.raw_payload], type: 'notify' });
+                    await this.handleMessageUpsert(r.tenant_id, r.instance_id, null, { messages: [r.raw_payload], type: 'reconcile' });
                 }
             }
         } catch (e) {
@@ -307,15 +307,11 @@ class EventProcessor {
                 // Ignora stubs de falha de descriptografia (ex: Message absent from node) na validação do cache,
                 // permitindo que o retry natural do WhatsApp/Baileys seja processado com sucesso.
                 const isDecryptionFailureStub = msg.messageStubType && !msg.message;
-                const isHistorySync = m.type === 'append';
+                const isHistorySync = m.type === 'append' || m.type === 'reconcile';
                 
                 if (!isDecryptionFailureStub && !isHistorySync && this.processedMessagesCache.has(cacheKey)) {
                     console.log(`[EventProcessor] Mensagem Duplicada Detectada em Cache de Memória (Ignorando). ID: ${msgId}`);
                     continue;
-                }
-                
-                if (!isDecryptionFailureStub) {
-                    this.processedMessagesCache.set(cacheKey, Date.now());
                 }
             }
 
@@ -505,6 +501,12 @@ class EventProcessor {
                     
                     // Ignora silenciosamente outros protocolMessages (HISTORY_SYNC_NOTIFICATION, APP_STATE_SYNC_KEY_SHARE, etc)
                     continue; 
+                }
+
+                // Marca no cache apenas quando a mensagem é válida e efetivamente enfileirada
+                if (msg.key?.id) {
+                    const safeInstanceId = instanceId || 'null_instance';
+                    this.processedMessagesCache.set(`${safeInstanceId}_${msg.key.id}`, Date.now());
                 }
 
                 // Em memória: empurra pra fila invés de dar AWAIT no BD cru.

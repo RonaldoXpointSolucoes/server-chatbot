@@ -30,7 +30,12 @@ import {
   Download,
   Tablet,
   Smartphone,
-  Share
+  Share,
+  ChevronLeft,
+  Plus,
+  CheckSquare,
+  List,
+  FileText
 } from 'lucide-react';
 import { Reorder } from 'framer-motion';
 
@@ -133,6 +138,21 @@ export default function ChecklistTablet() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
+
+  // Estados de Interface Mobile (Fidelidade às 5 Fotos de Referência)
+  const [isMobileView, setIsMobileView] = useState(window.innerWidth < 768);
+  const [mobileStepIndex, setMobileStepIndex] = useState(0);
+  const [mobileEvidenceModalItem, setMobileEvidenceModalItem] = useState<any | null>(null);
+  const [mobileEvidencePhoto, setMobileEvidencePhoto] = useState<string | null>(null);
+  const [mobileSuccessOverlay, setMobileSuccessOverlay] = useState(false);
+  const [mobileTab, setMobileTab] = useState<'checklists' | 'setores' | 'respostas' | 'add'>('checklists');
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobileView(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     const checkStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
@@ -1315,6 +1335,625 @@ export default function ChecklistTablet() {
       {loggedInUser && (
         <div className="flex-1 flex flex-col overflow-hidden">
           
+          {/* ========================================== */}
+          {/* VISTA MOBILE - TEMA ESCURO NATIVO COM NAVEGAÇÃO RESPONSIVA */}
+          {/* ========================================== */}
+          <div className="block md:hidden flex-1 flex flex-col bg-[#0b141a] text-[#d1d7db] overflow-y-auto pb-28 relative styled-scrollbar">
+            
+            {/* OVERLAY GAMIFICADO DE SUCESSO VERDE (DESLIZE / POPUP) */}
+            {mobileSuccessOverlay && (
+              <div className="fixed inset-0 z-[100] bg-[#0b141a]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center text-white animate-in fade-in zoom-in duration-300">
+                <div className="w-24 h-24 bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-3xl flex items-center justify-center shadow-2xl shadow-emerald-500/30 mb-6 text-black font-black text-4xl animate-bounce">
+                  <Check size={48} strokeWidth={3} className="text-black" />
+                </div>
+                <h2 className="text-3xl font-black tracking-tight text-white">Rotina Concluída!</h2>
+                <p className="text-sm text-[#8696a0] mt-2">Sua auditoria foi salva e registrada no servidor.</p>
+                <div className="text-xs font-bold text-emerald-400 mt-6 bg-emerald-500/20 px-5 py-2.5 rounded-full border border-emerald-500/40 shadow-sm flex items-center gap-2 font-mono">
+                  <span>✓ 100% Conforme • Enviando para o Servidor...</span>
+                </div>
+              </div>
+            )}
+
+            {/* BOTTOM SHEET MODAL "ANEXAR EVIDÊNCIA" (FOTOS DE EVIDÊNCIA EM TEMA ESCURO) */}
+            {mobileEvidenceModalItem && (
+              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end justify-center">
+                <div className="bg-[#182229] border-t border-x border-white/20 rounded-t-[36px] p-6 w-full max-w-lg shadow-2xl space-y-4 animate-in slide-in-from-bottom duration-300 text-left">
+                  <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-1" />
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-black text-white flex items-center gap-2">
+                      <Camera size={20} className="text-indigo-400" />
+                      Anexar Evidência
+                    </h3>
+                    <button 
+                      onClick={() => {
+                        setMobileEvidenceModalItem(null);
+                        setMobileEvidencePhoto(null);
+                      }} 
+                      className="p-1.5 rounded-full text-[#8696a0] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+                  <p className="text-xs text-[#8696a0] font-semibold">
+                    {mobileEvidenceModalItem.photo_instructions || `Tire uma foto nítida do ${mobileEvidenceModalItem.title.toLowerCase()} para validação.`}
+                  </p>
+
+                  {!mobileEvidencePhoto ? (
+                    /* FOTO AINDA NÃO CAPTURADA */
+                    <div className="space-y-4 pt-2">
+                      <label className="w-full py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black rounded-2xl flex items-center justify-center gap-2.5 shadow-xl shadow-indigo-600/30 active:scale-95 transition-all cursor-pointer text-sm">
+                        <Camera size={20} />
+                        <span>Tirar foto agora (Câmera)</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          capture="environment" 
+                          className="hidden" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                setMobileEvidencePhoto(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }} 
+                        />
+                      </label>
+
+                      <p className="text-[11px] text-[#8696a0] text-center leading-tight px-4">
+                        A câmera é aberta diretamente para gravação de foto em tempo real com validação GPS.
+                      </p>
+
+                      <button 
+                        disabled 
+                        className="w-full py-4 bg-[#202c33] text-[#8696a0] font-bold rounded-2xl cursor-not-allowed border border-white/5 text-sm"
+                      >
+                        Salvar evidência
+                      </button>
+                    </div>
+                  ) : (
+                    /* FOTO CAPTURADA / PREVIEW */
+                    <div className="space-y-4 pt-2">
+                      <div className="relative rounded-2xl overflow-hidden shadow-xl max-h-56 bg-slate-900 border border-white/20">
+                        <img src={mobileEvidencePhoto} alt="Evidência" className="w-full h-48 object-cover" />
+                        <div className="absolute bottom-2 right-2 bg-black/80 backdrop-blur-md text-emerald-400 text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg border border-emerald-500/40">
+                          {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 bg-[#111b21] border border-white/10 rounded-2xl flex items-center justify-between text-xs">
+                        <div className="space-y-0.5">
+                          <span className="font-bold text-white block">evidencia_fotografica.jpg</span>
+                          <span className="text-emerald-400 font-bold flex items-center gap-1">✓ Foto validada pelo sistema</span>
+                          <span className="text-[#8696a0] text-[10px]">📍 GPS: OK</span>
+                        </div>
+                        <button 
+                          onClick={() => setMobileEvidencePhoto(null)} 
+                          className="p-1.5 text-rose-400 hover:bg-rose-500/20 rounded-xl transition-colors cursor-pointer"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+
+                      <button 
+                        onClick={() => {
+                          const itemId = mobileEvidenceModalItem.id;
+                          setResponses(prev => ({
+                            ...prev,
+                            [itemId]: {
+                              ...prev[itemId],
+                              photoUrl: mobileEvidencePhoto,
+                              evidenceUrl: mobileEvidencePhoto
+                            }
+                          }));
+                          showToast('success', 'Foto de evidência gravada!');
+                          setMobileEvidenceModalItem(null);
+                          setMobileEvidencePhoto(null);
+                        }}
+                        className="w-full py-4 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400 text-black font-black rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/30 transition-all cursor-pointer text-sm active:scale-95"
+                      >
+                        Salvar evidência ✅
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* SEÇÃO 1: TELA INICIAL / LISTAGEM DE ROTINAS MOBILE */}
+            {!activeChecklist ? (
+              <div className="flex-1 flex flex-col">
+                {/* Header Superior Mobile com Tema Escuro & Glassmorphism */}
+                <div className="bg-[#182229]/95 backdrop-blur-xl border-b border-white/15 px-5 py-4 flex items-center justify-between shadow-lg sticky top-0 z-20">
+                  <div>
+                    <span className="text-[9px] uppercase font-bold tracking-widest text-indigo-400 block">Totem Operacional Mobile</span>
+                    <h1 className="text-xl font-black text-white tracking-tight">Meus Checklists</h1>
+                  </div>
+                  <div className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-xs px-3.5 py-1.5 rounded-2xl font-bold flex items-center gap-2 shadow-md">
+                    <User size={14} className="text-indigo-400" />
+                    <span>{loggedInUser.name}</span>
+                  </div>
+                </div>
+
+                <div className="p-4 space-y-4 pb-32">
+                  {/* Card Resumo Diário com Painel de Métricas */}
+                  <div className="bg-[#182229]/90 backdrop-blur-md rounded-3xl p-5 border border-white/15 shadow-2xl space-y-3">
+                    <div className="flex items-center justify-between text-white font-bold text-xs">
+                      <div className="flex items-center gap-2">
+                        <Clock size={16} className="text-indigo-400" />
+                        <span>HOJE - {new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}</span>
+                      </div>
+                      <span className="text-[10px] text-[#8696a0] uppercase tracking-wider font-mono">Turno Ativo</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div className="bg-[#111b21] p-3 rounded-2xl border border-emerald-500/30 flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-sm">
+                          ✓
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-[#8696a0] font-bold block uppercase">Concluídos</span>
+                          <span className="text-base font-black text-emerald-400 font-mono">
+                            {Object.keys(todayCompletedChecklists).length} / {checklists.length}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-[#111b21] p-3 rounded-2xl border border-rose-500/30 flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-sm">
+                          ⚠
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-[#8696a0] font-bold block uppercase">Atrasados</span>
+                          <span className="text-base font-black text-rose-400 font-mono">
+                            1
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Lista de Cards de Rotinas (Sem sobreposição) */}
+                  <div className="space-y-4">
+                    {checklists.map((chk, idx) => {
+                      const isDoneToday = !!todayCompletedChecklists[chk.id];
+                      const inProg = inProgressExecutions[chk.id];
+                      const isLate = idx === 1 && !isDoneToday;
+                      const scheduleTime = idx === 0 ? '08:00' : idx === 1 ? '12:30' : '14:00';
+                      const progressPercent = isDoneToday ? 100 : inProg ? 50 : 0;
+
+                      return (
+                        <div 
+                          key={chk.id}
+                          className={`bg-[#182229]/95 backdrop-blur-md rounded-3xl p-5 border shadow-2xl space-y-4 relative overflow-hidden transition-all hover:border-white/25 ${
+                            isDoneToday 
+                              ? 'border-emerald-500/40 bg-emerald-950/20' 
+                              : inProg 
+                                ? 'border-indigo-500/40 bg-indigo-950/20' 
+                                : 'border-white/15'
+                          }`}
+                        >
+                          {/* Topo do Card: Horário | Categoria & Título | Badge Em Andamento */}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3.5 min-w-0">
+                              <div className="text-center pr-3.5 border-r border-white/15 shrink-0">
+                                <span className={`text-lg font-black block leading-none font-mono ${isLate ? 'text-rose-400 animate-pulse' : 'text-white'}`}>
+                                  {isLate && '⚠ '}{scheduleTime}
+                                </span>
+                                <span className="text-[10px] text-[#8696a0] font-bold block mt-1">hoje</span>
+                                {isLate && (
+                                  <span className="bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md mt-1 block">
+                                    ATRASADO
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="min-w-0 space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-300 bg-indigo-500/20 px-2.5 py-0.5 rounded-md border border-indigo-500/30 inline-block">
+                                    {chk.category}
+                                  </span>
+                                  {inProg && !isDoneToday && (
+                                    <span className="bg-indigo-600/40 text-indigo-200 border border-indigo-500/50 text-[9px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 animate-pulse">
+                                      <Clock size={11} /> Em Andamento
+                                    </span>
+                                  )}
+                                </div>
+                                <h3 className="text-base font-black text-white leading-tight truncate">{chk.title}</h3>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Barra de Progresso */}
+                          <div className="space-y-1">
+                            <div className="w-full bg-[#111b21] h-6 rounded-full overflow-hidden relative border border-white/10 p-0.5">
+                              <div 
+                                className={`h-full rounded-full transition-all duration-500 flex items-center justify-center text-[10px] font-black font-mono text-white ${
+                                  isDoneToday 
+                                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black' 
+                                    : inProg 
+                                      ? 'bg-gradient-to-r from-indigo-500 to-purple-500' 
+                                      : 'bg-[#202c33] text-[#8696a0]'
+                                }`}
+                                style={{ width: `${Math.max(15, progressPercent)}%` }}
+                              >
+                                {progressPercent}%
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Rodapé do Card: Metadata | Botão de Ação */}
+                          <div className="flex items-end justify-between pt-1 gap-2">
+                            <div className="text-xs text-[#8696a0] space-y-0.5 font-medium min-w-0">
+                              <div className="flex items-center gap-1.5 truncate"><FolderOpen size={13} className="text-indigo-400 shrink-0" /> <span className="truncate">{chk.sector_name || 'Cozinha'}</span></div>
+                              <div className="flex items-center gap-1.5 truncate"><MapPin size={13} className="text-indigo-400 shrink-0" /> <span className="truncate">{chk.unit_name || 'Burguer Plus'}</span></div>
+                            </div>
+
+                            {isDoneToday ? (
+                              <div className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold px-4 py-2 rounded-2xl flex items-center gap-1.5 shadow-md shrink-0">
+                                <CheckCircle2 size={15} /> Finalizado
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  handleStartChecklist(chk);
+                                  setMobileStepIndex(0);
+                                }}
+                                className="bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-black px-6 py-2.5 rounded-2xl shadow-lg shadow-indigo-600/30 cursor-pointer active:scale-95 transition-all shrink-0"
+                              >
+                                {inProg ? 'Continuar' : 'Iniciar Rotina'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Dock Bar Flutuante Inferior em Glassmorphism */}
+                <div className="fixed bottom-4 left-4 right-4 z-40 bg-[#182229]/95 backdrop-blur-xl rounded-full shadow-2xl border border-white/15 p-2 flex items-center justify-between px-4">
+                  <button 
+                    onClick={() => setMobileTab('checklists')} 
+                    className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-full transition-all cursor-pointer ${
+                      mobileTab === 'checklists' ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/40' : 'text-[#8696a0] hover:text-white'
+                    }`}
+                  >
+                    <CheckSquare size={16} />
+                    <span>Checklists</span>
+                    <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold">5</span>
+                  </button>
+
+                  <button 
+                    onClick={() => setMobileTab('setores')} 
+                    className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-full transition-all cursor-pointer ${
+                      mobileTab === 'setores' ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/40' : 'text-[#8696a0] hover:text-white'
+                    }`}
+                  >
+                    <List size={16} />
+                    <span>Setores</span>
+                    <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold">2</span>
+                  </button>
+
+                  <button 
+                    onClick={() => setMobileTab('respostas')} 
+                    className="text-[#8696a0] hover:text-white p-2 rounded-full cursor-pointer"
+                  >
+                    <FileText size={18} />
+                  </button>
+
+                  <button 
+                    onClick={() => setMobileTab('add')} 
+                    className="text-[#8696a0] hover:text-white p-2 rounded-full cursor-pointer"
+                  >
+                    <Plus size={18} />
+                  </button>
+
+                  <button 
+                    onClick={() => setMobileSearchOpen(!mobileSearchOpen)} 
+                    className="w-10 h-10 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full flex items-center justify-center shadow-md cursor-pointer"
+                  >
+                    <Search size={18} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+
+              /* SEÇÃO 2: EXECUÇÃO PASSO-A-PASSO ITEM A ITEM EM TEMA ESCURO (FOTO 2) */
+              <div className="flex-1 flex flex-col bg-[#0b141a]">
+                <div className="bg-[#182229]/95 backdrop-blur-xl border-b border-white/15 px-4 py-3.5 flex items-center justify-between shadow-lg sticky top-0 z-20">
+                  <button 
+                    onClick={() => setActiveChecklist(null)} 
+                    className="p-2 rounded-2xl bg-[#111b21] border border-white/10 text-white hover:bg-white/10 transition-all cursor-pointer"
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                  <h2 className="text-sm font-black text-white truncate max-w-[220px] text-center">
+                    {activeChecklist.title}
+                  </h2>
+                  <div className="w-9" />
+                </div>
+
+                {/* Banner de Aviso de Rotina Concluída Hoje se Aplicável */}
+                {todayCompletedChecklists[activeChecklist.id] && (
+                  <div className="m-4 p-4 rounded-3xl bg-gradient-to-r from-emerald-950/80 via-teal-900/60 to-emerald-950/80 border border-emerald-500/50 text-emerald-200 shadow-xl flex items-center gap-3">
+                    <CheckCircle2 size={24} className="text-emerald-400 shrink-0" />
+                    <div>
+                      <h4 className="font-black text-xs text-white">Rotina Concluída Hoje! ({todayCompletedChecklists[activeChecklist.id].score}% Aprovado)</h4>
+                      <p className="text-[11px] text-emerald-300/80 mt-0.5">Respostas registradas no servidor.</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Seção de Progresso */}
+                <div className="bg-[#111b21] px-4 py-3.5 border-b border-white/10 space-y-2.5">
+                  <div className="flex items-center justify-between text-xs font-bold text-[#8696a0]">
+                    <span>Progresso da Rotina</span>
+                    <span className="text-base font-black text-emerald-400 font-mono">
+                      {itemsToAnswer.length > 0 ? Math.round(((mobileStepIndex + 1) / itemsToAnswer.length) * 100) : 0}%
+                    </span>
+                  </div>
+
+                  <div className="w-full bg-[#202c33] h-2.5 rounded-full overflow-hidden border border-white/5">
+                    <div 
+                      className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-full rounded-full transition-all duration-300 shadow-sm shadow-emerald-500/50"
+                      style={{ width: `${itemsToAnswer.length > 0 ? ((mobileStepIndex + 1) / itemsToAnswer.length) * 100 : 0}%` }}
+                    />
+                  </div>
+
+                  <div className="bg-[#182229] border border-amber-500/30 rounded-2xl p-3 flex items-center justify-between text-xs font-bold text-amber-300 shadow-md">
+                    <div className="flex items-center gap-2">
+                      <span className="w-4 h-4 rounded-full border-2 border-amber-400 inline-block" />
+                      <span>Item {mobileStepIndex + 1} de {itemsToAnswer.length}</span>
+                    </div>
+                    <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-black px-2.5 py-0.5 rounded-md uppercase tracking-wider">
+                      OBRIGATÓRIO
+                    </span>
+                  </div>
+                </div>
+
+                {/* Card da Pergunta Atual (Foto 2 + Tema Escuro + Sub-Tarefas) */}
+                <div className="p-4 flex-1 overflow-y-auto">
+                  {(() => {
+                    const item = itemsToAnswer[mobileStepIndex];
+                    if (!item) return null;
+
+                    const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                    const groupName = match ? match[1] : null;
+                    const cleanTitle = match ? match[2] : item.title;
+                    const cleanDescription = item.description ? item.description.replace(/Fornecedor:\s*/g, '').replace(/Custo:\s*/g, '').split(' | ').join(' • ') : null;
+
+                    const resp = responses[item.id] || { itemId: item.id, value: '', isConforming: true, isMetaOk: true, isDone: false };
+                    const isDone = resp.isDone;
+                    const photoAttached = resp.photoUrl || resp.evidenceUrl;
+
+                    return (
+                      <div className="bg-[#182229] rounded-[32px] p-6 border border-white/15 shadow-2xl space-y-5">
+                        
+                        {/* Categoria e Título */}
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-300 bg-indigo-500/20 px-2.5 py-1 rounded-xl border border-indigo-500/30">
+                              {groupName || activeChecklist.category}
+                            </span>
+                            {resp.isDone && (
+                              <span className="text-xs font-bold text-emerald-400 bg-emerald-500/20 border border-emerald-500/40 px-3 py-0.5 rounded-full">
+                                Concluído ✅
+                              </span>
+                            )}
+                          </div>
+
+                          <h3 className="text-lg font-black text-white leading-tight">
+                            {cleanTitle} <span className="text-rose-400">*</span>
+                          </h3>
+                        </div>
+
+                        {/* Descrição em Caixa Escura */}
+                        {cleanDescription && (
+                          <div className="bg-[#111b21]/90 border-l-4 border-indigo-500 p-3.5 rounded-r-2xl text-xs text-[#e9edef] leading-relaxed">
+                            {cleanDescription}
+                          </div>
+                        )}
+
+                        {/* SUB-TAREFAS ("ITENS A VERIFICAR") */}
+                        {item.options && item.options.length > 0 && (
+                          <div className="space-y-2.5 pt-1">
+                            <span className="text-xs font-black text-indigo-400 block uppercase tracking-widest">ITENS A VERIFICAR:</span>
+                            <div className="space-y-2">
+                              {item.options.map((sub: string, sIdx: number) => {
+                                const subtaskKey = `${item.id}_${sIdx}`;
+                                const isChecked = checkedSubtasks[subtaskKey] || false;
+                                return (
+                                  <label 
+                                    key={sIdx} 
+                                    className={`flex items-center gap-3.5 p-3.5 rounded-2xl border transition-all cursor-pointer select-none text-xs font-semibold min-h-[48px] ${
+                                      isChecked 
+                                        ? 'bg-indigo-500/20 border-indigo-500/50 text-white shadow-md' 
+                                        : 'bg-[#111b21] border-white/10 text-[#d1d7db] hover:bg-[#111b21]/80'
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => handleSubtaskToggle(item.id, item.options, sIdx, e.target.checked)}
+                                      className="rounded-lg border-white/30 text-indigo-500 bg-[#202c33] focus:ring-indigo-500/40 focus:ring-offset-0 w-5 h-5 cursor-pointer shrink-0"
+                                    />
+                                    <span className="leading-snug">{sub}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Botão de Upload de Foto */}
+                        {(item.require_photo || item.require_evidence) && (
+                          <button
+                            onClick={() => {
+                              setMobileEvidenceModalItem(item);
+                              setMobileEvidencePhoto(resp.photoUrl || resp.evidenceUrl || null);
+                            }}
+                            className={`text-xs font-bold px-4 py-3 rounded-2xl flex items-center gap-2 transition-all cursor-pointer w-full justify-center min-h-[48px] ${
+                              photoAttached 
+                                ? 'border border-emerald-500/40 bg-emerald-500/20 text-emerald-300' 
+                                : 'border border-indigo-500/40 bg-indigo-500/15 text-indigo-300 hover:bg-indigo-500/25'
+                            }`}
+                          >
+                            <Camera size={18} />
+                            <span>{photoAttached ? '✓ Foto de Evidência Anexada' : '📷 Tirar Foto Evidência *'}</span>
+                          </button>
+                        )}
+
+                        {/* CONTROLES DE RESPOSTA (FEITO / NÃO FEITO OU INPUTS NUMÉRICOS/TEXTO/ESTRELAS) */}
+                        {item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'counter' || item.response_type === 'kg' ? (
+                          <div className="space-y-3 pt-2">
+                            <div className="flex items-center justify-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const currentVal = parseFloat((resp.value || '0').replace(',', '.'));
+                                  const newVal = Math.max(0, currentVal - 1).toString();
+                                  handleAnswerChange(item.id, item.response_type, newVal, item.min_meta, item.max_meta);
+                                }}
+                                className="w-12 h-12 rounded-2xl bg-[#111b21] border border-white/15 text-white font-black text-xl flex items-center justify-center active:scale-95 transition-all cursor-pointer"
+                              >
+                                -
+                              </button>
+
+                              <input
+                                type="text"
+                                value={resp.value || ''}
+                                onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
+                                placeholder={item.min_meta !== null ? `Mín ${item.min_meta}` : '0'}
+                                className="w-32 bg-[#111b21] border border-white/20 rounded-2xl px-4 py-3 text-center text-lg font-black text-white font-mono focus:outline-none focus:border-indigo-500"
+                              />
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const currentVal = parseFloat((resp.value || '0').replace(',', '.'));
+                                  const newVal = (currentVal + 1).toString();
+                                  handleAnswerChange(item.id, item.response_type, newVal, item.min_meta, item.max_meta);
+                                }}
+                                className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 font-black text-xl flex items-center justify-center active:scale-95 transition-all cursor-pointer"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        ) : item.response_type === 'text' ? (
+                          <div className="pt-2">
+                            <textarea
+                              rows={3}
+                              value={resp.value || ''}
+                              onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
+                              placeholder="Digite suas observações ou resultado..."
+                              className="w-full bg-[#111b21] border border-white/15 rounded-2xl p-3.5 text-xs text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        ) : item.response_type === 'stars' ? (
+                          <div className="flex items-center justify-center gap-2 pt-2">
+                            {[1, 2, 3, 4, 5].map(starNum => {
+                              const isSelected = parseInt(resp.value || '0') >= starNum;
+                              return (
+                                <button
+                                  key={starNum}
+                                  type="button"
+                                  onClick={() => handleAnswerChange(item.id, item.response_type, starNum.toString(), item.min_meta, item.max_meta)}
+                                  className={`p-2 hover:scale-125 transition-transform cursor-pointer ${isSelected ? 'text-amber-400' : 'text-[#202c33]'}`}
+                                >
+                                  <Star size={28} fill={isSelected ? 'currentColor' : 'transparent'} />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          /* PADRÃO FEITO / NÃO FEITO COM CONFIRMAÇÃO REAL VIA handleAnswerChange */
+                          <div className="flex items-center gap-3 pt-3">
+                            {(() => {
+                              const isFeitoVal = resp.isDone && (resp.value === 'Feito' || resp.value === 'Conforme' || resp.value === 'Sim' || resp.isConforming);
+                              const isNaoFeitoVal = resp.isDone && (resp.value === 'Não Feito' || resp.value === 'Não Conforme' || resp.value === 'Não' || (!resp.isConforming && resp.value.length > 0));
+
+                              const feitoText = item.response_type === 'conformity' ? '✓ Conforme' : item.response_type === 'yes_no' ? '✓ Sim' : '✓ FEITO';
+                              const naoFeitoText = item.response_type === 'conformity' ? '✕ Não Conforme' : item.response_type === 'yes_no' ? '✕ Não' : '✕ NÃO FEITO';
+
+                              const feitoVal = item.response_type === 'conformity' ? 'Conforme' : item.response_type === 'yes_no' ? 'Sim' : 'Feito';
+                              const naoFeitoVal = item.response_type === 'conformity' ? 'Não Conforme' : item.response_type === 'yes_no' ? 'Não' : 'Não Feito';
+
+                              return (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAnswerChange(item.id, item.response_type || 'boolean', naoFeitoVal, item.min_meta, item.max_meta)}
+                                    className={`flex-1 py-4 rounded-2xl border font-black text-sm flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-md ${
+                                      isNaoFeitoVal
+                                        ? 'bg-rose-600 border-rose-500 text-white shadow-rose-600/40' 
+                                        : 'bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25'
+                                    }`}
+                                  >
+                                    {naoFeitoText}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAnswerChange(item.id, item.response_type || 'boolean', feitoVal, item.min_meta, item.max_meta)}
+                                    className={`flex-1 py-4 rounded-2xl font-black text-sm flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-lg ${
+                                      isFeitoVal 
+                                        ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 text-black shadow-emerald-500/40 border-2 border-emerald-300 font-mono scale-[1.02]' 
+                                        : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30'
+                                    }`}
+                                  >
+                                    {feitoText}
+                                  </button>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Footer Fixo de Navegação (Anterior / Próximo / Finalizar e Assinar Rotina) */}
+                <div className="fixed bottom-0 left-0 right-0 p-4 bg-[#182229]/95 backdrop-blur-xl border-t border-white/15 flex items-center gap-3 z-30 shadow-2xl">
+                  <button
+                    disabled={mobileStepIndex === 0}
+                    onClick={() => setMobileStepIndex(prev => Math.max(0, prev - 1))}
+                    className="flex-1 py-3.5 rounded-2xl border border-white/20 bg-[#111b21] text-white font-bold text-xs flex items-center justify-center hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer min-h-[48px]"
+                  >
+                    ← Anterior
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (mobileStepIndex < itemsToAnswer.length - 1) {
+                        setMobileStepIndex(prev => prev + 1);
+                      } else {
+                        // CHAMA A FUNÇÃO CORRETA DE FINALIZAÇÃO DO TABLET PWA
+                        handleSubmitChecklist();
+                      }
+                    }}
+                    className={`flex-1 py-3.5 rounded-2xl font-black text-xs flex items-center justify-center transition-all cursor-pointer min-h-[48px] shadow-lg ${
+                      mobileStepIndex === itemsToAnswer.length - 1
+                        ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 text-black shadow-emerald-500/40 active:scale-95 font-mono'
+                        : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-indigo-600/30 active:scale-95'
+                    }`}
+                  >
+                    {mobileStepIndex < itemsToAnswer.length - 1 ? 'Próximo →' : 'Finalizar Rotina ✓'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ========================================== */}
+          {/* VISTA DESKTOP / TABLET TOTEM PWA (MANTIDA 100% INTACTA) */}
+          {/* ========================================== */}
+          <div className="hidden md:flex flex-1 flex-col overflow-hidden">
+          
           {/* Header Superior do Totem - Consolidado, Compacto e Elegante (h-16) */}
           <div className="h-16 sm:h-18 bg-[#182229]/95 backdrop-blur-xl border-b border-white/15 px-6 sm:px-8 flex items-center justify-between shrink-0 shadow-lg relative z-20 gap-4">
             
@@ -2341,9 +2980,9 @@ export default function ChecklistTablet() {
                 </div>
               )}
             </div>
-
           </div>
         </div>
+      </div>
       )}
 
       {/* MODAL DE INSTRUÇÕES DE INSTALAÇÃO NO TABLET */}

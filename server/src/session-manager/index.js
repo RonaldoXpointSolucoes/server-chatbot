@@ -275,13 +275,6 @@ class SessionManager {
                 maxMsgRetryCount: 0, // Desativado para evitar loops de retry em grupos que causam BAN
                 msgRetryCounterCache,
                 shouldSyncHistoryMessage: (histNotification) => {
-                    const syncType = histNotification?.syncType;
-                    if (syncType === 6 || syncType === 'ON_DEMAND') {
-                        return true;
-                    }
-                    if (syncType === 2 || syncType === 'FULL') {
-                        return false;
-                    }
                     return true;
                 },
                 getMessage: async (key) => {
