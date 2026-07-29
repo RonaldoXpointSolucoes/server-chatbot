@@ -1690,9 +1690,8 @@ class EventProcessor {
                 const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
                 const statusVal = isLocalDev ? 'connected_local' : 'connected';
                 await supabase.from('whatsapp_instances')
-                    .update({ status: statusVal, last_error: null })
-                    .eq('id', instanceId)
-                    .eq('assigned_node_id', NODE_ID);
+                    .update({ status: statusVal, assigned_node_id: NODE_ID, last_error: null })
+                    .eq('id', instanceId);
                 const { data: existing } = await supabase.from('whatsapp_instance_runtime')
                     .select('instance_id')
                     .eq('instance_id', instanceId)
