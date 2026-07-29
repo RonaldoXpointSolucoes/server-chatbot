@@ -333,7 +333,11 @@ app.listen(PORT, '0.0.0.0', async () => {
         return;
     }
     
-    await runMigrations();
+    try {
+        await runMigrations();
+    } catch(migErr) {
+        console.error("[Migration] Erro não impeditivo ao rodar migrações:", migErr.message);
+    }
     
     // Registrar o deploy no banco Supabase
     try {
