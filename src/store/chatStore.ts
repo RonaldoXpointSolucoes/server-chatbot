@@ -3711,11 +3711,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
                const updated = [...s.contacts];
                const idx = updated.findIndex(c => c.id === contactId);
                if (idx !== -1) {
+                   // Preserva mensagens otimistas em andamento (in-flight)
+                   const currentMsgs = updated[idx].messages || [];
+                   const optimisticMsgs = currentMsgs.filter(m => String(m.id).startsWith('optimistic-'));
+
+                   // Filtra otimistas que já foram gravadas no banco (para evitar duplicatas)
+                   const pendingOptimistic = optimisticMsgs.filter(opt => {
+                       return !uniqueMsgs.some(dbMsg => 
+                           (opt.whatsapp_id && dbMsg.whatsapp_id === opt.whatsapp_id) ||
+                           (dbMsg.text === opt.text && Math.abs(new Date(dbMsg.timestamp).getTime() - new Date(opt.timestamp).getTime()) < 15000)
+                       );
+                   });
+
+                   const finalMsgs = sortMessagesChronologically([...uniqueMsgs, ...pendingOptimistic]);
+
                    updated[idx] = {
                        ...updated[idx],
                        unread: 0,
                        isManuallyUnread: false,
-                       messages: uniqueMsgs
+                       messages: finalMsgs
                    };
                }
                return { contacts: updated };
