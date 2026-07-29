@@ -32,9 +32,8 @@ const requireTenant = async (req, res, next) => {
             
         if (error || !data) return res.status(404).json({ error: 'Instance not found or unauthorized' });
         
-        // Verifica se a instância requer API Key.
-        if (data.api_key) {
-             if (!apiKey) return res.status(401).json({ error: 'apikey header missing. Access denied.' });
+        // Se a chamada enviar a chave API (integração externa), valida com a api_key da instância.
+        if (apiKey && data.api_key) {
              if (data.api_key !== apiKey) return res.status(401).json({ error: 'Invalid API Key provided for this instance' });
         }
     }

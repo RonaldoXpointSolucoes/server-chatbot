@@ -358,7 +358,7 @@ class EventProcessor {
                     }
                 }
 
-                supabase.from('wa_incoming_messages').upsert({
+                const { error: incErr } = await supabase.from('wa_incoming_messages').upsert({
                     instance_id: instanceId,
                     tenant_id: tenantId,
                     chat_jid: jid,
@@ -368,11 +368,12 @@ class EventProcessor {
                     body: bodyText,
                     message_type: mType,
                     raw_payload: msg
-                }, { onConflict: 'instance_id, message_id' }).then(({ error }) => {
-                    if (error) console.error('[EventProcessor] Erro ao gravar wa_incoming_messages:', error.message);
-                });
+                }, { onConflict: 'instance_id, message_id' });
+                if (incErr) {
+                    console.warn('[EventProcessor] Aviso ao gravar wa_incoming_messages:', incErr.message);
+                }
             } catch (err) {
-                console.error('[EventProcessor] Erro ao preparar gravação wa_incoming_messages:', err.message);
+                console.warn('[EventProcessor] Falha de conexão ao gravar wa_incoming_messages (não impeditivo):', err.message);
             }
             
             const instanceConfig = await this.getInstanceConfig(instanceId);
@@ -1274,7 +1275,8 @@ class EventProcessor {
         try {
             const { data: instCheck } = await supabase.from('whatsapp_instances').select('id').eq('id', instanceId).limit(1);
             if (!instCheck || instCheck.length === 0) {
-                console.warn(`[EventProcessor] Instância ${instanceId} não existe mais no banco de dados. Ignorando histórico.`);
+                console.warn(`[EventProcessor] Instância ${instanceId} não existe mais no banco de dados. Encerrando sessão de memória residual.`);
+                sessionManager.closeSession(instanceId).catch(() => {});
                 return;
             }
         } catch (e) {
