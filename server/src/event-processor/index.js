@@ -736,7 +736,7 @@ class EventProcessor {
                           instance_id: exist.instance_id || data.instance_id,
                           contact_id: exist.contact_id || data.contact_id,
                           unread_count: Number(exist.unread_count || 0) + Number(data.unread_count || 0),
-                          last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
+                          last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 500).join(''),
                           last_message_at: new Date(data.last_message_at).toISOString(),
                           updated_at: new Date().toISOString(),
                           status: nextStatus,
@@ -769,7 +769,7 @@ class EventProcessor {
                          contact_id: data.contact_id,
                          status: initialStatus,
                          unread_count: data.unread_count,
-                         last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
+                         last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 500).join(''),
                          last_message_at: data.last_message_at.toISOString(),
                          ai_paused: initialAiPaused
                      });

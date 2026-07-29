@@ -3736,11 +3736,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
         
         const { data: msgs } = await supabase.from('messages')
-               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload, created_at')
+               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                .eq('tenant_id', tenant.id)
                .eq('conversation_id', conv.id)
                .order('timestamp', { ascending: true })
-               .order('created_at', { ascending: true })
                .limit(300);
                
         
