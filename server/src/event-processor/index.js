@@ -231,7 +231,7 @@ class EventProcessor {
         return jid && jid.endsWith('@lid');
     }
 
-    async resolveLidToPhone(instanceId, jid, sock) {
+    async resolveLidToPhone(instanceId, jid, sock, allowDbQuery = true) {
         if (!jid || !jid.includes('@lid')) return null;
         
         const cleanLid = jid.split('@')[0];
@@ -261,6 +261,8 @@ class EventProcessor {
         } catch (e) {
             // Silenciado
         }
+
+        if (!allowDbQuery) return null;
         
         // 3. Try global wa_auth_keys query (LID mappings are globally constant)
         try {
@@ -1267,78 +1269,83 @@ class EventProcessor {
     async handleMessagingHistorySet(tenantId, instanceId, sock, payload) {
         if (!instanceId) return;
 
-        try {
-            const { data: instCheck } = await supabase.from('whatsapp_instances').select('id').eq('id', instanceId).limit(1);
-            if (!instCheck || instCheck.length === 0) {
-                console.warn(`[EventProcessor] Instância ${instanceId} não existe mais no banco de dados. Encerrando sessão de memória residual.`);
-                sessionManager.closeSession(instanceId).catch(() => {});
-                return;
+        // Processa o histórico de forma assíncrona fora da pilha do evento do socket para NÃO bloquear o event loop e prevenir disconects (Code 428/408)
+        setImmediate(async () => {
+            try {
+                const { data: instCheck } = await supabase.from('whatsapp_instances').select('id').eq('id', instanceId).limit(1);
+                if (!instCheck || instCheck.length === 0) {
+                    console.warn(`[EventProcessor] Instância ${instanceId} não existe mais no banco de dados. Encerrando sessão de memória residual.`);
+                    sessionManager.closeSession(instanceId).catch(() => {});
+                    return;
+                }
+
+                const chats = payload.chats || [];
+                const contacts = payload.contacts || [];
+                const messages = payload.messages || [];
+                
+                console.log(`[EventProcessor] Histórico de Conexão/Reconexão Recebido em Background: ${chats.length} chats, ${contacts.length} contatos, ${messages.length} mensagens.`);
+
+                const ownerJid = sock?.user?.id;
+                let ownerPhone = null;
+                if (ownerJid) {
+                     ownerPhone = ownerJid.split('@')[0].split(':')[0];
+                }
+
+                // 1. Sincronização de Contatos do Histórico
+                const mappedContactsToHistory = {};
+                for (const c of contacts) {
+                    let jid = c.id;
+                    if (!jid || this.isBroadcast(jid) || this.isGroup(jid)) continue;
+                    
+                    if (this.isLid(jid)) {
+                        const resolvedPn = await this.resolveLidToPhone(instanceId, jid, sock, false);
+                        if (resolvedPn) jid = resolvedPn;
+                        else continue;
+                    }
+                    
+                    const phone = jid.split('@')[0].split(':')[0];
+                    if (!phone || phone.length < 5) continue;
+                    const cleanJid = phone + '@' + (jid.split('@')[1] || 's.whatsapp.net');
+                    jid = cleanJid;
+                    
+                    if (ownerPhone && phone === ownerPhone) continue;
+
+                    const pushName = c.notify || c.name || phone;
+                    mappedContactsToHistory[`${tenantId}_${phone}`] = { tenant_id: tenantId, phone: phone, name: pushName, whatsapp_jid: jid, instance_id: instanceId };
+                }
+                const histContacts = Object.values(mappedContactsToHistory);
+                if (histContacts.length > 0) {
+                     const chunkLimit = 500;
+                     for (let i = 0; i < histContacts.length; i += chunkLimit) {
+                         const chunk = histContacts.slice(i, i + chunkLimit);
+                         try {
+                             await supabase.from('contacts').upsert(chunk, { onConflict: 'tenant_id, phone', ignoreDuplicates: true });
+                         } catch (e) {}
+                     }
+                }
+
+                // 2. Sincronização de Mensagens (Prevenção Total de Perda de Mensagens Offline/Reconexão)
+                if (messages && messages.length > 0) {
+                    console.log(`[EventProcessor] Processando ${messages.length} mensagens do histórico em segundo plano...`);
+                    const chronologicMessages = [...messages].reverse();
+                    
+                    // Processa em lotes de 100 mensagens por vez para alta performance sem travar a CPU
+                    for (let i = 0; i < chronologicMessages.length; i += 100) {
+                        const chunk = chronologicMessages.slice(i, i + 100);
+                        await this.handleMessageUpsert(tenantId, instanceId, sock, { messages: chunk, type: 'append' });
+                        await new Promise(r => setTimeout(r, 50));
+                    }
+
+                    await realtime.publishInboxEvent(tenantId, 'history.sync.completed', {
+                        count: chronologicMessages.length
+                    }).catch(() => {});
+                }
+                
+                console.log(`[EventProcessor] Sync de histórico concluído com sucesso para instância ${instanceId}.`);
+            } catch (err) {
+                console.error(`[EventProcessor] Erro na sincronização de histórico da instância ${instanceId}:`, err.message);
             }
-        } catch (e) {
-            console.error(`[EventProcessor] Erro ao verificar existência da instância ${instanceId} para histórico:`, e);
-            return;
-        }
-
-        const chats = payload.chats || [];
-        const contacts = payload.contacts || [];
-        const messages = payload.messages || [];
-        
-        console.log(`[EventProcessor] Histórico de Conexão/Reconexão Recebido: ${chats.length} chats, ${contacts.length} contatos, ${messages.length} mensagens.`);
-
-        const ownerJid = sock?.user?.id;
-        let ownerPhone = null;
-        if (ownerJid) {
-             ownerPhone = ownerJid.split('@')[0].split(':')[0];
-        }
-
-        // 1. Sincronização de Contatos do Histórico
-        const mappedContactsToHistory = {};
-        for (const c of contacts) {
-            let jid = c.id;
-            if (!jid || this.isBroadcast(jid) || this.isGroup(jid)) continue;
-            
-            if (this.isLid(jid)) {
-                const resolvedPn = await this.resolveLidToPhone(instanceId, jid, sock);
-                if (resolvedPn) jid = resolvedPn;
-            }
-            
-            const phone = jid.split('@')[0].split(':')[0];
-            const cleanJid = phone + '@' + jid.split('@')[1];
-            jid = cleanJid;
-            
-            if (ownerPhone && phone === ownerPhone) continue;
-
-            const pushName = c.notify || c.name || phone;
-            mappedContactsToHistory[`${tenantId}_${phone}`] = { tenant_id: tenantId, phone: phone, name: pushName, whatsapp_jid: jid, instance_id: instanceId };
-        }
-        const histContacts = Object.values(mappedContactsToHistory);
-        if (histContacts.length > 0) {
-             const chunkLimit = 500;
-             for (let i = 0; i < histContacts.length; i += chunkLimit) {
-                 const chunk = histContacts.slice(i, i + chunkLimit);
-                 try {
-                     await supabase.from('contacts').upsert(chunk, { onConflict: 'tenant_id, phone', ignoreDuplicates: true });
-                 } catch (e) {}
-             }
-        }
-
-        // 2. Sincronização de Mensagens (Prevenção Total de Perda de Mensagens Offline/Reconexão)
-        if (messages && messages.length > 0) {
-            console.log(`[EventProcessor] Processando ${messages.length} mensagens do histórico para garantir integridade total...`);
-            const chronologicMessages = [...messages].reverse();
-            
-            // Processa em lotes de 100 mensagens por vez para alta performance sem travar a CPU
-            for (let i = 0; i < chronologicMessages.length; i += 100) {
-                const chunk = chronologicMessages.slice(i, i + 100);
-                await this.handleMessageUpsert(tenantId, instanceId, sock, { messages: chunk, type: 'append' });
-            }
-
-            await realtime.publishInboxEvent(tenantId, 'history.sync.completed', {
-                count: chronologicMessages.length
-            }).catch(() => {});
-        }
-        
-        console.log(`[EventProcessor] Sync de histórico concluído com sucesso para instância ${instanceId}.`);
+        });
     }
 
     async handleChatsUpsert(tenantId, instanceId, sock, chats) {
