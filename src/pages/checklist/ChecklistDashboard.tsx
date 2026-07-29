@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { 
@@ -23,7 +23,13 @@ import {
   ChevronRight,
   X,
   Eye,
-  CheckCheck
+  CheckCheck,
+  RefreshCw,
+  Filter,
+  Activity,
+  Award,
+  Zap,
+  Check
 } from 'lucide-react';
 
 interface KPIStats {
@@ -71,15 +77,19 @@ export default function ChecklistDashboard() {
   const [alerts, setAlerts] = useState<any[]>([]);
   const [ranking, setRanking] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Filtros
   const [selectedUnit, setSelectedUnit] = useState('all');
   const [selectedPeriod, setSelectedPeriod] = useState<'today' | 'week' | 'month'>('today');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [units, setUnits] = useState<any[]>([]);
 
   // Detalhamento de Execução Ativa (Modal Premium)
   const [selectedExecDetail, setSelectedExecDetail] = useState<ExecutionDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (tenantId) {
@@ -208,7 +218,7 @@ export default function ChecklistDashboard() {
       setAlerts(alertsData || []);
 
       // 4. Calcular Estatísticas de KPIs
-      const expected = mappedExecs.length + (selectedPeriod === 'today' ? 2 : 5); // Mock de agendamentos pendentes
+      const expected = mappedExecs.length + (selectedPeriod === 'today' ? 2 : 5);
       const completedOnTime = mappedExecs.filter(e => e.status === 'completed_on_time').length;
       const completedLate = mappedExecs.filter(e => e.status === 'completed_late').length;
       const inProgress = mappedExecs.filter(e => e.status === 'in_progress').length;
@@ -277,8 +287,32 @@ export default function ChecklistDashboard() {
       console.error(e);
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   };
+
+  const handleManualRefresh = () => {
+    setIsRefreshing(true);
+    loadDashboardData();
+  };
+
+  // Execuções filtradas na busca
+  const filteredExecutions = useMemo(() => {
+    return executions.filter(ex => {
+      const matchesSearch = searchQuery === '' || 
+        ex.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        ex.operatorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        ex.sectorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        ex.category.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const matchesStatus = statusFilter === 'all' ||
+        (statusFilter === 'on_time' && ex.status === 'completed_on_time') ||
+        (statusFilter === 'late' && ex.status === 'completed_late') ||
+        (statusFilter === 'in_progress' && ex.status === 'in_progress');
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [executions, searchQuery, statusFilter]);
 
   // ==========================================
   // CARREGAR DETALHAMENTO DE RESPOSTAS
@@ -369,155 +403,275 @@ export default function ChecklistDashboard() {
     }
   };
 
-  // ==========================================
-  // EXPORTAÇÃO RÁPIDA PDF (Simulado)
-  // ==========================================
+  // EXPORTAÇÃO RÁPIDA PDF (Formatada)
   const handleExportPDF = () => {
-    window.print(); // Solução nativa premium para impressão/salvar PDF formatado
+    window.print();
+  };
+
+  // Helper de Iniciais do Operador
+  const getInitials = (name: string) => {
+    if (!name) return 'OP';
+    const parts = name.trim().split(' ');
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#182229] dark:bg-[#0b141a] text-[#d1d7db] overflow-y-auto p-6 styled-scrollbar">
+    <div className="flex-1 flex flex-col h-full bg-[#0b141a] text-[#d1d7db] overflow-y-auto p-4 md:p-6 styled-scrollbar relative">
       
-      {/* MODAL DETALHAMENTO DE EXECUÇÃO */}
+      {/* GLOW DE FUNDO DECORATIVO */}
+      <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none -z-0" />
+      <div className="absolute bottom-10 left-10 w-80 h-80 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none -z-0" />
+
+      {/* LIGHTBOX PREVIEW DE FOTO */}
+      {previewPhotoUrl && (
+        <div 
+          onClick={() => setPreviewPhotoUrl(null)}
+          className="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] flex items-center justify-center p-4 cursor-pointer animate-in fade-in duration-200"
+        >
+          <div className="relative max-w-4xl w-full max-h-[90vh] flex flex-col items-center justify-center">
+            <button 
+              onClick={() => setPreviewPhotoUrl(null)} 
+              className="absolute -top-12 right-0 p-2 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition-all"
+            >
+              <X size={20} />
+            </button>
+            <img 
+              src={previewPhotoUrl} 
+              alt="Evidência Ampliada" 
+              className="max-w-full max-h-[85vh] object-contain rounded-2xl border border-white/20 shadow-2xl" 
+            />
+            <span className="mt-3 text-xs text-white/60 font-medium">Clique em qualquer lugar para fechar</span>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DETALHAMENTO DE EXECUÇÃO (RAIO-X EXECUTIVO) */}
       {selectedExecDetail && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-[#202c33] border border-[#2a3942] rounded-[40px] p-6 max-w-2xl w-full max-h-[85vh] overflow-y-auto styled-scrollbar shadow-2xl relative animate-in zoom-in-95 duration-300">
-            <button onClick={() => setSelectedExecDetail(null)} className="absolute top-5 right-5 p-1.5 hover:bg-white/10 rounded-full text-[#8696a0]">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-xl flex items-center justify-center p-3 sm:p-6 z-50 animate-in fade-in duration-200">
+          <div className="bg-[#111b21] border border-white/10 rounded-[32px] sm:rounded-[40px] p-5 sm:p-7 max-w-3xl w-full max-h-[90vh] overflow-y-auto styled-scrollbar shadow-2xl relative animate-in zoom-in-95 duration-300">
+            
+            {/* Botão Fechar */}
+            <button 
+              onClick={() => setSelectedExecDetail(null)} 
+              className="absolute top-5 right-5 p-2 bg-[#202c33] hover:bg-[#2a3942] rounded-full text-[#8696a0] hover:text-white transition-all cursor-pointer shadow-md"
+            >
               <X size={18} />
             </button>
 
-            {/* Cabeçalho */}
-            <div className="border-b border-[#2a3942]/60 pb-4 mb-5">
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-500/10 text-indigo-400">
-                {selectedExecDetail.category}
-              </span>
-              <h3 className="font-black text-white text-lg mt-2">{selectedExecDetail.checklist_title}</h3>
+            {/* Cabeçalho do Raio-X */}
+            <div className="border-b border-[#2a3942]/60 pb-5 mb-6">
+              <div className="flex items-center gap-2 flex-wrap mb-2">
+                <span className="text-[10px] px-3 py-1 rounded-full font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 uppercase tracking-wider">
+                  {selectedExecDetail.category}
+                </span>
+                <span className={`text-[10px] px-3 py-1 rounded-full font-bold uppercase ${
+                  selectedExecDetail.status === 'completed_on_time' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' :
+                  selectedExecDetail.status === 'completed_late' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' :
+                  'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 animate-pulse'
+                }`}>
+                  {selectedExecDetail.status === 'completed_on_time' ? 'Concluído no Prazo' :
+                   selectedExecDetail.status === 'completed_late' ? 'Concluído Atrasado' : 'Em Andamento'}
+                </span>
+              </div>
+
+              <h3 className="font-black text-white text-xl sm:text-2xl tracking-tight leading-snug">
+                {selectedExecDetail.checklist_title}
+              </h3>
               
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 text-xs text-[#8696a0]">
+              {/* Grid Metadados do Preenchimento */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 p-4 rounded-2xl bg-[#182229]/60 border border-white/5 text-xs">
                 <div>
-                  <span className="block text-[10px] text-slate-500 uppercase">Operador</span>
-                  <span className="text-white font-semibold">{selectedExecDetail.operator_name}</span>
+                  <span className="block text-[10px] text-[#8696a0] uppercase font-semibold">Operador</span>
+                  <span className="text-white font-bold text-sm truncate block mt-0.5">{selectedExecDetail.operator_name}</span>
                 </div>
                 <div>
-                  <span className="block text-[10px] text-slate-500 uppercase">Filial/Setor</span>
-                  <span className="text-white font-semibold">{selectedExecDetail.unit_name} / {selectedExecDetail.sector_name}</span>
+                  <span className="block text-[10px] text-[#8696a0] uppercase font-semibold">Filial / Setor</span>
+                  <span className="text-slate-200 font-medium truncate block mt-0.5">{selectedExecDetail.unit_name} • {selectedExecDetail.sector_name}</span>
                 </div>
                 <div>
-                  <span className="block text-[10px] text-slate-500 uppercase">Duração</span>
-                  <span className="text-white font-semibold">{selectedExecDetail.duration_seconds ? `${Math.round(selectedExecDetail.duration_seconds / 60)} min` : 'Não Finalizado'}</span>
+                  <span className="block text-[10px] text-[#8696a0] uppercase font-semibold">Tempo Decorrido</span>
+                  <span className="text-slate-200 font-medium truncate block mt-0.5">
+                    {selectedExecDetail.duration_seconds ? `${Math.round(selectedExecDetail.duration_seconds / 60)} min` : 'Não finalizado'}
+                  </span>
                 </div>
                 <div>
-                  <span className="block text-[10px] text-slate-500 uppercase">Score Obtido</span>
-                  <span className="text-emerald-400 font-bold text-sm">{selectedExecDetail.score !== null ? `${selectedExecDetail.score} / 100` : 'Pendente'}</span>
+                  <span className="block text-[10px] text-[#8696a0] uppercase font-semibold">Pontuação Geral</span>
+                  <span className={`font-black text-sm block mt-0.5 ${
+                    selectedExecDetail.score !== null && selectedExecDetail.score >= 90 ? 'text-emerald-400' :
+                    selectedExecDetail.score !== null && selectedExecDetail.score >= 70 ? 'text-amber-400' : 'text-rose-400'
+                  }`}>
+                    {selectedExecDetail.score !== null ? `${selectedExecDetail.score} / 100 pts` : 'Em análise'}
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Respostas */}
+            {/* Lista de Respostas do Formulário */}
             <div className="space-y-4">
-              <h4 className="font-bold text-white text-sm">Respostas do Preenchimento</h4>
-              
-              {selectedExecDetail.responses.map((resp, idx) => (
-                <div 
-                  key={resp.id}
-                  className={`p-4 rounded-3xl border bg-[#111b21]/30 flex flex-col gap-2 ${
-                    !resp.isConforming || !resp.isMetaOk ? 'border-rose-500/30 shadow-sm shadow-rose-500/5' : 'border-[#2a3942]/40'
-                  }`}
-                >
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="min-w-0">
-                      <h5 className="text-xs font-semibold text-white flex items-center gap-1.5">
-                        <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-4 h-4 flex items-center justify-center rounded-full shrink-0">
-                          {idx + 1}
-                        </span>
-                        {resp.title}
-                      </h5>
-                    </div>
-                    
-                    {/* Badge de Resposta */}
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                      resp.isConforming && resp.isMetaOk ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
-                    }`}>
-                      {resp.value}
-                    </span>
-                  </div>
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                  <ClipboardList size={16} className="text-indigo-400" />
+                  Respostas Registradas ({selectedExecDetail.responses.length} Itens)
+                </h4>
+              </div>
 
-                  {/* Evidências Fotográficas */}
-                  {resp.photos && resp.photos.length > 0 && (
-                    <div className="flex gap-2 pt-2 border-t border-[#2a3942]/20">
-                      {resp.photos.map((url: string, pIdx: number) => (
-                        <a key={pIdx} href={url} target="_blank" rel="noopener noreferrer" className="relative group overflow-hidden rounded-xl border border-[#2a3942]/40">
-                          <img src={url} alt="Evidência" className="w-14 h-14 object-cover group-hover:scale-105 transition-all" />
-                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
-                            <Eye size={12} className="text-white" />
+              {selectedExecDetail.responses.length === 0 ? (
+                <p className="text-xs text-[#8696a0] italic py-6 text-center bg-[#182229]/40 rounded-2xl border border-dashed border-[#2a3942]">
+                  Nenhum item respondido até o momento.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {selectedExecDetail.responses.map((resp, idx) => (
+                    <div 
+                      key={resp.id}
+                      className={`p-4 rounded-2xl border transition-all flex flex-col gap-2.5 ${
+                        !resp.isConforming || !resp.isMetaOk 
+                          ? 'bg-rose-500/5 border-rose-500/30' 
+                          : 'bg-[#182229]/60 border-white/5 hover:border-white/10'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start gap-3">
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <span className="text-[11px] font-bold font-mono text-[#8696a0] bg-[#202c33] w-6 h-6 flex items-center justify-center rounded-xl shrink-0 mt-0.5 border border-white/5">
+                            {idx + 1}
+                          </span>
+                          <div>
+                            <h5 className="text-xs font-semibold text-white leading-relaxed flex items-center gap-2 flex-wrap">
+                              {resp.title}
+                              {resp.is_critical && (
+                                <span className="text-[9px] px-2 py-0.5 rounded-md font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                                  CRÍTICO
+                                </span>
+                              )}
+                            </h5>
                           </div>
-                        </a>
-                      ))}
-                    </div>
-                  )}
+                        </div>
+                        
+                        {/* Status da Resposta */}
+                        <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase shrink-0 ${
+                          resp.isConforming && resp.isMetaOk 
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' 
+                            : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                        }`}>
+                          {resp.value}
+                        </span>
+                      </div>
 
-                  {/* Observação */}
-                  {resp.observation && (
-                    <p className="text-[10px] text-amber-400 bg-amber-500/5 px-2.5 py-1.5 rounded-xl border border-amber-500/10 mt-1 italic">
-                      Obs: {resp.observation}
-                    </p>
-                  )}
+                      {/* Fotos de Evidência com Modal Lightbox */}
+                      {resp.photos && resp.photos.length > 0 && (
+                        <div className="flex flex-col gap-1.5 pt-2 border-t border-white/5">
+                          <span className="text-[10px] text-[#8696a0] font-medium flex items-center gap-1">
+                            <Camera size={11} className="text-indigo-400" /> Evidências Fotográficas ({resp.photos.length}):
+                          </span>
+                          <div className="flex gap-2.5 overflow-x-auto pb-1 styled-scrollbar">
+                            {resp.photos.map((url: string, pIdx: number) => (
+                              <div 
+                                key={pIdx} 
+                                onClick={() => setPreviewPhotoUrl(url)}
+                                className="relative group overflow-hidden rounded-xl border border-white/10 shrink-0 cursor-pointer shadow-md"
+                              >
+                                <img src={url} alt="Evidência" className="w-16 h-16 object-cover group-hover:scale-110 transition-transform duration-300" />
+                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Eye size={14} className="text-white" />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Observação / Comentário */}
+                      {resp.observation && (
+                        <div className="text-[11px] text-amber-300 bg-amber-500/10 px-3 py-2 rounded-xl border border-amber-500/20 mt-1 italic flex items-start gap-1.5">
+                          <Info size={13} className="text-amber-400 shrink-0 mt-0.5" />
+                          <span><strong>Observação do Operador:</strong> {resp.observation}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
 
-            {/* Ações */}
-            <div className="flex gap-2 border-t border-[#2a3942]/60 pt-5 mt-6">
+            {/* Ações do Modal */}
+            <div className="flex flex-col sm:flex-row gap-2.5 border-t border-[#2a3942]/60 pt-5 mt-6">
               <button
                 onClick={handleExportPDF}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-2xl flex items-center justify-center gap-1.5 text-xs transition-all shadow-md active:scale-[0.98]"
+                className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 text-xs transition-all shadow-lg shadow-indigo-600/20 active:scale-[0.98] cursor-pointer"
               >
-                <Download size={14} /> Exportar Roteiro PDF
+                <Download size={15} /> Exportar Relatório Executivo PDF
               </button>
               <button
                 onClick={() => setSelectedExecDetail(null)}
-                className="bg-[#2a3942] hover:bg-[#3b4a54] text-[#d1d7db] px-5 py-2.5 rounded-2xl text-xs font-semibold transition-all"
+                className="bg-[#202c33] hover:bg-[#2a3942] text-[#d1d7db] px-6 py-3 rounded-2xl text-xs font-semibold transition-all cursor-pointer"
               >
-                Fechar Painel
+                Fechar Raio-X
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* HEADER PRINCIPAL */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-[#2a3942]/60 pb-6 mb-6">
+      {/* HEADER PRINCIPAL EXECUTIVO */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-white/10 pb-6 mb-6 relative z-10">
         <div>
-          <h1 className="text-2xl font-bold text-[#e9edef] tracking-tight flex items-center gap-2">
-            <BarChart3 className="text-indigo-400 animate-pulse" />
-            Dashboard Operacional Gastronômico
-          </h1>
-          <p className="text-sm text-[#8696a0] mt-1">
-            Acompanhe em tempo real a execução das rotinas de abertura, fechamento e segurança alimentar.
-          </p>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 shadow-lg shadow-indigo-500/10">
+              <BarChart3 size={24} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-black text-white tracking-tight">
+                  Dashboard Operacional Gastronômico
+                </h1>
+                <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                  Ao Vivo
+                </span>
+              </div>
+              <p className="text-xs text-[#8696a0] mt-0.5">
+                Acompanhamento em tempo real das rotinas de abertura, fechamento e conformidade técnica.
+              </p>
+            </div>
+          </div>
         </div>
 
-        {/* Filtros de Unidade e Período */}
-        <div className="flex flex-wrap gap-2.5">
-          <select
-            value={selectedUnit}
-            onChange={e => setSelectedUnit(e.target.value)}
-            className="bg-[#202c33] border border-[#2a3942] rounded-xl px-3 py-2 text-xs text-[#d1d7db] focus:outline-none"
+        {/* Barra de Filtros e Atualização */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="p-2.5 bg-[#202c33] hover:bg-[#2a3942] text-[#8696a0] hover:text-white rounded-xl border border-white/5 transition-all cursor-pointer flex items-center gap-1.5 text-xs active:scale-95 disabled:opacity-50"
+            title="Atualizar Dados Agora"
           >
-            <option value="all">Todas as Filiais</option>
-            {units.map(u => (
-              <option key={u.id} value={u.id}>{u.name}</option>
-            ))}
-          </select>
+            <RefreshCw size={14} className={isRefreshing ? "animate-spin text-indigo-400" : ""} />
+            <span className="hidden sm:inline font-medium">Atualizar</span>
+          </button>
 
-          <div className="flex bg-[#202c33] p-1 rounded-xl border border-[#2a3942]">
+          <div className="relative">
+            <select
+              value={selectedUnit}
+              onChange={e => setSelectedUnit(e.target.value)}
+              className="bg-[#202c33] hover:bg-[#2a3942] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white font-medium focus:outline-none focus:border-indigo-500 transition-all cursor-pointer appearance-none pr-8"
+            >
+              <option value="all">Todas as Filiais</option>
+              {units.map(u => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+            <Filter size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
+          </div>
+
+          <div className="flex bg-[#202c33] p-1 rounded-xl border border-white/10">
             {(['today', 'week', 'month'] as const).map((period) => (
               <button
                 key={period}
                 onClick={() => setSelectedPeriod(period)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  selectedPeriod === period ? 'bg-indigo-600 text-white shadow-sm' : 'text-[#8696a0] hover:text-[#d1d7db]'
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  selectedPeriod === period 
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' 
+                    : 'text-[#8696a0] hover:text-white'
                 }`}
               >
                 {period === 'today' ? 'Hoje' : period === 'week' ? '7 Dias' : '30 Dias'}
@@ -527,118 +681,210 @@ export default function ChecklistDashboard() {
         </div>
       </div>
 
-      {/* GRID DE KPIS / CARDS SUPERIORES */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 shrink-0">
+      {/* GRID DE KPIS SUPERIORES (GLASSMORPHISM CARDS) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 shrink-0 relative z-10">
         
-        {/* Taxa de Conclusão (Central) */}
-        <div className="bg-[#202c33]/85 rounded-[32px] border border-[#2a3942]/60 p-5 relative overflow-hidden flex flex-col justify-between min-h-[120px]">
-          <div className="absolute top-4 right-4 p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
-            <CheckCircle2 size={18} />
+        {/* Taxa de Conclusão */}
+        <div className="bg-[#202c33]/70 backdrop-blur-xl rounded-[28px] border border-white/10 p-5 relative overflow-hidden flex flex-col justify-between min-h-[130px] group hover:-translate-y-1 hover:border-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl group-hover:bg-indigo-500/20 transition-all" />
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider">Taxa de Conclusão</span>
+            <div className="p-2.5 rounded-xl bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
+              <CheckCircle2 size={18} />
+            </div>
           </div>
           <div>
-            <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider block">Taxa de Conclusão</span>
-            <span className="text-3xl font-black text-white mt-1">{stats.completionRate}%</span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-3xl font-black text-white">{stats.completionRate}%</span>
+              <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-0.5">
+                <TrendingUp size={10} /> Meta 95%
+              </span>
+            </div>
+            {/* Barra de Progresso Visual */}
+            <div className="w-full bg-black/30 h-1.5 rounded-full mt-3 overflow-hidden border border-white/5">
+              <div 
+                className="bg-gradient-to-r from-indigo-500 to-emerald-400 h-full rounded-full transition-all duration-700" 
+                style={{ width: `${Math.min(stats.completionRate, 100)}%` }}
+              />
+            </div>
           </div>
-          <p className="text-[10px] text-[#8696a0] mt-2">Checklists concluídos vs previstos.</p>
         </div>
 
-        {/* Em Tempo */}
-        <div className="bg-[#202c33]/85 rounded-[32px] border border-[#2a3942]/60 p-5 relative overflow-hidden flex flex-col justify-between min-h-[120px]">
-          <div className="absolute top-4 right-4 p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
-            <Clock size={18} />
+        {/* Concluídos no Prazo */}
+        <div className="bg-[#202c33]/70 backdrop-blur-xl rounded-[28px] border border-white/10 p-5 relative overflow-hidden flex flex-col justify-between min-h-[130px] group hover:-translate-y-1 hover:border-emerald-500/30 hover:shadow-xl hover:shadow-emerald-500/10 transition-all duration-300">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl group-hover:bg-emerald-500/20 transition-all" />
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider">No Prazo</span>
+            <div className="p-2.5 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+              <Clock size={18} />
+            </div>
           </div>
           <div>
-            <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider block">Concluídos no Prazo</span>
-            <span className="text-3xl font-black text-emerald-400 mt-1">{stats.completedOnTime}</span>
+            <span className="text-3xl font-black text-emerald-400 mt-1 block">{stats.completedOnTime}</span>
+            <p className="text-[10px] text-[#8696a0] mt-1">Rotinas entregues pontualmente.</p>
           </div>
-          <p className="text-[10px] text-[#8696a0] mt-2">Rotinas entregues pontualmente.</p>
         </div>
 
-        {/* Atrasados */}
-        <div className="bg-[#202c33]/85 rounded-[32px] border border-[#2a3942]/60 p-5 relative overflow-hidden flex flex-col justify-between min-h-[120px]">
-          <div className="absolute top-4 right-4 p-2 rounded-xl bg-amber-500/10 text-amber-400">
-            <AlertTriangle size={18} />
+        {/* Concluídos Atrasados */}
+        <div className="bg-[#202c33]/70 backdrop-blur-xl rounded-[28px] border border-white/10 p-5 relative overflow-hidden flex flex-col justify-between min-h-[130px] group hover:-translate-y-1 hover:border-amber-500/30 hover:shadow-xl hover:shadow-amber-500/10 transition-all duration-300">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl group-hover:bg-amber-500/20 transition-all" />
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider">Atrasados</span>
+            <div className="p-2.5 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/20">
+              <AlertTriangle size={18} />
+            </div>
           </div>
           <div>
-            <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider block">Concluídos Atrasados</span>
-            <span className="text-3xl font-black text-amber-400 mt-1">{stats.completedLate}</span>
+            <span className="text-3xl font-black text-amber-400 mt-1 block">{stats.completedLate}</span>
+            <p className="text-[10px] text-[#8696a0] mt-1">Entregues fora da janela ideal.</p>
           </div>
-          <p className="text-[10px] text-[#8696a0] mt-2">Entregues com janelas toleráveis.</p>
         </div>
 
-        {/* Alertas Críticos */}
-        <div className="bg-[#202c33]/85 rounded-[32px] border border-[#2a3942]/60 p-5 relative overflow-hidden flex flex-col justify-between min-h-[120px]">
-          <div className="absolute top-4 right-4 p-2 rounded-xl bg-rose-500/10 text-rose-400">
-            <Shield size={18} />
+        {/* Falhas Críticas Ativas */}
+        <div className="bg-[#202c33]/70 backdrop-blur-xl rounded-[28px] border border-white/10 p-5 relative overflow-hidden flex flex-col justify-between min-h-[130px] group hover:-translate-y-1 hover:border-rose-500/30 hover:shadow-xl hover:shadow-rose-500/10 transition-all duration-300">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-rose-500/10 rounded-full blur-2xl group-hover:bg-rose-500/20 transition-all" />
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider">Falhas Críticas</span>
+            <div className="p-2.5 rounded-xl bg-rose-500/15 text-rose-400 border border-rose-500/20">
+              <Shield size={18} />
+            </div>
           </div>
           <div>
-            <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider block">Falhas Críticas Ativas</span>
-            <span className="text-3xl font-black text-rose-400 mt-1">{stats.criticalAlerts}</span>
+            <span className="text-3xl font-black text-rose-400 mt-1 block">{stats.criticalAlerts}</span>
+            <p className="text-[10px] text-[#8696a0] mt-1">Alerta de não conformidade grave.</p>
           </div>
-          <p className="text-[10px] text-[#8696a0] mt-2">Itens críticos pendentes de ação.</p>
         </div>
 
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      {/* CONTEÚDO PRINCIPAL (GRID DUAL 2:1) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start relative z-10">
         
-        {/* LISTAGEM DE EXECUÇÕES REALTIME (ESQUERDA) */}
+        {/* LISTAGEM DE EXECUÇÕES REALTIME (ESQUERDA - 2 COLUNAS) */}
         <div className="lg:col-span-2 space-y-4">
-          <h3 className="font-bold text-white text-md flex items-center gap-1.5">
-            <ClipboardList size={16} className="text-indigo-400" />
-            Atividades Recentes (Atualizado Realtime)
-          </h3>
-
-          {loading ? (
-            <div className="p-12 text-center text-[#8696a0] bg-[#202c33]/50 rounded-3xl border border-[#2a3942]/40 animate-pulse">
-              Atualizando dados do dashboard...
+          
+          {/* Header da Seção + Busca e Filtros Locais */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#202c33]/60 p-4 rounded-2xl border border-white/5">
+            <div className="flex items-center gap-2">
+              <ClipboardList size={18} className="text-indigo-400" />
+              <h3 className="font-bold text-white text-sm">
+                Atividades Recentes ({filteredExecutions.length})
+              </h3>
             </div>
-          ) : executions.length === 0 ? (
-            <div className="p-12 text-center text-[#8696a0] bg-[#202c33]/40 rounded-3xl border border-dashed border-[#2a3942]/60">
-              Nenhuma rotina executada no período selecionado.
+
+            {/* Busca e Status Pills */}
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1 sm:w-48">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8696a0]" />
+                <input
+                  type="text"
+                  placeholder="Buscar rotina/operador..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full bg-[#111b21] border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500 transition-all"
+                />
+              </div>
+
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                className="bg-[#111b21] border border-white/10 rounded-xl px-2.5 py-1.5 text-xs text-[#d1d7db] focus:outline-none cursor-pointer"
+              >
+                <option value="all">Todos Status</option>
+                <option value="on_time">Em Dia</option>
+                <option value="late">Atrasados</option>
+                <option value="in_progress">Em Curso</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Estado de Carregamento (Skeleton) */}
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="p-5 bg-[#202c33]/40 rounded-[24px] border border-white/5 animate-pulse flex items-center justify-between">
+                  <div className="space-y-2 flex-1">
+                    <div className="h-4 bg-white/10 rounded w-1/3" />
+                    <div className="h-3 bg-white/5 rounded w-1/2" />
+                  </div>
+                  <div className="w-16 h-8 bg-white/10 rounded-xl" />
+                </div>
+              ))}
+            </div>
+          ) : filteredExecutions.length === 0 ? (
+            <div className="p-12 text-center text-[#8696a0] bg-[#202c33]/40 rounded-[28px] border border-dashed border-white/10 flex flex-col items-center justify-center">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 mb-3 border border-indigo-500/20">
+                <ClipboardList size={26} />
+              </div>
+              <h4 className="text-white font-bold text-sm mb-1">Nenhuma atividade encontrada</h4>
+              <p className="text-xs max-w-xs text-[#8696a0]">
+                {searchQuery ? 'Tente alterar os termos da busca ou filtros selecionados.' : 'Aguardando início de rotinas operacionais no período.'}
+              </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {executions.map((exec) => (
+              {filteredExecutions.map((exec) => (
                 <div 
                   key={exec.id}
                   onClick={() => handleOpenDetail(exec.id)}
-                  className="bg-[#202c33]/80 rounded-[28px] border border-[#2a3942]/60 p-4 hover:shadow-md hover:border-indigo-500/30 transition-all flex items-center justify-between gap-4 cursor-pointer"
+                  className="bg-[#202c33]/70 hover:bg-[#202c33] rounded-[24px] border border-white/5 hover:border-indigo-500/30 p-4 transition-all flex items-center justify-between gap-4 cursor-pointer group shadow-sm hover:shadow-xl hover:shadow-indigo-500/5 relative overflow-hidden"
                 >
-                  <div className="min-w-0 flex-1">
+                  {/* Bordazinha Indicadora de Status na Lateral */}
+                  <div className={`absolute left-0 top-0 bottom-0 w-1 ${
+                    exec.status === 'completed_on_time' ? 'bg-emerald-400' :
+                    exec.status === 'completed_late' ? 'bg-amber-400' : 'bg-indigo-400'
+                  }`} />
+
+                  <div className="min-w-0 flex-1 pl-2">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-indigo-500/10 text-indigo-400">
+                      <span className="text-[9px] px-2.5 py-0.5 rounded-full font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/20 uppercase tracking-wider">
                         {exec.category}
                       </span>
-                      <h4 className="font-bold text-white text-sm leading-snug truncate">{exec.title}</h4>
+                      <h4 className="font-bold text-white text-sm leading-snug group-hover:text-indigo-300 transition-colors truncate">
+                        {exec.title}
+                      </h4>
                     </div>
                     
-                    <div className="flex items-center gap-4 mt-2 text-[11px] text-[#8696a0] flex-wrap">
-                      <span>Operador: <strong className="text-slate-300 font-semibold">{exec.operatorName}</strong></span>
-                      <span>Filial: {exec.unitName}</span>
-                      <span>Setor: {exec.sectorName}</span>
+                    <div className="flex items-center gap-3.5 mt-2 text-[11px] text-[#8696a0] flex-wrap">
+                      {/* Avatar com Iniciais */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white font-bold text-[9px] flex items-center justify-center shadow-sm">
+                          {getInitials(exec.operatorName)}
+                        </span>
+                        <strong className="text-slate-200 font-semibold">{exec.operatorName}</strong>
+                      </div>
+
+                      <span className="flex items-center gap-1">
+                        <MapPin size={11} className="text-[#8696a0]" /> {exec.unitName}
+                      </span>
+                      <span>Setor: <strong className="text-slate-300">{exec.sectorName}</strong></span>
                     </div>
                   </div>
 
                   <div className="shrink-0 flex items-center gap-3">
                     
-                    {/* Score */}
+                    {/* Badge de Pontuação */}
                     {exec.score !== null ? (
-                      <div className="text-center bg-black/20 p-2 rounded-2xl border border-[#2a3942]/40 min-w-[70px]">
-                        <span className="text-[8px] text-[#8696a0] block uppercase font-bold">Score</span>
-                        <span className={`text-sm font-bold ${exec.score >= 90 ? 'text-emerald-400' : exec.score >= 70 ? 'text-amber-400' : 'text-rose-400'}`}>
-                          {exec.score}
+                      <div className="text-center bg-[#111b21] px-3 py-1.5 rounded-xl border border-white/10 min-w-[75px]">
+                        <span className="text-[8px] text-[#8696a0] block uppercase font-bold tracking-wider">Score</span>
+                        <span className={`text-xs font-black ${
+                          exec.score >= 90 ? 'text-emerald-400' : 
+                          exec.score >= 70 ? 'text-amber-400' : 'text-rose-400'
+                        }`}>
+                          {exec.score} pts
                         </span>
                       </div>
                     ) : (
-                      <span className="text-[10px] text-slate-500 italic">Preenchendo...</span>
+                      <span className="text-[10px] text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded-full border border-indigo-500/20 font-semibold animate-pulse">
+                        Em Preenchimento
+                      </span>
                     )}
 
-                    {/* Status */}
-                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase shrink-0 ${
-                      exec.status === 'completed_on_time' ? 'bg-emerald-500/10 text-emerald-400' :
-                      exec.status === 'completed_late' ? 'bg-amber-500/10 text-amber-400' :
-                      'bg-indigo-500/10 text-indigo-400 animate-pulse'
+                    {/* Status Pill */}
+                    <span className={`text-[10px] font-bold px-3 py-1 rounded-full uppercase shrink-0 ${
+                      exec.status === 'completed_on_time' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' :
+                      exec.status === 'completed_late' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' :
+                      'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
                     }`}>
                       {exec.status === 'completed_on_time' ? 'Em Dia' :
                        exec.status === 'completed_late' ? 'Atrasado' : 'Em Curso'}
@@ -650,34 +896,43 @@ export default function ChecklistDashboard() {
           )}
         </div>
 
-        {/* ALERTAS CRÍTICOS E RANKING DE EQUIPE (DIREITA) */}
+        {/* ALERTAS CRÍTICOS E RANKING DE EQUIPE (DIREITA - 1 COLUNA) */}
         <div className="space-y-6">
           
           {/* Alertas Críticos Pendentes */}
-          <div className="bg-[#202c33]/85 rounded-[32px] border border-[#2a3942]/60 p-5 space-y-4">
-            <h3 className="font-bold text-white text-sm flex items-center gap-1.5 text-rose-400">
-              <AlertTriangle size={16} />
-              Alertas de Itens Críticos ({alerts.length})
-            </h3>
+          <div className="bg-[#202c33]/70 backdrop-blur-xl rounded-[28px] border border-white/10 p-5 space-y-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-white text-sm flex items-center gap-2 text-rose-400">
+                <AlertTriangle size={17} />
+                Alertas de Itens Críticos ({alerts.length})
+              </h3>
+              {alerts.length > 0 && (
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+              )}
+            </div>
 
             {alerts.length === 0 ? (
-              <p className="text-xs text-[#8696a0] italic py-2 text-center">Nenhum alerta crítico ativo. Excelente controle!</p>
+              <div className="py-6 text-center text-[#8696a0] bg-[#111b21]/40 rounded-2xl border border-dashed border-white/5">
+                <CheckCircle2 size={24} className="mx-auto text-emerald-400 mb-2 opacity-80" />
+                <p className="text-xs font-semibold text-white">Nenhum alerta pendente</p>
+                <p className="text-[10px] text-[#8696a0] mt-0.5">Conformidade operacional impecável!</p>
+              </div>
             ) : (
-              <div className="space-y-2.5 max-h-[220px] overflow-y-auto styled-scrollbar pr-1">
+              <div className="space-y-2.5 max-h-[260px] overflow-y-auto styled-scrollbar pr-1">
                 {alerts.map((al) => (
-                  <div key={al.id} className="bg-rose-500/5 border border-rose-500/20 p-3 rounded-2xl relative">
+                  <div key={al.id} className="bg-rose-500/10 border border-rose-500/30 p-3.5 rounded-2xl relative group hover:border-rose-500/50 transition-all">
                     <button
                       onClick={() => handleResolveAlert(al.id)}
-                      className="absolute top-2 right-2 text-xs font-bold text-emerald-400 hover:text-emerald-300"
+                      className="absolute top-3 right-3 text-[10px] font-bold px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30 transition-all cursor-pointer active:scale-95"
                     >
                       Tratar
                     </button>
                     
-                    <h4 className="text-xs font-bold text-white leading-snug pr-8">{al.title}</h4>
-                    <p className="text-[10px] text-slate-300 mt-1 leading-relaxed">{al.message}</p>
-                    <div className="flex items-center gap-2 mt-2 text-[9px] text-[#8696a0]">
-                      <span>Filial: {al.units?.name}</span>
-                      <span>{new Date(al.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <h4 className="text-xs font-bold text-white leading-snug pr-14">{al.title}</h4>
+                    <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">{al.message}</p>
+                    <div className="flex items-center gap-3 mt-2.5 text-[9px] text-[#8696a0] border-t border-rose-500/20 pt-2">
+                      <span className="flex items-center gap-1"><MapPin size={10} /> {al.units?.name}</span>
+                      <span className="flex items-center gap-1"><Clock size={10} /> {new Date(al.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
                   </div>
                 ))}
@@ -685,37 +940,51 @@ export default function ChecklistDashboard() {
             )}
           </div>
 
-          {/* Ranking de Equipe por Score */}
-          <div className="bg-[#202c33]/85 rounded-[32px] border border-[#2a3942]/60 p-5 space-y-4">
-            <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
-              <TrendingUp size={16} className="text-indigo-400" />
-              Ranking da Equipe
-            </h3>
+          {/* Ranking de Equipe por Score Executivo */}
+          <div className="bg-[#202c33]/70 backdrop-blur-xl rounded-[28px] border border-white/10 p-5 space-y-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                <Award size={17} className="text-amber-400" />
+                Ranking da Equipe
+              </h3>
+              <span className="text-[10px] text-[#8696a0] font-semibold bg-white/5 px-2 py-0.5 rounded-md">
+                Top Pontuação
+              </span>
+            </div>
 
             {ranking.length === 0 ? (
-              <p className="text-xs text-[#8696a0] italic py-2 text-center">Aguardando mais execuções para gerar pontuação.</p>
+              <div className="py-6 text-center text-[#8696a0] bg-[#111b21]/40 rounded-2xl border border-dashed border-white/5">
+                <TrendingUp size={24} className="mx-auto text-indigo-400 mb-2 opacity-80" />
+                <p className="text-xs font-semibold text-white">Aguardando execuções</p>
+                <p className="text-[10px] text-[#8696a0] mt-0.5">Pontuações serão geradas ao concluir tarefas.</p>
+              </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {ranking.map((rank, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-3 p-2 hover:bg-black/10 rounded-2xl transition-colors">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${
-                        idx === 0 ? 'bg-amber-400 text-black' :
-                        idx === 1 ? 'bg-slate-300 text-black' :
-                        idx === 2 ? 'bg-amber-700 text-white' :
-                        'bg-black/35 text-slate-400'
+                  <div 
+                    key={idx} 
+                    className="flex items-center justify-between gap-3 p-3 bg-[#111b21]/50 border border-white/5 hover:border-indigo-500/20 rounded-2xl transition-all"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      {/* Posição Medaglias */}
+                      <span className={`w-6 h-6 rounded-xl flex items-center justify-center text-[11px] font-black shrink-0 ${
+                        idx === 0 ? 'bg-amber-400 text-black shadow-md shadow-amber-400/20' :
+                        idx === 1 ? 'bg-slate-300 text-black shadow-md shadow-slate-300/20' :
+                        idx === 2 ? 'bg-amber-700 text-white shadow-md shadow-amber-700/20' :
+                        'bg-[#202c33] text-[#8696a0] border border-white/5'
                       }`}>
-                        {idx + 1}
+                        {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
                       </span>
+
                       <div className="min-w-0">
                         <h4 className="text-xs font-bold text-white truncate">{rank.name}</h4>
-                        <p className="text-[9px] text-[#8696a0]">{rank.role}</p>
+                        <p className="text-[9px] text-[#8696a0] uppercase tracking-wider font-semibold">{rank.role}</p>
                       </div>
                     </div>
 
-                    <div className="shrink-0 flex items-center gap-1">
-                      <span className="text-xs font-bold text-white">{rank.averageScore}</span>
-                      <span className="text-[9px] text-[#8696a0]">pts</span>
+                    <div className="shrink-0 flex items-center gap-1.5 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-xl">
+                      <span className="text-xs font-black text-indigo-300">{rank.averageScore}</span>
+                      <span className="text-[9px] text-indigo-400 font-bold">pts</span>
                     </div>
                   </div>
                 ))}
@@ -730,7 +999,7 @@ export default function ChecklistDashboard() {
       {/* Botão Flutuante de Toggle da Sidebar Principal */}
       <button
         onClick={() => setShowMainSidebar(!showMainSidebar)}
-        className="fixed left-0 top-1/2 -translate-y-1/2 z-40 bg-[#202c33] border border-l-0 border-[#2a3942] rounded-r-2xl p-2.5 hover:bg-[#2a3942] hover:text-indigo-400 text-[#8696a0] shadow-xl transition-all cursor-pointer flex items-center justify-center group animate-in slide-in-from-left duration-300"
+        className="fixed left-0 top-1/2 -translate-y-1/2 z-40 bg-[#202c33] border border-l-0 border-white/10 rounded-r-2xl p-2.5 hover:bg-[#2a3942] hover:text-indigo-400 text-[#8696a0] shadow-2xl transition-all cursor-pointer flex items-center justify-center group animate-in slide-in-from-left duration-300"
         title={showMainSidebar ? "Ocultar Menu Principal" : "Mostrar Menu Principal"}
       >
         {showMainSidebar ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
