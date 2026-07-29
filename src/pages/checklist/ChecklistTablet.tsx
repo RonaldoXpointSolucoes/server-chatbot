@@ -23,7 +23,9 @@ import {
   Star,
   Search,
   GripVertical,
-  Eye
+  Eye,
+  Check,
+  Award
 } from 'lucide-react';
 import { Reorder } from 'framer-motion';
 
@@ -177,7 +179,6 @@ export default function ChecklistTablet() {
 
   const loadOperators = async () => {
     try {
-      // 1. Carrega todos os operadores ativos do tenant
       const { data: opsData, error: opsErr } = await supabase
         .from('v_checklist_operators')
         .select('id, name, pin, role, is_active')
@@ -186,14 +187,10 @@ export default function ChecklistTablet() {
       
       if (opsErr) throw opsErr;
       
-      // Guarda todos os perfis ativos
       const allOps = opsData || [];
       setAllProfiles(allOps);
 
-      // 2. Todos os colaboradores que possuem PIN de 5 dígitos cadastrado são listados para troca rápida no Totem
       const opsWithPin = allOps.filter(o => o.pin && o.pin.trim().length === 5);
-
-      // Se houver membros com PIN cadastrado, exibe-os. Se nenhum tiver PIN ainda, exibe a equipe inteira para facilitar o acesso inicial.
       setOperators(opsWithPin.length > 0 ? opsWithPin : allOps);
     } catch (e) {
       console.error('Erro ao buscar e carregar operadores no totem:', e);
@@ -232,12 +229,10 @@ export default function ChecklistTablet() {
 
   const validatePin = (pin: string) => {
     if (selectedOperator && selectedOperator.pin === pin) {
-      // Login bem sucedido
       setLoggedInUser(selectedOperator);
       setSelectedOperator(null);
       setPinCode('');
       
-      // Reseta abas e estados
       setActiveTab('active');
       setActiveExecution(null);
       setActiveChecklist(null);
@@ -308,7 +303,6 @@ export default function ChecklistTablet() {
 
       if (error) throw error;
       
-      // Mapeia para agrupar as fotos de forma resiliente
       const mapped = (data || []).map((resp: any) => {
         const evs = resp.checklist_evidences || [];
         return {
@@ -334,7 +328,6 @@ export default function ChecklistTablet() {
     try {
       const isPowerUser = ['company_admin', 'super_admin', 'manager'].includes(userRole);
 
-      // 1. Carrega permissões de setores do usuário
       let allowedSectors: string[] = [];
       if (!isPowerUser) {
         const { data: sPerms } = await supabase
@@ -345,7 +338,6 @@ export default function ChecklistTablet() {
         allowedSectors = sPerms?.map(p => p.sector_id) || [];
       }
 
-      // 2. Carrega permissões de unidades do usuário
       let allowedUnits: string[] = [];
       if (!isPowerUser) {
         const { data: uPerms } = await supabase
@@ -361,7 +353,6 @@ export default function ChecklistTablet() {
         }
       }
 
-      // 3. Busca checklists ativos nos setores/unidades permitidas
       const { data: checklistsData, error } = await supabase
         .from('checklists')
         .select(`
@@ -374,7 +365,6 @@ export default function ChecklistTablet() {
 
       if (error) throw error;
 
-      // Mapeia e filtra
       const list: ChecklistToExecute[] = (checklistsData || [])
         .map((chk: any) => {
           const sector = chk.sectors;
@@ -400,7 +390,6 @@ export default function ChecklistTablet() {
           };
         })
         .filter(c => {
-          // 1. Validação estrita por operador responsável (com suporte resiliente a duplicidades por nome)
           const hasResponsibles = c.responsible_ids && c.responsible_ids.length > 0;
           
           let isResponsible = !hasResponsibles;
@@ -408,7 +397,6 @@ export default function ChecklistTablet() {
           if (hasResponsibles && c.responsible_ids) {
             const hasDirectId = c.responsible_ids.includes(userId);
             
-            // Verificação resiliente por nome (em caso de duplicidade de contas no banco)
             let hasNameMatch = false;
             if (userName) {
               const cleanUserName = userName.toLowerCase().trim();
@@ -426,10 +414,8 @@ export default function ChecklistTablet() {
           
           if (!isResponsible) return false;
 
-          // 2. Validação padrão de permissões de unidade e setor
           if (isPowerUser) return true;
 
-          // Se o operador for de fato responsável direto atribuído, ele pode ver esta rotina (basta pertencer à unidade)
           if (hasDirectAssignment) {
             return allowedUnits.includes(c.unit_id);
           }
@@ -450,7 +436,7 @@ export default function ChecklistTablet() {
   // GEOLOCALIZAÇÃO E FÓRMULA DE HAVERSINE
   // ==========================================
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371e3; // raio da Terra em metros
+    const R = 6371e3;
     const φ1 = lat1 * Math.PI/180;
     const φ2 = lat2 * Math.PI/180;
     const Δφ = (lat2-lat1) * Math.PI/180;
@@ -461,721 +447,462 @@ export default function ChecklistTablet() {
               Math.sin(Δλ/2) * Math.sin(Δλ/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 
-    return R * c; // distância em metros
+    return R * c;
   };
 
-  const captureLocation = (unitLat: number | null, unitLng: number | null) => {
-    if (!navigator.geolocation) {
-      setGeoError('GPS não suportado neste aparelho.');
-      return;
-    }
-
-    setLocating(true);
-    setGeoError('');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        const precision = position.coords.accuracy;
-        setCurrentCoords({ lat, lng, precision });
-        setLocating(false);
-
-        if (unitLat !== null && unitLng !== null) {
-          const dist = calculateDistance(lat, lng, unitLat, unitLng);
-          setDistanceFromUnit(dist);
-        }
-      },
-      (error) => {
-        console.error(error);
-        setLocating(false);
-        setGeoError('Permissão do GPS negada ou sinal fraco.');
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-  };
-
-  // ==========================================
-  // EXECUÇÃO DO CHECKLIST
-  // ==========================================
   const handleStartChecklist = async (chk: ChecklistToExecute) => {
     setActiveChecklist(chk);
     setStartedAt(new Date().toISOString());
     setResponses({});
     setCheckedSubtasks({});
-    setDistanceFromUnit(null);
-    setCurrentCoords(null);
-    setGeoError('');
+    setSearchQuery('');
+    setCategoryFilter('');
 
-    // Coleta localização se necessário
-    if (chk.require_geolocation) {
-      captureLocation(chk.unit_latitude, chk.unit_longitude);
-    }
-
+    // Busca itens do checklist
     try {
-      // Carrega perguntas do checklist
-      const { data: items } = await supabase
+      const { data: items, error } = await supabase
         .from('checklist_items')
         .select('*')
         .eq('checklist_id', chk.id)
-        .order('sort_order', { ascending: true });
-      
+        .order('order_index', { ascending: true });
+
+      if (error) throw error;
       setItemsToAnswer(items || []);
 
-      // Inicializa objeto de respostas
-      const initialResponses: Record<string, ExecutionResponse> = {};
-      (items || []).forEach(item => {
-        initialResponses[item.id] = {
-          itemId: item.id,
-          value: '',
-          isConforming: true,
-          isMetaOk: true,
-          isDone: false
-        };
-      });
-      setResponses(initialResponses);
+      // Inicia geolocalização se exigido
+      if (chk.require_geolocation) {
+        setLocating(true);
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            setCurrentCoords({ lat, lng, precision: pos.coords.accuracy });
+            
+            if (chk.unit_latitude && chk.unit_longitude) {
+              const dist = calculateDistance(lat, lng, chk.unit_latitude, chk.unit_longitude);
+              setDistanceFromUnit(dist);
+            }
+            setLocating(false);
+          },
+          (err) => {
+            console.error(err);
+            setGeoError('Não foi possível obter geolocalização exata.');
+            setLocating(false);
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      }
     } catch (e) {
       console.error(e);
-      showToast('error', 'Falha ao carregar itens da rotina.');
+      showToast('error', 'Erro ao carregar itens da rotina.');
     }
   };
 
-  // ==========================================
-  // RESPOSTAS INDIVIDUAIS
-  // ==========================================
-  const handleAnswerChange = (itemId: string, itemType: string, val: string, minMeta: number | null, maxMeta: number | null) => {
-    let becameDone = false;
+  const handleAnswerChange = (
+    itemId: string, 
+    responseType: string, 
+    value: string, 
+    minMeta?: number | null, 
+    maxMeta?: number | null
+  ) => {
+    let isConforming = true;
+    let isMetaOk = true;
+
+    if (responseType === 'conformity') {
+      isConforming = value === 'Conforme';
+    } else if (responseType === 'boolean') {
+      isConforming = value === 'Feito';
+    } else if (responseType === 'yes_no') {
+      isConforming = value === 'Sim';
+    } else if (responseType === 'numeric' || responseType === 'temperature' || responseType === 'counter' || responseType === 'kg') {
+      const numVal = parseFloat(value.replace(',', '.'));
+      if (!isNaN(numVal)) {
+        if (minMeta !== null && minMeta !== undefined && numVal < minMeta) isMetaOk = false;
+        if (maxMeta !== null && maxMeta !== undefined && numVal > maxMeta) isMetaOk = false;
+      }
+    }
 
     setResponses(prev => {
       const current = prev[itemId] || { itemId, value: '', isConforming: true, isMetaOk: true, isDone: false };
+      const updated = {
+        ...current,
+        value,
+        isConforming,
+        isMetaOk,
+        isDone: value.trim().length > 0,
+        answeredAt: new Date().toISOString(),
+        answeredBy: loggedInUser?.name || 'Operador'
+      };
       
-      let isConforming = true;
-      let isMetaOk = true;
-      let isDone = val.trim().length > 0;
-
-      // 1. Validação de Conformidade Padrão
-      if (itemType === 'conformity' && val === 'Não Conforme') {
-        isConforming = false;
-      }
-      if (itemType === 'yes_no' && val === 'Não') {
-        isConforming = false;
-      }
-      if (itemType === 'boolean' && val === 'Não Feito') {
-        isDone = false;
-        isConforming = false;
-      }
-
-      // 2. Validação de Metas Numéricas / Temperatura
-      if ((itemType === 'numeric' || itemType === 'temperature' || itemType === 'kg') && val !== '') {
-        const numVal = parseFloat(val);
-        if (!isNaN(numVal)) {
-          if (minMeta !== null && numVal < minMeta) isMetaOk = false;
-          if (maxMeta !== null && numVal > maxMeta) isMetaOk = false;
-        }
-      }
-
-      if (isDone && !current.isDone) {
-        becameDone = true;
-      }
+      triggerConfetti(false);
 
       return {
         ...prev,
-        [itemId]: {
-          ...current,
-          value: val,
-          isConforming,
-          isMetaOk,
-          isDone,
-          answeredAt: isDone ? new Date().toISOString() : undefined,
-          answeredBy: isDone && loggedInUser ? loggedInUser.name : undefined
-        }
-      };
-    });
-
-    if (becameDone) {
-      setTimeout(() => triggerConfetti(false), 50);
-    }
-  };
-
-  // Mantemos o esqueleto da antiga apenas para evitar referências quebradas se houver
-  /*
-const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, minMeta: number | null, maxMeta: number | null) => {
-      const current = prev[itemId] || { itemId, value: '', isConforming: true, isMetaOk: true, isDone: false };
-      
-      let isConforming = true;
-      let isMetaOk = true;
-      let isDone = val.trim().length > 0;
-
-      // 1. Validação de Conformidade Padrão
-      if (itemType === 'conformity' && val === 'Não Conforme') {
-        isConforming = false;
-      }
-      if (itemType === 'yes_no' && val === 'Não') {
-        isConforming = false;
-      }
-      if (itemType === 'boolean' && val === 'Não Feito') {
-        isDone = false;
-        isConforming = false;
-      }
-
-      // 2. Validação de Metas Numéricas / Temperatura
-      if ((itemType === 'numeric' || itemType === 'temperature' || itemType === 'kg') && val !== '') {
-        const numVal = parseFloat(val);
-        if (!isNaN(numVal)) {
-          if (minMeta !== null && numVal < minMeta) isMetaOk = false;
-          if (maxMeta !== null && numVal > maxMeta) isMetaOk = false;
-        }
-      }
-
-      return {
-        ...prev,
-        [itemId]: {
-          ...current,
-          value: val,
-          isConforming,
-          isMetaOk,
-          isDone,
-          answeredAt: isDone ? new Date().toISOString() : undefined,
-          answeredBy: isDone && loggedInUser ? loggedInUser.name : undefined
-        }
+        [itemId]: updated
       };
     });
   };
-*/
-  
-  const handleUpdateItemCategory = async (itemId: string, currentFullTitle: string, newCategory: string) => {
-    const match = currentFullTitle.match(/^\[(.*?)\]\s*(.*)$/);
-    const cleanTitle = match ? match[2] : currentFullTitle;
 
-    const finalNewTitle = newCategory.trim()
-      ? `[${newCategory.trim()}] ${cleanTitle}`
-      : cleanTitle;
+  const handlePhotoUpload = async (itemId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    try {
-      const { error } = await supabase
-        .from('checklist_items')
-        .update({ title: finalNewTitle })
-        .eq('id', itemId);
-
-      if (error) throw error;
-
-      setItemsToAnswer(prev => prev.map(item => {
-        if (item.id === itemId) {
-          return { ...item, title: finalNewTitle };
-        }
-        return item;
-      }));
-
-      showToast('success', 'Categoria atualizada com sucesso!');
-      
-    } catch (e: any) {
-      console.error(e);
-      showToast('error', `Falha ao alterar categoria: ${e.message}`);
-    } finally {
-      setActiveCategoryEditItemId(null);
-    }
-  };
-
-  // ==========================================
-  // UPLOAD DE EVIDÊNCIA DE FOTO AO STORAGE
-  // ==========================================
-  const handlePhotoUpload = async (itemId: string, event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !loggedInUser || !activeChecklist) return;
-
-    // Sinaliza uploading
     setResponses(prev => ({
       ...prev,
-      [itemId]: { ...prev[itemId], evidenceUploading: true }
+      [itemId]: { ...(prev[itemId] || { itemId, value: '', isConforming: true, isMetaOk: true, isDone: false }), evidenceUploading: true }
     }));
 
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${tenantId}/${activeChecklist.unit_id}/${itemId}_${Date.now()}.${fileExt}`;
+      const ext = file.name.split('.').pop();
+      const filePath = `evidences/${tenantId}/${itemId}_${Date.now()}.${ext}`;
       
-      // Upload direto para o bucket do Supabase Storage
-      const { data, error } = await supabase.storage
-        .from('checklist-evidences')
-        .upload(fileName, file, { cacheControl: '3600', upsert: true });
+      const { error: uploadErr } = await supabase.storage
+        .from('checklist-media')
+        .upload(filePath, file);
 
-      if (error) throw error;
+      if (uploadErr) throw uploadErr;
 
-      // Pega a URL pública
-      const { data: { publicUrl } } = supabase.storage
-        .from('checklist-evidences')
-        .getPublicUrl(fileName);
+      const { data: pubUrl } = supabase.storage
+        .from('checklist-media')
+        .getPublicUrl(filePath);
 
       setResponses(prev => ({
         ...prev,
-        [itemId]: { 
-          ...prev[itemId], 
-          evidenceUrl: publicUrl, 
-          evidenceUploading: false,
-          isDone: true // Upload de foto obrigatória cumpre a tarefa
-        }
+        [itemId]: { ...prev[itemId], evidenceUrl: pubUrl.publicUrl, evidenceUploading: false }
       }));
-
-      showToast('success', 'Evidência fotográfica anexada!');
-    } catch (e: any) {
-      console.error(e);
+      showToast('success', 'Foto de evidência anexada!');
+    } catch (err) {
+      console.error(err);
+      showToast('error', 'Falha ao enviar foto de evidência.');
       setResponses(prev => ({
         ...prev,
         [itemId]: { ...prev[itemId], evidenceUploading: false }
       }));
-      showToast('error', 'Falha ao fazer upload da evidência.');
     }
   };
 
-  // ==========================================
-  // ENVIO E CONCLUSÃO DO CHECKLIST
-  // ==========================================
-  const handleSubmitChecklist = async () => {
-    if (!loggedInUser || !activeChecklist || !startedAt) return;
-
-    // Valida se todos os obrigatórios foram respondidos
-    const missingRequired = itemsToAnswer.some(item => {
-      const resp = responses[item.id];
-      const hasValue = resp?.value && resp.value.trim() !== '';
-      const isPhotoRequired = item.require_evidence && !resp?.evidenceUrl && (item.is_required || hasValue);
-      return (item.is_required && (!resp?.isDone || !resp?.value)) || isPhotoRequired;
-    });
-
-    if (missingRequired) {
-      showToast('error', 'Algumas tarefas obrigatórias ou fotos exigidas não foram concluídas.');
-      return;
-    }
-
-    // Valida Geolocalização se exigido e geolocalização travada
-    if (activeChecklist.require_geolocation && activeChecklist.unit_latitude !== null) {
-      if (distanceFromUnit === null) {
-        showToast('error', 'Aguardando precisão do sinal de GPS para validar localização.');
-        return;
-      }
-      if (distanceFromUnit > activeChecklist.unit_radius_meters) {
-        showToast('error', `Acesso negado: Você está fora do raio operacional permitido da unidade (${Math.round(distanceFromUnit)} metros de distância).`);
-        return;
-      }
-    }
-
-    setSubmitting(true);
+  const handleUpdateItemCategory = async (itemId: string, currentTitle: string, newCategory: string) => {
     try {
-      const now = new Date().toISOString();
-      const durSec = Math.round((new Date(now).getTime() - new Date(startedAt).getTime()) / 1000);
+      const cleanTitle = currentTitle.replace(/^\[.*?\]\s*/, '');
+      const updatedTitle = newCategory.trim() ? `[${newCategory.trim().toUpperCase()}] ${cleanTitle}` : cleanTitle;
 
-      // 1. Criar Cabeçalho de Execução
-      const { data: execData, error: execErr } = await supabase
-        .from('checklist_executions')
-        .insert({
-          tenant_id: tenantId,
-          unit_id: activeChecklist.unit_id,
-          sector_id: activeChecklist.sector_id,
-          checklist_id: activeChecklist.id,
-          user_id: loggedInUser.id,
-          started_at: startedAt,
-          completed_at: now,
-          duration_seconds: durSec,
-          status: 'completed_on_time', // Simplificado para MVP
-          latitude: currentCoords?.lat || null,
-          longitude: currentCoords?.lng || null,
-          lat_lng_precision: currentCoords?.precision || null,
-          distance_calculated: distanceFromUnit || null
-        })
-        .select()
-        .single();
+      const { error } = await supabase
+        .from('checklist_items')
+        .update({ title: updatedTitle })
+        .eq('id', itemId);
 
-      if (execErr) throw execErr;
+      if (error) throw error;
 
-      // 2. Inserir todas as Respostas
-      const responsesPayloads = itemsToAnswer.map(item => {
-        const resp = responses[item.id];
-        let valToSave = resp.value || 'Feito';
-        if (item.response_type === 'kg') {
-          const num = parseFloat(resp.value || '0');
-          valToSave = !isNaN(num) ? num.toFixed(3) : '0.000';
-        }
-        return {
-          tenant_id: tenantId,
-          execution_id: execData.id,
-          item_id: item.id,
-          user_id: loggedInUser.id,
-          response_value: valToSave,
-          is_conforming: resp.isConforming,
-          is_meta_ok: resp.isMetaOk,
-          is_done: resp.isDone,
-          observation: resp.observation || ''
-        };
-      });
-
-      const { data: respsInserted, error: respErr } = await supabase
-        .from('checklist_item_responses')
-        .insert(responsesPayloads)
-        .select();
-
-      if (respErr) throw respErr;
-
-      // 3. Vincular Fotos/Evidências
-      const evidencesPayloads = itemsToAnswer
-        .map(item => {
-          const resp = responses[item.id];
-          const insertedResponse = respsInserted.find(r => r.item_id === item.id);
-          if (resp.evidenceUrl && insertedResponse) {
-            return {
-              tenant_id: tenantId,
-              response_id: insertedResponse.id,
-              user_id: loggedInUser.id,
-              type: 'photo',
-              url: resp.evidenceUrl
-            };
-          }
-          return null;
-        })
-        .filter(Boolean);
-
-      if (evidencesPayloads.length > 0) {
-        await supabase.from('checklist_evidences').insert(evidencesPayloads);
-      }
-
-      // 4. Disparar Trigger no banco para recalcular Score e Alertas (Já configurados via DDL).
-      // Buscamos o score atualizado calculado pela trigger de banco na tabela
-      const { data: finalExec } = await supabase
-        .from('checklist_executions')
-        .select('score')
-        .eq('id', execData.id)
-        .single();
-
-      setSuccessScore(finalExec?.score || 100);
-      
-      // Recarrega histórico local de imediato
-      if (loggedInUser) {
-        loadCompletedExecutions(loggedInUser.id);
-      }
-
-      setShowSuccessModal(true);
-      setTimeout(() => triggerConfetti(true), 150);
-      
-      // Auto-desloga após 5 segundos para o próximo colega usar
-      setTimeout(() => {
-        setShowSuccessModal(false);
-        setSuccessScore(null);
-        handleLogout();
-      }, 5000);
-
-    } catch (e: any) {
+      setItemsToAnswer(prev => prev.map(item => item.id === itemId ? { ...item, title: updatedTitle } : item));
+      setActiveCategoryEditItemId(null);
+      setNewInlineCategoryName('');
+      showToast('success', 'Categoria atualizada!');
+    } catch (e) {
       console.error(e);
-      showToast('error', `Erro ao finalizar checklist: ${e.message}`);
-    } finally {
-      setSubmitting(false);
+      showToast('error', 'Erro ao atualizar categoria.');
     }
   };
 
   const getHelperMessage = (item: any, currentResponses: Record<string, ExecutionResponse>) => {
-    if (!item.title) return null;
-    const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
-    const groupName = match ? match[1] : null;
-    const cleanTitle = (match ? match[2] : item.title).toLowerCase().trim();
-
-    // 1. Caso de Média de Peso (por exemplo, Bifes, Empanados, Retalhos)
-    if (groupName) {
-      const isWeightItem = cleanTitle.includes('peso');
-      const isQtyItem = cleanTitle.includes('quantidade') || cleanTitle.includes('quantas') || cleanTitle.includes('unidade') || cleanTitle.includes('bife') || cleanTitle.includes('pacote') || cleanTitle.includes('sobra') || cleanTitle.includes('pct');
-
-      if (isWeightItem || isQtyItem) {
-        // Busca o outro item do mesmo grupo
-        const otherItem = itemsToAnswer.find(i => {
-          if (i.id === item.id) return false;
-          const iMatch = i.title.match(/^\[(.*?)\]\s*(.*)$/);
-          const iGroupName = iMatch ? iMatch[1] : null;
-          if (iGroupName !== groupName) return false;
-          
-          const iCleanTitle = (iMatch ? iMatch[2] : i.title).toLowerCase().trim();
-          if (isWeightItem) {
-            return iCleanTitle.includes('quantidade') || iCleanTitle.includes('quantas') || iCleanTitle.includes('unidade') || iCleanTitle.includes('bife') || iCleanTitle.includes('pacote') || iCleanTitle.includes('sobra') || iCleanTitle.includes('pct');
-          } else {
-            return iCleanTitle.includes('peso');
-          }
-        });
-
-        if (otherItem) {
-          const weightItem = isWeightItem ? item : otherItem;
-          const qtyItem = isQtyItem ? item : otherItem;
-
-          const weightResp = currentResponses[weightItem.id];
-          const qtyResp = currentResponses[qtyItem.id];
-
-          const weightVal = parseFloat(weightResp?.value || '');
-          const qtyVal = parseFloat(qtyResp?.value || '');
-
-          if (!isNaN(weightVal) && !isNaN(qtyVal) && qtyVal > 0 && weightVal > 0) {
-            let media = weightVal / qtyVal;
-            let unitLabel = 'un';
-            if (weightItem.measurement_unit && weightItem.measurement_unit.toLowerCase() === 'kg') {
-              media = media * 1000;
-              unitLabel = 'g';
-            } else {
-              unitLabel = weightItem.measurement_unit || 'g';
-            }
-            
-            // Formatamos a média
-            const formattedMedia = media >= 1000 
-              ? `${(media / 1000).toFixed(3).replace('.', ',')} kg`
-              : `${Math.round(media)} g`;
-
-            return {
-              type: 'average',
-              text: `💡 Rendimento Médio: ${formattedMedia} / un`
-            };
-          }
-        }
-      }
+    if (!item.description) return null;
+    
+    if (item.description.includes('Dica:')) {
+      const parts = item.description.split('Dica:');
+      return { type: 'hint', text: `💡 Dica: ${parts[1].trim()}` };
     }
 
-    // 2. Caso de Sugestão de Estoque Restante
-    const isRemainingStock = cleanTitle.includes('restou') || cleanTitle.includes('restante') || cleanTitle.includes('ficou');
-    if (isRemainingStock) {
-      // Busca itens de estoque inicial e retiradas
-      const initialItem = itemsToAnswer.find(i => {
-        const iMatch = i.title.match(/^\[(.*?)\]\s*(.*)$/);
-        const iCleanTitle = (iMatch ? iMatch[2] : i.title).toLowerCase().trim();
-        return iCleanTitle.includes('inicial') || iCleanTitle.includes('tinham') || iCleanTitle.includes('estoque (inicial)');
-      });
+    if (item.description.includes('Estoque Ideal:')) {
+      const matchIdeal = item.description.match(/Estoque Ideal:\s*(\d+(\.\d+)?)/);
+      const matchAtual = item.description.match(/Estoque Atual:\s*(\d+(\.\d+)?)/);
 
-      const withdrawnItem = itemsToAnswer.find(i => {
-        const iMatch = i.title.match(/^\[(.*?)\]\s*(.*)$/);
-        const iCleanTitle = (iMatch ? iMatch[2] : i.title).toLowerCase().trim();
-        return iCleanTitle.includes('retirada') || iCleanTitle.includes('retirou') || iCleanTitle.includes('tirei');
-      });
+      if (matchIdeal) {
+        const ideal = parseFloat(matchIdeal[1]);
+        const atual = matchAtual ? parseFloat(matchAtual[1]) : 0;
+        const diff = ideal - atual;
+        const suggestion = diff > 0 ? diff.toString() : '0';
 
-      if (initialItem && withdrawnItem) {
-        const initialResp = currentResponses[initialItem.id];
-        const withdrawnResp = currentResponses[withdrawnItem.id];
-
-        const initialVal = parseFloat(initialResp?.value || '');
-        const withdrawnVal = parseFloat(withdrawnResp?.value || '');
-
-        if (!isNaN(initialVal) && !isNaN(withdrawnVal)) {
-          const suggestedVal = initialVal - withdrawnVal;
-          if (suggestedVal >= 0) {
-            return {
-              type: 'stock_suggestion',
-              text: `💡 Sugestão: Restam ${suggestedVal} peças no estoque`,
-              value: suggestedVal.toString()
-            };
-          }
-        }
+        return {
+          type: 'stock_suggestion',
+          text: `📦 Sugestão de Reposição: ${suggestion} ${item.measurement_unit || ''}`,
+          value: suggestion
+        };
       }
     }
 
     return null;
   };
 
-  return (
-    <div className="flex-1 flex flex-col h-full bg-[#111b21] text-[#d1d7db] overflow-hidden select-none">
+  const handleSubmitChecklist = async () => {
+    if (!activeChecklist || !loggedInUser) return;
+
+    // Checa itens obrigatórios
+    const unansweredRequired = itemsToAnswer.filter(item => item.is_required && (!responses[item.id] || !responses[item.id].isDone));
+    if (unansweredRequired.length > 0) {
+      showToast('error', `Preencha os ${unansweredRequired.length} itens obrigatórios marcados antes de finalizar.`);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const now = new Date();
+      const started = startedAt ? new Date(startedAt) : now;
+      const durationSeconds = Math.round((now.getTime() - started.getTime()) / 1000);
+
+      // Calcula pontuação final (score)
+      const answeredCount = Object.keys(responses).length;
+      const totalItems = itemsToAnswer.length;
+      let score = 100;
+
+      if (totalItems > 0) {
+        let conformCount = 0;
+        itemsToAnswer.forEach(item => {
+          const r = responses[item.id];
+          if (r && r.isConforming && r.isMetaOk) {
+            conformCount++;
+          }
+        });
+        score = Math.round((conformCount / totalItems) * 100);
+      }
+
+      // Cria a execução no banco
+      const { data: execData, error: execErr } = await supabase
+        .from('checklist_executions')
+        .insert({
+          tenant_id: tenantId,
+          checklist_id: activeChecklist.id,
+          user_id: loggedInUser.id,
+          unit_id: activeChecklist.unit_id,
+          started_at: startedAt,
+          completed_at: now.toISOString(),
+          duration_seconds: durationSeconds,
+          status: 'completed_on_time',
+          score,
+          distance_calculated: distanceFromUnit
+        })
+        .select('id')
+        .single();
+
+      if (execErr) throw execErr;
+      const executionId = execData.id;
+
+      // Grava respostas dos itens
+      const insertResponses = itemsToAnswer.map(item => {
+        const r = responses[item.id] || { itemId: item.id, value: '', isConforming: true, isMetaOk: true, isDone: false };
+        return {
+          execution_id: executionId,
+          item_id: item.id,
+          response_value: r.value,
+          is_conforming: r.isConforming,
+          is_meta_ok: r.isMetaOk,
+          is_done: r.isDone,
+          observation: r.observation || null
+        };
+      });
+
+      const { data: savedResponses, error: respErr } = await supabase
+        .from('checklist_item_responses')
+        .insert(insertResponses)
+        .select('id, item_id');
+
+      if (respErr) throw respErr;
+
+      // Grava evidências fotográficas
+      const insertEvidences: any[] = [];
+      (savedResponses || []).forEach((savedR: any) => {
+        const localR = responses[savedR.item_id];
+        if (localR && localR.evidenceUrl) {
+          insertEvidences.push({
+            response_id: savedR.id,
+            url: localR.evidenceUrl,
+            uploaded_at: new Date().toISOString()
+          });
+        }
+      });
+
+      if (insertEvidences.length > 0) {
+        await supabase.from('checklist_evidences').insert(insertEvidences);
+      }
+
+      // Confetes e Modal de Sucesso
+      setSuccessScore(score);
+      setShowSuccessModal(true);
+      triggerConfetti(true);
+
+      // Reseta ativo
+      setActiveChecklist(null);
+      setItemsToAnswer([]);
+      setResponses({});
+      setCheckedSubtasks({});
       
-      {/* Toast de Eventos */}
+      loadOperatorChecklists(loggedInUser.id, loggedInUser.role, loggedInUser.name);
+      loadCompletedExecutions(loggedInUser.id);
+
+    } catch (e) {
+      console.error(e);
+      showToast('error', 'Erro ao finalizar rotina. Tente novamente.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col h-full bg-[#0b141a] text-[#d1d7db] overflow-hidden relative styled-scrollbar">
+      
+      {/* TOAST DE NOTIFICAÇÃO */}
       {toastMsg && (
-        <div className={`fixed top-4 left-1/2 -translate-x-1/2 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-2 z-50 animate-in fade-in slide-in-from-top-4 duration-300 ${toastMsg.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'} text-white`}>
-          {toastMsg.type === 'success' ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
-          <span className="text-sm font-semibold">{toastMsg.msg}</span>
+        <div className={`fixed top-5 right-5 z-[999] px-4 py-3 rounded-2xl border text-xs font-bold shadow-2xl flex items-center gap-2 animate-in slide-in-from-top-3 duration-300 ${
+          toastMsg.type === 'success' 
+            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 backdrop-blur-md' 
+            : 'bg-rose-500/20 text-rose-300 border-rose-500/40 backdrop-blur-md'
+        }`}>
+          {toastMsg.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+          <span>{toastMsg.msg}</span>
         </div>
       )}
 
-      {/* MODAL DE SUCESSO VIBRANTE E AUTO-DESLOGUE */}
+      {/* MODAL DE SUCESSO GAMIFICADO (CONFETTI & SCORE) */}
       {showSuccessModal && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-[#202c33] border border-emerald-500/30 rounded-[40px] p-8 max-w-sm w-full text-center shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
-            <div className="absolute -top-10 -left-10 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl"></div>
-            <div className="absolute -bottom-10 -right-10 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl"></div>
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
+          <div className="bg-[#182229] border border-white/10 rounded-[36px] p-8 max-w-md w-full text-center relative shadow-2xl animate-in zoom-in-95 duration-300">
+            <div className="w-20 h-20 bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-3xl mx-auto flex items-center justify-center text-black font-black text-3xl shadow-xl shadow-emerald-500/20 mb-4 animate-bounce">
+              🌟
+            </div>
+            
+            <h2 className="text-2xl font-black text-white tracking-tight">Rotina Concluída com Sucesso!</h2>
+            <p className="text-xs text-[#8696a0] mt-1">Sua auditoria foi salva e registrada no servidor.</p>
 
-            <div className="w-16 h-16 rounded-full bg-emerald-500/15 flex items-center justify-center mx-auto mb-4 border border-emerald-500/20 text-emerald-400">
-              <Sparkles size={32} className="animate-spin duration-1000" />
+            <div className="my-6 p-4 rounded-2xl bg-[#111b21] border border-white/5 flex items-center justify-around font-mono">
+              <div>
+                <span className="text-[10px] text-[#8696a0] uppercase font-bold block">Pontuação</span>
+                <span className="text-2xl font-black text-emerald-400">{successScore}%</span>
+              </div>
+              <div className="w-px h-8 bg-white/10" />
+              <div>
+                <span className="text-[10px] text-[#8696a0] uppercase font-bold block">Status</span>
+                <span className="text-xs font-bold text-white uppercase bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-md mt-1 inline-block">Conforme</span>
+              </div>
             </div>
 
-            <h3 className="font-bold text-white text-lg">Parabéns, {loggedInUser?.name}!</h3>
-            <p className="text-xs text-[#8696a0] mt-1">Sua rotina foi arquivada com sucesso.</p>
-
-            <div className="my-6 bg-black/20 p-4 rounded-3xl border border-[#2a3942]/60 inline-block min-w-[140px]">
-              <span className="text-[10px] text-[#8696a0] block uppercase font-bold tracking-wider">Score da Rotina</span>
-              <span className="text-4xl font-black text-emerald-400 tracking-tight">{successScore !== null ? Math.round(successScore) : 100}</span>
-            </div>
-
-            <p className="text-[10px] text-[#8696a0]">
-              Retornando à tela de bloqueio em <span className="text-white font-bold animate-pulse">5 segundos</span> para o próximo operador...
-            </p>
+            <button
+              onClick={() => setShowSuccessModal(false)}
+              className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-sm py-3.5 rounded-2xl transition-all shadow-lg shadow-emerald-500/25 cursor-pointer active:scale-95"
+            >
+              Continuar Trabalhando 🚀
+            </button>
           </div>
         </div>
       )}
 
-      {/* TELA DE LOGIN / BLOQUEIO POR PIN */}
+      {/* TELA DE AUTENTICAÇÃO POR PIN (TOTEM BLOQUEADO) */}
       {!loggedInUser && (
-        <div className="flex-1 flex flex-col items-center justify-center bg-gradient-to-b from-[#0f171c] to-[#060a0d] p-6 relative overflow-hidden select-none">
-          {/* Fundo dinâmico decorativo com degradê suave e blur */}
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-[120px] pointer-events-none"></div>
-          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/5 rounded-full blur-[120px] pointer-events-none"></div>
+        <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 bg-[#0b141a] relative overflow-hidden">
+          {/* Luzes de fundo decorativas */}
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
-          {/* Logo e Cabeçalho no Fluxo Normal (Garante que nunca sobreponha!) */}
-          <div className="flex flex-col items-center gap-2 mb-10 text-center animate-in fade-in slide-in-from-top-4 duration-500">
-            <div className="w-12 h-12 rounded-[22px] bg-gradient-to-tr from-indigo-500 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 border border-white/10">
-              <ClipboardList className="text-white" size={24} />
-            </div>
-            <div>
-              <span className="text-xs font-black text-indigo-400 uppercase tracking-[0.25em] mt-3 block">Checklist Operacional</span>
-              <span className="text-[11px] text-[#8696a0] font-medium mt-0.5 block">Totem Compartilhado da Cozinha</span>
-            </div>
-          </div>
-
-          <div className="flex flex-col md:flex-row items-stretch gap-8 max-w-4xl w-full z-10 animate-in fade-in zoom-in-95 duration-500">
-            {/* Seleção do Colaborador (Esquerda) */}
-            <div className="flex-1 w-full max-h-[380px] overflow-y-auto styled-scrollbar bg-[#1c2830]/60 backdrop-blur-xl rounded-[40px] border border-[#2a3942]/50 p-7 space-y-4 shadow-2xl flex flex-col">
-              <div className="flex items-center justify-between pb-2 border-b border-[#2a3942]/40 shrink-0">
-                <h3 className="text-xs font-bold text-[#d1d7db] uppercase tracking-wider">Quem está operando agora?</h3>
-                <span className="text-[10px] text-indigo-400 font-semibold bg-indigo-500/10 px-2 py-0.5 rounded-full">Equipe</span>
+          <div className="max-w-4xl w-full flex flex-col md:flex-row items-center gap-8 bg-[#182229]/80 backdrop-blur-xl border border-white/10 p-6 sm:p-10 rounded-[40px] shadow-2xl relative z-10">
+            
+            {/* Lista de Operadores da Equipe */}
+            <div className="flex-1 w-full space-y-4">
+              <div>
+                <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs uppercase tracking-widest">
+                  <User size={16} /> Totem Operacional PWA
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight mt-1">Quem está operando?</h1>
+                <p className="text-xs text-[#8696a0] mt-1">Selecione seu nome na lista para autenticar no turno.</p>
               </div>
-              
-              <div className="flex-1 overflow-y-auto pr-1 space-y-2 styled-scrollbar">
-                {operators.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 text-center gap-3">
-                    <User size={28} className="text-[#3b4a54] animate-pulse" />
-                    <p className="text-xs text-[#8696a0] italic max-w-[200px] leading-relaxed">
-                      Nenhum operador com PIN de 5 dígitos cadastrado nas configurações do painel.
-                    </p>
+
+              <div className="grid grid-cols-2 gap-3 max-h-[320px] overflow-y-auto styled-scrollbar pr-1">
+                {operators.map((op) => (
+                  <button
+                    key={op.id}
+                    onClick={() => handleSelectOperator(op)}
+                    className={`p-3.5 rounded-2xl border text-left transition-all flex items-center gap-3 cursor-pointer ${
+                      selectedOperator?.id === op.id 
+                        ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-lg shadow-indigo-500/10' 
+                        : 'bg-[#202c33]/60 hover:bg-[#202c33] border-white/5 text-[#d1d7db]'
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white font-black text-sm flex items-center justify-center shrink-0 shadow-md">
+                      {op.name.substring(0, 1).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="font-bold text-xs text-white truncate">{op.name}</h4>
+                      <p className="text-[10px] text-[#8696a0] capitalize">{op.role === 'manager' ? 'Gerente' : 'Operador'}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Teclado Numérico de PIN de 5 Dígitos */}
+            <div className="w-full md:w-72 shrink-0 bg-[#111b21] border border-white/10 p-6 rounded-[32px] flex flex-col items-center justify-center shadow-xl">
+              {selectedOperator ? (
+                <>
+                  <div className="text-center mb-4">
+                    <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider">Digitar PIN</span>
+                    <h3 className="text-sm font-bold text-white truncate max-w-[200px]">{selectedOperator.name}</h3>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {operators.map((op) => (
-                      <button
-                        key={op.id}
-                        onClick={() => handleSelectOperator(op)}
-                        className={`p-4 rounded-3xl border text-left flex items-center gap-3 transition-all duration-300 relative overflow-hidden group ${
-                          selectedOperator?.id === op.id 
-                            ? 'border-indigo-500 bg-indigo-500/10 shadow-lg shadow-indigo-500/5' 
-                            : 'border-[#2a3942]/40 bg-[#202c33]/40 hover:bg-[#202c33]/80 hover:border-[#3b4a54]'
+
+                  {/* Visor de Dígitos do PIN */}
+                  <div className="flex gap-2 mb-5">
+                    {[0, 1, 2, 3, 4].map((idx) => (
+                      <div 
+                        key={idx} 
+                        className={`w-8 h-10 rounded-xl border flex items-center justify-center font-mono font-bold text-lg transition-all ${
+                          pinCode.length > idx 
+                            ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300 shadow-sm shadow-indigo-500/20' 
+                            : 'bg-[#202c33] border-white/5 text-slate-600'
                         }`}
                       >
-                        {/* Indicador Ativo */}
-                        {selectedOperator?.id === op.id && (
-                          <div className="absolute right-3 top-3 w-2 h-2 rounded-full bg-indigo-400 animate-ping"></div>
-                        )}
-                        <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center text-slate-200 font-bold shrink-0 shadow-sm transition-transform group-hover:scale-105">
-                          {op.name.substring(0, 1).toUpperCase()}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-1">
-                            <p className="text-xs font-bold text-white truncate">{op.name}</p>
-                            {(!op.pin || op.pin.length !== 5) && (
-                              <span className="text-[8px] font-extrabold text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded-full border border-rose-500/20 shrink-0">Sem PIN</span>
-                            )}
-                          </div>
-                          <p className="text-[9px] text-[#8696a0] font-semibold uppercase tracking-wider mt-0.5">
-                            {op.role === 'company_admin' || op.role === 'super_admin' ? 'Administrador' :
-                             op.role === 'manager' ? 'Gerente' : 'Operador'}
-                          </p>
-                        </div>
-                      </button>
+                        {pinCode.length > idx ? '•' : ''}
+                      </div>
                     ))}
                   </div>
-                )}
-              </div>
-            </div>
 
-            {/* Teclado Numérico de PIN (Direita) */}
-            <div className="w-full md:w-[300px] shrink-0 bg-[#1c2830]/60 backdrop-blur-xl rounded-[40px] border border-[#2a3942]/50 p-7 shadow-2xl flex flex-col justify-center min-h-[380px]">
-              {selectedOperator ? (
-                (!selectedOperator.pin || selectedOperator.pin.length !== 5) ? (
-                  <div className="w-full space-y-5 animate-in zoom-in-95 duration-300 flex flex-col items-center text-center">
-                    <div className="w-14 h-14 rounded-3xl bg-rose-500/10 flex items-center justify-center border border-rose-500/20 text-rose-400 shadow-md">
-                      <AlertTriangle size={24} className="animate-bounce" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-black text-white tracking-wide">PIN Não Cadastrado</p>
-                      <p className="text-[10px] text-[#8696a0] leading-relaxed max-w-[200px] mx-auto mt-2">
-                        O operador <span className="text-white font-bold">{selectedOperator.name}</span> está escalado em rotinas, mas ainda não possui um código PIN de 5 dígitos cadastrado.
-                      </p>
-                    </div>
-                    <div className="bg-black/20 p-4 rounded-3xl border border-[#2a3942]/60 text-[9px] text-[#8696a0] leading-relaxed text-left space-y-1.5 w-full">
-                      <p className="text-indigo-400 font-bold">Como cadastrar o PIN:</p>
-                      <p>1. Acesse o painel de administração em <span className="text-white font-semibold">Equipes</span>.</p>
-                      <p>2. Edite o perfil deste colaborador.</p>
-                      <p>3. Defina um código PIN de 5 números e salve.</p>
-                    </div>
+                  {authError && (
+                    <p className="text-[10px] text-rose-400 font-bold mb-3 animate-shake">{authError}</p>
+                  )}
+
+                  {/* Teclado 3x4 */}
+                  <div className="grid grid-cols-3 gap-2 w-full max-w-[220px]">
+                    {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(num => (
+                      <button
+                        key={num}
+                        onClick={() => handleKeyPress(num)}
+                        className="h-12 rounded-xl bg-[#202c33] hover:bg-[#2a3942] active:scale-95 text-white font-black text-lg border border-white/5 transition-all shadow-sm cursor-pointer"
+                      >
+                        {num}
+                      </button>
+                    ))}
                     <button
-                      onClick={() => handleSelectOperator(selectedOperator)} // Reseta
-                      className="w-full py-2.5 rounded-2xl bg-[#202c33] hover:bg-[#2a3942] text-[10px] font-bold border border-[#2a3942]/60 text-slate-300 transition-all cursor-pointer active:scale-95"
+                      onClick={() => setSelectedOperator(null)}
+                      className="h-12 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px] font-bold uppercase transition-all cursor-pointer"
                     >
-                      Voltar
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={() => handleKeyPress('0')}
+                      className="h-12 rounded-xl bg-[#202c33] hover:bg-[#2a3942] active:scale-95 text-white font-black text-lg border border-white/5 transition-all shadow-sm cursor-pointer"
+                    >
+                      0
+                    </button>
+                    <button
+                      onClick={handleDeletePress}
+                      className="h-12 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-bold transition-all cursor-pointer flex items-center justify-center"
+                    >
+                      ⌫
                     </button>
                   </div>
-                ) : (
-                  <div className="w-full space-y-5 animate-in zoom-in-95 duration-300 flex flex-col items-center">
-                    <div className="text-center">
-                      <p className="text-[11px] text-[#8696a0] font-semibold uppercase tracking-wider">Digite o PIN para</p>
-                      <p className="text-sm font-black text-white mt-1 tracking-wide">{selectedOperator.name}</p>
-                    </div>
-
-                    {/* Visor do PIN */}
-                    <div className="flex justify-center gap-3.5 py-1">
-                      {[0, 1, 2, 3, 4].map((idx) => (
-                        <div 
-                          key={idx} 
-                          className={`w-3.5 h-3.5 rounded-full border-2 transition-all duration-200 ${
-                            pinCode.length > idx 
-                              ? 'bg-gradient-to-tr from-indigo-400 to-purple-500 border-indigo-300 scale-125 shadow-md shadow-indigo-500/40' 
-                              : 'border-[#3b4a54] bg-black/40 scale-100'
-                          }`}
-                        ></div>
-                      ))}
-                    </div>
-
-                    {authError ? (
-                      <p className="text-[10px] text-rose-400 text-center font-bold animate-pulse">{authError}</p>
-                    ) : (
-                      <div className="h-[15px]"></div> /* Placeholder fixo de altura */
-                    )}
-
-                    {/* Teclado Ultra-Elegante */}
-                    <div className="grid grid-cols-3 gap-2.5 w-full max-w-[240px]">
-                      {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(num => (
-                        <button
-                          key={num}
-                          onClick={() => handleKeyPress(num)}
-                          className="w-16 h-16 rounded-[20px] bg-[#202c33]/60 hover:bg-[#202c33]/90 text-lg font-bold text-white border border-[#2a3942]/60 active:scale-95 active:bg-indigo-500/20 active:border-indigo-500 transition-all duration-150 flex items-center justify-center shadow-sm"
-                        >
-                          {num}
-                        </button>
-                      ))}
-                      <button
-                        onClick={() => handleSelectOperator(selectedOperator)} // Reseta
-                        className="w-16 h-16 rounded-[20px] bg-[#202c33]/20 hover:bg-[#202c33]/40 text-[#8696a0] hover:text-white border border-transparent active:scale-95 flex items-center justify-center text-[10px] font-bold uppercase tracking-wider"
-                      >
-                        Limpar
-                      </button>
-                      <button
-                        onClick={() => handleKeyPress('0')}
-                        className="w-16 h-16 rounded-[20px] bg-[#202c33]/60 hover:bg-[#202c33]/90 text-lg font-bold text-white border border-[#2a3942]/60 active:scale-95 flex items-center justify-center shadow-sm"
-                      >
-                        0
-                      </button>
-                      <button
-                        onClick={handleDeletePress}
-                        className="w-16 h-16 rounded-[20px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 active:scale-95 flex items-center justify-center text-[10px] font-bold uppercase tracking-wider"
-                      >
-                        Apagar
-                      </button>
-                    </div>
-                  </div>
-                )
+                </>
               ) : (
-                <div className="text-center p-6 w-full flex flex-col items-center justify-center gap-4">
-                  <div className="w-14 h-14 rounded-3xl bg-[#202c33]/40 flex items-center justify-center border border-[#2a3942]/40 text-[#8696a0] shadow-inner">
-                    <Lock size={26} className="animate-pulse" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-300">Acesso Restrito</h4>
-                    <p className="text-[10px] text-[#8696a0] leading-relaxed max-w-[180px] mx-auto mt-1.5">
-                      Selecione seu perfil na listagem lateral para habilitar o teclado numérico de PIN.
-                    </p>
-                  </div>
+                <div className="py-8 text-center text-[#8696a0]">
+                  <Lock size={32} className="mx-auto text-[#202c33] mb-2" />
+                  <p className="text-xs">Selecione seu perfil à esquerda para inserir o PIN.</p>
                 </div>
               )}
             </div>
+
           </div>
         </div>
       )}
@@ -1185,22 +912,26 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
         <div className="flex-1 flex flex-col overflow-hidden">
           
           {/* Header Superior do Totem */}
-          <div className="h-16 bg-[#202c33] border-b border-[#2a3942]/60 px-6 flex items-center justify-between shrink-0">
+          <div className="h-16 bg-[#202c33]/80 backdrop-blur-xl border-b border-white/10 px-6 flex items-center justify-between shrink-0 shadow-md relative z-10">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-bold text-sm">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-400 border border-white/20 flex items-center justify-center text-white font-black text-sm shadow-md">
                 {loggedInUser.name.substring(0, 1).toUpperCase()}
               </div>
               <div>
-                <h2 className="text-xs text-[#8696a0]">Operador Conectado</h2>
-                <h1 className="text-sm font-bold text-white">{loggedInUser.name}</h1>
+                <span className="text-[10px] uppercase font-bold tracking-wider text-[#8696a0] block">Operador Conectado</span>
+                <h1 className="text-sm font-black text-white flex items-center gap-1.5">
+                  {loggedInUser.name}
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block ml-1" />
+                </h1>
               </div>
             </div>
+
             <div className="flex items-center gap-2">
               <button
                 onClick={handleLogout}
-                className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all"
+                className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95"
               >
-                Bloquear Tela <Lock size={12} />
+                <Lock size={13} /> Bloquear Tela
               </button>
             </div>
           </div>
@@ -1208,19 +939,21 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
           <div className="flex-1 flex overflow-hidden">
             
             {/* LISTAGEM DE CHECKLISTS DISPONÍVEIS (SEÇÃO ESQUERDA) */}
-            <div className={`w-full md:w-[340px] ${(activeChecklist || activeExecution) ? 'hidden md:flex' : 'flex'} shrink-0 border-r border-[#2a3942]/60 bg-[#182229]/60 flex-col overflow-y-auto p-4 styled-scrollbar gap-3`}>
+            <div className={`w-full md:w-[340px] ${(activeChecklist || activeExecution) ? 'hidden md:flex' : 'flex'} shrink-0 border-r border-white/10 bg-[#182229]/60 flex-col overflow-y-auto p-4 styled-scrollbar gap-3`}>
               
               {/* Abas Premium de Navegação */}
-              <div className="flex gap-2 p-1 bg-[#111b21] rounded-2xl border border-[#2a3942]/40 shrink-0">
+              <div className="flex gap-2 p-1 bg-[#111b21] rounded-2xl border border-white/10 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
                     setActiveTab('active');
                     setActiveExecution(null);
                   }}
-                  className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${activeTab === 'active' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[#8696a0] hover:text-[#d1d7db] bg-transparent'}`}
+                  className={`flex-1 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer ${
+                    activeTab === 'active' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'text-[#8696a0] hover:text-white bg-transparent'
+                  }`}
                 >
-                  Pendentes
+                  Pendentes ({checklists.length})
                 </button>
                 <button
                   type="button"
@@ -1229,9 +962,11 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                     setActiveChecklist(null);
                     if (loggedInUser) loadCompletedExecutions(loggedInUser.id);
                   }}
-                  className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${activeTab === 'history' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[#8696a0] hover:text-[#d1d7db] bg-transparent'}`}
+                  className={`flex-1 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer ${
+                    activeTab === 'history' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'text-[#8696a0] hover:text-white bg-transparent'
+                  }`}
                 >
-                  Concluídos
+                  Concluídos ({completedExecutions.length})
                 </button>
               </div>
 
@@ -1240,9 +975,11 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                   <h3 className="text-[10px] font-black text-[#8696a0] uppercase tracking-widest px-2 mt-2">Rotinas do seu Turno</h3>
                   
                   {loadingChecklists ? (
-                    <div className="p-8 text-center text-[#8696a0] animate-pulse">Carregando rotinas...</div>
+                    <div className="p-8 text-center text-[#8696a0] animate-pulse text-xs">Carregando rotinas...</div>
                   ) : checklists.length === 0 ? (
-                    <div className="p-8 text-center text-[#8696a0] italic text-xs">Nenhum checklist disponível no momento.</div>
+                    <div className="p-8 text-center text-[#8696a0] italic text-xs bg-[#202c33]/30 rounded-2xl border border-dashed border-white/5">
+                      Nenhum checklist disponível no momento.
+                    </div>
                   ) : (
                     checklists.map((chk) => (
                       <button
@@ -1253,23 +990,29 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                           setActiveExecution(null);
                         }}
                         disabled={submitting}
-                        className={`p-4 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[110px] ${activeChecklist?.id === chk.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-[#2a3942]/60 bg-[#202c33]/50 hover:bg-[#202c33]/80'}`}
+                        className={`p-4 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[110px] cursor-pointer group ${
+                          activeChecklist?.id === chk.id 
+                            ? 'border-indigo-500 bg-indigo-500/15 shadow-lg shadow-indigo-500/10' 
+                            : 'border-white/5 bg-[#202c33]/60 hover:bg-[#202c33] hover:border-white/10'
+                        }`}
                       >
                         <div>
                           <div className="flex justify-between items-start gap-1">
-                            <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-indigo-500/20 text-indigo-400 shrink-0">
+                            <span className="text-[9px] px-2.5 py-0.5 rounded-full font-bold bg-indigo-500/20 text-indigo-300 shrink-0 border border-indigo-500/30 uppercase tracking-wider">
                               {chk.category || 'Geral'}
                             </span>
-                            <span className="text-[9px] text-[#8696a0] truncate">{chk.unit_name}</span>
+                            <span className="text-[9px] text-[#8696a0] font-medium truncate">{chk.unit_name}</span>
                           </div>
-                          <h4 className="font-bold text-white text-sm mt-2.5 leading-snug line-clamp-1">{chk.title}</h4>
+                          <h4 className="font-bold text-white text-sm mt-2.5 leading-snug line-clamp-1 group-hover:text-indigo-300 transition-colors">
+                            {chk.title}
+                          </h4>
                         </div>
 
-                        <div className="flex items-center justify-between mt-3 text-[10px] text-[#8696a0] pt-2.5 border-t border-[#2a3942]/40 w-full font-mono">
-                          <span className="flex items-center gap-1 font-sans">
-                            <Compass size={11} className="shrink-0" /> {chk.sector_name}
+                        <div className="flex items-center justify-between mt-3 text-[10px] text-[#8696a0] pt-2.5 border-t border-white/5 w-full">
+                          <span className="flex items-center gap-1 font-semibold text-slate-300">
+                            <Compass size={12} className="text-indigo-400 shrink-0" /> {chk.sector_name}
                           </span>
-                          <ChevronRight size={14} className="text-slate-400" />
+                          <ChevronRight size={14} className="text-[#8696a0] group-hover:translate-x-1 transition-transform" />
                         </div>
                       </button>
                     ))
@@ -1280,9 +1023,11 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                   <h3 className="text-[10px] font-black text-[#8696a0] uppercase tracking-widest px-2 mt-2">Histórico Recente</h3>
                   
                   {loadingHistory ? (
-                    <div className="p-8 text-center text-[#8696a0] animate-pulse">Buscando histórico...</div>
+                    <div className="p-8 text-center text-[#8696a0] animate-pulse text-xs">Buscando histórico...</div>
                   ) : completedExecutions.length === 0 ? (
-                    <div className="p-8 text-center text-[#8696a0] italic text-xs">Nenhuma rotina finalizada por você recentemente.</div>
+                    <div className="p-8 text-center text-[#8696a0] italic text-xs bg-[#202c33]/30 rounded-2xl border border-dashed border-white/5">
+                      Nenhuma rotina finalizada recentemente.
+                    </div>
                   ) : (
                     completedExecutions.map((exec) => {
                       const chkInfo = exec.checklists || { title: 'Rotina Excluída', category: 'Geral' };
@@ -1306,21 +1051,23 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                             setActiveChecklist(null);
                             loadExecutionDetails(exec.id);
                           }}
-                          className={`p-4 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[110px] ${activeExecution?.id === exec.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-[#2a3942]/60 bg-[#202c33]/50 hover:bg-[#202c33]/80'}`}
+                          className={`p-4 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[110px] cursor-pointer ${
+                            activeExecution?.id === exec.id ? 'border-indigo-500 bg-indigo-500/15' : 'border-white/5 bg-[#202c33]/60 hover:bg-[#202c33]'
+                          }`}
                         >
                           <div>
                             <div className="flex justify-between items-start gap-1 flex-wrap">
-                              <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-slate-500/20 text-[#8696a0] shrink-0">
+                              <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-slate-500/20 text-[#8696a0] shrink-0 uppercase tracking-wider">
                                 {chkInfo.category || 'Geral'}
                               </span>
-                              <span className={`text-[9px] px-1.5 py-0.5 border rounded-full font-bold font-mono ${scoreColor} shrink-0`}>
+                              <span className={`text-[9px] px-2 py-0.5 border rounded-full font-bold font-mono ${scoreColor} shrink-0`}>
                                 {exec.score}% conformidade
                               </span>
                             </div>
                             <h4 className="font-bold text-white text-sm mt-2.5 leading-snug line-clamp-1">{chkInfo.title}</h4>
                           </div>
 
-                          <div className="flex items-center justify-between mt-3 text-[10px] text-[#8696a0] pt-2.5 border-t border-[#2a3942]/40 w-full font-mono">
+                          <div className="flex items-center justify-between mt-3 text-[10px] text-[#8696a0] pt-2.5 border-t border-white/5 w-full font-mono">
                             <span>{formattedDate}</span>
                             <ChevronRight size={14} className="text-slate-400" />
                           </div>
@@ -1333,33 +1080,31 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
             </div>
 
             {/* ÁREA DE PREENCHIMENTO OU DETALHES (SEÇÃO DIREITA) */}
-            <div className={`flex-1 ${(!activeChecklist && !activeExecution) ? 'hidden md:flex' : 'flex'} flex-col overflow-hidden bg-[#182229]/20`}>
+            <div className={`flex-1 ${(!activeChecklist && !activeExecution) ? 'hidden md:flex' : 'flex'} flex-col overflow-hidden bg-[#0b141a]`}>
               {activeExecution ? (
                 <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-200">
                   {/* Cabeçalho da Execução Concluída */}
-                  <div className="p-6 bg-[#202c33]/50 border-b border-[#2a3942]/60 shrink-0">
+                  <div className="p-6 bg-[#182229]/80 backdrop-blur-md border-b border-white/10 shrink-0">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
                           onClick={() => setActiveExecution(null)}
-                          className="md:hidden p-2 -ml-2 rounded-full hover:bg-[#2a3942] text-[#8696a0] hover:text-white transition-all shrink-0"
-                          title="Voltar para a lista"
+                          className="md:hidden p-2 -ml-2 rounded-full hover:bg-white/10 text-[#8696a0] hover:text-white transition-all shrink-0"
                         >
                           <ChevronRight className="rotate-180" size={20} />
                         </button>
                         <div>
-                          <span className="text-[9px] uppercase tracking-wider font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20 font-bold">Rotina Concluída</span>
-                          <h2 className="text-lg font-black text-white mt-1.5">{activeExecution.checklists?.title || 'Rotina Finalizada'}</h2>
+                          <span className="text-[9px] uppercase tracking-wider font-mono text-emerald-400 bg-emerald-500/15 px-3 py-1 rounded-full border border-emerald-500/30 font-bold">Rotina Concluída</span>
+                          <h2 className="text-xl font-black text-white mt-1.5">{activeExecution.checklists?.title || 'Rotina Finalizada'}</h2>
                           <p className="text-xs text-[#8696a0] mt-0.5">Visualizando respostas registradas do histórico.</p>
                         </div>
                       </div>
                       
-                      {/* Score e Duração da Execução */}
                       <div className="flex items-center gap-3 shrink-0">
-                        <div className="px-4 py-2 rounded-2xl border border-[#2a3942] bg-[#111b21]/40 text-left font-mono">
+                        <div className="px-4 py-2 rounded-2xl border border-white/10 bg-[#111b21] text-left font-mono">
                           <span className="text-[9px] block text-[#8696a0] uppercase tracking-wider font-bold">Duração</span>
-                          <span className="text-[12px] text-white font-bold">
+                          <span className="text-xs text-white font-bold">
                             {(() => {
                               const sec = activeExecution.duration_seconds || 0;
                               const min = Math.floor(sec / 60);
@@ -1368,12 +1113,12 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                           </span>
                         </div>
                         <div className={`px-4 py-2 rounded-2xl border flex flex-col justify-center text-left font-mono ${
-                          activeExecution.score >= 90 ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' :
-                          activeExecution.score >= 70 ? 'border-amber-500/20 bg-amber-500/5 text-amber-400' :
-                          'border-rose-500/20 bg-rose-500/5 text-rose-400'
+                          activeExecution.score >= 90 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' :
+                          activeExecution.score >= 70 ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' :
+                          'border-rose-500/30 bg-rose-500/10 text-rose-400'
                         }`}>
                           <span className="text-[9px] uppercase tracking-wider font-bold opacity-80">Conformidade</span>
-                          <span className="text-[12px] font-bold">{activeExecution.score}%</span>
+                          <span className="text-xs font-black">{activeExecution.score}%</span>
                         </div>
                       </div>
                     </div>
@@ -1382,7 +1127,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                   {/* Detalhes das Respostas */}
                   <div className="flex-1 overflow-y-auto styled-scrollbar p-6 space-y-4">
                     {loadingExecutionDetails ? (
-                      <div className="p-16 text-center text-[#8696a0] animate-pulse">Carregando respostas detalhadas...</div>
+                      <div className="p-16 text-center text-[#8696a0] animate-pulse text-xs">Carregando respostas detalhadas...</div>
                     ) : executionResponses.length === 0 ? (
                       <div className="p-16 text-center text-[#8696a0] italic text-xs">Nenhuma resposta registrada para esta rotina.</div>
                     ) : (
@@ -1395,9 +1140,9 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                           
                           const borderClass = resp.is_done 
                             ? resp.is_conforming && resp.is_meta_ok 
-                              ? 'border-emerald-500/20 bg-[#1e2e28]/30 shadow-sm shadow-emerald-950/5' 
-                              : 'border-rose-500/30 bg-[#2d1c1e]/30 shadow-sm shadow-rose-950/10'
-                            : 'border-[#2a3942]/30 bg-[#202c33]/20';
+                              ? 'border-emerald-500/30 bg-emerald-500/5' 
+                              : 'border-rose-500/30 bg-rose-500/5'
+                            : 'border-white/5 bg-[#182229]/60';
 
                           return (
                             <div 
@@ -1407,11 +1152,11 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                                 <div className="space-y-0.5">
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
+                                    <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-[#202c33] w-5 h-5 flex items-center justify-center rounded-full shrink-0 border border-white/5">
                                       {idx + 1}
                                     </span>
                                     {groupName && (
-                                      <span className="text-[9px] px-1.5 py-0.5 rounded font-bold tracking-wider uppercase bg-[#2a3942] text-[#8696a0]">
+                                      <span className="text-[9px] px-2 py-0.5 rounded font-bold tracking-wider uppercase bg-[#202c33] text-indigo-400 border border-indigo-500/30">
                                         {groupName}
                                       </span>
                                     )}
@@ -1423,10 +1168,10 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                 </div>
 
                                 <div className="shrink-0 flex items-center gap-2 ml-7 sm:ml-0">
-                                  <span className={`text-xs px-3 py-1.5 rounded-xl font-mono font-black ${
+                                  <span className={`text-xs px-3.5 py-1.5 rounded-xl font-mono font-black ${
                                     resp.is_conforming && resp.is_meta_ok
-                                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                      : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                      : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
                                   }`}>
                                     {resp.response_value}
                                   </span>
@@ -1434,31 +1179,9 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                               </div>
 
                               {resp.observation && (
-                                <div className="ml-7 bg-[#111b21]/50 border-l-2 border-amber-500/80 p-3 rounded-r-xl mt-1 text-xs text-[#d1d7db] leading-relaxed">
+                                <div className="ml-7 bg-[#111b21] border-l-2 border-amber-400 p-3 rounded-r-xl mt-1 text-xs text-[#d1d7db] leading-relaxed">
                                   <span className="font-bold block text-amber-400 text-[10px] uppercase mb-0.5 font-mono">Observação registrada:</span>
                                   {resp.observation}
-                                </div>
-                              )}
-
-                              {resp.checklist_evidences && resp.checklist_evidences.length > 0 && (
-                                <div className="ml-7 mt-1.5">
-                                  <span className="text-[9px] font-bold text-indigo-400/80 block uppercase tracking-wider mb-2 font-mono">Evidência Fotográfica:</span>
-                                  <div className="flex gap-2.5 overflow-x-auto py-1">
-                                    {resp.checklist_evidences.map((ev: any, evIdx: number) => (
-                                      <a 
-                                        key={evIdx}
-                                        href={ev.url} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className="relative group w-24 h-24 rounded-2xl overflow-hidden border border-[#2a3942] bg-[#111b21] hover:scale-95 transition-all flex items-center justify-center cursor-pointer shrink-0"
-                                      >
-                                        <img src={ev.url} alt="Evidência" className="w-full h-full object-cover" />
-                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center">
-                                          <Eye size={16} className="text-white" />
-                                        </div>
-                                      </a>
-                                    ))}
-                                  </div>
                                 </div>
                               )}
                             </div>
@@ -1472,19 +1195,21 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                 <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-200">
                   
                   {/* Cabeçalho do Roteiro */}
-                  <div className="p-6 bg-[#202c33]/50 border-b border-[#2a3942]/60 shrink-0">
+                  <div className="p-6 bg-[#182229]/80 backdrop-blur-md border-b border-white/10 shrink-0">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
                           onClick={() => setActiveChecklist(null)}
-                          className="md:hidden p-2 -ml-2 rounded-full hover:bg-[#2a3942] text-[#8696a0] hover:text-white transition-all shrink-0"
-                          title="Voltar para as rotinas"
+                          className="md:hidden p-2 -ml-2 rounded-full hover:bg-white/10 text-[#8696a0] hover:text-white transition-all shrink-0"
                         >
                           <ChevronRight className="rotate-180" size={20} />
                         </button>
                         <div>
-                          <h2 className="text-lg font-black text-white">{activeChecklist.title}</h2>
+                          <span className="text-[10px] uppercase tracking-widest font-bold text-indigo-400 bg-indigo-500/15 px-3 py-0.5 rounded-full border border-indigo-500/30">
+                            {activeChecklist.category}
+                          </span>
+                          <h2 className="text-xl font-black text-white mt-1.5 tracking-tight">{activeChecklist.title}</h2>
                           <p className="text-xs text-[#8696a0] mt-0.5">{activeChecklist.description || 'Siga as orientações abaixo para preencher.'}</p>
                         </div>
                       </div>
@@ -1492,13 +1217,13 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                       {/* Geolocalização e Status do GPS */}
                       {activeChecklist.require_geolocation && (
                         <div className={`px-4 py-2 rounded-2xl border flex items-center gap-2 shrink-0 ${
-                          distanceFromUnit === null ? 'border-amber-500/20 bg-amber-500/5 text-amber-400' :
-                          distanceFromUnit <= activeChecklist.unit_radius_meters ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' :
-                          'border-rose-500/20 bg-rose-500/5 text-rose-400'
+                          distanceFromUnit === null ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' :
+                          distanceFromUnit <= activeChecklist.unit_radius_meters ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' :
+                          'border-rose-500/30 bg-rose-500/10 text-rose-400'
                         }`}>
-                          <Compass size={14} className={locating ? 'animate-spin' : ''} />
+                          <Compass size={15} className={locating ? 'animate-spin text-indigo-400' : ''} />
                           <div className="text-left">
-                            <span className="text-[9px] block uppercase font-bold tracking-wider">Precisão GPS</span>
+                            <span className="text-[9px] block uppercase font-bold tracking-wider opacity-80">Precisão GPS</span>
                             <span className="text-[11px] font-bold">
                               {locating ? 'Coletando...' :
                                distanceFromUnit === null ? 'Aguardando GPS' :
@@ -1517,7 +1242,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                       const completed = itemsToAnswer.filter(item => responses[item.id]?.isDone).length;
                       const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
                       return (
-                        <div className="flex items-center gap-4 bg-[#111b21]/50 p-4 rounded-3xl border border-[#2a3942]/60 mt-4 animate-in fade-in duration-300">
+                        <div className="flex items-center gap-4 bg-[#111b21] p-4 rounded-3xl border border-white/10 mt-4 animate-in fade-in duration-300 shadow-md">
                           {/* Gráfico circular SVG */}
                           <div className="relative w-12 h-12 shrink-0 flex items-center justify-center">
                             <svg className="w-full h-full transform -rotate-90">
@@ -1534,7 +1259,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                 cx="24"
                                 cy="24"
                                 r="20"
-                                className="text-emerald-500 transition-all duration-500 ease-out"
+                                className="text-emerald-400 transition-all duration-500 ease-out"
                                 strokeWidth="3.5"
                                 strokeDasharray={2 * Math.PI * 20}
                                 strokeDashoffset={2 * Math.PI * 20 * (1 - percent / 100)}
@@ -1543,7 +1268,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                 fill="transparent"
                               />
                             </svg>
-                            <span className="absolute text-[10px] font-black text-white font-mono">{percent}%</span>
+                            <span className="absolute text-[11px] font-black text-white font-mono">{percent}%</span>
                           </div>
 
                           {/* Progresso Textual e Mensagem de Incentivo */}
@@ -1552,10 +1277,10 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                               <span className="font-bold text-[#d1d7db]">Progresso da Rotina</span>
                               <span className="font-mono text-emerald-400 font-bold">{completed} de {total} tarefas concluídas</span>
                             </div>
-                            {/* Barra de Progresso Horizontal */}
-                            <div className="w-full bg-[#202c33] h-2.5 rounded-full overflow-hidden border border-[#2a3942]/40">
+                            {/* Barra de Progresso Horizontal Neon */}
+                            <div className="w-full bg-[#202c33] h-2.5 rounded-full overflow-hidden border border-white/5">
                               <div 
-                                className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 h-full rounded-full transition-all duration-500 ease-out" 
+                                className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-full rounded-full transition-all duration-500 ease-out shadow-sm shadow-emerald-500/50" 
                                 style={{ width: `${percent}%` }}
                               />
                             </div>
@@ -1574,25 +1299,25 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                     
                     {/* Filtros da Lista */}
                     {itemsToAnswer.length > 0 && (
-                      <div className="flex flex-col sm:flex-row gap-3 mb-6 bg-[#202c33]/50 p-3 rounded-2xl border border-[#2a3942]/60">
+                      <div className="flex flex-col sm:flex-row gap-3 mb-4 bg-[#182229]/60 p-3 rounded-2xl border border-white/5">
                         <div className="flex-1 relative">
-                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Search size={16} className="text-[#8696a0]" />
+                          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                            <Search size={15} className="text-[#8696a0]" />
                           </div>
                           <input
                             type="text"
-                            placeholder="Buscar item..."
+                            placeholder="Buscar item nesta rotina..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl pl-10 pr-4 py-2.5 text-sm text-[#d1d7db] placeholder-[#8696a0] focus:outline-none focus:border-indigo-500 transition-all"
+                            className="w-full bg-[#111b21] border border-white/10 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500 transition-all"
                           />
                         </div>
                         
-                        <div className="sm:w-64">
+                        <div className="sm:w-56">
                           <select
                             value={categoryFilter}
                             onChange={(e) => setCategoryFilter(e.target.value)}
-                            className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-4 py-2.5 text-sm text-[#d1d7db] focus:outline-none focus:border-indigo-500 transition-all cursor-pointer"
+                            className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-[#d1d7db] focus:outline-none focus:border-indigo-500 transition-all cursor-pointer"
                           >
                             <option value="">Todas as Categorias</option>
                             {Array.from(new Set(itemsToAnswer.map(item => {
@@ -1653,10 +1378,10 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                           value={item}
                           className={`p-5 rounded-[28px] border flex flex-col gap-4 transition-all duration-300 ${
                             resp.isDone 
-                              ? 'border-emerald-500/40 bg-[#1e2e28]/70 shadow-sm shadow-emerald-950/20' 
+                              ? 'border-emerald-500/40 bg-emerald-500/5 shadow-sm shadow-emerald-500/5' 
                               : item.is_required 
-                                ? 'border-[#2a3942]/60 bg-[#202c33]/50' 
-                                : 'border-[#2a3942]/30 bg-[#202c33]/30'
+                                ? 'border-white/10 bg-[#182229]/80 hover:border-white/20' 
+                                : 'border-white/5 bg-[#182229]/50 hover:border-white/10'
                           }`}
                         >
                           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1675,14 +1400,16 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                       <GripVertical size={16} />
                                     </div>
                                     {resp.isDone ? (
-                                      <span className="w-5 h-5 flex items-center justify-center rounded-full shrink-0 bg-emerald-500 text-black font-black text-[10px] flex items-center justify-center">
+                                      <span className="w-5 h-5 flex items-center justify-center rounded-full shrink-0 bg-emerald-400 text-black font-black text-[11px] shadow-sm">
                                         ✓
                                       </span>
                                     ) : (
-                                      <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-black/20 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
+                                      <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-[#202c33] border border-white/5 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
                                         {idx + 1}
                                       </span>
                                     )}
+                                    
+                                    {/* Tag de Categoria com troca rápida */}
                                     <div className="relative shrink-0">
                                       <button
                                         type="button"
@@ -1691,14 +1418,14 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                           setActiveCategoryEditItemId(activeCategoryEditItemId === item.id ? null : item.id);
                                           setNewInlineCategoryName('');
                                         }}
-                                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold tracking-wider uppercase flex items-center gap-1 transition-all select-none cursor-pointer ${
+                                        className={`text-[9px] px-2 py-0.5 rounded font-bold tracking-wider uppercase flex items-center gap-1 transition-all select-none cursor-pointer ${
                                           groupName 
-                                            ? 'bg-[#2a3942] hover:bg-[#344654] text-[#8696a0] hover:text-[#d1d7db]' 
-                                            : 'bg-slate-500/15 hover:bg-slate-500/25 text-[#8696a0] hover:text-white border border-[#2a3942]/60'
+                                            ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' 
+                                            : 'bg-white/5 text-[#8696a0] hover:text-white border border-white/10'
                                         }`}
-                                        title="Trocar categoria do produto"
+                                        title="Trocar categoria"
                                       >
-                                        <span>{groupName || '+ Cat'}</span>
+                                        <span>{groupName || '+ CAT'}</span>
                                         <ChevronDown size={10} className="opacity-60" />
                                       </button>
 
@@ -1712,7 +1439,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                             }}
                                           />
                                           <div 
-                                            className="absolute left-0 mt-1.5 w-48 bg-[#202c33] border border-[#2a3942] rounded-2xl p-2.5 z-50 shadow-2xl animate-in fade-in slide-in-from-top-1 text-left"
+                                            className="absolute left-0 mt-1.5 w-48 bg-[#202c33] border border-white/10 rounded-2xl p-2.5 z-50 shadow-2xl animate-in fade-in slide-in-from-top-1 text-left"
                                             onClick={(e) => e.stopPropagation()}
                                           >
                                             <span className="text-[8px] font-black text-[#8696a0] block uppercase tracking-wider mb-1.5 px-1.5">Mudar Categoria</span>
@@ -1743,28 +1470,20 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                               ))}
                                             </div>
 
-                                            <div className="pt-2 border-t border-[#2a3942]/60 px-1">
+                                            <div className="pt-2 border-t border-white/10 px-1">
                                               <div className="flex gap-1.5">
                                                 <input
                                                   type="text"
                                                   value={newInlineCategoryName}
                                                   onChange={e => setNewInlineCategoryName(e.target.value.toUpperCase())}
                                                   placeholder="NOVA CATEGORIA"
-                                                  className="flex-1 bg-[#111b21] border border-[#2a3942] rounded-lg px-2 py-1 text-[9px] text-white focus:outline-none focus:border-indigo-500 placeholder-[#8696a0]/30"
-                                                  onKeyDown={e => {
-                                                    if (e.key === 'Enter') {
-                                                      e.preventDefault();
-                                                      if (newInlineCategoryName.trim()) {
-                                                        handleUpdateItemCategory(item.id, item.title, newInlineCategoryName.trim());
-                                                      }
-                                                    }
-                                                  }}
+                                                  className="flex-1 bg-[#111b21] border border-white/10 rounded-lg px-2 py-1 text-[9px] text-white focus:outline-none focus:border-indigo-500 placeholder-[#8696a0]/40"
                                                 />
                                                 <button
                                                   type="button"
                                                   disabled={!newInlineCategoryName.trim()}
                                                   onClick={() => handleUpdateItemCategory(item.id, item.title, newInlineCategoryName.trim())}
-                                                  className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-[9px] px-2 py-1 rounded-lg transition-all"
+                                                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-[9px] px-2 py-1 rounded-lg transition-all"
                                                 >
                                                   OK
                                                 </button>
@@ -1774,27 +1493,33 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                         </>
                                       )}
                                     </div>
-                                    <h4 className={`font-semibold text-sm leading-snug transition-all ${resp.isDone ? 'text-emerald-300 line-through opacity-80' : 'text-white'}`}>{cleanTitle}</h4>
+
+                                    <h4 className={`font-bold text-sm sm:text-base leading-snug transition-all ${resp.isDone ? 'text-emerald-300 line-through opacity-80' : 'text-white'}`}>{cleanTitle}</h4>
+                                    
                                     {resp.isDone && (
-                                      <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full shrink-0">Concluído ✅</span>
+                                      <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full shrink-0">
+                                        Concluído ✅
+                                      </span>
                                     )}
                                     {item.is_required && !resp.isDone && (
-                                      <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest shrink-0">* Obrigatório</span>
+                                      <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider shrink-0">* OBRIGATÓRIO</span>
                                     )}
                                     {item.is_critical && !resp.isDone && (
-                                      <span className="text-[9px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full shrink-0">Crítico</span>
+                                      <span className="text-[9px] font-bold text-rose-400 bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 rounded-full shrink-0">
+                                        CRÍTICO
+                                      </span>
                                     )}
                                   </div>
                                   
                                   {cleanDescription && (
-                                    <p className="text-[13px] md:text-sm text-[#e9edef] bg-[#111b21]/40 border-l-2 border-indigo-500/80 pl-3 py-1.5 rounded-r-lg mt-1.5 leading-relaxed ml-7">
+                                    <p className="text-xs sm:text-sm text-[#d1d7db] bg-[#111b21]/60 border-l-2 border-indigo-500 pl-3 py-2 rounded-r-xl mt-2 leading-relaxed ml-7 font-normal">
                                       {cleanDescription}
                                     </p>
                                   )}
 
-                                  {/* Metas Numéricas / Temperatura */}
+                                  {/* Metas Numéricas */}
                                   {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'kg') && (item.min_meta !== null || item.max_meta !== null) && (
-                                    <p className="text-[11px] text-teal-400 pl-7 font-mono font-bold mt-0.5">
+                                    <p className="text-[11px] text-teal-400 pl-7 font-mono font-bold mt-1">
                                       {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Máx: ${item.max_meta}` : ''} {item.measurement_unit || (item.response_type === 'kg' ? 'kg' : '')}
                                     </p>
                                   )}
@@ -1810,7 +1535,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                           <button
                                             type="button"
                                             onClick={() => handleAnswerChange(item.id, item.response_type, helperMsg.value!, item.min_meta, item.max_meta)}
-                                            className="text-[9px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-2 py-0.5 rounded-lg transition-all active:scale-95 cursor-pointer ml-1 select-none"
+                                            className="text-[9px] font-bold text-white bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1 rounded-lg transition-all active:scale-95 cursor-pointer ml-1 select-none shadow-sm"
                                           >
                                             Usar Sugestão
                                           </button>
@@ -1825,7 +1550,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                             {/* Lista de Verificação (Sub-tarefas) */}
                             {item.options && item.options.length > 0 && (
                               <div className="mt-2 pl-7 space-y-1.5">
-                                <span className="text-[9px] font-black text-indigo-400/80 block uppercase tracking-widest">Itens a verificar:</span>
+                                <span className="text-[9px] font-black text-indigo-400/90 block uppercase tracking-widest">ITENS A VERIFICAR:</span>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                   {item.options.map((sub: string, sIdx: number) => {
                                     const subtaskKey = `${item.id}_${sIdx}`;
@@ -1833,10 +1558,10 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                     return (
                                       <label 
                                         key={sIdx} 
-                                        className={`flex items-center gap-2 p-2 rounded-xl border transition-all cursor-pointer select-none text-[11px] ${
+                                        className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-all cursor-pointer select-none text-[11px] font-medium ${
                                           isChecked 
-                                            ? 'bg-indigo-500/10 border-indigo-500/30 text-white' 
-                                            : 'bg-black/25 border-[#2a3942]/40 text-[#d1d7db] hover:bg-black/40'
+                                            ? 'bg-indigo-500/15 border-indigo-500/40 text-white shadow-sm' 
+                                            : 'bg-[#111b21]/70 border-white/5 text-[#d1d7db] hover:bg-[#111b21]'
                                         }`}
                                       >
                                         <input
@@ -1848,7 +1573,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                               [subtaskKey]: e.target.checked
                                             }));
                                           }}
-                                          className="rounded border-[#2a3942] text-indigo-600 bg-transparent focus:ring-indigo-600/30 focus:ring-offset-0 w-3.5 h-3.5"
+                                          className="rounded-md border-white/20 text-indigo-500 bg-[#202c33] focus:ring-indigo-500/30 focus:ring-offset-0 w-4 h-4 cursor-pointer"
                                         />
                                         <span className="truncate">{sub}</span>
                                       </label>
@@ -1861,11 +1586,11 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                             {/* Campo de Upload de Foto de Evidência se exigido */}
                             {item.require_evidence && (
                               <div className="pt-2 pl-7 flex items-center gap-2 flex-wrap">
-                                <label className={`px-3 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
-                                  resp.evidenceUrl ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400' : 'border-indigo-500/30 bg-indigo-500/5 text-indigo-400'
+                                <label className={`px-3.5 py-2 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 ${
+                                  resp.evidenceUrl ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20'
                                 }`}>
-                                  <Camera size={13} />
-                                  {resp.evidenceUploading ? 'Enviando...' : resp.evidenceUrl ? 'Foto Anexada ✅' : 'Tirar Foto Evidência'}
+                                  <Camera size={14} />
+                                  {resp.evidenceUploading ? 'Enviando Foto...' : resp.evidenceUrl ? 'Foto Anexada ✅' : 'Tirar Foto Evidência'}
                                   <input
                                     type="file"
                                     accept="image/*"
@@ -1876,28 +1601,31 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                   />
                                 </label>
                                 {resp.evidenceUrl && (
-                                  <a href={resp.evidenceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[#8696a0] hover:underline truncate max-w-[160px]">
-                                    Ver Foto
+                                  <a href={resp.evidenceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[#8696a0] hover:text-white underline truncate max-w-[160px]">
+                                    Ver Foto Anexada
                                   </a>
                                 )}
                               </div>
                             )}
                           </div>
 
-                          {/* Seleção de Respostas */}
+                          {/* Seleção de Respostas Touch-First (Pílulas Vibrantes) */}
                           <div className="shrink-0 flex items-center gap-3">
                             
                             {/* BOOLEAN */}
                             {item.response_type === 'boolean' && (
-                              <div className="flex gap-2 bg-black/20 p-1 rounded-xl">
+                              <div className="flex gap-1.5 bg-[#111b21] p-1.5 rounded-2xl border border-white/10 shadow-inner">
                                 {['Feito', 'Não Feito'].map(opt => (
                                   <button
                                     key={opt}
+                                    type="button"
                                     onClick={() => handleAnswerChange(item.id, item.response_type, opt, item.min_meta, item.max_meta)}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer select-none ${
                                       resp.value === opt
-                                        ? opt === 'Feito' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
-                                        : 'text-[#8696a0] hover:text-[#d1d7db]'
+                                        ? opt === 'Feito' 
+                                          ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30 scale-[1.02]' 
+                                          : 'bg-gradient-to-r from-rose-600 to-rose-500 text-white shadow-lg shadow-rose-600/30 scale-[1.02]'
+                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
                                     }`}
                                   >
                                     {opt}
@@ -1908,15 +1636,18 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
 
                             {/* CONFORMIDADE */}
                             {item.response_type === 'conformity' && (
-                              <div className="flex gap-2 bg-black/20 p-1 rounded-xl">
+                              <div className="flex gap-1.5 bg-[#111b21] p-1.5 rounded-2xl border border-white/10 shadow-inner">
                                 {['Conforme', 'Não Conforme'].map(opt => (
                                   <button
                                     key={opt}
+                                    type="button"
                                     onClick={() => handleAnswerChange(item.id, item.response_type, opt, item.min_meta, item.max_meta)}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer select-none ${
                                       resp.value === opt
-                                        ? opt === 'Conforme' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
-                                        : 'text-[#8696a0] hover:text-[#d1d7db]'
+                                        ? opt === 'Conforme' 
+                                          ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30 scale-[1.02]' 
+                                          : 'bg-gradient-to-r from-rose-600 to-rose-500 text-white shadow-lg shadow-rose-600/30 scale-[1.02]'
+                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
                                     }`}
                                   >
                                     {opt}
@@ -1927,15 +1658,18 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
 
                             {/* YES_NO */}
                             {item.response_type === 'yes_no' && (
-                              <div className="flex gap-2 bg-black/20 p-1 rounded-xl">
+                              <div className="flex gap-1.5 bg-[#111b21] p-1.5 rounded-2xl border border-white/10 shadow-inner">
                                 {['Sim', 'Não'].map(opt => (
                                   <button
                                     key={opt}
+                                    type="button"
                                     onClick={() => handleAnswerChange(item.id, item.response_type, opt, item.min_meta, item.max_meta)}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer select-none ${
                                       resp.value === opt
-                                        ? opt === 'Sim' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
-                                        : 'text-[#8696a0] hover:text-[#d1d7db]'
+                                        ? opt === 'Sim' 
+                                          ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30 scale-[1.02]' 
+                                          : 'bg-gradient-to-r from-rose-600 to-rose-500 text-white shadow-lg shadow-rose-600/30 scale-[1.02]'
+                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
                                     }`}
                                   >
                                     {opt}
@@ -1946,7 +1680,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
 
                             {/* NUMERIC / TEMPERATURE / COUNTER / KG */}
                             {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'counter' || item.response_type === 'kg') && (
-                              <div className="flex items-center gap-1 bg-[#111b21] p-1.5 rounded-[20px] border border-[#2a3942]/80 shadow-inner">
+                              <div className="flex items-center gap-1.5 bg-[#111b21] p-1.5 rounded-[20px] border border-white/10 shadow-inner">
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -1961,7 +1695,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                       item.max_meta
                                     );
                                   }}
-                                  className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-[#202c33] hover:bg-[#2a3942] rounded-2xl text-[#8696a0] hover:text-white text-3xl font-light transition-all active:scale-95"
+                                  className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-[#202c33] hover:bg-[#2a3942] rounded-2xl text-[#8696a0] hover:text-white text-3xl font-light transition-all active:scale-95 cursor-pointer"
                                 >
                                   -
                                 </button>
@@ -1978,7 +1712,6 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                           handleAnswerChange(item.id, item.response_type, '', item.min_meta, item.max_meta);
                                           return;
                                         }
-                                        // Máscara pura de balança comercial (de trás para frente)
                                         const digits = rawVal.replace(/\D/g, '');
                                         if (digits) {
                                           const parsed = parseInt(digits, 10);
@@ -1998,11 +1731,11 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                       value={resp.value || ''}
                                       onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
                                       placeholder="0"
-                                      className="bg-transparent border-none focus:outline-none focus:ring-0 text-3xl md:text-4xl font-black w-20 md:w-24 text-center text-white p-0 m-0"
+                                      className="bg-transparent border-none focus:outline-none focus:ring-0 text-3xl md:text-4xl font-black w-20 md:w-24 text-center text-white p-0 m-0 font-mono"
                                     />
                                   )}
                                   {(item.measurement_unit || item.response_type === 'kg') && (
-                                    <span className="text-[11px] font-black text-indigo-400 shrink-0 ml-1.5 uppercase font-mono bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-lg select-none">
+                                    <span className="text-[11px] font-black text-indigo-400 shrink-0 ml-1.5 uppercase font-mono bg-indigo-500/15 border border-indigo-500/30 px-2 py-0.5 rounded-lg select-none">
                                       {item.measurement_unit || 'kg'}
                                     </span>
                                   )}
@@ -2022,7 +1755,7 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                                       item.max_meta
                                     );
                                   }}
-                                  className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-2xl text-3xl font-light transition-all active:scale-95 border border-emerald-500/30"
+                                  className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-2xl text-3xl font-light transition-all active:scale-95 border border-emerald-500/30 cursor-pointer"
                                 >
                                   +
                                 </button>
@@ -2032,26 +1765,27 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                             {/* TEXT FREE */}
                             {item.response_type === 'text' && (
                               <textarea
-                                rows={1}
+                                rows={2}
                                 value={resp.value || ''}
                                 onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
                                 placeholder="Descreva aqui..."
-                                className="bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none w-48"
+                                className="bg-[#111b21] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 w-48 sm:w-64"
                               />
                             )}
 
                             {/* STARS */}
                             {item.response_type === 'stars' && (
-                              <div className="flex gap-1">
+                              <div className="flex gap-1.5">
                                 {[1, 2, 3, 4, 5].map(starNum => {
                                   const isSelected = parseInt(resp.value) >= starNum;
                                   return (
                                     <button
                                       key={starNum}
+                                      type="button"
                                       onClick={() => handleAnswerChange(item.id, item.response_type, starNum.toString(), item.min_meta, item.max_meta)}
-                                      className={`p-1 hover:scale-110 transition-transform ${isSelected ? 'text-amber-400' : 'text-[#2a3942]'}`}
+                                      className={`p-1.5 hover:scale-125 transition-transform cursor-pointer ${isSelected ? 'text-amber-400' : 'text-[#202c33]'}`}
                                     >
-                                      <Star size={16} fill={isSelected ? 'currentColor' : 'transparent'} />
+                                      <Star size={20} fill={isSelected ? 'currentColor' : 'transparent'} />
                                     </button>
                                   );
                                 })}
@@ -2063,10 +1797,10 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
 
                           {/* Data e Hora e Operador */}
                           {resp.isDone && resp.answeredAt && resp.answeredBy && (
-                            <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-[#2a3942]/30 text-[10px] text-[#8696a0] animate-in fade-in slide-in-from-top-1">
-                              <CheckCircle2 size={12} className="text-emerald-500" />
+                            <div className="flex items-center justify-end gap-1.5 pt-2.5 border-t border-white/5 text-[10px] text-[#8696a0] animate-in fade-in slide-in-from-top-1">
+                              <CheckCircle2 size={13} className="text-emerald-400" />
                               <span>
-                                Registrado por <strong className="text-[#d1d7db]">{resp.answeredBy}</strong> em{' '}
+                                Registrado por <strong className="text-white font-semibold">{resp.answeredBy}</strong> em{' '}
                                 {new Date(resp.answeredAt).toLocaleDateString('pt-BR')} às{' '}
                                 {new Date(resp.answeredAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                               </span>
@@ -2079,29 +1813,31 @@ const _handleAnswerChangeOld = (itemId: string, itemType: string, val: string, m
                   </div>
 
                   {/* Barra Inferior de Envio */}
-                  <div className="h-20 bg-[#202c33] border-t border-[#2a3942]/60 px-6 flex items-center justify-between shrink-0">
+                  <div className="h-20 bg-[#182229]/90 backdrop-blur-xl border-t border-white/10 px-6 flex items-center justify-between shrink-0 shadow-2xl relative z-10">
                     <button
                       onClick={() => setActiveChecklist(null)}
-                      className="text-xs text-[#8696a0] hover:text-[#d1d7db] font-semibold flex items-center gap-1"
+                      className="text-xs text-[#8696a0] hover:text-white font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
-                      <X size={14} /> Abandonar Roteiro
+                      <X size={15} /> Abandonar Roteiro
                     </button>
                     
                     <button
                       onClick={handleSubmitChecklist}
                       disabled={submitting}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-6 py-3 rounded-2xl flex items-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50"
+                      className="bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-black text-xs px-7 py-3.5 rounded-2xl flex items-center gap-2.5 transition-all shadow-lg shadow-indigo-600/30 active:scale-95 disabled:opacity-50 cursor-pointer"
                     >
                       {submitting ? 'Registrando na Base...' : 'Finalizar e Assinar Rotina'}
-                      <ArrowRight size={14} />
+                      <ArrowRight size={15} />
                     </button>
                   </div>
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-3">
-                  <Smile size={48} className="text-[#2a3942] animate-pulse" />
+                  <div className="w-16 h-16 rounded-3xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-2 shadow-lg shadow-indigo-500/5 animate-pulse">
+                    <Smile size={36} />
+                  </div>
                   <div>
-                    <h3 className="font-bold text-white text-md">Cozinha Organizada!</h3>
+                    <h3 className="font-black text-white text-lg tracking-tight">Cozinha Organizada!</h3>
                     <p className="text-xs text-[#8696a0] mt-1 max-w-[280px] mx-auto leading-relaxed">
                       Selecione uma das rotinas ativas ou consulte o histórico de concluídos no painel esquerdo.
                     </p>
