@@ -649,7 +649,7 @@ class EventProcessor {
                   const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
                   if(!cid) continue; 
                   
-                  const key = `${b.tenantId}_${b.instanceId}_${cid}`;
+                  const key = `${b.tenantId}_${cid}`;
                   if(!convMap.has(key)) {
                       convMap.set(key, {
                           tenant_id: b.tenantId,
@@ -690,9 +690,8 @@ class EventProcessor {
              
              const existingConvMap = new Map();
              for(const e of existingConvs) {
-                 // Usa tenant + instance + contact como chave de isolamento da conversa
-                 const safeInstance = e.instance_id || 'null_instance';
-                 existingConvMap.set(`${e.tenant_id}_${safeInstance}_${e.contact_id}`, e);
+                 // Usa tenant + contact como chave de unicidade da conversa
+                 existingConvMap.set(`${e.tenant_id}_${e.contact_id}`, e);
              }
              
              const toInsertConvs = [];
@@ -733,6 +732,7 @@ class EventProcessor {
                       const updatePayload = {
                           id: exist.id,
                           tenant_id: data.tenant_id,
+                          instance_id: data.instance_id || exist.instance_id,
                           contact_id: data.contact_id,
                           unread_count: Number(exist.unread_count || 0) + Number(data.unread_count || 0),
                           last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 50).join(''),
@@ -780,7 +780,6 @@ class EventProcessor {
              
              const insertedConvs = [];
              if(toInsertConvs.length > 0) {
-                 // Usando upsert com a nova restrição de unicidade para evitar race conditions
                  const { data: res, error: errInst } = await supabase.from('conversations')
                      .upsert(toInsertConvs, { onConflict: 'tenant_id, instance_id, contact_id' })
                      .select('id, tenant_id, contact_id, instance_id');
