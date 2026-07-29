@@ -1319,7 +1319,9 @@ class EventProcessor {
              const chunkLimit = 500;
              for (let i = 0; i < histContacts.length; i += chunkLimit) {
                  const chunk = histContacts.slice(i, i + chunkLimit);
-                 await supabase.from('contacts').upsert(chunk, { onConflict: 'tenant_id, phone', ignoreDuplicates: true }).catch(() => {});
+                 try {
+                     await supabase.from('contacts').upsert(chunk, { onConflict: 'tenant_id, phone', ignoreDuplicates: true });
+                 } catch (e) {}
              }
         }
 

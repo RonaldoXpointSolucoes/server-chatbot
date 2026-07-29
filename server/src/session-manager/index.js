@@ -83,7 +83,11 @@ class SessionManager {
                         'Incompatible version number on WhisperMessage',
                         'conflict',
                         'replaced',
-                        'Stream Errored (conflict)'
+                        'Stream Errored (conflict)',
+                        'Failed to fetch stream',
+                        'handling notification',
+                        'mmg.whatsapp.net',
+                        'Precondition Required'
                     ];
                     
                     if (parsed.msg && ignoredLogs.some(text => parsed.msg.includes(text))) {
