@@ -7,6 +7,7 @@ import {
   MapPin, 
   Camera, 
   CheckCircle2, 
+  XCircle,
   AlertTriangle, 
   X, 
   LogOut, 
@@ -132,7 +133,6 @@ export default function ChecklistTablet() {
   }, [activeChecklist?.id]);
 
   useEffect(() => {
-    // Injeta canvas-confetti via CDN de forma segura
     if (!(window as any).confetti) {
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';
@@ -458,7 +458,7 @@ export default function ChecklistTablet() {
     setSearchQuery('');
     setCategoryFilter('');
 
-    // Busca itens do checklist
+    // Busca itens do checklist usando a coluna correta 'sort_order'
     try {
       const { data: items, error } = await supabase
         .from('checklist_items')
@@ -746,46 +746,46 @@ export default function ChecklistTablet() {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#0b141a] text-[#d1d7db] overflow-hidden relative styled-scrollbar">
+    <div className="flex-1 flex flex-col h-full bg-[#0b141a] text-[#d1d7db] overflow-hidden relative styled-scrollbar text-base">
       
       {/* TOAST DE NOTIFICAÇÃO */}
       {toastMsg && (
-        <div className={`fixed top-5 right-5 z-[999] px-4 py-3 rounded-2xl border text-xs font-bold shadow-2xl flex items-center gap-2 animate-in slide-in-from-top-3 duration-300 ${
+        <div className={`fixed top-6 right-6 z-[999] px-6 py-4 rounded-2xl border text-sm font-bold shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-3 duration-300 ${
           toastMsg.type === 'success' 
-            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 backdrop-blur-md' 
-            : 'bg-rose-500/20 text-rose-300 border-rose-500/40 backdrop-blur-md'
+            ? 'bg-emerald-500/25 text-emerald-200 border-emerald-500/50 backdrop-blur-xl' 
+            : 'bg-rose-500/25 text-rose-200 border-rose-500/50 backdrop-blur-xl'
         }`}>
-          {toastMsg.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+          {toastMsg.type === 'success' ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
           <span>{toastMsg.msg}</span>
         </div>
       )}
 
       {/* MODAL DE SUCESSO GAMIFICADO (CONFETTI & SCORE) */}
       {showSuccessModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
-          <div className="bg-[#182229] border border-white/10 rounded-[36px] p-8 max-w-md w-full text-center relative shadow-2xl animate-in zoom-in-95 duration-300">
-            <div className="w-20 h-20 bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-3xl mx-auto flex items-center justify-center text-black font-black text-3xl shadow-xl shadow-emerald-500/20 mb-4 animate-bounce">
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-[#182229] border border-white/15 rounded-[40px] p-10 max-w-lg w-full text-center relative shadow-2xl animate-in zoom-in-95 duration-300">
+            <div className="w-24 h-24 bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-3xl mx-auto flex items-center justify-center text-black font-black text-4xl shadow-xl shadow-emerald-500/30 mb-6 animate-bounce">
               🌟
             </div>
             
-            <h2 className="text-2xl font-black text-white tracking-tight">Rotina Concluída com Sucesso!</h2>
-            <p className="text-xs text-[#8696a0] mt-1">Sua auditoria foi salva e registrada no servidor.</p>
+            <h2 className="text-3xl font-black text-white tracking-tight">Rotina Concluída com Sucesso!</h2>
+            <p className="text-sm text-[#8696a0] mt-2">Sua auditoria foi salva e registrada no servidor.</p>
 
-            <div className="my-6 p-4 rounded-2xl bg-[#111b21] border border-white/5 flex items-center justify-around font-mono">
+            <div className="my-8 p-6 rounded-3xl bg-[#111b21] border border-white/10 flex items-center justify-around font-mono">
               <div>
-                <span className="text-[10px] text-[#8696a0] uppercase font-bold block">Pontuação</span>
-                <span className="text-2xl font-black text-emerald-400">{successScore}%</span>
+                <span className="text-xs text-[#8696a0] uppercase font-bold block">Pontuação</span>
+                <span className="text-3xl font-black text-emerald-400">{successScore}%</span>
               </div>
-              <div className="w-px h-8 bg-white/10" />
+              <div className="w-px h-12 bg-white/10" />
               <div>
-                <span className="text-[10px] text-[#8696a0] uppercase font-bold block">Status</span>
-                <span className="text-xs font-bold text-white uppercase bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-md mt-1 inline-block">Conforme</span>
+                <span className="text-xs text-[#8696a0] uppercase font-bold block">Status</span>
+                <span className="text-sm font-bold text-white uppercase bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-lg mt-1 inline-block border border-emerald-500/30">Conforme</span>
               </div>
             </div>
 
             <button
               onClick={() => setShowSuccessModal(false)}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-sm py-3.5 rounded-2xl transition-all shadow-lg shadow-emerald-500/25 cursor-pointer active:scale-95"
+              className="w-full bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-black font-black text-base py-4 rounded-2xl transition-all shadow-xl shadow-emerald-500/30 cursor-pointer active:scale-95"
             >
               Continuar Trabalhando 🚀
             </button>
@@ -795,64 +795,63 @@ export default function ChecklistTablet() {
 
       {/* TELA DE AUTENTICAÇÃO POR PIN (TOTEM BLOQUEADO) */}
       {!loggedInUser && (
-        <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 bg-[#0b141a] relative overflow-hidden">
-          {/* Luzes de fundo decorativas */}
+        <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10 bg-[#0b141a] relative overflow-hidden">
           <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
-          <div className="max-w-4xl w-full flex flex-col md:flex-row items-center gap-8 bg-[#182229]/80 backdrop-blur-xl border border-white/10 p-6 sm:p-10 rounded-[40px] shadow-2xl relative z-10">
+          <div className="max-w-5xl w-full flex flex-col md:flex-row items-center gap-8 sm:gap-12 bg-[#182229]/80 backdrop-blur-xl border border-white/15 p-8 sm:p-12 rounded-[48px] shadow-2xl relative z-10">
             
             {/* Lista de Operadores da Equipe */}
-            <div className="flex-1 w-full space-y-4">
+            <div className="flex-1 w-full space-y-5">
               <div>
-                <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs uppercase tracking-widest">
-                  <User size={16} /> Totem Operacional PWA
+                <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm uppercase tracking-widest">
+                  <User size={18} /> Totem Operacional Tablet PWA
                 </div>
-                <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight mt-1">Quem está operando?</h1>
-                <p className="text-xs text-[#8696a0] mt-1">Selecione seu nome na lista para autenticar no turno.</p>
+                <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight mt-2">Quem está operando?</h1>
+                <p className="text-sm text-[#8696a0] mt-1.5">Selecione seu nome na lista para autenticar com seu PIN.</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 max-h-[320px] overflow-y-auto styled-scrollbar pr-1">
+              <div className="grid grid-cols-2 gap-4 max-h-[380px] overflow-y-auto styled-scrollbar pr-2">
                 {operators.map((op) => (
                   <button
                     key={op.id}
                     onClick={() => handleSelectOperator(op)}
-                    className={`p-3.5 rounded-2xl border text-left transition-all flex items-center gap-3 cursor-pointer ${
+                    className={`p-5 rounded-3xl border text-left transition-all flex items-center gap-4 cursor-pointer min-h-[72px] ${
                       selectedOperator?.id === op.id 
-                        ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-lg shadow-indigo-500/10' 
-                        : 'bg-[#202c33]/60 hover:bg-[#202c33] border-white/5 text-[#d1d7db]'
+                        ? 'bg-indigo-600/30 border-indigo-500 text-white shadow-xl shadow-indigo-500/20 scale-[1.02]' 
+                        : 'bg-[#202c33]/80 hover:bg-[#202c33] border-white/10 text-[#d1d7db]'
                     }`}
                   >
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white font-black text-sm flex items-center justify-center shrink-0 shadow-md">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white font-black text-lg flex items-center justify-center shrink-0 shadow-md">
                       {op.name.substring(0, 1).toUpperCase()}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <h4 className="font-bold text-xs text-white truncate">{op.name}</h4>
-                      <p className="text-[10px] text-[#8696a0] capitalize">{op.role === 'manager' ? 'Gerente' : 'Operador'}</p>
+                      <h4 className="font-black text-sm sm:text-base text-white truncate">{op.name}</h4>
+                      <p className="text-xs text-[#8696a0] capitalize mt-0.5">{op.role === 'manager' ? 'Gerente' : 'Operador'}</p>
                     </div>
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Teclado Numérico de PIN de 5 Dígitos */}
-            <div className="w-full md:w-72 shrink-0 bg-[#111b21] border border-white/10 p-6 rounded-[32px] flex flex-col items-center justify-center shadow-xl">
+            {/* Teclado Numérico de PIN de 5 Dígitos Otimizado para Toque */}
+            <div className="w-full md:w-80 shrink-0 bg-[#111b21] border border-white/15 p-8 rounded-[40px] flex flex-col items-center justify-center shadow-2xl">
               {selectedOperator ? (
                 <>
-                  <div className="text-center mb-4">
-                    <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider">Digitar PIN</span>
-                    <h3 className="text-sm font-bold text-white truncate max-w-[200px]">{selectedOperator.name}</h3>
+                  <div className="text-center mb-5">
+                    <span className="text-xs uppercase font-bold text-indigo-400 tracking-wider">Digitar PIN</span>
+                    <h3 className="text-base font-black text-white truncate max-w-[240px] mt-0.5">{selectedOperator.name}</h3>
                   </div>
 
                   {/* Visor de Dígitos do PIN */}
-                  <div className="flex gap-2 mb-5">
+                  <div className="flex gap-3 mb-6">
                     {[0, 1, 2, 3, 4].map((idx) => (
                       <div 
                         key={idx} 
-                        className={`w-8 h-10 rounded-xl border flex items-center justify-center font-mono font-bold text-lg transition-all ${
+                        className={`w-10 h-12 rounded-2xl border flex items-center justify-center font-mono font-black text-xl transition-all ${
                           pinCode.length > idx 
-                            ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300 shadow-sm shadow-indigo-500/20' 
-                            : 'bg-[#202c33] border-white/5 text-slate-600'
+                            ? 'bg-indigo-500/30 border-indigo-400 text-indigo-300 shadow-md shadow-indigo-500/20' 
+                            : 'bg-[#202c33] border-white/10 text-slate-600'
                         }`}
                       >
                         {pinCode.length > idx ? '•' : ''}
@@ -861,44 +860,44 @@ export default function ChecklistTablet() {
                   </div>
 
                   {authError && (
-                    <p className="text-[10px] text-rose-400 font-bold mb-3 animate-shake">{authError}</p>
+                    <p className="text-xs text-rose-400 font-bold mb-4 animate-shake text-center">{authError}</p>
                   )}
 
-                  {/* Teclado 3x4 */}
-                  <div className="grid grid-cols-3 gap-2 w-full max-w-[220px]">
+                  {/* Teclado 3x4 com Teclas Grandes (56px) */}
+                  <div className="grid grid-cols-3 gap-3 w-full">
                     {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(num => (
                       <button
                         key={num}
                         onClick={() => handleKeyPress(num)}
-                        className="h-12 rounded-xl bg-[#202c33] hover:bg-[#2a3942] active:scale-95 text-white font-black text-lg border border-white/5 transition-all shadow-sm cursor-pointer"
+                        className="h-14 rounded-2xl bg-[#202c33] hover:bg-[#2a3942] active:scale-95 text-white font-black text-2xl border border-white/10 transition-all shadow-md cursor-pointer flex items-center justify-center select-none"
                       >
                         {num}
                       </button>
                     ))}
                     <button
                       onClick={() => setSelectedOperator(null)}
-                      className="h-12 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px] font-bold uppercase transition-all cursor-pointer"
+                      className="h-14 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-xs font-black uppercase transition-all cursor-pointer flex items-center justify-center select-none border border-rose-500/20"
                     >
                       Cancelar
                     </button>
                     <button
                       onClick={() => handleKeyPress('0')}
-                      className="h-12 rounded-xl bg-[#202c33] hover:bg-[#2a3942] active:scale-95 text-white font-black text-lg border border-white/5 transition-all shadow-sm cursor-pointer"
+                      className="h-14 rounded-2xl bg-[#202c33] hover:bg-[#2a3942] active:scale-95 text-white font-black text-2xl border border-white/10 transition-all shadow-md cursor-pointer flex items-center justify-center select-none"
                     >
                       0
                     </button>
                     <button
                       onClick={handleDeletePress}
-                      className="h-12 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-bold transition-all cursor-pointer flex items-center justify-center"
+                      className="h-14 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-sm font-black transition-all cursor-pointer flex items-center justify-center select-none border border-amber-500/20"
                     >
                       ⌫
                     </button>
                   </div>
                 </>
               ) : (
-                <div className="py-8 text-center text-[#8696a0]">
-                  <Lock size={32} className="mx-auto text-[#202c33] mb-2" />
-                  <p className="text-xs">Selecione seu perfil à esquerda para inserir o PIN.</p>
+                <div className="py-10 text-center text-[#8696a0]">
+                  <Lock size={40} className="mx-auto text-[#202c33] mb-3" />
+                  <p className="text-sm">Selecione seu perfil à esquerda para inserir o PIN.</p>
                 </div>
               )}
             </div>
@@ -912,26 +911,26 @@ export default function ChecklistTablet() {
         <div className="flex-1 flex flex-col overflow-hidden">
           
           {/* Header Superior do Totem */}
-          <div className="h-16 bg-[#202c33]/80 backdrop-blur-xl border-b border-white/10 px-6 flex items-center justify-between shrink-0 shadow-md relative z-10">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-400 border border-white/20 flex items-center justify-center text-white font-black text-sm shadow-md">
+          <div className="h-20 bg-[#202c33]/90 backdrop-blur-xl border-b border-white/15 px-8 flex items-center justify-between shrink-0 shadow-lg relative z-10">
+            <div className="flex items-center gap-4">
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 border border-white/30 flex items-center justify-center text-white font-black text-lg shadow-md">
                 {loggedInUser.name.substring(0, 1).toUpperCase()}
               </div>
               <div>
-                <span className="text-[10px] uppercase font-bold tracking-wider text-[#8696a0] block">Operador Conectado</span>
-                <h1 className="text-sm font-black text-white flex items-center gap-1.5">
+                <span className="text-xs uppercase font-bold tracking-wider text-[#8696a0] block">Operador Conectado</span>
+                <h1 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
                   {loggedInUser.name}
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block ml-1" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping inline-block ml-1" />
                 </h1>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <button
                 onClick={handleLogout}
-                className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95"
+                className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold flex items-center gap-2.5 transition-all cursor-pointer shadow-md active:scale-95"
               >
-                <Lock size={13} /> Bloquear Tela
+                <Lock size={16} /> Bloquear Tela
               </button>
             </div>
           </div>
@@ -939,18 +938,18 @@ export default function ChecklistTablet() {
           <div className="flex-1 flex overflow-hidden">
             
             {/* LISTAGEM DE CHECKLISTS DISPONÍVEIS (SEÇÃO ESQUERDA) */}
-            <div className={`w-full md:w-[340px] ${(activeChecklist || activeExecution) ? 'hidden md:flex' : 'flex'} shrink-0 border-r border-white/10 bg-[#182229]/60 flex-col overflow-y-auto p-4 styled-scrollbar gap-3`}>
+            <div className={`w-full md:w-[360px] ${(activeChecklist || activeExecution) ? 'hidden md:flex' : 'flex'} shrink-0 border-r border-white/15 bg-[#182229]/70 flex-col overflow-y-auto p-5 styled-scrollbar gap-4`}>
               
-              {/* Abas Premium de Navegação */}
-              <div className="flex gap-2 p-1 bg-[#111b21] rounded-2xl border border-white/10 shrink-0">
+              {/* Abas Otimizadas de Navegação */}
+              <div className="flex gap-2 p-1.5 bg-[#111b21] rounded-2xl border border-white/15 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
                     setActiveTab('active');
                     setActiveExecution(null);
                   }}
-                  className={`flex-1 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer ${
-                    activeTab === 'active' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'text-[#8696a0] hover:text-white bg-transparent'
+                  className={`flex-1 py-3 text-xs sm:text-sm font-black rounded-xl transition-all cursor-pointer ${
+                    activeTab === 'active' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-[#8696a0] hover:text-white bg-transparent'
                   }`}
                 >
                   Pendentes ({checklists.length})
@@ -962,22 +961,22 @@ export default function ChecklistTablet() {
                     setActiveChecklist(null);
                     if (loggedInUser) loadCompletedExecutions(loggedInUser.id);
                   }}
-                  className={`flex-1 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer ${
-                    activeTab === 'history' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'text-[#8696a0] hover:text-white bg-transparent'
+                  className={`flex-1 py-3 text-xs sm:text-sm font-black rounded-xl transition-all cursor-pointer ${
+                    activeTab === 'history' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-[#8696a0] hover:text-white bg-transparent'
                   }`}
                 >
-                  Concluídos ({completedExecutions.length})
+                  Concluídos
                 </button>
               </div>
 
               {activeTab === 'active' ? (
                 <>
-                  <h3 className="text-[10px] font-black text-[#8696a0] uppercase tracking-widest px-2 mt-2">Rotinas do seu Turno</h3>
+                  <h3 className="text-xs font-black text-[#8696a0] uppercase tracking-widest px-2 mt-1">Rotinas do seu Turno</h3>
                   
                   {loadingChecklists ? (
-                    <div className="p-8 text-center text-[#8696a0] animate-pulse text-xs">Carregando rotinas...</div>
+                    <div className="p-10 text-center text-[#8696a0] animate-pulse text-sm">Carregando rotinas...</div>
                   ) : checklists.length === 0 ? (
-                    <div className="p-8 text-center text-[#8696a0] italic text-xs bg-[#202c33]/30 rounded-2xl border border-dashed border-white/5">
+                    <div className="p-10 text-center text-[#8696a0] italic text-sm bg-[#202c33]/40 rounded-3xl border border-dashed border-white/10">
                       Nenhum checklist disponível no momento.
                     </div>
                   ) : (
@@ -990,29 +989,29 @@ export default function ChecklistTablet() {
                           setActiveExecution(null);
                         }}
                         disabled={submitting}
-                        className={`p-4 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[110px] cursor-pointer group ${
+                        className={`p-5 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[120px] cursor-pointer group ${
                           activeChecklist?.id === chk.id 
-                            ? 'border-indigo-500 bg-indigo-500/15 shadow-lg shadow-indigo-500/10' 
-                            : 'border-white/5 bg-[#202c33]/60 hover:bg-[#202c33] hover:border-white/10'
+                            ? 'border-indigo-500 bg-indigo-500/20 shadow-xl shadow-indigo-500/15 scale-[1.01]' 
+                            : 'border-white/10 bg-[#202c33]/70 hover:bg-[#202c33] hover:border-white/20'
                         }`}
                       >
                         <div>
-                          <div className="flex justify-between items-start gap-1">
-                            <span className="text-[9px] px-2.5 py-0.5 rounded-full font-bold bg-indigo-500/20 text-indigo-300 shrink-0 border border-indigo-500/30 uppercase tracking-wider">
+                          <div className="flex justify-between items-start gap-2">
+                            <span className="text-[10px] px-3 py-1 rounded-full font-bold bg-indigo-500/25 text-indigo-300 shrink-0 border border-indigo-500/40 uppercase tracking-wider">
                               {chk.category || 'Geral'}
                             </span>
-                            <span className="text-[9px] text-[#8696a0] font-medium truncate">{chk.unit_name}</span>
+                            <span className="text-xs text-[#8696a0] font-semibold truncate">{chk.unit_name}</span>
                           </div>
-                          <h4 className="font-bold text-white text-sm mt-2.5 leading-snug line-clamp-1 group-hover:text-indigo-300 transition-colors">
+                          <h4 className="font-black text-white text-base mt-3 leading-snug line-clamp-2 group-hover:text-indigo-300 transition-colors">
                             {chk.title}
                           </h4>
                         </div>
 
-                        <div className="flex items-center justify-between mt-3 text-[10px] text-[#8696a0] pt-2.5 border-t border-white/5 w-full">
-                          <span className="flex items-center gap-1 font-semibold text-slate-300">
-                            <Compass size={12} className="text-indigo-400 shrink-0" /> {chk.sector_name}
+                        <div className="flex items-center justify-between mt-4 text-xs text-[#8696a0] pt-3 border-t border-white/10 w-full">
+                          <span className="flex items-center gap-1.5 font-bold text-slate-200">
+                            <Compass size={14} className="text-indigo-400 shrink-0" /> {chk.sector_name}
                           </span>
-                          <ChevronRight size={14} className="text-[#8696a0] group-hover:translate-x-1 transition-transform" />
+                          <ChevronRight size={16} className="text-[#8696a0] group-hover:translate-x-1 transition-transform" />
                         </div>
                       </button>
                     ))
@@ -1020,12 +1019,12 @@ export default function ChecklistTablet() {
                 </>
               ) : (
                 <>
-                  <h3 className="text-[10px] font-black text-[#8696a0] uppercase tracking-widest px-2 mt-2">Histórico Recente</h3>
+                  <h3 className="text-xs font-black text-[#8696a0] uppercase tracking-widest px-2 mt-1">Histórico Recente</h3>
                   
                   {loadingHistory ? (
-                    <div className="p-8 text-center text-[#8696a0] animate-pulse text-xs">Buscando histórico...</div>
+                    <div className="p-10 text-center text-[#8696a0] animate-pulse text-sm">Buscando histórico...</div>
                   ) : completedExecutions.length === 0 ? (
-                    <div className="p-8 text-center text-[#8696a0] italic text-xs bg-[#202c33]/30 rounded-2xl border border-dashed border-white/5">
+                    <div className="p-10 text-center text-[#8696a0] italic text-sm bg-[#202c33]/40 rounded-3xl border border-dashed border-white/10">
                       Nenhuma rotina finalizada recentemente.
                     </div>
                   ) : (
@@ -1038,9 +1037,9 @@ export default function ChecklistTablet() {
                         minute: '2-digit'
                       });
                       
-                      const scoreColor = exec.score >= 90 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' :
-                                         exec.score >= 70 ? 'text-amber-400 border-amber-500/30 bg-amber-500/10' :
-                                         'text-rose-400 border-rose-500/30 bg-rose-500/10';
+                      const scoreColor = exec.score >= 90 ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/15' :
+                                         exec.score >= 70 ? 'text-amber-400 border-amber-500/40 bg-amber-500/15' :
+                                         'text-rose-400 border-rose-500/40 bg-rose-500/15';
 
                       return (
                         <button
@@ -1051,25 +1050,25 @@ export default function ChecklistTablet() {
                             setActiveChecklist(null);
                             loadExecutionDetails(exec.id);
                           }}
-                          className={`p-4 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[110px] cursor-pointer ${
-                            activeExecution?.id === exec.id ? 'border-indigo-500 bg-indigo-500/15' : 'border-white/5 bg-[#202c33]/60 hover:bg-[#202c33]'
+                          className={`p-5 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[120px] cursor-pointer ${
+                            activeExecution?.id === exec.id ? 'border-indigo-500 bg-indigo-500/20' : 'border-white/10 bg-[#202c33]/70 hover:bg-[#202c33]'
                           }`}
                         >
                           <div>
-                            <div className="flex justify-between items-start gap-1 flex-wrap">
-                              <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-slate-500/20 text-[#8696a0] shrink-0 uppercase tracking-wider">
+                            <div className="flex justify-between items-start gap-2 flex-wrap">
+                              <span className="text-[10px] px-2.5 py-1 rounded-full font-bold bg-slate-500/20 text-[#8696a0] shrink-0 uppercase tracking-wider">
                                 {chkInfo.category || 'Geral'}
                               </span>
-                              <span className={`text-[9px] px-2 py-0.5 border rounded-full font-bold font-mono ${scoreColor} shrink-0`}>
+                              <span className={`text-[10px] px-2.5 py-1 border rounded-full font-bold font-mono ${scoreColor} shrink-0`}>
                                 {exec.score}% conformidade
                               </span>
                             </div>
-                            <h4 className="font-bold text-white text-sm mt-2.5 leading-snug line-clamp-1">{chkInfo.title}</h4>
+                            <h4 className="font-black text-white text-base mt-3 leading-snug line-clamp-2">{chkInfo.title}</h4>
                           </div>
 
-                          <div className="flex items-center justify-between mt-3 text-[10px] text-[#8696a0] pt-2.5 border-t border-white/5 w-full font-mono">
+                          <div className="flex items-center justify-between mt-4 text-xs text-[#8696a0] pt-3 border-t border-white/10 w-full font-mono">
                             <span>{formattedDate}</span>
-                            <ChevronRight size={14} className="text-slate-400" />
+                            <ChevronRight size={16} className="text-slate-400" />
                           </div>
                         </button>
                       );
@@ -1079,32 +1078,32 @@ export default function ChecklistTablet() {
               )}
             </div>
 
-            {/* ÁREA DE PREENCHIMENTO OU DETALHES (SEÇÃO DIREITA) */}
+            {/* ÁREA DE PREENCHIMENTO OU DETALHES (SEÇÃO DIREITA DE MAIOR AMPLITUDE) */}
             <div className={`flex-1 ${(!activeChecklist && !activeExecution) ? 'hidden md:flex' : 'flex'} flex-col overflow-hidden bg-[#0b141a]`}>
               {activeExecution ? (
                 <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-200">
                   {/* Cabeçalho da Execução Concluída */}
-                  <div className="p-6 bg-[#182229]/80 backdrop-blur-md border-b border-white/10 shrink-0">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
+                  <div className="p-8 bg-[#182229]/90 backdrop-blur-md border-b border-white/15 shrink-0">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+                      <div className="flex items-center gap-4">
                         <button
                           type="button"
                           onClick={() => setActiveExecution(null)}
-                          className="md:hidden p-2 -ml-2 rounded-full hover:bg-white/10 text-[#8696a0] hover:text-white transition-all shrink-0"
+                          className="md:hidden p-3 -ml-2 rounded-2xl hover:bg-white/10 text-[#8696a0] hover:text-white transition-all shrink-0"
                         >
-                          <ChevronRight className="rotate-180" size={20} />
+                          <ChevronRight className="rotate-180" size={24} />
                         </button>
                         <div>
-                          <span className="text-[9px] uppercase tracking-wider font-mono text-emerald-400 bg-emerald-500/15 px-3 py-1 rounded-full border border-emerald-500/30 font-bold">Rotina Concluída</span>
-                          <h2 className="text-xl font-black text-white mt-1.5">{activeExecution.checklists?.title || 'Rotina Finalizada'}</h2>
-                          <p className="text-xs text-[#8696a0] mt-0.5">Visualizando respostas registradas do histórico.</p>
+                          <span className="text-xs uppercase tracking-wider font-mono text-emerald-400 bg-emerald-500/20 px-3.5 py-1 rounded-full border border-emerald-500/40 font-bold">Rotina Concluída</span>
+                          <h2 className="text-2xl font-black text-white mt-2 tracking-tight">{activeExecution.checklists?.title || 'Rotina Finalizada'}</h2>
+                          <p className="text-sm text-[#8696a0] mt-1">Visualizando respostas registradas do histórico.</p>
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-3 shrink-0">
-                        <div className="px-4 py-2 rounded-2xl border border-white/10 bg-[#111b21] text-left font-mono">
-                          <span className="text-[9px] block text-[#8696a0] uppercase tracking-wider font-bold">Duração</span>
-                          <span className="text-xs text-white font-bold">
+                      <div className="flex items-center gap-4 shrink-0">
+                        <div className="px-5 py-3 rounded-2xl border border-white/15 bg-[#111b21] text-left font-mono">
+                          <span className="text-xs block text-[#8696a0] uppercase tracking-wider font-bold">Duração</span>
+                          <span className="text-sm text-white font-bold">
                             {(() => {
                               const sec = activeExecution.duration_seconds || 0;
                               const min = Math.floor(sec / 60);
@@ -1112,26 +1111,26 @@ export default function ChecklistTablet() {
                             })()}
                           </span>
                         </div>
-                        <div className={`px-4 py-2 rounded-2xl border flex flex-col justify-center text-left font-mono ${
-                          activeExecution.score >= 90 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' :
-                          activeExecution.score >= 70 ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' :
-                          'border-rose-500/30 bg-rose-500/10 text-rose-400'
+                        <div className={`px-5 py-3 rounded-2xl border flex flex-col justify-center text-left font-mono ${
+                          activeExecution.score >= 90 ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400' :
+                          activeExecution.score >= 70 ? 'border-amber-500/40 bg-amber-500/15 text-amber-400' :
+                          'border-rose-500/40 bg-rose-500/15 text-rose-400'
                         }`}>
-                          <span className="text-[9px] uppercase tracking-wider font-bold opacity-80">Conformidade</span>
-                          <span className="text-xs font-black">{activeExecution.score}%</span>
+                          <span className="text-xs uppercase tracking-wider font-bold opacity-80">Conformidade</span>
+                          <span className="text-sm font-black">{activeExecution.score}%</span>
                         </div>
                       </div>
                     </div>
                   </div>
 
                   {/* Detalhes das Respostas */}
-                  <div className="flex-1 overflow-y-auto styled-scrollbar p-6 space-y-4">
+                  <div className="flex-1 overflow-y-auto styled-scrollbar p-8 space-y-5">
                     {loadingExecutionDetails ? (
-                      <div className="p-16 text-center text-[#8696a0] animate-pulse text-xs">Carregando respostas detalhadas...</div>
+                      <div className="p-20 text-center text-[#8696a0] animate-pulse text-sm">Carregando respostas detalhadas...</div>
                     ) : executionResponses.length === 0 ? (
-                      <div className="p-16 text-center text-[#8696a0] italic text-xs">Nenhuma resposta registrada para esta rotina.</div>
+                      <div className="p-20 text-center text-[#8696a0] italic text-sm">Nenhuma resposta registrada para esta rotina.</div>
                     ) : (
-                      <div className="space-y-4">
+                      <div className="space-y-5">
                         {executionResponses.map((resp, idx) => {
                           const item = resp.checklist_items || { title: 'Tarefa Excluída', description: '', response_type: 'boolean' };
                           const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
@@ -1140,38 +1139,38 @@ export default function ChecklistTablet() {
                           
                           const borderClass = resp.is_done 
                             ? resp.is_conforming && resp.is_meta_ok 
-                              ? 'border-emerald-500/30 bg-emerald-500/5' 
-                              : 'border-rose-500/30 bg-rose-500/5'
-                            : 'border-white/5 bg-[#182229]/60';
+                              ? 'border-emerald-500/40 bg-emerald-500/10' 
+                              : 'border-rose-500/40 bg-rose-500/10'
+                            : 'border-white/10 bg-[#182229]/70';
 
                           return (
                             <div 
                               key={resp.id} 
-                              className={`p-5 rounded-[28px] border flex flex-col gap-3 transition-all ${borderClass}`}
+                              className={`p-6 rounded-[32px] border flex flex-col gap-4 transition-all ${borderClass}`}
                             >
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                                <div className="space-y-0.5">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-[#202c33] w-5 h-5 flex items-center justify-center rounded-full shrink-0 border border-white/5">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-3 flex-wrap">
+                                    <span className="text-xs font-bold font-mono text-[#8696a0] bg-[#202c33] w-7 h-7 flex items-center justify-center rounded-full shrink-0 border border-white/10">
                                       {idx + 1}
                                     </span>
                                     {groupName && (
-                                      <span className="text-[9px] px-2 py-0.5 rounded font-bold tracking-wider uppercase bg-[#202c33] text-indigo-400 border border-indigo-500/30">
+                                      <span className="text-[10px] px-2.5 py-1 rounded font-bold tracking-wider uppercase bg-[#202c33] text-indigo-400 border border-indigo-500/40">
                                         {groupName}
                                       </span>
                                     )}
-                                    <h4 className="font-bold text-white text-sm leading-snug">{cleanTitle}</h4>
+                                    <h4 className="font-black text-white text-base sm:text-lg leading-snug">{cleanTitle}</h4>
                                   </div>
                                   {item.description && (
-                                    <p className="text-xs text-[#8696a0] mt-1 ml-7">{item.description}</p>
+                                    <p className="text-sm text-[#8696a0] mt-1 ml-10">{item.description}</p>
                                   )}
                                 </div>
 
-                                <div className="shrink-0 flex items-center gap-2 ml-7 sm:ml-0">
-                                  <span className={`text-xs px-3.5 py-1.5 rounded-xl font-mono font-black ${
+                                <div className="shrink-0 flex items-center gap-2 ml-10 sm:ml-0">
+                                  <span className={`text-sm px-4 py-2 rounded-2xl font-mono font-black ${
                                     resp.is_conforming && resp.is_meta_ok
-                                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                      : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
                                   }`}>
                                     {resp.response_value}
                                   </span>
@@ -1179,8 +1178,8 @@ export default function ChecklistTablet() {
                               </div>
 
                               {resp.observation && (
-                                <div className="ml-7 bg-[#111b21] border-l-2 border-amber-400 p-3 rounded-r-xl mt-1 text-xs text-[#d1d7db] leading-relaxed">
-                                  <span className="font-bold block text-amber-400 text-[10px] uppercase mb-0.5 font-mono">Observação registrada:</span>
+                                <div className="ml-10 bg-[#111b21] border-l-4 border-amber-400 p-4 rounded-r-2xl mt-1 text-sm text-[#d1d7db] leading-relaxed">
+                                  <span className="font-bold block text-amber-400 text-xs uppercase mb-1 font-mono">Observação registrada:</span>
                                   {resp.observation}
                                 </div>
                               )}
@@ -1195,36 +1194,36 @@ export default function ChecklistTablet() {
                 <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-200">
                   
                   {/* Cabeçalho do Roteiro */}
-                  <div className="p-6 bg-[#182229]/80 backdrop-blur-md border-b border-white/10 shrink-0">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
+                  <div className="p-8 bg-[#182229]/90 backdrop-blur-md border-b border-white/15 shrink-0">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+                      <div className="flex items-center gap-4">
                         <button
                           type="button"
                           onClick={() => setActiveChecklist(null)}
-                          className="md:hidden p-2 -ml-2 rounded-full hover:bg-white/10 text-[#8696a0] hover:text-white transition-all shrink-0"
+                          className="md:hidden p-3 -ml-2 rounded-2xl hover:bg-white/10 text-[#8696a0] hover:text-white transition-all shrink-0"
                         >
-                          <ChevronRight className="rotate-180" size={20} />
+                          <ChevronRight className="rotate-180" size={24} />
                         </button>
                         <div>
-                          <span className="text-[10px] uppercase tracking-widest font-bold text-indigo-400 bg-indigo-500/15 px-3 py-0.5 rounded-full border border-indigo-500/30">
+                          <span className="text-xs uppercase tracking-widest font-bold text-indigo-300 bg-indigo-500/20 px-3.5 py-1 rounded-full border border-indigo-500/40">
                             {activeChecklist.category}
                           </span>
-                          <h2 className="text-xl font-black text-white mt-1.5 tracking-tight">{activeChecklist.title}</h2>
-                          <p className="text-xs text-[#8696a0] mt-0.5">{activeChecklist.description || 'Siga as orientações abaixo para preencher.'}</p>
+                          <h2 className="text-2xl sm:text-3xl font-black text-white mt-2 tracking-tight">{activeChecklist.title}</h2>
+                          <p className="text-sm text-[#8696a0] mt-1">{activeChecklist.description || 'Siga as orientações abaixo para preencher.'}</p>
                         </div>
                       </div>
                       
                       {/* Geolocalização e Status do GPS */}
                       {activeChecklist.require_geolocation && (
-                        <div className={`px-4 py-2 rounded-2xl border flex items-center gap-2 shrink-0 ${
-                          distanceFromUnit === null ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' :
-                          distanceFromUnit <= activeChecklist.unit_radius_meters ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' :
-                          'border-rose-500/30 bg-rose-500/10 text-rose-400'
+                        <div className={`px-5 py-3 rounded-2xl border flex items-center gap-3 shrink-0 ${
+                          distanceFromUnit === null ? 'border-amber-500/40 bg-amber-500/15 text-amber-300' :
+                          distanceFromUnit <= activeChecklist.unit_radius_meters ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300' :
+                          'border-rose-500/40 bg-rose-500/15 text-rose-300'
                         }`}>
-                          <Compass size={15} className={locating ? 'animate-spin text-indigo-400' : ''} />
+                          <Compass size={18} className={locating ? 'animate-spin text-indigo-400' : ''} />
                           <div className="text-left">
-                            <span className="text-[9px] block uppercase font-bold tracking-wider opacity-80">Precisão GPS</span>
-                            <span className="text-[11px] font-bold">
+                            <span className="text-xs block uppercase font-bold tracking-wider opacity-80">Precisão GPS</span>
+                            <span className="text-xs sm:text-sm font-bold">
                               {locating ? 'Coletando...' :
                                distanceFromUnit === null ? 'Aguardando GPS' :
                                distanceFromUnit <= activeChecklist.unit_radius_meters ? `Dentro da área (${Math.round(distanceFromUnit)}m)` :
@@ -1242,50 +1241,50 @@ export default function ChecklistTablet() {
                       const completed = itemsToAnswer.filter(item => responses[item.id]?.isDone).length;
                       const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
                       return (
-                        <div className="flex items-center gap-4 bg-[#111b21] p-4 rounded-3xl border border-white/10 mt-4 animate-in fade-in duration-300 shadow-md">
+                        <div className="flex items-center gap-5 bg-[#111b21] p-5 rounded-3xl border border-white/15 mt-5 animate-in fade-in duration-300 shadow-lg">
                           {/* Gráfico circular SVG */}
-                          <div className="relative w-12 h-12 shrink-0 flex items-center justify-center">
+                          <div className="relative w-14 h-14 shrink-0 flex items-center justify-center">
                             <svg className="w-full h-full transform -rotate-90">
                               <circle
-                                cx="24"
-                                cy="24"
-                                r="20"
+                                cx="28"
+                                cy="28"
+                                r="22"
                                 className="text-[#202c33]"
-                                strokeWidth="3.5"
+                                strokeWidth="4"
                                 stroke="currentColor"
                                 fill="transparent"
                               />
                               <circle
-                                cx="24"
-                                cy="24"
-                                r="20"
+                                cx="28"
+                                cy="28"
+                                r="22"
                                 className="text-emerald-400 transition-all duration-500 ease-out"
-                                strokeWidth="3.5"
-                                strokeDasharray={2 * Math.PI * 20}
-                                strokeDashoffset={2 * Math.PI * 20 * (1 - percent / 100)}
+                                strokeWidth="4"
+                                strokeDasharray={2 * Math.PI * 22}
+                                strokeDashoffset={2 * Math.PI * 22 * (1 - percent / 100)}
                                 strokeLinecap="round"
                                 stroke="currentColor"
                                 fill="transparent"
                               />
                             </svg>
-                            <span className="absolute text-[11px] font-black text-white font-mono">{percent}%</span>
+                            <span className="absolute text-xs font-black text-white font-mono">{percent}%</span>
                           </div>
 
                           {/* Progresso Textual e Mensagem de Incentivo */}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between text-[11px] mb-1">
+                            <div className="flex items-center justify-between text-xs sm:text-sm mb-1.5">
                               <span className="font-bold text-[#d1d7db]">Progresso da Rotina</span>
                               <span className="font-mono text-emerald-400 font-bold">{completed} de {total} tarefas concluídas</span>
                             </div>
                             {/* Barra de Progresso Horizontal Neon */}
-                            <div className="w-full bg-[#202c33] h-2.5 rounded-full overflow-hidden border border-white/5">
+                            <div className="w-full bg-[#202c33] h-3.5 rounded-full overflow-hidden border border-white/10">
                               <div 
-                                className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-full rounded-full transition-all duration-500 ease-out shadow-sm shadow-emerald-500/50" 
+                                className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-full rounded-full transition-all duration-500 ease-out shadow-md shadow-emerald-500/50" 
                                 style={{ width: `${percent}%` }}
                               />
                             </div>
                             {/* Mensagem Gamificada de Incentivo */}
-                            <p className="text-[10px] text-[#8696a0] mt-1.5 italic font-medium truncate">
+                            <p className="text-xs text-[#8696a0] mt-2 italic font-semibold truncate">
                               {getGamifiedIncentive(percent, completed, total, loggedInUser?.name)}
                             </p>
                           </div>
@@ -1294,30 +1293,30 @@ export default function ChecklistTablet() {
                     })()}
                   </div>
 
-                  {/* Formulário de Perguntas/Itens */}
-                  <div className="flex-1 overflow-y-auto styled-scrollbar p-6 space-y-4">
+                  {/* Formulário de Perguntas com Elementos Grandes para Tablet */}
+                  <div className="flex-1 overflow-y-auto styled-scrollbar p-8 space-y-6">
                     
                     {/* Filtros da Lista */}
                     {itemsToAnswer.length > 0 && (
-                      <div className="flex flex-col sm:flex-row gap-3 mb-4 bg-[#182229]/60 p-3 rounded-2xl border border-white/5">
+                      <div className="flex flex-col sm:flex-row gap-4 mb-5 bg-[#182229]/70 p-4 rounded-3xl border border-white/10 shadow-sm">
                         <div className="flex-1 relative">
-                          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                            <Search size={15} className="text-[#8696a0]" />
+                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <Search size={18} className="text-[#8696a0]" />
                           </div>
                           <input
                             type="text"
                             placeholder="Buscar item nesta rotina..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full bg-[#111b21] border border-white/10 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500 transition-all"
+                            className="w-full bg-[#111b21] border border-white/15 rounded-2xl pl-11 pr-5 py-3 text-sm text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500 transition-all"
                           />
                         </div>
                         
-                        <div className="sm:w-56">
+                        <div className="sm:w-64">
                           <select
                             value={categoryFilter}
                             onChange={(e) => setCategoryFilter(e.target.value)}
-                            className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-[#d1d7db] focus:outline-none focus:border-indigo-500 transition-all cursor-pointer"
+                            className="w-full bg-[#111b21] border border-white/15 rounded-2xl px-4 py-3 text-sm text-[#d1d7db] focus:outline-none focus:border-indigo-500 transition-all cursor-pointer font-medium"
                           >
                             <option value="">Todas as Categorias</option>
                             {Array.from(new Set(itemsToAnswer.map(item => {
@@ -1359,7 +1358,7 @@ export default function ChecklistTablet() {
                         });
                         setItemsToAnswer(newItemsToAnswer);
                       }}
-                      className="space-y-4"
+                      className="space-y-6"
                     >
                     {itemsToAnswer.filter(item => {
                       const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
@@ -1376,429 +1375,450 @@ export default function ChecklistTablet() {
                         <Reorder.Item 
                           key={item.id}
                           value={item}
-                          className={`p-5 rounded-[28px] border flex flex-col gap-4 transition-all duration-300 ${
+                          className={`p-6 sm:p-7 rounded-[32px] border flex flex-col gap-5 transition-all duration-300 ${
                             resp.isDone 
-                              ? 'border-emerald-500/40 bg-emerald-500/5 shadow-sm shadow-emerald-500/5' 
+                              ? 'border-emerald-500/50 bg-emerald-500/10 shadow-md shadow-emerald-500/5' 
                               : item.is_required 
-                                ? 'border-white/10 bg-[#182229]/80 hover:border-white/20' 
-                                : 'border-white/5 bg-[#182229]/50 hover:border-white/10'
+                                ? 'border-white/15 bg-[#182229] hover:border-white/25 shadow-lg' 
+                                : 'border-white/10 bg-[#182229]/80 hover:border-white/20'
                           }`}
                         >
-                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                          {/* Enunciado e Instrução */}
-                          <div className="min-w-0 flex-1 space-y-1">
-                            {(() => {
-                              const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
-                              const groupName = match ? match[1] : null;
-                              const cleanTitle = match ? match[2] : item.title;
-                              const cleanDescription = item.description ? item.description.replace(/Fornecedor:\s*/g, '').replace(/Custo:\s*/g, '').split(' | ').join(' • ') : null;
+                          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6">
+                            {/* Enunciado e Instrução */}
+                            <div className="min-w-0 flex-1 space-y-2">
+                              {(() => {
+                                const match = item.title.match(/^\[(.*?)\]\s*(.*)$/);
+                                const groupName = match ? match[1] : null;
+                                const cleanTitle = match ? match[2] : item.title;
+                                const cleanDescription = item.description ? item.description.replace(/Fornecedor:\s*/g, '').replace(/Custo:\s*/g, '').split(' | ').join(' • ') : null;
 
-                              return (
-                                <>
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <div className="cursor-grab hover:text-indigo-400 text-[#8696a0] transition-colors shrink-0 mr-1 active:cursor-grabbing">
-                                      <GripVertical size={16} />
-                                    </div>
-                                    {resp.isDone ? (
-                                      <span className="w-5 h-5 flex items-center justify-center rounded-full shrink-0 bg-emerald-400 text-black font-black text-[11px] shadow-sm">
-                                        ✓
-                                      </span>
-                                    ) : (
-                                      <span className="text-[10px] font-bold font-mono text-[#8696a0] bg-[#202c33] border border-white/5 w-5 h-5 flex items-center justify-center rounded-full shrink-0">
-                                        {idx + 1}
-                                      </span>
-                                    )}
-                                    
-                                    {/* Tag de Categoria com troca rápida */}
-                                    <div className="relative shrink-0">
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setActiveCategoryEditItemId(activeCategoryEditItemId === item.id ? null : item.id);
-                                          setNewInlineCategoryName('');
-                                        }}
-                                        className={`text-[9px] px-2 py-0.5 rounded font-bold tracking-wider uppercase flex items-center gap-1 transition-all select-none cursor-pointer ${
-                                          groupName 
-                                            ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' 
-                                            : 'bg-white/5 text-[#8696a0] hover:text-white border border-white/10'
-                                        }`}
-                                        title="Trocar categoria"
-                                      >
-                                        <span>{groupName || '+ CAT'}</span>
-                                        <ChevronDown size={10} className="opacity-60" />
-                                      </button>
+                                return (
+                                  <>
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                      <div className="cursor-grab hover:text-indigo-400 text-[#8696a0] transition-colors shrink-0 mr-1 active:cursor-grabbing p-1">
+                                        <GripVertical size={20} />
+                                      </div>
+                                      {resp.isDone ? (
+                                        <span className="w-7 h-7 flex items-center justify-center rounded-full shrink-0 bg-emerald-400 text-black font-black text-sm shadow-md">
+                                          ✓
+                                        </span>
+                                      ) : (
+                                        <span className="text-xs font-bold font-mono text-[#8696a0] bg-[#202c33] border border-white/10 w-7 h-7 flex items-center justify-center rounded-full shrink-0">
+                                          {idx + 1}
+                                        </span>
+                                      )}
+                                      
+                                      {/* Tag de Categoria com troca rápida */}
+                                      <div className="relative shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveCategoryEditItemId(activeCategoryEditItemId === item.id ? null : item.id);
+                                            setNewInlineCategoryName('');
+                                          }}
+                                          className={`text-[10px] px-3 py-1 rounded-xl font-bold tracking-wider uppercase flex items-center gap-1.5 transition-all select-none cursor-pointer ${
+                                            groupName 
+                                              ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/40' 
+                                              : 'bg-white/10 text-[#8696a0] hover:text-white border border-white/15'
+                                          }`}
+                                          title="Trocar categoria"
+                                        >
+                                          <span>{groupName || '+ CAT'}</span>
+                                          <ChevronDown size={12} className="opacity-70" />
+                                        </button>
 
-                                      {activeCategoryEditItemId === item.id && (
-                                        <>
-                                          <div 
-                                            className="fixed inset-0 z-40" 
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setActiveCategoryEditItemId(null);
-                                            }}
-                                          />
-                                          <div 
-                                            className="absolute left-0 mt-1.5 w-48 bg-[#202c33] border border-white/10 rounded-2xl p-2.5 z-50 shadow-2xl animate-in fade-in slide-in-from-top-1 text-left"
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            <span className="text-[8px] font-black text-[#8696a0] block uppercase tracking-wider mb-1.5 px-1.5">Mudar Categoria</span>
-                                            
-                                            <div className="max-h-32 overflow-y-auto space-y-0.5 mb-2 styled-scrollbar px-0.5">
-                                              <button
-                                                type="button"
-                                                onClick={() => handleUpdateItemCategory(item.id, item.title, '')}
-                                                className="w-full text-left text-[11px] text-[#d1d7db] hover:bg-[#111b21] hover:text-white px-2 py-1.5 rounded-lg transition-colors flex items-center justify-between"
-                                              >
-                                                <span>(Sem Categoria)</span>
-                                                {!groupName && <span className="text-[10px] text-indigo-400">✓</span>}
-                                              </button>
+                                        {activeCategoryEditItemId === item.id && (
+                                          <>
+                                            <div 
+                                              className="fixed inset-0 z-40" 
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setActiveCategoryEditItemId(null);
+                                              }}
+                                            />
+                                            <div 
+                                              className="absolute left-0 mt-2 w-56 bg-[#202c33] border border-white/15 rounded-3xl p-3 z-50 shadow-2xl animate-in fade-in slide-in-from-top-1 text-left"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              <span className="text-[9px] font-black text-[#8696a0] block uppercase tracking-wider mb-2 px-2">Mudar Categoria</span>
                                               
-                                              {Array.from(new Set(itemsToAnswer.map(i => {
-                                                const m = i.title.match(/^\[(.*?)\]\s*(.*)$/);
-                                                return m ? m[1] : null;
-                                              }).filter(Boolean))).map(cat => (
+                                              <div className="max-h-36 overflow-y-auto space-y-1 mb-2.5 styled-scrollbar px-1">
                                                 <button
-                                                  key={cat as string}
                                                   type="button"
-                                                  onClick={() => handleUpdateItemCategory(item.id, item.title, cat as string)}
-                                                  className="w-full text-left text-[11px] text-[#d1d7db] hover:bg-[#111b21] hover:text-white px-2 py-1.5 rounded-lg transition-colors flex items-center justify-between"
+                                                  onClick={() => handleUpdateItemCategory(item.id, item.title, '')}
+                                                  className="w-full text-left text-xs text-[#d1d7db] hover:bg-[#111b21] hover:text-white px-3 py-2 rounded-xl transition-colors flex items-center justify-between font-medium"
                                                 >
-                                                  <span className="truncate">{cat}</span>
-                                                  {groupName === cat && <span className="text-[10px] text-indigo-400">✓</span>}
+                                                  <span>(Sem Categoria)</span>
+                                                  {!groupName && <span className="text-xs text-indigo-400 font-bold">✓</span>}
                                                 </button>
-                                              ))}
-                                            </div>
+                                                
+                                                {Array.from(new Set(itemsToAnswer.map(i => {
+                                                  const m = i.title.match(/^\[(.*?)\]\s*(.*)$/);
+                                                  return m ? m[1] : null;
+                                                }).filter(Boolean))).map(cat => (
+                                                  <button
+                                                    key={cat as string}
+                                                    type="button"
+                                                    onClick={() => handleUpdateItemCategory(item.id, item.title, cat as string)}
+                                                    className="w-full text-left text-xs text-[#d1d7db] hover:bg-[#111b21] hover:text-white px-3 py-2 rounded-xl transition-colors flex items-center justify-between font-medium"
+                                                  >
+                                                    <span className="truncate">{cat}</span>
+                                                    {groupName === cat && <span className="text-xs text-indigo-400 font-bold">✓</span>}
+                                                  </button>
+                                                ))}
+                                              </div>
 
-                                            <div className="pt-2 border-t border-white/10 px-1">
-                                              <div className="flex gap-1.5">
-                                                <input
-                                                  type="text"
-                                                  value={newInlineCategoryName}
-                                                  onChange={e => setNewInlineCategoryName(e.target.value.toUpperCase())}
-                                                  placeholder="NOVA CATEGORIA"
-                                                  className="flex-1 bg-[#111b21] border border-white/10 rounded-lg px-2 py-1 text-[9px] text-white focus:outline-none focus:border-indigo-500 placeholder-[#8696a0]/40"
-                                                />
-                                                <button
-                                                  type="button"
-                                                  disabled={!newInlineCategoryName.trim()}
-                                                  onClick={() => handleUpdateItemCategory(item.id, item.title, newInlineCategoryName.trim())}
-                                                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-[9px] px-2 py-1 rounded-lg transition-all"
-                                                >
-                                                  OK
-                                                </button>
+                                              <div className="pt-2.5 border-t border-white/10 px-1">
+                                                <div className="flex gap-2">
+                                                  <input
+                                                    type="text"
+                                                    value={newInlineCategoryName}
+                                                    onChange={e => setNewInlineCategoryName(e.target.value.toUpperCase())}
+                                                    placeholder="NOVA CATEGORIA"
+                                                    className="flex-1 bg-[#111b21] border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 placeholder-[#8696a0]/50"
+                                                  />
+                                                  <button
+                                                    type="button"
+                                                    disabled={!newInlineCategoryName.trim()}
+                                                    onClick={() => handleUpdateItemCategory(item.id, item.title, newInlineCategoryName.trim())}
+                                                    className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs px-3 py-1.5 rounded-xl transition-all"
+                                                  >
+                                                    OK
+                                                  </button>
+                                                </div>
                                               </div>
                                             </div>
-                                          </div>
-                                        </>
+                                          </>
+                                        )}
+                                      </div>
+
+                                      <h4 className={`font-black text-base sm:text-lg leading-snug transition-all ${resp.isDone ? 'text-emerald-300 line-through opacity-85' : 'text-white'}`}>{cleanTitle}</h4>
+                                      
+                                      {resp.isDone && (
+                                        <span className="text-xs font-bold text-emerald-400 bg-emerald-500/20 border border-emerald-500/40 px-3 py-0.5 rounded-full shrink-0">
+                                          Concluído ✅
+                                        </span>
+                                      )}
+                                      {item.is_required && !resp.isDone && (
+                                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest shrink-0">* OBRIGATÓRIO</span>
+                                      )}
+                                      {item.is_critical && !resp.isDone && (
+                                        <span className="text-[10px] font-black text-rose-300 bg-rose-500/20 border border-rose-500/40 px-3 py-0.5 rounded-full shrink-0">
+                                          CRÍTICO
+                                        </span>
                                       )}
                                     </div>
-
-                                    <h4 className={`font-bold text-sm sm:text-base leading-snug transition-all ${resp.isDone ? 'text-emerald-300 line-through opacity-80' : 'text-white'}`}>{cleanTitle}</h4>
                                     
-                                    {resp.isDone && (
-                                      <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full shrink-0">
-                                        Concluído ✅
-                                      </span>
+                                    {cleanDescription && (
+                                      <p className="text-sm sm:text-base text-[#e9edef] bg-[#111b21]/80 border-l-4 border-indigo-500 pl-4 py-2.5 rounded-r-2xl mt-2 leading-relaxed ml-9 font-normal">
+                                        {cleanDescription}
+                                      </p>
                                     )}
-                                    {item.is_required && !resp.isDone && (
-                                      <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider shrink-0">* OBRIGATÓRIO</span>
+
+                                    {/* Metas Numéricas */}
+                                    {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'kg') && (item.min_meta !== null || item.max_meta !== null) && (
+                                      <p className="text-xs sm:text-sm text-teal-400 pl-9 font-mono font-bold mt-1.5">
+                                        {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Máx: ${item.max_meta}` : ''} {item.measurement_unit || (item.response_type === 'kg' ? 'kg' : '')}
+                                      </p>
                                     )}
-                                    {item.is_critical && !resp.isDone && (
-                                      <span className="text-[9px] font-bold text-rose-400 bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 rounded-full shrink-0">
-                                        CRÍTICO
+
+                                    {/* Dica operacional ou cálculo em tempo real */}
+                                    {(() => {
+                                      const helperMsg = getHelperMessage(item, responses);
+                                      if (!helperMsg) return null;
+                                      return (
+                                        <p className="text-xs sm:text-sm text-indigo-300 pl-9 font-semibold mt-1.5 flex items-center gap-2 flex-wrap">
+                                          <span>{helperMsg.text}</span>
+                                          {helperMsg.type === 'stock_suggestion' && !resp.value && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleAnswerChange(item.id, item.response_type, helperMsg.value!, item.min_meta, item.max_meta)}
+                                              className="text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded-xl transition-all active:scale-95 cursor-pointer ml-1 select-none shadow-md"
+                                            >
+                                              Usar Sugestão
+                                            </button>
+                                          )}
+                                        </p>
+                                      );
+                                    })()}
+                                  </>
+                                );
+                              })()}
+
+                              {/* Lista de Verificação (Sub-tarefas com Cards Grandes) */}
+                              {item.options && item.options.length > 0 && (
+                                <div className="mt-3 pl-9 space-y-2">
+                                  <span className="text-xs font-black text-indigo-400 block uppercase tracking-widest">ITENS A VERIFICAR:</span>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {item.options.map((sub: string, sIdx: number) => {
+                                      const subtaskKey = `${item.id}_${sIdx}`;
+                                      const isChecked = checkedSubtasks[subtaskKey] || false;
+                                      return (
+                                        <label 
+                                          key={sIdx} 
+                                          className={`flex items-center gap-3.5 p-3.5 sm:p-4 rounded-2xl border transition-all cursor-pointer select-none text-xs sm:text-sm font-semibold min-h-[52px] ${
+                                            isChecked 
+                                              ? 'bg-indigo-500/20 border-indigo-500/50 text-white shadow-md' 
+                                              : 'bg-[#111b21]/80 border-white/10 text-[#d1d7db] hover:bg-[#111b21]'
+                                          }`}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={(e) => {
+                                              setCheckedSubtasks(prev => ({
+                                                ...prev,
+                                                [subtaskKey]: e.target.checked
+                                              }));
+                                            }}
+                                            className="rounded-lg border-white/30 text-indigo-500 bg-[#202c33] focus:ring-indigo-500/40 focus:ring-offset-0 w-5 h-5 cursor-pointer shrink-0"
+                                          />
+                                          <span className="leading-snug">{sub}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Campo de Upload de Foto de Evidência se exigido */}
+                              {item.require_evidence && (
+                                <div className="pt-3 pl-9 flex items-center gap-3 flex-wrap">
+                                  <label className={`px-5 py-3 rounded-2xl border text-xs sm:text-sm font-bold flex items-center gap-2 cursor-pointer transition-all active:scale-95 min-h-[48px] ${
+                                    resp.evidenceUrl ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300' : 'border-indigo-500/40 bg-indigo-500/15 text-indigo-300 hover:bg-indigo-500/25'
+                                  }`}>
+                                    <Camera size={18} />
+                                    {resp.evidenceUploading ? 'Enviando Foto...' : resp.evidenceUrl ? 'Foto Anexada ✅' : 'Tirar Foto Evidência'}
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      capture="environment"
+                                      onChange={(e) => handlePhotoUpload(item.id, e)}
+                                      className="hidden"
+                                      disabled={resp.evidenceUploading}
+                                    />
+                                  </label>
+                                  {resp.evidenceUrl && (
+                                    <a href={resp.evidenceUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-[#8696a0] hover:text-white underline truncate max-w-[200px] font-medium">
+                                      Ver Foto Anexada
+                                    </a>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Seleção de Respostas Otimizada para Toque de Polegar (Botões de 56px de Altura) */}
+                            <div className="shrink-0 flex items-center justify-start xl:justify-end">
+                              
+                              {/* BOOLEAN ("Feito / Não Feito") */}
+                              {item.response_type === 'boolean' && (
+                                <div className="flex flex-wrap sm:flex-nowrap gap-2.5 bg-[#111b21] p-2 rounded-2xl border border-white/15 shadow-inner w-full sm:w-auto">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAnswerChange(item.id, item.response_type, 'Feito', item.min_meta, item.max_meta)}
+                                    className={`flex-1 sm:flex-none min-w-[130px] h-13 sm:h-14 px-5 rounded-xl text-xs sm:text-sm font-black tracking-wide flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer ${
+                                      resp.value === 'Feito'
+                                        ? 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 text-white shadow-xl shadow-emerald-500/40 scale-[1.03] border border-emerald-400/40'
+                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                                    }`}
+                                  >
+                                    <CheckCircle2 size={18} /> FEITO
+                                  </button>
+                                  
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAnswerChange(item.id, item.response_type, 'Não Feito', item.min_meta, item.max_meta)}
+                                    className={`flex-1 sm:flex-none min-w-[130px] h-13 sm:h-14 px-5 rounded-xl text-xs sm:text-sm font-black tracking-wide flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer ${
+                                      resp.value === 'Não Feito'
+                                        ? 'bg-gradient-to-r from-rose-600 via-rose-500 to-red-500 text-white shadow-xl shadow-rose-500/40 scale-[1.03] border border-rose-400/40'
+                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                                    }`}
+                                  >
+                                    <XCircle size={18} /> NÃO FEITO
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* CONFORMIDADE ("Conforme / Não Conforme") */}
+                              {item.response_type === 'conformity' && (
+                                <div className="flex flex-wrap sm:flex-nowrap gap-2.5 bg-[#111b21] p-2 rounded-2xl border border-white/15 shadow-inner w-full sm:w-auto">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAnswerChange(item.id, item.response_type, 'Conforme', item.min_meta, item.max_meta)}
+                                    className={`flex-1 sm:flex-none min-w-[140px] h-13 sm:h-14 px-5 rounded-xl text-xs sm:text-sm font-black tracking-wide flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer ${
+                                      resp.value === 'Conforme'
+                                        ? 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 text-white shadow-xl shadow-emerald-500/40 scale-[1.03] border border-emerald-400/40'
+                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                                    }`}
+                                  >
+                                    <CheckCircle2 size={18} /> CONFORME
+                                  </button>
+                                  
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAnswerChange(item.id, item.response_type, 'Não Conforme', item.min_meta, item.max_meta)}
+                                    className={`flex-1 sm:flex-none min-w-[140px] h-13 sm:h-14 px-5 rounded-xl text-xs sm:text-sm font-black tracking-wide flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer ${
+                                      resp.value === 'Não Conforme'
+                                        ? 'bg-gradient-to-r from-rose-600 via-rose-500 to-red-500 text-white shadow-xl shadow-rose-500/40 scale-[1.03] border border-rose-400/40'
+                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                                    }`}
+                                  >
+                                    <XCircle size={18} /> NÃO CONFORME
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* YES_NO ("Sim / Não") */}
+                              {item.response_type === 'yes_no' && (
+                                <div className="flex flex-wrap sm:flex-nowrap gap-2.5 bg-[#111b21] p-2 rounded-2xl border border-white/15 shadow-inner w-full sm:w-auto">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAnswerChange(item.id, item.response_type, 'Sim', item.min_meta, item.max_meta)}
+                                    className={`flex-1 sm:flex-none min-w-[120px] h-13 sm:h-14 px-5 rounded-xl text-xs sm:text-sm font-black tracking-wide flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer ${
+                                      resp.value === 'Sim'
+                                        ? 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 text-white shadow-xl shadow-emerald-500/40 scale-[1.03] border border-emerald-400/40'
+                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                                    }`}
+                                  >
+                                    <CheckCircle2 size={18} /> SIM
+                                  </button>
+                                  
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAnswerChange(item.id, item.response_type, 'Não', item.min_meta, item.max_meta)}
+                                    className={`flex-1 sm:flex-none min-w-[120px] h-13 sm:h-14 px-5 rounded-xl text-xs sm:text-sm font-black tracking-wide flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer ${
+                                      resp.value === 'Não'
+                                        ? 'bg-gradient-to-r from-rose-600 via-rose-500 to-red-500 text-white shadow-xl shadow-rose-500/40 scale-[1.03] border border-rose-400/40'
+                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                                    }`}
+                                  >
+                                    <XCircle size={18} /> NÃO
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* NUMERIC / TEMPERATURE / COUNTER / KG (Com Botões Gigantes) */}
+                              {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'counter' || item.response_type === 'kg') && (
+                                <div className="flex items-center gap-2 bg-[#111b21] p-2 rounded-[24px] border border-white/15 shadow-inner">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const step = item.response_type === 'kg' ? 0.1 : 1;
+                                      const current = parseFloat(resp.value || '0');
+                                      const result = (current - step).toFixed(item.response_type === 'kg' ? 3 : 0);
+                                      handleAnswerChange(
+                                        item.id, 
+                                        item.response_type, 
+                                        item.response_type === 'kg' ? parseFloat(result).toFixed(3) : parseFloat(result).toString(), 
+                                        item.min_meta, 
+                                        item.max_meta
+                                      );
+                                    }}
+                                    className="w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center bg-[#202c33] hover:bg-[#2a3942] rounded-2xl text-[#8696a0] hover:text-white text-3xl font-light transition-all active:scale-95 cursor-pointer shadow-md"
+                                  >
+                                    -
+                                  </button>
+                                  
+                                  <div className="flex items-baseline px-3">
+                                    {item.response_type === 'kg' ? (
+                                      <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={resp.value ? resp.value.replace('.', ',') : ''}
+                                        onChange={(e) => {
+                                          const rawVal = e.target.value;
+                                          if (rawVal === '') {
+                                            handleAnswerChange(item.id, item.response_type, '', item.min_meta, item.max_meta);
+                                            return;
+                                          }
+                                          const digits = rawVal.replace(/\D/g, '');
+                                          if (digits) {
+                                            const parsed = parseInt(digits, 10);
+                                            const processed = (parsed / 1000).toFixed(3);
+                                            handleAnswerChange(item.id, item.response_type, processed, item.min_meta, item.max_meta);
+                                          } else {
+                                            handleAnswerChange(item.id, item.response_type, '0.000', item.min_meta, item.max_meta);
+                                          }
+                                        }}
+                                        placeholder="0,000"
+                                        className="bg-transparent border-none focus:outline-none focus:ring-0 text-3xl sm:text-5xl font-black w-28 sm:w-36 text-center text-white p-0 m-0 font-mono tracking-wide"
+                                      />
+                                    ) : (
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        value={resp.value || ''}
+                                        onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
+                                        placeholder="0"
+                                        className="bg-transparent border-none focus:outline-none focus:ring-0 text-3xl sm:text-5xl font-black w-24 sm:w-28 text-center text-white p-0 m-0 font-mono"
+                                      />
+                                    )}
+                                    {(item.measurement_unit || item.response_type === 'kg') && (
+                                      <span className="text-xs font-black text-indigo-300 shrink-0 ml-2 uppercase font-mono bg-indigo-500/20 border border-indigo-500/40 px-2.5 py-1 rounded-xl select-none">
+                                        {item.measurement_unit || 'kg'}
                                       </span>
                                     )}
                                   </div>
-                                  
-                                  {cleanDescription && (
-                                    <p className="text-xs sm:text-sm text-[#d1d7db] bg-[#111b21]/60 border-l-2 border-indigo-500 pl-3 py-2 rounded-r-xl mt-2 leading-relaxed ml-7 font-normal">
-                                      {cleanDescription}
-                                    </p>
-                                  )}
 
-                                  {/* Metas Numéricas */}
-                                  {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'kg') && (item.min_meta !== null || item.max_meta !== null) && (
-                                    <p className="text-[11px] text-teal-400 pl-7 font-mono font-bold mt-1">
-                                      {item.min_meta !== null ? `Mín: ${item.min_meta}` : ''} {item.max_meta !== null ? `Máx: ${item.max_meta}` : ''} {item.measurement_unit || (item.response_type === 'kg' ? 'kg' : '')}
-                                    </p>
-                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const step = item.response_type === 'kg' ? 0.1 : 1;
+                                      const current = parseFloat(resp.value || '0');
+                                      const result = (current + step).toFixed(item.response_type === 'kg' ? 3 : 0);
+                                      handleAnswerChange(
+                                        item.id, 
+                                        item.response_type, 
+                                        item.response_type === 'kg' ? parseFloat(result).toFixed(3) : parseFloat(result).toString(), 
+                                        item.min_meta, 
+                                        item.max_meta
+                                      );
+                                    }}
+                                    className="w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-2xl text-3xl font-light transition-all active:scale-95 border border-emerald-500/40 cursor-pointer shadow-md"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              )}
 
-                                  {/* Dica operacional ou cálculo em tempo real */}
-                                  {(() => {
-                                    const helperMsg = getHelperMessage(item, responses);
-                                    if (!helperMsg) return null;
+                              {/* TEXT FREE */}
+                              {item.response_type === 'text' && (
+                                <textarea
+                                  rows={2}
+                                  value={resp.value || ''}
+                                  onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
+                                  placeholder="Descreva aqui..."
+                                  className="bg-[#111b21] border border-white/15 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500 w-full sm:w-80"
+                                />
+                              )}
+
+                              {/* STARS */}
+                              {item.response_type === 'stars' && (
+                                <div className="flex gap-2">
+                                  {[1, 2, 3, 4, 5].map(starNum => {
+                                    const isSelected = parseInt(resp.value) >= starNum;
                                     return (
-                                      <p className="text-[11px] text-indigo-400 pl-7 font-semibold mt-1 flex items-center gap-1.5 flex-wrap">
-                                        <span>{helperMsg.text}</span>
-                                        {helperMsg.type === 'stock_suggestion' && !resp.value && (
-                                          <button
-                                            type="button"
-                                            onClick={() => handleAnswerChange(item.id, item.response_type, helperMsg.value!, item.min_meta, item.max_meta)}
-                                            className="text-[9px] font-bold text-white bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1 rounded-lg transition-all active:scale-95 cursor-pointer ml-1 select-none shadow-sm"
-                                          >
-                                            Usar Sugestão
-                                          </button>
-                                        )}
-                                      </p>
-                                    );
-                                  })()}
-                                </>
-                              );
-                            })()}
-
-                            {/* Lista de Verificação (Sub-tarefas) */}
-                            {item.options && item.options.length > 0 && (
-                              <div className="mt-2 pl-7 space-y-1.5">
-                                <span className="text-[9px] font-black text-indigo-400/90 block uppercase tracking-widest">ITENS A VERIFICAR:</span>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  {item.options.map((sub: string, sIdx: number) => {
-                                    const subtaskKey = `${item.id}_${sIdx}`;
-                                    const isChecked = checkedSubtasks[subtaskKey] || false;
-                                    return (
-                                      <label 
-                                        key={sIdx} 
-                                        className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-all cursor-pointer select-none text-[11px] font-medium ${
-                                          isChecked 
-                                            ? 'bg-indigo-500/15 border-indigo-500/40 text-white shadow-sm' 
-                                            : 'bg-[#111b21]/70 border-white/5 text-[#d1d7db] hover:bg-[#111b21]'
-                                        }`}
+                                      <button
+                                        key={starNum}
+                                        type="button"
+                                        onClick={() => handleAnswerChange(item.id, item.response_type, starNum.toString(), item.min_meta, item.max_meta)}
+                                        className={`p-2 hover:scale-125 transition-transform cursor-pointer ${isSelected ? 'text-amber-400' : 'text-[#202c33]'}`}
                                       >
-                                        <input
-                                          type="checkbox"
-                                          checked={isChecked}
-                                          onChange={(e) => {
-                                            setCheckedSubtasks(prev => ({
-                                              ...prev,
-                                              [subtaskKey]: e.target.checked
-                                            }));
-                                          }}
-                                          className="rounded-md border-white/20 text-indigo-500 bg-[#202c33] focus:ring-indigo-500/30 focus:ring-offset-0 w-4 h-4 cursor-pointer"
-                                        />
-                                        <span className="truncate">{sub}</span>
-                                      </label>
+                                        <Star size={24} fill={isSelected ? 'currentColor' : 'transparent'} />
+                                      </button>
                                     );
                                   })}
                                 </div>
-                              </div>
-                            )}
+                              )}
 
-                            {/* Campo de Upload de Foto de Evidência se exigido */}
-                            {item.require_evidence && (
-                              <div className="pt-2 pl-7 flex items-center gap-2 flex-wrap">
-                                <label className={`px-3.5 py-2 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 ${
-                                  resp.evidenceUrl ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20'
-                                }`}>
-                                  <Camera size={14} />
-                                  {resp.evidenceUploading ? 'Enviando Foto...' : resp.evidenceUrl ? 'Foto Anexada ✅' : 'Tirar Foto Evidência'}
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    capture="environment"
-                                    onChange={(e) => handlePhotoUpload(item.id, e)}
-                                    className="hidden"
-                                    disabled={resp.evidenceUploading}
-                                  />
-                                </label>
-                                {resp.evidenceUrl && (
-                                  <a href={resp.evidenceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[#8696a0] hover:text-white underline truncate max-w-[160px]">
-                                    Ver Foto Anexada
-                                  </a>
-                                )}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Seleção de Respostas Touch-First (Pílulas Vibrantes) */}
-                          <div className="shrink-0 flex items-center gap-3">
-                            
-                            {/* BOOLEAN */}
-                            {item.response_type === 'boolean' && (
-                              <div className="flex gap-1.5 bg-[#111b21] p-1.5 rounded-2xl border border-white/10 shadow-inner">
-                                {['Feito', 'Não Feito'].map(opt => (
-                                  <button
-                                    key={opt}
-                                    type="button"
-                                    onClick={() => handleAnswerChange(item.id, item.response_type, opt, item.min_meta, item.max_meta)}
-                                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer select-none ${
-                                      resp.value === opt
-                                        ? opt === 'Feito' 
-                                          ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30 scale-[1.02]' 
-                                          : 'bg-gradient-to-r from-rose-600 to-rose-500 text-white shadow-lg shadow-rose-600/30 scale-[1.02]'
-                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
-                                    }`}
-                                  >
-                                    {opt}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* CONFORMIDADE */}
-                            {item.response_type === 'conformity' && (
-                              <div className="flex gap-1.5 bg-[#111b21] p-1.5 rounded-2xl border border-white/10 shadow-inner">
-                                {['Conforme', 'Não Conforme'].map(opt => (
-                                  <button
-                                    key={opt}
-                                    type="button"
-                                    onClick={() => handleAnswerChange(item.id, item.response_type, opt, item.min_meta, item.max_meta)}
-                                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer select-none ${
-                                      resp.value === opt
-                                        ? opt === 'Conforme' 
-                                          ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30 scale-[1.02]' 
-                                          : 'bg-gradient-to-r from-rose-600 to-rose-500 text-white shadow-lg shadow-rose-600/30 scale-[1.02]'
-                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
-                                    }`}
-                                  >
-                                    {opt}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* YES_NO */}
-                            {item.response_type === 'yes_no' && (
-                              <div className="flex gap-1.5 bg-[#111b21] p-1.5 rounded-2xl border border-white/10 shadow-inner">
-                                {['Sim', 'Não'].map(opt => (
-                                  <button
-                                    key={opt}
-                                    type="button"
-                                    onClick={() => handleAnswerChange(item.id, item.response_type, opt, item.min_meta, item.max_meta)}
-                                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer select-none ${
-                                      resp.value === opt
-                                        ? opt === 'Sim' 
-                                          ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30 scale-[1.02]' 
-                                          : 'bg-gradient-to-r from-rose-600 to-rose-500 text-white shadow-lg shadow-rose-600/30 scale-[1.02]'
-                                        : 'text-[#8696a0] hover:text-white hover:bg-white/5'
-                                    }`}
-                                  >
-                                    {opt}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* NUMERIC / TEMPERATURE / COUNTER / KG */}
-                            {(item.response_type === 'numeric' || item.response_type === 'temperature' || item.response_type === 'counter' || item.response_type === 'kg') && (
-                              <div className="flex items-center gap-1.5 bg-[#111b21] p-1.5 rounded-[20px] border border-white/10 shadow-inner">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const step = item.response_type === 'kg' ? 0.1 : 1;
-                                    const current = parseFloat(resp.value || '0');
-                                    const result = (current - step).toFixed(item.response_type === 'kg' ? 3 : 0);
-                                    handleAnswerChange(
-                                      item.id, 
-                                      item.response_type, 
-                                      item.response_type === 'kg' ? parseFloat(result).toFixed(3) : parseFloat(result).toString(), 
-                                      item.min_meta, 
-                                      item.max_meta
-                                    );
-                                  }}
-                                  className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-[#202c33] hover:bg-[#2a3942] rounded-2xl text-[#8696a0] hover:text-white text-3xl font-light transition-all active:scale-95 cursor-pointer"
-                                >
-                                  -
-                                </button>
-                                
-                                <div className="flex items-baseline px-2">
-                                  {item.response_type === 'kg' ? (
-                                    <input
-                                      type="text"
-                                      inputMode="decimal"
-                                      value={resp.value ? resp.value.replace('.', ',') : ''}
-                                      onChange={(e) => {
-                                        const rawVal = e.target.value;
-                                        if (rawVal === '') {
-                                          handleAnswerChange(item.id, item.response_type, '', item.min_meta, item.max_meta);
-                                          return;
-                                        }
-                                        const digits = rawVal.replace(/\D/g, '');
-                                        if (digits) {
-                                          const parsed = parseInt(digits, 10);
-                                          const processed = (parsed / 1000).toFixed(3);
-                                          handleAnswerChange(item.id, item.response_type, processed, item.min_meta, item.max_meta);
-                                        } else {
-                                          handleAnswerChange(item.id, item.response_type, '0.000', item.min_meta, item.max_meta);
-                                        }
-                                      }}
-                                      placeholder="0,000"
-                                      className="bg-transparent border-none focus:outline-none focus:ring-0 text-3xl md:text-4xl font-black w-24 md:w-32 text-center text-white p-0 m-0 font-mono tracking-wide"
-                                    />
-                                  ) : (
-                                    <input
-                                      type="number"
-                                      step="any"
-                                      value={resp.value || ''}
-                                      onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
-                                      placeholder="0"
-                                      className="bg-transparent border-none focus:outline-none focus:ring-0 text-3xl md:text-4xl font-black w-20 md:w-24 text-center text-white p-0 m-0 font-mono"
-                                    />
-                                  )}
-                                  {(item.measurement_unit || item.response_type === 'kg') && (
-                                    <span className="text-[11px] font-black text-indigo-400 shrink-0 ml-1.5 uppercase font-mono bg-indigo-500/15 border border-indigo-500/30 px-2 py-0.5 rounded-lg select-none">
-                                      {item.measurement_unit || 'kg'}
-                                    </span>
-                                  )}
-                                </div>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const step = item.response_type === 'kg' ? 0.1 : 1;
-                                    const current = parseFloat(resp.value || '0');
-                                    const result = (current + step).toFixed(item.response_type === 'kg' ? 3 : 0);
-                                    handleAnswerChange(
-                                      item.id, 
-                                      item.response_type, 
-                                      item.response_type === 'kg' ? parseFloat(result).toFixed(3) : parseFloat(result).toString(), 
-                                      item.min_meta, 
-                                      item.max_meta
-                                    );
-                                  }}
-                                  className="w-12 h-12 md:w-14 md:h-14 flex items-center justify-center bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-2xl text-3xl font-light transition-all active:scale-95 border border-emerald-500/30 cursor-pointer"
-                                >
-                                  +
-                                </button>
-                              </div>
-                            )}
-
-                            {/* TEXT FREE */}
-                            {item.response_type === 'text' && (
-                              <textarea
-                                rows={2}
-                                value={resp.value || ''}
-                                onChange={(e) => handleAnswerChange(item.id, item.response_type, e.target.value, item.min_meta, item.max_meta)}
-                                placeholder="Descreva aqui..."
-                                className="bg-[#111b21] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 w-48 sm:w-64"
-                              />
-                            )}
-
-                            {/* STARS */}
-                            {item.response_type === 'stars' && (
-                              <div className="flex gap-1.5">
-                                {[1, 2, 3, 4, 5].map(starNum => {
-                                  const isSelected = parseInt(resp.value) >= starNum;
-                                  return (
-                                    <button
-                                      key={starNum}
-                                      type="button"
-                                      onClick={() => handleAnswerChange(item.id, item.response_type, starNum.toString(), item.min_meta, item.max_meta)}
-                                      className={`p-1.5 hover:scale-125 transition-transform cursor-pointer ${isSelected ? 'text-amber-400' : 'text-[#202c33]'}`}
-                                    >
-                                      <Star size={20} fill={isSelected ? 'currentColor' : 'transparent'} />
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
-
-                           </div>
+                            </div>
                           </div>
 
                           {/* Data e Hora e Operador */}
                           {resp.isDone && resp.answeredAt && resp.answeredBy && (
-                            <div className="flex items-center justify-end gap-1.5 pt-2.5 border-t border-white/5 text-[10px] text-[#8696a0] animate-in fade-in slide-in-from-top-1">
-                              <CheckCircle2 size={13} className="text-emerald-400" />
+                            <div className="flex items-center justify-end gap-2 pt-3 border-t border-white/10 text-xs text-[#8696a0] animate-in fade-in slide-in-from-top-1">
+                              <CheckCircle2 size={15} className="text-emerald-400" />
                               <span>
                                 Registrado por <strong className="text-white font-semibold">{resp.answeredBy}</strong> em{' '}
                                 {new Date(resp.answeredAt).toLocaleDateString('pt-BR')} às{' '}
@@ -1812,33 +1832,33 @@ export default function ChecklistTablet() {
                     </Reorder.Group>
                   </div>
 
-                  {/* Barra Inferior de Envio */}
-                  <div className="h-20 bg-[#182229]/90 backdrop-blur-xl border-t border-white/10 px-6 flex items-center justify-between shrink-0 shadow-2xl relative z-10">
+                  {/* Barra Inferior de Envio Responsiva e Ergonômica */}
+                  <div className="h-24 bg-[#182229]/95 backdrop-blur-xl border-t border-white/15 px-8 flex items-center justify-between shrink-0 shadow-2xl relative z-10">
                     <button
                       onClick={() => setActiveChecklist(null)}
-                      className="text-xs text-[#8696a0] hover:text-white font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      className="text-sm text-[#8696a0] hover:text-white font-bold flex items-center gap-2 transition-colors cursor-pointer p-2"
                     >
-                      <X size={15} /> Abandonar Roteiro
+                      <X size={18} /> Abandonar Roteiro
                     </button>
                     
                     <button
                       onClick={handleSubmitChecklist}
                       disabled={submitting}
-                      className="bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-black text-xs px-7 py-3.5 rounded-2xl flex items-center gap-2.5 transition-all shadow-lg shadow-indigo-600/30 active:scale-95 disabled:opacity-50 cursor-pointer"
+                      className="h-14 bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-sm px-8 rounded-2xl flex items-center gap-3 transition-all shadow-xl shadow-indigo-600/30 active:scale-95 disabled:opacity-50 cursor-pointer"
                     >
                       {submitting ? 'Registrando na Base...' : 'Finalizar e Assinar Rotina'}
-                      <ArrowRight size={15} />
+                      <ArrowRight size={18} />
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-3">
-                  <div className="w-16 h-16 rounded-3xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-2 shadow-lg shadow-indigo-500/5 animate-pulse">
-                    <Smile size={36} />
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-4">
+                  <div className="w-20 h-20 rounded-3xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-center text-indigo-400 mb-2 shadow-xl shadow-indigo-500/10 animate-pulse">
+                    <Smile size={44} />
                   </div>
                   <div>
-                    <h3 className="font-black text-white text-lg tracking-tight">Cozinha Organizada!</h3>
-                    <p className="text-xs text-[#8696a0] mt-1 max-w-[280px] mx-auto leading-relaxed">
+                    <h3 className="font-black text-white text-xl tracking-tight">Cozinha Organizada!</h3>
+                    <p className="text-sm text-[#8696a0] mt-1.5 max-w-[320px] mx-auto leading-relaxed">
                       Selecione uma das rotinas ativas ou consulte o histórico de concluídos no painel esquerdo.
                     </p>
                   </div>
