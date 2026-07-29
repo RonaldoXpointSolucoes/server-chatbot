@@ -52,19 +52,22 @@ Essas regras são imutáveis e devem ser seguidas sem exceções para evitar que
 - **Arquitetura Client-Side First (App + Supabase)**: Desenvolva novos recursos conectando a aplicação React diretamente com o Supabase (JS SDK, tabelas, políticas RLS), usando o servidor Node.js de backend o mínimo possível para manter a base de APIs e regras exclusivas (como Baileys, Gastrofood, RAG) do motor isoladas.
 - **Deploy de Backend Antes de Testar**: Alterações feitas no código real do backend/servidor de produção devem ser deployadas antes de orientar o usuário a testar as funcionalidades.
 
-### Fluxos de Deploy (Apenas Sob Demanda Explicita)
+### Fluxos de Deploy (Sugestão Proativa & Apenas Sob Demanda Explícita)
 
-Nenhum deploy deve ser executado automaticamente. Eles só ocorrem se o usuário digitar ou solicitar explicitamente:
+Ao concluir e verificar qualquer desenvolvimento ou correção localmente, a IA **PODE e DEVE SUGERIR** o deploy ao usuário. Porém, nenhum deploy ou `git push origin main` deve ser executado automaticamente, evitando que os webhooks do GitHub disparem builds indesejados no Coolify ou Vercel enquanto o usuário estiver testando localmente.
 
-1. **Comando `Deploy`**:
+1. **Sugestão de Deploy**:
+   - Ao finalizar a tarefa, a IA deve orientar: *"As alterações foram testadas localmente. Quando desejar enviar para produção, digite `Deploy` para Vercel ou `Deploy Server` para Coolify."*
+
+2. **Comando `Deploy`**:
    - **Objetivo**: Deploy do frontend na Vercel.
    - **Ação**: Incrementa o `patch` no `package.json` da raiz seguindo a regra de dígito único `X.Y.Z` (máximo `9`). Atualiza `VITE_PACKAGE_BUILD_DATE` no `.env` e roda `npm run deploy` (Vercel). Relata a nova versão no chat.
 
-2. **Comando `Deploy Server`**:
+3. **Comando `Deploy Server`**:
    - **Objetivo**: Deploy do backend no Coolify via Git.
    - **Ação**: Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z` (máximo `9`), realiza o commit e o push das alterações do servidor para o GitHub, que dispara o build automático do Coolify. Relata o status no chat.
 
-3. **Se nenhum comando for fornecido, nenhum deploy será efetuado.**
+4. **Se nenhum comando for fornecido pelo usuário, nenhum git push ou deploy será efetuado.**
 
 ---
 

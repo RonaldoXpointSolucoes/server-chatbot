@@ -1,23 +1,27 @@
 # Customizações e Regras do Agente
 
-## Regras de Deploy e Versionamento (Sem Deploy Automático)
+## Regras de Deploy e Versionamento (Sem Deploy Automático e Sem Push Automático)
 
-O deploy NUNCA deve ser executado de forma automática após alterações de código. O agente só poderá iniciar um deploy se o usuário explicitamente der um dos comandos abaixo no chat:
+O deploy NUNCA deve ser executado de forma automática após alterações de código. O agente só poderá iniciar um deploy ou enviar commits para a branch principal (`git push origin main`) se o usuário explicitamente solicitar.
 
-1. **Se o usuário digitar `Deploy`**:
+1. **Sugestão Proativa de Deploy**:
+   - Após concluir e verificar qualquer alteração de código ou correção de bug, a IA **PODE e DEVE SUGERIR** o deploy ao usuário (ex: "As alterações foram testadas localmente. Quando desejar publicar em produção, digite `Deploy` para Vercel ou `Deploy Server` para Coolify.").
+   - A IA **NÃO DEVE** realizar o deploy nem executar `git push origin main` automaticamente sem a solicitação do usuário. Enquanto o usuário estiver desenvolvendo e testando várias soluções no ambiente local, o envio para produção/GitHub fica suspenso para evitar que webhooks do Coolify ou Vercel ativem builds indesejados.
+
+2. **Se o usuário digitar `Deploy`**:
    - Realiza o deploy do frontend na Vercel e atualiza a versão no `package.json` (apenas no frontend).
    - O incremento da versão deve seguir a regra de dígito único `X.Y.Z` (0 a 9 em cada componente, ex: de `4.9.4` para `4.9.5`). O valor máximo de cada componente é `9`.
    - Atualiza a variável `VITE_PACKAGE_BUILD_DATE` no `.env` para a data/hora atual.
-   - Executa o comando de deploy do frontend (ex: `npm run deploy` que invoca a CLI do Vercel).
+   - Executa o commit/push do frontend e a publicação na Vercel (`npm run deploy`).
    - Relata a versão gerada e o status da publicação no chat.
 
-2. **Se o usuário digitar `Deploy Server`**:
+3. **Se o usuário digitar `Deploy Server`**:
    - Realiza o deploy do servidor de backend Node.js.
    - Incrementa a versão no arquivo `server/package.json` seguindo a regra de dígito único `X.Y.Z`.
    - Executa o commit e o push das alterações do servidor Node para o repositório GitHub, que por sua vez dispara o deploy automático no Coolify em nuvem.
    - Relata o status do deploy no chat.
 
-3. **Caso o usuário NÃO digite estes comandos, o agente NÃO deve realizar deploy de nenhum tipo (nem Vercel, nem Coolify).**
+4. **Caso o usuário NÃO digite estes comandos, o agente NÃO deve realizar git push nem deploy de nenhum tipo (nem Vercel, nem Coolify).**
 
 ## Regras de Execução e Testes do Servidor (Evitando Conflitos Concorrentes)
 
@@ -26,7 +30,7 @@ O deploy NUNCA deve ser executado de forma automática após alterações de có
    - Ao identificar esse estado, o servidor local **suspenderá automaticamente** todos os serviços de background concorrentes (como `SnoozeManager`, `QueueProcessor`, sincronização de cardápios, `WaCalls` e ouvintes de alterações realtime no Supabase).
    - Isso impede problemas de concorrência com o Supabase e conflitos de sessão do WhatsApp (código 409), mantendo o servidor local inofensivo.
 2. **COMUNICAÇÃO EXCLUSIVA COM PRODUÇÃO**: A aplicação front-end local (`npm run dev` na raiz) ou de produção online deve se comunicar apenas com o backend Node.js em produção no Coolify. O `.env` do front-end deve manter `VITE_WHATSAPP_ENGINE_URL` apontado para o endereço de produção online.
-3. **DEPLOY DE BACKEND ANTES DE TESTAR**: Quando houver necessidade de testar qualquer alteração feita no código do servidor de backend, a IA deve primeiro realizar o deploy das alterações do servidor na produção em nuvem (via push no GitHub/Coolify) para que a alteração reflita no ambiente real, e somente depois orientar o usuário a testar.
+3. **DEPLOY DE BACKEND ANTES DE TESTAR**: Quando houver necessidade de testar qualquer alteração feita no código do servidor de backend, a IA deve primeiro sugerir ou realizar o deploy das alterações do servidor na produção em nuvem (via push no GitHub/Coolify sob solicitação do usuário) para que a alteração reflita no ambiente real, e somente depois orientar o usuário a testar.
 
 ## Regras de Atualização do Servidor (Node.js) vs. Frontend
 
@@ -37,7 +41,7 @@ O deploy NUNCA deve ser executado de forma automática após alterações de có
    * Criação de triggers Postgres complexos que dependam de chamadas HTTP específicas do Node ou scripts de inicialização do servidor.
    * Mudanças nas APIs de roteamento Express ou integrações que exijam segurança de chaves em backend (ex: webhook do Gastrofood).
    * Atualizações de dependências no arquivo `/server/package.json`.
-4. **INDICAÇÃO DE DEPLOY**: Ao efetuar commits puramente visuais ou de integrações diretas do Supabase, faça o commit com mensagens que deixem claro que a mudança é exclusiva do frontend (ex: `feat(ui): ...` ou `fix(ui): ...`) e apenas efetue o deploy do frontend (Vercel).
+4. **INDICAÇÃO DE DEPLOY**: Ao efetuar commits puramente visuais ou de integrações diretas do Supabase, faça o commit com mensagens que deixem claro que a mudança é exclusiva do frontend (ex: `feat(ui): ...` ou `fix(ui): ...`) e apenas sugira ao usuário realizar o deploy quando apropriado.
 
 ## Regras de Execução de Comandos Assíncronos e Deploys
 
@@ -49,4 +53,3 @@ O deploy NUNCA deve ser executado de forma automática após alterações de có
 Sempre que o agente precisar realizar login de forma automatizada e testar as funcionalidades e fluxos no Chrome, deve utilizar as seguintes credenciais:
 * **E-mail/Login**: `ronaldo.xpointsolucoes@gmail.com`
 * **Senha**: `Cc@xroxmaxi7`
-

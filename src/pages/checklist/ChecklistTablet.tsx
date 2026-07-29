@@ -536,10 +536,36 @@ export default function ChecklistTablet() {
       
       triggerConfetti(false);
 
-      return {
+      const newResponses = {
         ...prev,
         [itemId]: updated
       };
+
+      // Rolagem suave e auto-foco no próximo item pendente OU no botão de finalização se for a última tarefa!
+      setTimeout(() => {
+        const remainingItems = itemsToAnswer.filter(i => {
+          const r = newResponses[i.id];
+          return !r || !r.isDone;
+        });
+
+        if (remainingItems.length === 0) {
+          // Todas as tarefas foram concluídas! Rolagem suave até o botão de envio e destaque animado
+          const submitBtn = document.getElementById('submit-checklist-btn');
+          if (submitBtn) {
+            submitBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        } else {
+          const nextPendingItem = remainingItems[0];
+          if (nextPendingItem) {
+            const nextElement = document.getElementById(`item-card-${nextPendingItem.id}`);
+            if (nextElement) {
+              nextElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }
+        }
+      }, 200);
+
+      return newResponses;
     });
   };
 
@@ -672,11 +698,15 @@ export default function ChecklistTablet() {
           checklist_id: activeChecklist.id,
           user_id: loggedInUser.id,
           unit_id: activeChecklist.unit_id,
+          sector_id: activeChecklist.sector_id,
           started_at: startedAt,
           completed_at: now.toISOString(),
           duration_seconds: durationSeconds,
           status: 'completed_on_time',
           score,
+          latitude: currentCoords?.lat || null,
+          longitude: currentCoords?.lng || null,
+          lat_lng_precision: currentCoords?.precision || null,
           distance_calculated: distanceFromUnit
         })
         .select('id')
@@ -910,27 +940,83 @@ export default function ChecklistTablet() {
       {loggedInUser && (
         <div className="flex-1 flex flex-col overflow-hidden">
           
-          {/* Header Superior do Totem */}
-          <div className="h-20 bg-[#202c33]/90 backdrop-blur-xl border-b border-white/15 px-8 flex items-center justify-between shrink-0 shadow-lg relative z-10">
-            <div className="flex items-center gap-4">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 border border-white/30 flex items-center justify-center text-white font-black text-lg shadow-md">
+          {/* Header Superior do Totem - Consolidado, Compacto e Elegante (h-16) */}
+          <div className="h-16 sm:h-18 bg-[#182229]/95 backdrop-blur-xl border-b border-white/15 px-6 sm:px-8 flex items-center justify-between shrink-0 shadow-lg relative z-20 gap-4">
+            
+            {/* Lado Esquerdo: Operador Conectado */}
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 border border-white/20 flex items-center justify-center text-white font-black text-sm shadow-md">
                 {loggedInUser.name.substring(0, 1).toUpperCase()}
               </div>
-              <div>
-                <span className="text-xs uppercase font-bold tracking-wider text-[#8696a0] block">Operador Conectado</span>
-                <h1 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+              <div className="hidden sm:block">
+                <span className="text-[9px] uppercase font-bold tracking-wider text-[#8696a0] block leading-none">Operador Conectado</span>
+                <h1 className="text-xs sm:text-sm font-black text-white flex items-center gap-1.5 mt-0.5 leading-tight">
                   {loggedInUser.name}
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping inline-block ml-1" />
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
                 </h1>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            {/* Centro: Título da Rotina Ativa & Progresso Integrado */}
+            {activeChecklist ? (
+              <div className="flex-1 min-w-0 max-w-3xl px-2 flex items-center justify-center gap-3 sm:gap-5">
+                {/* Categoria e Título */}
+                <div className="min-w-0 text-left shrink">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-md border border-indigo-500/30 shrink-0">
+                      {activeChecklist.category}
+                    </span>
+                    <h2 className="text-xs sm:text-sm font-black text-white truncate max-w-[130px] sm:max-w-[220px] md:max-w-[300px]">
+                      {activeChecklist.title}
+                    </h2>
+                  </div>
+                </div>
+
+                {/* Progresso Resumido da Rotina */}
+                {(() => {
+                  const total = itemsToAnswer.length;
+                  const completed = itemsToAnswer.filter(item => responses[item.id]?.isDone).length;
+                  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+                  return (
+                    <div className="flex items-center gap-3 bg-[#111b21] px-3.5 py-1.5 rounded-2xl border border-white/10 shrink-0">
+                      <span className="text-xs font-mono font-black text-emerald-400">{percent}%</span>
+                      <div className="w-16 sm:w-28 bg-[#202c33] h-2 rounded-full overflow-hidden border border-white/5">
+                        <div 
+                          className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-full rounded-full transition-all duration-500 ease-out shadow-sm shadow-emerald-500/50" 
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono text-[#8696a0] font-bold shrink-0">{completed}/{total}</span>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div className="flex-1 text-center hidden md:block">
+                <span className="text-xs font-bold text-[#8696a0]">Totem Operacional PWA</span>
+              </div>
+            )}
+
+            {/* Lado Direito: GPS e Bloqueio de Tela */}
+            <div className="flex items-center gap-2.5 shrink-0">
+              {activeChecklist?.require_geolocation && (
+                <div className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 text-xs font-bold shrink-0 ${
+                  distanceFromUnit === null ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' :
+                  distanceFromUnit <= activeChecklist.unit_radius_meters ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
+                  'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                }`}>
+                  <Compass size={14} className={locating ? 'animate-spin text-indigo-400' : ''} />
+                  <span className="hidden xl:inline text-[10px]">
+                    {locating ? 'GPS...' : distanceFromUnit <= activeChecklist.unit_radius_meters ? `${Math.round(distanceFromUnit)}m OK` : 'Fora'}
+                  </span>
+                </div>
+              )}
+
               <button
                 onClick={handleLogout}
-                className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold flex items-center gap-2.5 transition-all cursor-pointer shadow-md active:scale-95"
+                className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 shadow-sm"
               >
-                <Lock size={16} /> Bloquear Tela
+                <Lock size={14} /> <span className="hidden sm:inline">Bloquear Tela</span>
               </button>
             </div>
           </div>
@@ -1083,7 +1169,7 @@ export default function ChecklistTablet() {
               {activeExecution ? (
                 <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-200">
                   {/* Cabeçalho da Execução Concluída */}
-                  <div className="p-8 bg-[#182229]/90 backdrop-blur-md border-b border-white/15 shrink-0">
+                  <div className="p-6 sm:p-8 bg-[#182229]/90 backdrop-blur-md border-b border-white/15 shrink-0">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
                       <div className="flex items-center gap-4">
                         <button
@@ -1124,7 +1210,7 @@ export default function ChecklistTablet() {
                   </div>
 
                   {/* Detalhes das Respostas */}
-                  <div className="flex-1 overflow-y-auto styled-scrollbar p-8 space-y-5">
+                  <div className="flex-1 overflow-y-auto styled-scrollbar p-6 sm:p-8 space-y-5">
                     {loadingExecutionDetails ? (
                       <div className="p-20 text-center text-[#8696a0] animate-pulse text-sm">Carregando respostas detalhadas...</div>
                     ) : executionResponses.length === 0 ? (
@@ -1193,108 +1279,36 @@ export default function ChecklistTablet() {
               ) : activeChecklist ? (
                 <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-200">
                   
-                  {/* Cabeçalho do Roteiro */}
-                  <div className="p-8 bg-[#182229]/90 backdrop-blur-md border-b border-white/15 shrink-0">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
-                      <div className="flex items-center gap-4">
+                  {/* Banner discreto de apoio operacional com a descrição e mensagem de incentivo */}
+                  {activeChecklist.description && (
+                    <div className="px-6 sm:px-8 py-2.5 bg-[#182229]/60 border-b border-white/10 flex items-center justify-between gap-4 shrink-0 text-xs text-[#8696a0]">
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={() => setActiveChecklist(null)}
-                          className="md:hidden p-3 -ml-2 rounded-2xl hover:bg-white/10 text-[#8696a0] hover:text-white transition-all shrink-0"
+                          className="md:hidden p-1 rounded-xl hover:bg-white/10 text-[#8696a0] hover:text-white transition-all shrink-0"
                         >
-                          <ChevronRight className="rotate-180" size={24} />
+                          <ChevronRight className="rotate-180" size={18} />
                         </button>
-                        <div>
-                          <span className="text-xs uppercase tracking-widest font-bold text-indigo-300 bg-indigo-500/20 px-3.5 py-1 rounded-full border border-indigo-500/40">
-                            {activeChecklist.category}
-                          </span>
-                          <h2 className="text-2xl sm:text-3xl font-black text-white mt-2 tracking-tight">{activeChecklist.title}</h2>
-                          <p className="text-sm text-[#8696a0] mt-1">{activeChecklist.description || 'Siga as orientações abaixo para preencher.'}</p>
-                        </div>
+                        <p className="italic font-medium">{activeChecklist.description}</p>
                       </div>
-                      
-                      {/* Geolocalização e Status do GPS */}
-                      {activeChecklist.require_geolocation && (
-                        <div className={`px-5 py-3 rounded-2xl border flex items-center gap-3 shrink-0 ${
-                          distanceFromUnit === null ? 'border-amber-500/40 bg-amber-500/15 text-amber-300' :
-                          distanceFromUnit <= activeChecklist.unit_radius_meters ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300' :
-                          'border-rose-500/40 bg-rose-500/15 text-rose-300'
-                        }`}>
-                          <Compass size={18} className={locating ? 'animate-spin text-indigo-400' : ''} />
-                          <div className="text-left">
-                            <span className="text-xs block uppercase font-bold tracking-wider opacity-80">Precisão GPS</span>
-                            <span className="text-xs sm:text-sm font-bold">
-                              {locating ? 'Coletando...' :
-                               distanceFromUnit === null ? 'Aguardando GPS' :
-                               distanceFromUnit <= activeChecklist.unit_radius_meters ? `Dentro da área (${Math.round(distanceFromUnit)}m)` :
-                               `Fora da área (${Math.round(distanceFromUnit)}m - Limite ${activeChecklist.unit_radius_meters}m)`
-                              }
-                            </span>
-                          </div>
-                        </div>
-                      )}
+
+                      {/* Incentivo gamificado dinâmico */}
+                      {(() => {
+                        const total = itemsToAnswer.length;
+                        const completed = itemsToAnswer.filter(item => responses[item.id]?.isDone).length;
+                        const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+                        return (
+                          <span className="hidden xl:inline text-[11px] font-semibold text-emerald-400/90 font-mono">
+                            {getGamifiedIncentive(percent, completed, total, loggedInUser?.name)}
+                          </span>
+                        );
+                      })()}
                     </div>
-
-                    {/* Progresso Dinâmico e Gamificação */}
-                    {(() => {
-                      const total = itemsToAnswer.length;
-                      const completed = itemsToAnswer.filter(item => responses[item.id]?.isDone).length;
-                      const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-                      return (
-                        <div className="flex items-center gap-5 bg-[#111b21] p-5 rounded-3xl border border-white/15 mt-5 animate-in fade-in duration-300 shadow-lg">
-                          {/* Gráfico circular SVG */}
-                          <div className="relative w-14 h-14 shrink-0 flex items-center justify-center">
-                            <svg className="w-full h-full transform -rotate-90">
-                              <circle
-                                cx="28"
-                                cy="28"
-                                r="22"
-                                className="text-[#202c33]"
-                                strokeWidth="4"
-                                stroke="currentColor"
-                                fill="transparent"
-                              />
-                              <circle
-                                cx="28"
-                                cy="28"
-                                r="22"
-                                className="text-emerald-400 transition-all duration-500 ease-out"
-                                strokeWidth="4"
-                                strokeDasharray={2 * Math.PI * 22}
-                                strokeDashoffset={2 * Math.PI * 22 * (1 - percent / 100)}
-                                strokeLinecap="round"
-                                stroke="currentColor"
-                                fill="transparent"
-                              />
-                            </svg>
-                            <span className="absolute text-xs font-black text-white font-mono">{percent}%</span>
-                          </div>
-
-                          {/* Progresso Textual e Mensagem de Incentivo */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between text-xs sm:text-sm mb-1.5">
-                              <span className="font-bold text-[#d1d7db]">Progresso da Rotina</span>
-                              <span className="font-mono text-emerald-400 font-bold">{completed} de {total} tarefas concluídas</span>
-                            </div>
-                            {/* Barra de Progresso Horizontal Neon */}
-                            <div className="w-full bg-[#202c33] h-3.5 rounded-full overflow-hidden border border-white/10">
-                              <div 
-                                className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-full rounded-full transition-all duration-500 ease-out shadow-md shadow-emerald-500/50" 
-                                style={{ width: `${percent}%` }}
-                              />
-                            </div>
-                            {/* Mensagem Gamificada de Incentivo */}
-                            <p className="text-xs text-[#8696a0] mt-2 italic font-semibold truncate">
-                              {getGamifiedIncentive(percent, completed, total, loggedInUser?.name)}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
+                  )}
 
                   {/* Formulário de Perguntas com Elementos Grandes para Tablet */}
-                  <div className="flex-1 overflow-y-auto styled-scrollbar p-8 space-y-6">
+                  <div className="flex-1 overflow-y-auto styled-scrollbar p-6 sm:p-8 space-y-6">
                     
                     {/* Filtros da Lista */}
                     {itemsToAnswer.length > 0 && (
@@ -1374,6 +1388,7 @@ export default function ChecklistTablet() {
                       return (
                         <Reorder.Item 
                           key={item.id}
+                          id={`item-card-${item.id}`}
                           value={item}
                           className={`p-6 sm:p-7 rounded-[32px] border flex flex-col gap-5 transition-all duration-300 ${
                             resp.isDone 
@@ -1841,14 +1856,24 @@ export default function ChecklistTablet() {
                       <X size={18} /> Abandonar Roteiro
                     </button>
                     
-                    <button
-                      onClick={handleSubmitChecklist}
-                      disabled={submitting}
-                      className="h-14 bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-sm px-8 rounded-2xl flex items-center gap-3 transition-all shadow-xl shadow-indigo-600/30 active:scale-95 disabled:opacity-50 cursor-pointer"
-                    >
-                      {submitting ? 'Registrando na Base...' : 'Finalizar e Assinar Rotina'}
-                      <ArrowRight size={18} />
-                    </button>
+                    {(() => {
+                      const isAllDone = itemsToAnswer.length > 0 && itemsToAnswer.every(i => responses[i.id]?.isDone);
+                      return (
+                        <button
+                          id="submit-checklist-btn"
+                          onClick={handleSubmitChecklist}
+                          disabled={submitting}
+                          className={`h-14 rounded-2xl flex items-center gap-3 transition-all cursor-pointer font-black text-sm px-8 shadow-xl ${
+                            isAllDone
+                              ? 'bg-gradient-to-r from-emerald-500 via-indigo-600 to-purple-600 text-white border-2 border-emerald-400 shadow-2xl shadow-emerald-500/50 animate-bounce scale-105 ring-4 ring-emerald-500/30'
+                              : 'bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-indigo-600/30 active:scale-95 disabled:opacity-50'
+                          }`}
+                        >
+                          {submitting ? 'Registrando na Base...' : 'Finalizar e Assinar Rotina'}
+                          <ArrowRight size={18} className={isAllDone ? 'animate-pulse text-emerald-300' : ''} />
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
               ) : (
