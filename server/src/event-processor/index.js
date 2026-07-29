@@ -792,7 +792,7 @@ class EventProcessor {
              }
              
              if(toUpdateConvs.length > 0) {
-                 const { data: res, error: errUp } = await supabase.from('conversations').upsert(toUpdateConvs, { onConflict: 'tenant_id, instance_id, contact_id' }).select('id, tenant_id, contact_id, instance_id');
+                 const { data: res, error: errUp } = await supabase.from('conversations').upsert(toUpdateConvs, { onConflict: 'id' }).select('id, tenant_id, contact_id, instance_id');
                  if(errUp) console.warn('[BatchProcessor] Aviso: falha atualizando unread batch.', errUp.message);
              }
              
