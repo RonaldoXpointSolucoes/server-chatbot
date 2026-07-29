@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck } from 'lucide-react';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
-import { useChatStore, instanceCache, resolveInstanceUuid } from '../store/chatStore';
+import { useChatStore, instanceCache, resolveInstanceUuid, sortMessagesChronologically } from '../store/chatStore';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import { Phone } from 'lucide-react';
 import { playNotificationSound } from '../utils/AudioEngine';
@@ -6776,9 +6776,10 @@ export default function ChatDashboard() {
 
 
             {(() => {
-              const rawMsgs = activeChat.messages?.filter(m => m.text || m.mediaUrl) || [];
+              const rawMsgs = activeChat.messages?.filter(m => m.text || m.mediaUrl || m.isTask || m.sender === 'internal_note') || [];
+              const sortedRawMsgs = sortMessagesChronologically(rawMsgs);
               const msgsFilteredByMode = (ticketMode && messageFilter === 'today')
-                ? rawMsgs.filter(m => {
+                ? sortedRawMsgs.filter(m => {
                     try {
                       const msgDate = new Date(m.timestamp);
                       // Se a mensagem for de fuso horário futuro/drift de relógio, sempre exibe
@@ -6789,7 +6790,7 @@ export default function ChatDashboard() {
                       return false;
                     }
                   })
-                : rawMsgs;
+                : sortedRawMsgs;
               const dedupedMsgs = msgsFilteredByMode.filter((msg, idx) => {
                 if (msg.sender !== 'system') return true;
                 const nextMsg = msgsFilteredByMode[idx + 1];

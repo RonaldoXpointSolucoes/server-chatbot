@@ -35,6 +35,30 @@ export type MessageType = {
   mediaMetadata?: any;
 };
 
+export const sortMessagesChronologically = (msgs: MessageType[]): MessageType[] => {
+  if (!msgs || msgs.length <= 1) return msgs || [];
+  return [...msgs].sort((a, b) => {
+    const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp || 0).getTime();
+    const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp || 0).getTime();
+    
+    // 1. Fator principal: Timestamp cronológico ascendente (mais antiga primeiro, mais recente por último)
+    if (timeA !== timeB) {
+      return timeA - timeB;
+    }
+    
+    // 2. Desempate para mensagens otimistas: se 'a' for otimista ('optimistic-...'), fica por último
+    const isOptA = String(a.id || '').startsWith('optimistic-');
+    const isOptB = String(b.id || '').startsWith('optimistic-');
+    if (isOptA && !isOptB) return 1;
+    if (!isOptA && isOptB) return -1;
+
+    // 3. Desempate secundário por whatsapp_id ou ID do banco de dados
+    const idA = String(a.whatsapp_id || a.id || '');
+    const idB = String(b.whatsapp_id || b.id || '');
+    return idA.localeCompare(idB);
+  });
+};
+
 
 export type ContactType = ContactRow & {
   avatar: string;
@@ -2251,9 +2275,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 return m.text === msg.text;
             });
             if (optIndex !== -1) {
-              const updatedMsgs = [...c.messages];
+              let updatedMsgs = [...c.messages];
               updatedMsgs[optIndex] = { ...msg, sender: 'human' }; // substitui pelo registro do Realtime com UUID real mantendo verde na UI
-              updatedMsgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+              updatedMsgs = sortMessagesChronologically(updatedMsgs);
               return { ...c, messages: updatedMsgs, conv_status: updatedStatus, snoozed_until: updatedSnooze };
             }
           }
@@ -2266,8 +2290,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
              }
           }
           
-          const newMessages = [...c.messages, msg];
-          newMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+          const newMessages = sortMessagesChronologically([...c.messages, msg]);
           
           return { ...c, messages: newMessages, conv_status: updatedStatus, snoozed_until: updatedSnooze };
         }
@@ -3651,7 +3674,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const mappedMsgs = filteredArray.map(m => {
                 const advanced = parseAdvancedMsgMetadata(m);
                 const realTimestamp = new Date(m.timestamp);
- 
+
                 return {
                     id: m.id,
                     whatsapp_id: m.whatsapp_message_id,
@@ -3668,10 +3691,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     payload: m.raw_payload || m.payload
                 };
             });
- 
+
             // CRM: Mescla cronologicamente com todas as anotações carregadas
-            const combinedMsgs = [...mappedMsgs, ...mappedNotes];
-            combinedMsgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+            const combinedMsgs = sortMessagesChronologically([...mappedMsgs, ...mappedNotes]);
             
             // 3. Deduplicar baseando-se no whatsapp_id ou id (para anotações)
             const uniqueMsgs: any[] = [];
@@ -3684,7 +3706,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 }
                 uniqueMsgs.push(m);
             }
- 
+
             set((s) => {
                const updated = [...s.contacts];
                const idx = updated.findIndex(c => c.id === contactId);
@@ -3714,11 +3736,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
         
         const { data: msgs } = await supabase.from('messages')
-               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload, created_at')
                .eq('tenant_id', tenant.id)
                .eq('conversation_id', conv.id)
-               .order('timestamp', { ascending: false })
-               .limit(100);
+               .order('timestamp', { ascending: true })
+               .order('created_at', { ascending: true })
+               .limit(300);
                
         
 
