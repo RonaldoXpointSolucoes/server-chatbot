@@ -20,7 +20,8 @@ import {
   Briefcase,
   Calendar,
   HelpCircle,
-  Calculator
+  Calculator,
+  UserPlus
 } from 'lucide-react';
 
 interface Unit {
@@ -640,53 +641,64 @@ export default function ChecklistSettings() {
         is_active: editingUser.is_active ?? true,
       };
 
-      if (editingUser.id) {
-        // Atualizar ou inserir perfil na tabela de extensão
-        const { error } = await supabase
-          .from('users_profiles')
-          .upsert({
-            id: editingUser.id,
-            tenant_id: tenantId,
-            name: editingUser.name,
-            email: editingUser.email,
-            phone: editingUser.phone || '',
-            pin: finalPin,
-            role: editingUser.role,
-            is_active: editingUser.is_active ?? true,
-            cargo_id: editingUser.cargo_id || null
-          }, { onConflict: 'id' });
-        if (error) throw error;
+      const isNew = !editingUser.id;
+      const targetUserId = editingUser.id || crypto.randomUUID();
 
-        // Atualizar Permissões de Unidades (Exclui antigas, reinsere novas)
-        const { error: delUnitErr } = await supabase.from('user_unit_permissions').delete().eq('user_id', editingUser.id);
-        if (delUnitErr) console.warn('Erro ao deletar user_unit_permissions:', delUnitErr);
+      // Salvar perfil em users_profiles
+      const { error } = await supabase
+        .from('users_profiles')
+        .upsert({
+          id: targetUserId,
+          tenant_id: tenantId,
+          name: editingUser.name,
+          email: editingUser.email,
+          phone: editingUser.phone || '',
+          pin: finalPin,
+          role: editingUser.role || 'operator',
+          is_active: editingUser.is_active ?? true,
+          cargo_id: editingUser.cargo_id || null
+        }, { onConflict: 'id' });
+      if (error) throw error;
 
-        if (editingUser.unit_permissions && editingUser.unit_permissions.length > 0) {
-          const uniqueUnits = Array.from(new Set(editingUser.unit_permissions));
-          const insertPayloads = uniqueUnits.map(uId => ({
-            user_id: editingUser.id,
-            unit_id: uId
-          }));
-          const { error: insUnitErr } = await supabase.from('user_unit_permissions').upsert(insertPayloads, { onConflict: 'user_id,unit_id' });
-          if (insUnitErr) throw insUnitErr;
-        }
-
-        // Atualizar Permissões de Setores
-        const { error: delSecErr } = await supabase.from('user_sector_permissions').delete().eq('user_id', editingUser.id);
-        if (delSecErr) console.warn('Erro ao deletar user_sector_permissions:', delSecErr);
-
-        if (editingUser.sector_permissions && editingUser.sector_permissions.length > 0) {
-          const uniqueSectors = Array.from(new Set(editingUser.sector_permissions));
-          const insertPayloads = uniqueSectors.map(sId => ({
-            user_id: editingUser.id,
-            sector_id: sId
-          }));
-          const { error: insSecErr } = await supabase.from('user_sector_permissions').upsert(insertPayloads, { onConflict: 'user_id,sector_id' });
-          if (insSecErr) throw insSecErr;
-        }
-
-        showToast('success', 'Perfil e acessos do colaborador atualizados com sucesso!');
+      // Se for novo membro, vincula ao tenant_users também
+      if (isNew) {
+        await supabase.from('tenant_users').upsert({
+          tenant_id: tenantId,
+          user_id: targetUserId,
+          email: editingUser.email,
+          role: editingUser.role || 'operator'
+        }, { onConflict: 'tenant_id,user_id' });
       }
+
+      // Atualizar Permissões de Unidades
+      const { error: delUnitErr } = await supabase.from('user_unit_permissions').delete().eq('user_id', targetUserId);
+      if (delUnitErr) console.warn('Erro ao deletar user_unit_permissions:', delUnitErr);
+
+      if (editingUser.unit_permissions && editingUser.unit_permissions.length > 0) {
+        const uniqueUnits = Array.from(new Set(editingUser.unit_permissions));
+        const insertPayloads = uniqueUnits.map(uId => ({
+          user_id: targetUserId,
+          unit_id: uId
+        }));
+        const { error: insUnitErr } = await supabase.from('user_unit_permissions').upsert(insertPayloads, { onConflict: 'user_id,unit_id' });
+        if (insUnitErr) throw insUnitErr;
+      }
+
+      // Atualizar Permissões de Setores
+      const { error: delSecErr } = await supabase.from('user_sector_permissions').delete().eq('user_id', targetUserId);
+      if (delSecErr) console.warn('Erro ao deletar user_sector_permissions:', delSecErr);
+
+      if (editingUser.sector_permissions && editingUser.sector_permissions.length > 0) {
+        const uniqueSectors = Array.from(new Set(editingUser.sector_permissions));
+        const insertPayloads = uniqueSectors.map(sId => ({
+          user_id: targetUserId,
+          sector_id: sId
+        }));
+        const { error: insSecErr } = await supabase.from('user_sector_permissions').upsert(insertPayloads, { onConflict: 'user_id,sector_id' });
+        if (insSecErr) throw insSecErr;
+      }
+
+      showToast('success', isNew ? 'Novo membro cadastrado com sucesso!' : 'Perfil e acessos do colaborador atualizados com sucesso!');
 
       setEditingUser(null);
       loadData();
@@ -1269,24 +1281,44 @@ export default function ChecklistSettings() {
                 <p className="text-xs text-[#8696a0]">Gerencie cargos, turnos de trabalho, PINs no tablet e permissões por setor/filial.</p>
               </div>
 
-              {/* Input de Busca */}
-              <div className="relative w-full sm:w-72">
-                <Search size={14} className="absolute left-3 top-3 text-[#8696a0]" />
-                <input
-                  type="text"
-                  value={userSearchTerm}
-                  onChange={e => setUserSearchTerm(e.target.value)}
-                  placeholder="Buscar por nome, e-mail ou PIN..."
-                  className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500 transition-all font-medium"
-                />
-                {userSearchTerm && (
-                  <button 
-                    onClick={() => setUserSearchTerm('')}
-                    className="absolute right-2.5 top-2.5 text-[#8696a0] hover:text-white p-0.5 rounded-md cursor-pointer"
-                  >
-                    <X size={13} />
-                  </button>
-                )}
+              {/* Ações: Botão Novo Membro + Input de Busca */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setEditingUser({
+                    name: '',
+                    email: '',
+                    phone: '',
+                    pin: '',
+                    role: 'operator',
+                    is_active: true,
+                    unit_permissions: [],
+                    sector_permissions: []
+                  })}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3.5 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md shadow-indigo-600/20 active:scale-95 cursor-pointer shrink-0"
+                >
+                  <UserPlus size={14} />
+                  <span>Novo Membro</span>
+                </button>
+
+                <div className="relative w-full sm:w-72">
+                  <Search size={14} className="absolute left-3 top-3 text-[#8696a0]" />
+                  <input
+                    type="text"
+                    value={userSearchTerm}
+                    onChange={e => setUserSearchTerm(e.target.value)}
+                    placeholder="Buscar por nome, e-mail ou PIN..."
+                    className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500 transition-all font-medium"
+                  />
+                  {userSearchTerm && (
+                    <button 
+                      onClick={() => setUserSearchTerm('')}
+                      className="absolute right-2.5 top-2.5 text-[#8696a0] hover:text-white p-0.5 rounded-md cursor-pointer"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1578,7 +1610,7 @@ export default function ChecklistSettings() {
             <div className="flex justify-between items-center border-b border-[#2a3942]/60 pb-3 mb-4">
               <h3 className="font-semibold text-white text-md flex items-center gap-1.5">
                 <Shield size={16} className="text-indigo-400" />
-                Gerenciar Permissões de {editingUser.name || 'Colaborador'}
+                {editingUser.id ? `Gerenciar Permissões de ${editingUser.name || 'Colaborador'}` : 'Cadastrar Novo Membro da Equipe'}
               </h3>
               <button onClick={() => setEditingUser(null)} className="p-1 hover:bg-white/10 rounded-lg text-[#8696a0] hover:text-white transition-all cursor-pointer">
                 <X size={16} />
@@ -1586,11 +1618,28 @@ export default function ChecklistSettings() {
             </div>
 
             <div className="space-y-4">
-              {/* Nome / Email */}
-              <div>
-                <label className="block text-xs font-medium text-[#8696a0] mb-0.5">Colaborador</label>
-                <p className="text-sm font-semibold text-white">{editingUser.name}</p>
-                <p className="text-xs text-[#8696a0]">{editingUser.email}</p>
+              {/* Nome / Email / Telefone */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-[#8696a0] mb-1">Nome Completo *</label>
+                  <input
+                    type="text"
+                    value={editingUser.name || ''}
+                    onChange={e => setEditingUser(p => ({ ...p, name: e.target.value }))}
+                    placeholder="Ex: Carlos Silva"
+                    className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2 text-sm text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500 font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#8696a0] mb-1">E-mail Corporativo *</label>
+                  <input
+                    type="email"
+                    value={editingUser.email || ''}
+                    onChange={e => setEditingUser(p => ({ ...p, email: e.target.value }))}
+                    placeholder="exemplo@burguerplus.com.br"
+                    className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl px-3 py-2 text-sm text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500 font-medium"
+                  />
+                </div>
               </div>
 
               {/* PIN */}

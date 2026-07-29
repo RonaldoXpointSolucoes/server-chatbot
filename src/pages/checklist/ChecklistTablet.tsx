@@ -111,6 +111,7 @@ export default function ChecklistTablet() {
   // Estado de persistência em tempo real (Auto-Save)
   const [currentExecutionId, setCurrentExecutionId] = useState<string | null>(null);
   const [inProgressExecutions, setInProgressExecutions] = useState<Record<string, { executionId: string; completedCount: number }>>({});
+  const [todayCompletedChecklists, setTodayCompletedChecklists] = useState<Record<string, { executionId: string; completedAt: string; score: number }>>({});
 
   // Filtros locais e ordenação
   const [searchQuery, setSearchQuery] = useState('');
@@ -452,6 +453,29 @@ export default function ChecklistTablet() {
           };
         });
         setInProgressExecutions(inProgMap);
+      }
+
+      // Busca execuções concluídas HOJE para destacar rotinas já efetuadas no dia atual
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+
+      const { data: todayData } = await supabase
+        .from('checklist_executions')
+        .select('id, checklist_id, completed_at, score')
+        .eq('tenant_id', tenantId)
+        .gte('completed_at', startOfToday.toISOString())
+        .in('status', ['completed_on_time', 'completed_late']);
+
+      if (todayData) {
+        const todayMap: Record<string, { executionId: string; completedAt: string; score: number }> = {};
+        todayData.forEach((td: any) => {
+          todayMap[td.checklist_id] = {
+            executionId: td.id,
+            completedAt: td.completed_at,
+            score: td.score || 100
+          };
+        });
+        setTodayCompletedChecklists(todayMap);
       }
     } catch (e) {
       console.error(e);
@@ -1324,47 +1348,69 @@ export default function ChecklistTablet() {
                       Nenhum checklist disponível no momento.
                     </div>
                   ) : (
-                    checklists.map((chk) => (
-                      <button
-                        key={chk.id}
-                        type="button"
-                        onClick={() => {
-                          handleStartChecklist(chk);
-                          setActiveExecution(null);
-                        }}
-                        disabled={submitting}
-                        className={`p-5 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[120px] cursor-pointer group ${
-                          activeChecklist?.id === chk.id 
-                            ? 'border-indigo-500 bg-indigo-500/20 shadow-xl shadow-indigo-500/15 scale-[1.01]' 
-                            : 'border-white/10 bg-[#202c33]/70 hover:bg-[#202c33] hover:border-white/20'
-                        }`}
-                      >
-                        <div>
-                          <div className="flex justify-between items-start gap-2">
-                            <span className="text-[10px] px-3 py-1 rounded-full font-bold bg-indigo-500/25 text-indigo-300 shrink-0 border border-indigo-500/40 uppercase tracking-wider">
-                              {chk.category || 'Geral'}
+                    checklists.map((chk) => {
+                      const isDoneToday = !!todayCompletedChecklists[chk.id];
+                      const isInProg = !isDoneToday && !!inProgressExecutions[chk.id];
+                      const todayData = todayCompletedChecklists[chk.id];
+
+                      return (
+                        <button
+                          key={chk.id}
+                          type="button"
+                          onClick={() => {
+                            handleStartChecklist(chk);
+                            setActiveExecution(null);
+                          }}
+                          disabled={submitting}
+                          className={`p-5 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[120px] cursor-pointer group ${
+                            activeChecklist?.id === chk.id 
+                              ? 'border-indigo-500 bg-indigo-500/20 shadow-xl shadow-indigo-500/15 scale-[1.01]' 
+                              : isDoneToday
+                                ? 'border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/15 shadow-md shadow-emerald-500/5'
+                                : isInProg
+                                  ? 'border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/15'
+                                  : 'border-white/10 bg-[#202c33]/70 hover:bg-[#202c33] hover:border-white/20'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex justify-between items-start gap-2 flex-wrap">
+                              <span className="text-[10px] px-3 py-1 rounded-full font-bold bg-indigo-500/25 text-indigo-300 shrink-0 border border-indigo-500/40 uppercase tracking-wider">
+                                {chk.category || 'Geral'}
+                              </span>
+                              {isDoneToday ? (
+                                <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 uppercase tracking-wider flex items-center gap-1 shrink-0">
+                                  <CheckCircle2 size={12} className="text-emerald-400" /> Realizada Hoje ({todayData.score}%)
+                                </span>
+                              ) : isInProg ? (
+                                <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wider animate-pulse flex items-center gap-1 shrink-0">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Em Andamento
+                                </span>
+                              ) : (
+                                <span className="text-xs text-[#8696a0] font-semibold truncate">{chk.unit_name}</span>
+                              )}
+                            </div>
+                            <h4 className={`font-black text-base mt-3 leading-snug line-clamp-2 transition-colors ${
+                              isDoneToday ? 'text-emerald-200 opacity-90' : 'text-white group-hover:text-indigo-300'
+                            }`}>
+                              {chk.title}
+                            </h4>
+                          </div>
+
+                          <div className="flex items-center justify-between mt-4 text-xs text-[#8696a0] pt-3 border-t border-white/10 w-full">
+                            <span className="flex items-center gap-1.5 font-bold text-slate-200">
+                              <Compass size={14} className="text-indigo-400 shrink-0" /> {chk.sector_name}
                             </span>
-                            {inProgressExecutions[chk.id] ? (
-                              <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wider animate-pulse flex items-center gap-1 shrink-0">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Em Andamento
+                            {isDoneToday ? (
+                              <span className="text-[11px] font-bold text-emerald-400 font-mono">
+                                {new Date(todayData.completedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}h
                               </span>
                             ) : (
-                              <span className="text-xs text-[#8696a0] font-semibold truncate">{chk.unit_name}</span>
+                              <ChevronRight size={16} className="text-[#8696a0] group-hover:translate-x-1 transition-transform" />
                             )}
                           </div>
-                          <h4 className="font-black text-white text-base mt-3 leading-snug line-clamp-2 group-hover:text-indigo-300 transition-colors">
-                            {chk.title}
-                          </h4>
-                        </div>
-
-                        <div className="flex items-center justify-between mt-4 text-xs text-[#8696a0] pt-3 border-t border-white/10 w-full">
-                          <span className="flex items-center gap-1.5 font-bold text-slate-200">
-                            <Compass size={14} className="text-indigo-400 shrink-0" /> {chk.sector_name}
-                          </span>
-                          <ChevronRight size={16} className="text-[#8696a0] group-hover:translate-x-1 transition-transform" />
-                        </div>
-                      </button>
-                    ))
+                        </button>
+                      );
+                    })
                   )}
                 </>
               ) : (
