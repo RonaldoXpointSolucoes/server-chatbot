@@ -440,8 +440,7 @@ class SessionManager {
                         }, 2000);
                         return;
                     }
-                    }
-                    
+
                     // Clear stable connection timeouts if it disconnected early
                     if (this.conflictTimeouts.has(instanceId)) {
                         clearTimeout(this.conflictTimeouts.get(instanceId));
