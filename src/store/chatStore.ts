@@ -2315,7 +2315,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 if (msg.whatsapp_id && m.whatsapp_id === msg.whatsapp_id) return true;
                 if (!String(m.id).startsWith('optimistic-')) return false;
                 if (m.mediaType && msg.mediaType && m.mediaType === msg.mediaType) return true;
-                return m.text === msg.text;
+                
+                const normM = (m.text || '').replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
+                const normMsg = (msg.text || '').replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
+                return normM === normMsg || (!!normM && !!normMsg && (normM.includes(normMsg) || normMsg.includes(normM)));
             });
             if (optIndex !== -1) {
               let updatedMsgs = [...c.messages];
@@ -3756,12 +3759,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
                    const currentMsgs = updated[idx].messages || [];
                    const optimisticMsgs = currentMsgs.filter(m => String(m.id).startsWith('optimistic-'));
 
-                   // Filtra otimistas que já foram gravadas no banco (para evitar duplicatas)
+                   const normalizeTextForCompare = (txt: any) => {
+                       if (!txt) return '';
+                       return String(txt).replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
+                   };
+
+                   // Filtra otimistas que já foram gravadas no banco ou expiraram (mais de 5 minutos sem envio)
+                   const nowMs = Date.now();
                    const pendingOptimistic = optimisticMsgs.filter(opt => {
-                       return !uniqueMsgs.some(dbMsg => 
-                           (opt.whatsapp_id && dbMsg.whatsapp_id === opt.whatsapp_id) ||
-                           (dbMsg.text === opt.text && Math.abs(new Date(dbMsg.timestamp).getTime() - new Date(opt.timestamp).getTime()) < 15000)
-                       );
+                       const optTime = opt.timestamp instanceof Date ? opt.timestamp.getTime() : new Date(opt.timestamp || 0).getTime();
+                       const isExpired = (nowMs - optTime) > 5 * 60 * 1000; // 5 minutos de tolerância para in-flight
+                       if (isExpired) return false;
+
+                       const optNormText = normalizeTextForCompare(opt.text);
+                       const alreadyInDb = uniqueMsgs.some(dbMsg => {
+                           if (opt.whatsapp_id && dbMsg.whatsapp_id === opt.whatsapp_id) return true;
+                           const dbNormText = normalizeTextForCompare(dbMsg.text);
+                           if (optNormText && dbNormText && (optNormText === dbNormText || dbNormText.includes(optNormText) || optNormText.includes(dbNormText))) return true;
+                           return false;
+                       });
+
+                       return !alreadyInDb;
                    });
 
                    const finalMsgs = sortMessagesChronologically([...uniqueMsgs, ...pendingOptimistic]);
