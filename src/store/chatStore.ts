@@ -59,6 +59,49 @@ export const sortMessagesChronologically = (msgs: MessageType[]): MessageType[] 
   });
 };
 
+export const getEffectiveContactTime = (c: any): number => {
+    if (!c) return 0;
+    
+    // 1. Se tem mensagens carregadas em RAM, o timestamp da mensagem mais recente tem prioridade absoluta!
+    if (Array.isArray(c.messages) && c.messages.length > 0) {
+        const lastMsg = c.messages[c.messages.length - 1];
+        if (lastMsg && lastMsg.timestamp) {
+            const t = lastMsg.timestamp instanceof Date ? lastMsg.timestamp.getTime() : new Date(lastMsg.timestamp).getTime();
+            if (!isNaN(t) && t > 0) return t;
+        }
+    }
+    
+    // 2. Se a conversa possui last_message_at
+    if (c.last_message_at) {
+        const t = new Date(c.last_message_at).getTime();
+        if (!isNaN(t) && t > 0) return t;
+    }
+    
+    // 3. Fallback para lastMsgTimestamp
+    if (c.lastMsgTimestamp) {
+        const t = typeof c.lastMsgTimestamp === 'number' ? c.lastMsgTimestamp : new Date(c.lastMsgTimestamp).getTime();
+        if (!isNaN(t) && t > 0) return t;
+    }
+
+    // 4. Fallback para timestamp ou last_interaction_at ou created_at
+    if (c.timestamp) {
+        const t = typeof c.timestamp === 'number' ? c.timestamp : new Date(c.timestamp).getTime();
+        if (!isNaN(t) && t > 0) return t;
+    }
+
+    if (c.last_interaction_at) {
+        const t = new Date(c.last_interaction_at).getTime();
+        if (!isNaN(t) && t > 0) return t;
+    }
+    
+    if (c.created_at) {
+        const t = new Date(c.created_at).getTime();
+        if (!isNaN(t) && t > 0) return t;
+    }
+
+    return 0;
+};
+
 
 export type ContactType = ContactRow & {
   avatar: string;
@@ -3436,9 +3479,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                // Mantém a ordem decrescente pra pegar sempre o mais recente em caso de duplicatas
                normalizedContacts.sort((a,b) => {
-                  const tsA = a.timestamp || a.lastMsgTimestamp || 0;
-                  const tsB = b.timestamp || b.lastMsgTimestamp || 0;
-                  return tsB - tsA;
+                  return getEffectiveContactTime(b) - getEffectiveContactTime(a);
                });
                
                for (const c of normalizedContacts) {
@@ -4996,13 +5037,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
               
               u[i] = updatedContact;
            }
-           
-           // Se o lastMsgTimestamp foi atualizado, reordena a lista de contatos para o contato correto subir,
-           // ou descer, se for o caso. (Nossa view na sidebar renderiza baseado no timestamp)
+
            u.sort((a, b) => {
-              const tsA = a.timestamp || a.lastMsgTimestamp || 0;
-              const tsB = b.timestamp || b.lastMsgTimestamp || 0;
-              return tsB - tsA;
+              return getEffectiveContactTime(b) - getEffectiveContactTime(a);
            });
            
            return { contacts: u };

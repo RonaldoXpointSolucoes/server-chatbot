@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck } from 'lucide-react';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
-import { useChatStore, instanceCache, resolveInstanceUuid, sortMessagesChronologically } from '../store/chatStore';
+import { useChatStore, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime } from '../store/chatStore';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import { Phone } from 'lucide-react';
 import { playNotificationSound } from '../utils/AudioEngine';
@@ -1612,8 +1612,8 @@ export default function ChatDashboard() {
         if (aPinned && !bPinned) return -1;
         if (!aPinned && bPinned) return 1;
         
-        const aTime = a.lastMsgTimestamp || 0;
-        const bTime = b.lastMsgTimestamp || 0;
+        const aTime = getEffectiveContactTime(a);
+        const bTime = getEffectiveContactTime(b);
         
         if (bTime !== aTime) {
            return bTime - aTime;
@@ -5714,15 +5714,12 @@ export default function ChatDashboard() {
             {/* Expressão 2: Renderização estável dos contatos correspondentes */}
             {!isChannelLoading && (filteredContacts.length > 0 || !searchTerm) && filteredContacts.slice(0, contactPageLimit).map((contact) => {
               const lastMsg = Array.isArray(contact.messages) && contact.messages.length > 0 ? contact.messages[contact.messages.length - 1] : null;
-              const timeDisplay = lastMsg 
-                ? (isToday(lastMsg.timestamp) ? format(lastMsg.timestamp, 'HH:mm') 
-                   : isYesterday(lastMsg.timestamp) ? 'Ontem' 
-                   : format(lastMsg.timestamp, 'dd/MM/yyyy'))
-                : contact.lastMsgTimestamp 
-                   ? (isToday(new Date(contact.lastMsgTimestamp)) ? format(new Date(contact.lastMsgTimestamp), 'HH:mm') 
-                      : isYesterday(new Date(contact.lastMsgTimestamp)) ? 'Ontem' 
-                      : format(new Date(contact.lastMsgTimestamp), 'dd/MM/yyyy'))
-                   : '';
+              const effTime = getEffectiveContactTime(contact);
+              const timeDisplay = effTime > 0
+                ? (isToday(new Date(effTime)) ? format(new Date(effTime), 'HH:mm') 
+                   : isYesterday(new Date(effTime)) ? 'Ontem' 
+                   : format(new Date(effTime), 'dd/MM/yyyy'))
+                : '';
                    
               // Verifica se a ultima msg foi mandada por voce testando sender
               const isMe = lastMsg && (lastMsg.sender === 'bot' || lastMsg.sender === 'human');
