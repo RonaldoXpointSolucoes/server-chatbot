@@ -159,6 +159,21 @@ export const getOrFetchApiKey = async (instanceId: string | null | undefined): P
   return '';
 };
 
+export const getContactJid = (contact: { whatsapp_jid?: string | null; phone?: string | null; id?: string | null } | null | undefined): string => {
+  if (!contact) return '';
+  if (contact.whatsapp_jid && (contact.whatsapp_jid.includes('@s.whatsapp.net') || contact.whatsapp_jid.includes('@g.us'))) {
+    return contact.whatsapp_jid;
+  }
+  const raw = contact.phone || contact.id || '';
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.endsWith('s.whatsapp.net') || digits.endsWith('g.us')) return digits;
+  if (digits.length === 10 || digits.length === 11) {
+    return `55${digits}@s.whatsapp.net`;
+  }
+  return `${digits}@s.whatsapp.net`;
+};
+
 export const resolveInstanceUuid = async (tenantId: string, identifier: string | null | undefined): Promise<string | null> => {
   if (!identifier || identifier === 'default' || identifier === 'all') return null;
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1504,7 +1519,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const apiKey = resolvedInstanceId ? await getOrFetchApiKey(resolvedInstanceId) : '';
 
       if (resolvedInstanceId) {
-         await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), finalMessageText, apiKey);
+         const targetJid = getContactJid(contact);
+         if (!targetJid) {
+            throw new Error('Número de telefone do contato inválido ou incompleto.');
+         }
+         await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalMessageText, apiKey);
       }
       
     } catch(err: any) {
@@ -1548,7 +1567,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!resolvedInstanceId) return;
 
       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
-      const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
+      const jid = getContactJid(contact);
 
       const { sendEnginePresenceUpdate } = await import('../services/whatsappEngine');
       await sendEnginePresenceUpdate(state.tenantInfo.id, resolvedInstanceId, jid, presence, apiKey);
@@ -1579,14 +1598,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
        const { editNativeMessage } = await import('../services/whatsappEngine');
        
        const apiKey = await getOrFetchApiKey(resolvedInstanceId);
- 
+       const targetJid = getContactJid(contact);
+
        const messageKey = {
-          remoteJid: contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'),
+          remoteJid: targetJid,
           fromMe: true,
           id: msgToEdit.whatsapp_id
        };
  
-       await editNativeMessage(state.tenantInfo.id, resolvedInstanceId, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), newText, messageKey, apiKey);
+       await editNativeMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, newText, messageKey, apiKey);
       
       // Update Database
       const finalNewText = newText.endsWith(' *(Editado)*') ? newText : newText + ' *(Editado)*';
@@ -1677,14 +1697,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
          const { deleteNativeMessage } = await import('../services/whatsappEngine');
          
          const apiKey = await getOrFetchApiKey(resolvedInstanceId);
+         const targetJid = getContactJid(contact);
 
          const messageKey = {
-            remoteJid: contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'),
+            remoteJid: targetJid,
             fromMe: true,
             id: msgToDelete.whatsapp_id
          };
 
-         await deleteNativeMessage(state.tenantInfo.id, resolvedInstanceId, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), messageKey, apiKey);
+         await deleteNativeMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, messageKey, apiKey);
       }
       
       // Update Database
@@ -1829,7 +1850,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const formData = new FormData();
       formData.append('media', file);
       // Pega o jid. Padrão: DDI + NUMERO + @s.whatsapp.net
-      const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
+      const jid = getContactJid(contact);
       formData.append('jid', jid);
       formData.append('messageType', mediaType);
       
@@ -2017,7 +2038,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           throw new Error('whatsapp_offline');
       }
 
-      const jid = contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net');
+      const jid = getContactJid(contact);
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
 

@@ -660,15 +660,14 @@ export default function ChecklistSettings() {
         }, { onConflict: 'id' });
       if (error) throw error;
 
-      // Se for novo membro, vincula ao tenant_users também
-      if (isNew) {
-        await supabase.from('tenant_users').upsert({
-          tenant_id: tenantId,
-          user_id: targetUserId,
-          email: editingUser.email,
-          role: editingUser.role || 'operator'
-        }, { onConflict: 'tenant_id,user_id' });
-      }
+      // Vincula e sincroniza tenant_users com full_name e role
+      await supabase.from('tenant_users').upsert({
+        tenant_id: tenantId,
+        user_id: targetUserId,
+        email: editingUser.email,
+        full_name: editingUser.name,
+        role: editingUser.role || 'operator'
+      }, { onConflict: 'tenant_id,user_id' });
 
       // Atualizar Permissões de Unidades
       const { error: delUnitErr } = await supabase.from('user_unit_permissions').delete().eq('user_id', targetUserId);

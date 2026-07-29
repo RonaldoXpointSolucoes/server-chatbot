@@ -779,20 +779,20 @@ class EventProcessor {
              }
              
              const insertedConvs = [];
-             if(toInsertConvs.length > 0) {
-                 const { data: res, error: errInst } = await supabase.from('conversations')
-                     .upsert(toInsertConvs, { onConflict: 'tenant_id, instance_id, contact_id' })
-                     .select('id, tenant_id, contact_id, instance_id');
-                     
-                 if(errInst) {
-                       console.error('[BatchProcessor] Falha no upsert de conversas:', errInst.message);
-                 } else if (res) {
-                       insertedConvs.push(...res);
-                 }
-             }
+              if(toInsertConvs.length > 0) {
+                  const { data: res, error: errInst } = await supabase.from('conversations')
+                      .upsert(toInsertConvs, { onConflict: 'tenant_id, instance_id, contact_id' })
+                      .select('id, tenant_id, contact_id, instance_id');
+                      
+                  if(errInst) {
+                        console.error('[BatchProcessor] Falha no upsert de conversas:', errInst.message);
+                  } else if (res) {
+                        insertedConvs.push(...res);
+                  }
+              }
              
              if(toUpdateConvs.length > 0) {
-                 const { data: res, error: errUp } = await supabase.from('conversations').upsert(toUpdateConvs, { onConflict: 'id' }).select('id, tenant_id, contact_id, instance_id');
+                 const { data: res, error: errUp } = await supabase.from('conversations').upsert(toUpdateConvs, { onConflict: 'tenant_id, instance_id, contact_id' }).select('id, tenant_id, contact_id, instance_id');
                  if(errUp) console.warn('[BatchProcessor] Aviso: falha atualizando unread batch.', errUp.message);
              }
              

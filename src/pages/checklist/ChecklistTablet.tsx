@@ -26,7 +26,11 @@ import {
   GripVertical,
   Eye,
   Check,
-  Award
+  Award,
+  Download,
+  Tablet,
+  Smartphone,
+  Share
 } from 'lucide-react';
 import { Reorder } from 'framer-motion';
 
@@ -125,11 +129,42 @@ export default function ChecklistTablet() {
   const [successScore, setSuccessScore] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Instalação PWA dedicada ao Tablet
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+
   useEffect(() => {
-    if (tenantId) {
-      loadOperators();
+    const checkStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    setIsStandalone(checkStandalone);
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (deferredPrompt) {
+      try {
+        await deferredPrompt.prompt();
+        const choiceResult = await deferredPrompt.userChoice;
+        if (choiceResult.outcome === 'accepted') {
+          showToast('success', '✅ Aplicativo Totem instalado no tablet com sucesso!');
+          setDeferredPrompt(null);
+        }
+      } catch (err) {
+        setIsInstallModalOpen(true);
+      }
+    } else if (isStandalone) {
+      showToast('success', '📱 O App Totem já está instalado e rodando em modo aplicativo!');
+    } else {
+      setIsInstallModalOpen(true);
     }
-  }, [tenantId]);
+  };
 
   useEffect(() => {
     if (activeChecklist && activeChecklist.id && itemsToAnswer.length === 0) {
@@ -184,13 +219,35 @@ export default function ChecklistTablet() {
 
   const loadOperators = async () => {
     try {
-      const { data: opsData, error: opsErr } = await supabase
+      const effectiveTenantId = tenantId || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      
+      let query = supabase
         .from('v_checklist_operators')
         .select('id, name, pin, role, is_active')
-        .eq('tenant_id', tenantId)
         .eq('is_active', true);
       
-      if (opsErr) throw opsErr;
+      if (effectiveTenantId) {
+        query = query.eq('tenant_id', effectiveTenantId);
+      }
+      
+      let { data: opsData, error: opsErr } = await query;
+
+      // Fallback para a tabela users_profiles se v_checklist_operators estiver vazia
+      if (!opsData || opsData.length === 0) {
+        let profileQuery = supabase
+          .from('users_profiles')
+          .select('id, name, pin, role, is_active')
+          .eq('is_active', true);
+        if (effectiveTenantId) {
+          profileQuery = profileQuery.eq('tenant_id', effectiveTenantId);
+        }
+        const { data: profData } = await profileQuery;
+        if (profData && profData.length > 0) {
+          opsData = profData;
+        }
+      }
+
+      if (opsErr && (!opsData || opsData.length === 0)) throw opsErr;
       
       const allOps = opsData || [];
       setAllProfiles(allOps);
@@ -201,6 +258,10 @@ export default function ChecklistTablet() {
       console.error('Erro ao buscar e carregar operadores no totem:', e);
     }
   };
+
+  useEffect(() => {
+    loadOperators();
+  }, [tenantId]);
 
   const showToast = (type: 'success' | 'error', msg: string) => {
     setToastMsg({ type, msg });
@@ -533,9 +594,13 @@ export default function ChecklistTablet() {
           } catch (e) {}
         }
 
-        const { data: activeExec } = await supabase
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        // 1. Tenta buscar execução em andamento (in_progress)
+        let { data: activeExec } = await supabase
           .from('checklist_executions')
-          .select('id, started_at')
+          .select('id, started_at, status')
           .eq('tenant_id', tenantId)
           .eq('checklist_id', chk.id)
           .eq('user_id', loggedInUser.id)
@@ -544,11 +609,29 @@ export default function ChecklistTablet() {
           .limit(1)
           .maybeSingle();
 
+        // 2. Se não houver em andamento, busca se foi concluída no dia atual
+        if (!activeExec) {
+          const { data: todayDoneExec } = await supabase
+            .from('checklist_executions')
+            .select('id, started_at, status')
+            .eq('tenant_id', tenantId)
+            .eq('checklist_id', chk.id)
+            .gte('completed_at', startOfToday.toISOString())
+            .in('status', ['completed_on_time', 'completed_late'])
+            .order('completed_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (todayDoneExec) {
+            activeExec = todayDoneExec;
+          }
+        }
+
         if (activeExec) {
           setCurrentExecutionId(activeExec.id);
           setStartedAt(activeExec.started_at);
 
-          // Restaura respostas salvas previamente no banco
+          // Restaura respostas salvas previamente no banco (seja em andamento ou concluída no dia)
           const { data: savedResps } = await supabase
             .from('checklist_item_responses')
             .select(`
@@ -1116,8 +1199,18 @@ export default function ChecklistTablet() {
             {/* Lista de Operadores da Equipe */}
             <div className="flex-1 w-full space-y-5">
               <div>
-                <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm uppercase tracking-widest">
-                  <User size={18} /> Totem Operacional Tablet PWA
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm uppercase tracking-widest">
+                    <Tablet size={18} /> Totem Operacional Tablet PWA
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleInstallPwa}
+                    className="bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 text-xs font-bold px-3.5 py-1.5 rounded-2xl flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
+                  >
+                    <Download size={13} />
+                    <span>Instalar App</span>
+                  </button>
                 </div>
                 <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight mt-2">Quem está operando?</h1>
                 <p className="text-sm text-[#8696a0] mt-1.5">Selecione seu nome na lista para autenticar com seu PIN.</p>
@@ -1279,7 +1372,7 @@ export default function ChecklistTablet() {
               </div>
             )}
 
-            {/* Lado Direito: GPS e Bloqueio de Tela */}
+            {/* Lado Direito: GPS, Instalar App no Tablet e Bloqueio de Tela */}
             <div className="flex items-center gap-2.5 shrink-0">
               {activeChecklist?.require_geolocation && (
                 <div className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 text-xs font-bold shrink-0 ${
@@ -1293,6 +1386,16 @@ export default function ChecklistTablet() {
                   </span>
                 </div>
               )}
+
+              <button
+                type="button"
+                onClick={handleInstallPwa}
+                title="Instalar App Totem no Tablet"
+                className="bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-black px-3 py-1.5 rounded-xl border border-white/20 flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition-all cursor-pointer active:scale-95 shrink-0"
+              >
+                <Tablet size={14} className="text-indigo-200" />
+                <span className="hidden sm:inline">Instalar App</span>
+              </button>
 
               <button
                 onClick={handleLogout}
@@ -1339,6 +1442,27 @@ export default function ChecklistTablet() {
 
               {activeTab === 'active' ? (
                 <>
+                  {/* Banner de Instalação no Tablet */}
+                  <div className="bg-gradient-to-r from-indigo-950/70 via-[#1e2a30] to-purple-950/70 border border-indigo-500/30 p-3 rounded-2xl flex items-center justify-between gap-2 shadow-lg">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+                        <Tablet size={16} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-xs font-black text-white block leading-tight truncate">Instalar no Tablet</span>
+                        <span className="text-[10px] text-indigo-300/80 block leading-tight font-medium">Uso em Modo Aplicativo</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleInstallPwa}
+                      className="bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1 transition-all shadow-md shadow-indigo-600/30 cursor-pointer shrink-0"
+                    >
+                      <Download size={13} />
+                      <span>Instalar</span>
+                    </button>
+                  </div>
+
                   <h3 className="text-xs font-black text-[#8696a0] uppercase tracking-widest px-2 mt-1">Rotinas do seu Turno</h3>
                   
                   {loadingChecklists ? (
@@ -1619,6 +1743,28 @@ export default function ChecklistTablet() {
 
                   {/* Formulário de Perguntas com Elementos Grandes para Tablet */}
                   <div className="flex-1 overflow-y-auto styled-scrollbar p-6 sm:p-8 space-y-6">
+                    
+                    {/* Banner de Aviso de Rotina Concluída Hoje */}
+                    {todayCompletedChecklists[activeChecklist.id] && (
+                      <div className="mb-6 p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-emerald-950/70 via-teal-900/50 to-emerald-950/70 border border-emerald-500/50 text-emerald-200 flex flex-wrap items-center justify-between gap-4 shadow-xl shadow-emerald-500/10 animate-in fade-in duration-300">
+                        <div className="flex items-center gap-3.5">
+                          <div className="w-11 h-11 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0 shadow-inner">
+                            <CheckCircle2 size={24} className="text-emerald-400" />
+                          </div>
+                          <div>
+                            <h4 className="font-black text-sm sm:text-base text-white flex items-center gap-2.5 flex-wrap">
+                              Rotina Finalizada no Turno de Hoje!
+                              <span className="px-3 py-0.5 rounded-full text-xs bg-emerald-500/30 text-emerald-300 border border-emerald-400/40 font-bold font-mono">
+                                {todayCompletedChecklists[activeChecklist.id].score}% Aprovado
+                              </span>
+                            </h4>
+                            <p className="text-xs text-emerald-300/80 mt-0.5 font-semibold">
+                              Todas as respostas e conferências realizadas hoje estão exibidas e preenchidas abaixo.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     
                     {/* Filtros da Lista */}
                     {itemsToAnswer.length > 0 && (
@@ -2196,6 +2342,78 @@ export default function ChecklistTablet() {
               )}
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE INSTRUÇÕES DE INSTALAÇÃO NO TABLET */}
+      {isInstallModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#182229] border border-white/20 rounded-[36px] p-6 sm:p-8 shadow-2xl max-w-xl w-full text-left space-y-6 relative animate-in zoom-in-95 duration-200">
+            <button
+              onClick={() => setIsInstallModalOpen(false)}
+              className="absolute top-5 right-5 p-2 rounded-full hover:bg-white/10 text-[#8696a0] hover:text-white transition-colors cursor-pointer"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-3xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white shrink-0 shadow-lg shadow-indigo-600/30">
+                <Tablet size={30} />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-white tracking-tight">Instalar App Totem no Tablet</h3>
+                <p className="text-xs text-[#8696a0] mt-0.5">Deixe o sistema fixo em tela cheia na cozinha ou bar sem barras de navegação do navegador.</p>
+              </div>
+            </div>
+
+            <div className="space-y-3.5 bg-[#111b21] p-4 sm:p-5 rounded-3xl border border-white/10 text-xs text-[#d1d7db]">
+              <div className="flex items-start gap-3">
+                <div className="w-6 h-6 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center shrink-0 mt-0.5">1</div>
+                <div>
+                  <strong className="text-white font-bold block mb-0.5">Android Tablet / Google Chrome 📱</strong>
+                  <span>Toque nos <strong>3 pontinhos (⋮)</strong> no canto superior direito do navegador e selecione <strong className="text-indigo-300">"Adicionar à Tela Inicial"</strong> ou <strong className="text-indigo-300">"Instalar Aplicativo"</strong>.</span>
+                </div>
+              </div>
+
+              <div className="h-px bg-white/10 my-2" />
+
+              <div className="flex items-start gap-3">
+                <div className="w-6 h-6 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-300 font-bold flex items-center justify-center shrink-0 mt-0.5">2</div>
+                <div>
+                  <strong className="text-white font-bold block mb-0.5">iPad / Apple Safari 🍏</strong>
+                  <span>Toque no botão <strong className="text-purple-300">Compartilhar (📤)</strong> no topo do Safari e selecione <strong className="text-purple-300">"Adicionar à Tela de Início"</strong>.</span>
+                </div>
+              </div>
+
+              <div className="h-px bg-white/10 my-2" />
+
+              <div className="flex items-start gap-3">
+                <div className="w-6 h-6 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold flex items-center justify-center shrink-0 mt-0.5">3</div>
+                <div>
+                  <strong className="text-white font-bold block mb-0.5">Computador / Windows 💻</strong>
+                  <span>Clique no ícone de instalação <strong className="text-emerald-300">(📲 ou ➕)</strong> localizado na barra de endereço do navegador.</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              {deferredPrompt && (
+                <button
+                  onClick={handleInstallPwa}
+                  className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-sm py-3.5 px-5 rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/30 transition-all cursor-pointer active:scale-95"
+                >
+                  <Download size={18} />
+                  <span>Instalar Agora (Automático)</span>
+                </button>
+              )}
+              <button
+                onClick={() => setIsInstallModalOpen(false)}
+                className="flex-1 bg-[#202c33] hover:bg-[#2a3942] text-[#d1d7db] hover:text-white font-bold text-sm py-3.5 px-5 rounded-2xl border border-white/10 transition-all cursor-pointer text-center"
+              >
+                Entendi / Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}
