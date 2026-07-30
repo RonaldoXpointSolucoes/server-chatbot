@@ -3071,7 +3071,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const { data: dbConvs } = await supabase
             .from('conversations')
             .select('*, conversation_labels(label_id)')
-            .in('contact_id', contactIds);
+            .in('contact_id', contactIds)
+            .order('last_interaction_at', { ascending: false, nullsFirst: false });
 
         const conversationIds = dbConvs?.map(cv => cv.id) || [];
 
@@ -3626,6 +3627,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  updateTenantInstance: async (newInst: string) => {
+    get().setEvolutionConnection(true, newInst);
+  },
+
   setEvolutionConnection: async (status, newInst) => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
@@ -3637,10 +3642,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
        tenantInfo: { ...tenant, evolution_api_instance: newInst || null },
        modalReason: null
     });
-  },
-
-  updateTenantInstance: async (newInst: string) => {
-    get().setEvolutionConnection(true, newInst);
   },
 
   setModalReason: (reason) => {
@@ -3657,41 +3658,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!tenant) return;
 
         const realContactId = getRealContactId(contactId);
-        const localContact = get().contacts.find(c => c.id === contactId);
-        const conv_id = localContact?.conv_id;
 
-        // Paralelizar a busca de notas, resolução do UUID da instância e a busca inicial de conversas
-        const [notesRes, resolvedInstanceId, initialConvRes] = await Promise.all([
+        // Paralelizar a busca de notas, resolução do UUID da instância e a busca de TODAS as conversas do contato
+        const [notesRes, resolvedInstanceId, allConvsRes] = await Promise.all([
              supabase.from('contact_notes')
                 .select('id, content, media_url, media_type, media_metadata, is_task, assigned_to, checklist_items, task_completed, created_by_name, created_at')
                 .eq('tenant_id', tenant.id)
                 .eq('contact_id', realContactId)
                 .order('created_at', { ascending: true }),
              resolveInstanceUuid(tenant.id, instanceName),
-             conv_id 
-                ? supabase.from('conversations').select('id, status').eq('id', conv_id).limit(1).maybeSingle()
-                : Promise.resolve({ data: null, error: null })
+             supabase.from('conversations')
+                .select('id, status, last_interaction_at, updated_at')
+                .eq('tenant_id', tenant.id)
+                .eq('contact_id', realContactId)
+                .order('last_interaction_at', { ascending: false, nullsFirst: false })
          ]);
 
         let dbNotes: any[] = notesRes.data || [];
-        let conv = initialConvRes?.data || null;
-
-        if (!conv) {
-             let query = supabase.from('conversations')
-                   .select('id, status')
-                   .eq('tenant_id', tenant.id)
-                   .eq('contact_id', realContactId);
-                   
-             if (resolvedInstanceId) {
-                 query = query.eq('instance_id', resolvedInstanceId);
-             }
-             
-             const { data: convs } = await query
-                   .order('last_message_at', { ascending: false, nullsFirst: false })
-                   .limit(1);
-            
-            conv = convs && convs.length > 0 ? convs[0] : null;
-        }
+        const allConvs = allConvsRes.data || [];
+        const conv = allConvs.length > 0 ? allConvs[0] : null;
+        const convIds = allConvs.map(c => c.id);
 
         const mappedNotes = dbNotes.map(n => ({
            id: n.id,
@@ -3784,6 +3770,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                    updated[idx] = {
                        ...updated[idx],
+                       conv_id: conv?.id || updated[idx].conv_id,
                        unread: 0,
                        isManuallyUnread: false,
                        messages: finalMsgs
@@ -3793,7 +3780,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
         };
 
-        if (!conv) {
+        if (convIds.length === 0) {
              // Em vez de inserir uma conversa vazia no banco e poluir o DB,
              // inicializamos a UI com array vazio.
              // A conversa será criada organicamente pelo Webhook no 1º envio/recebimento.
@@ -3802,16 +3789,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         // Limpar unread em background (sem bloquear o carregamento das mensagens locais!)
-        supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id).then(({ error }) => {
-            if (error) console.error("[loadHistoricalMessages] Erro ao limpar unread_count:", error);
-        });
+        if (conv?.id) {
+            supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id).then(({ error }) => {
+                if (error) console.error("[loadHistoricalMessages] Erro ao limpar unread_count:", error);
+            });
+        }
         
-        const { data: msgs } = await supabase.from('messages')
+        const { data: rawFetchedMsgs } = await supabase.from('messages')
                .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                .eq('tenant_id', tenant.id)
-               .eq('conversation_id', conv.id)
-               .order('timestamp', { ascending: true })
-               .limit(300);
+               .in('conversation_id', convIds)
+               .order('timestamp', { ascending: false })
+               .limit(500);
+               
+        const msgs = rawFetchedMsgs ? [...rawFetchedMsgs].reverse() : [];
+        handleMapping(msgs);
                
         
 

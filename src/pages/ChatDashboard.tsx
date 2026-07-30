@@ -1529,11 +1529,11 @@ export default function ChatDashboard() {
            }
        }
 
-       // PROTEÇÃO RIGOROSA: Se a conversa estiver ATIVA no painel, NUNCA oculta do menu lateral!
-       const isSelectedContact = Boolean(
-         activeChatId && (c.id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId))
+       // PROTEÇÃO RIGOROSA: Se ESTE CARD ESPECÍFICO for o chat ativo no painel (c.id === activeChatId), NUNCA oculta do menu lateral!
+       const isExactActiveChat = Boolean(
+         activeChatId && (c.id === activeChatId || c.conv_id === activeChatId)
        );
-       if (isSelectedContact) {
+       if (isExactActiveChat) {
            return true;
        }
 
@@ -1576,7 +1576,7 @@ export default function ChatDashboard() {
 
        // Filtros de Pills - IGNORADOS DURANTE PESQUISA
        if (!searchTerm) {
-           if (filterType === 'unread' && c.unread <= 0 && !isSelectedContact) return false;
+           if (filterType === 'unread' && c.unread <= 0 && !isExactActiveChat) return false;
            if (filterType === 'favorite' && !c.is_favorite) return false;
            if (filterType === 'labels') {
               if (selectedLabelId) {
@@ -1609,7 +1609,7 @@ export default function ChatDashboard() {
        }
 
        // Esconde contatos que são apenas resultados de busca global quando a pesquisa é limpa (a menos que seja o chat ativo)
-       if (!searchTerm && c.isSearchResult && !isSelectedContact) {
+       if (!searchTerm && c.isSearchResult && !isExactActiveChat) {
           return false;
        }
 
@@ -1641,7 +1641,9 @@ export default function ChatDashboard() {
          seenKeys.set(key, c);
        } else if (activeChatId) {
          const existing = seenKeys.get(key);
-         if ((c.id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId)) && existing.id !== activeChatId) {
+         const isCurrentExact = c.id === activeChatId || c.conv_id === activeChatId;
+         const isExistingExact = existing.id === activeChatId || existing.conv_id === activeChatId;
+         if (isCurrentExact && !isExistingExact) {
            seenKeys.set(key, c);
          }
        }
@@ -5726,9 +5728,9 @@ export default function ChatDashboard() {
             {(() => {
               const sliced = filteredContacts.slice(0, contactPageLimit);
               if (activeChatId) {
-                const isAlreadyInSliced = sliced.some(c => c.id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId));
+                const isAlreadyInSliced = sliced.some(c => c.id === activeChatId || c.conv_id === activeChatId);
                 if (!isAlreadyInSliced) {
-                  const activeContactInFullList = filteredContacts.find(c => c.id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId));
+                  const activeContactInFullList = filteredContacts.find(c => c.id === activeChatId || c.conv_id === activeChatId);
                   if (activeContactInFullList) {
                     sliced.push(activeContactInFullList);
                   }
@@ -6179,6 +6181,8 @@ export default function ChatDashboard() {
                         </span>
                       )}
                     </div>
+                  </div>
+                </motion.div>
               );
             });
             })()}
@@ -6799,7 +6803,8 @@ export default function ChatDashboard() {
               const msgsFilteredByMode = (ticketMode && messageFilter === 'today')
                 ? sortedRawMsgs.filter(m => {
                     try {
-                      const msgDate = new Date(m.timestamp);
+                      const msgDate = m.timestamp instanceof Date ? m.timestamp : new Date(m.timestamp);
+                      if (isNaN(msgDate.getTime())) return false;
                       // Se a mensagem for de fuso horário futuro/drift de relógio, sempre exibe
                       if (msgDate.getTime() > Date.now()) return true;
 
@@ -6816,10 +6821,10 @@ export default function ChatDashboard() {
               });
 
               if (ticketMode && messageFilter === 'today' && rawMsgs.length > 0 && dedupedMsgs.length === 0) {
-                const lastMsg = rawMsgs[rawMsgs.length - 1];
-                const lastMsgDate = lastMsg ? new Date(lastMsg.timestamp) : null;
+                const lastMsg = sortedRawMsgs[sortedRawMsgs.length - 1];
+                const lastMsgDate = lastMsg ? (lastMsg.timestamp instanceof Date ? lastMsg.timestamp : new Date(lastMsg.timestamp)) : null;
                 let lastMsgDateText = '';
-                if (lastMsgDate) {
+                if (lastMsgDate && !isNaN(lastMsgDate.getTime())) {
                   if (isToday(lastMsgDate)) {
                     lastMsgDateText = 'hoje';
                   } else if (isYesterday(lastMsgDate)) {
