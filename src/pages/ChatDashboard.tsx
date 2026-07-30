@@ -594,7 +594,7 @@ export default function ChatDashboard() {
   // Garante que o chat ativo seja marcado como lido automaticamente ao ser aberto ou ao receber novas mensagens apenas se a tela/aba estiver com foco
   useEffect(() => {
     if (activeChatId) {
-      const activeContact = contacts.find(c => c.id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId));
+      const activeContact = contacts.find(c => c.id === activeChatId || c.conv_id === activeChatId) || contacts.find(c => getRealContactId(c.id) === getRealContactId(activeChatId));
       if (activeContact && Number(activeContact.unread || 0) > 0 && !activeContact.isManuallyUnread) {
         if (typeof document !== 'undefined' && document.hasFocus()) {
           useChatStore.getState().markAsRead(activeChatId);
@@ -2570,7 +2570,7 @@ export default function ChatDashboard() {
     return () => window.removeEventListener('click', closeCb);
   }, []);
 
-  const activeChat = contacts.find(c => c.id === activeChatId || (activeChatId && getRealContactId(c.id) === getRealContactId(activeChatId)));
+  const activeChat = contacts.find(c => c.id === activeChatId || (activeChatId && c.conv_id === activeChatId)) || contacts.find(c => activeChatId && getRealContactId(c.id) === getRealContactId(activeChatId));
   const wacallSessions = useWaCallsStore((s) => s.sessions) || [];
   const chatInstanceId = activeChat ? (getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName) : null;
   const resolvedInstanceUuid = chatInstanceId ? (instanceCache.getId(chatInstanceId) || chatInstanceId) : null;
