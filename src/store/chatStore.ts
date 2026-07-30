@@ -3072,7 +3072,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             .from('conversations')
             .select('*, conversation_labels(label_id)')
             .in('contact_id', contactIds)
-            .order('last_interaction_at', { ascending: false, nullsFirst: false });
+            .order('updated_at', { ascending: false });
 
         const conversationIds = dbConvs?.map(cv => cv.id) || [];
 
@@ -3125,7 +3125,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 avatar: dbC.profile_picture_url || '',
                 messages: mappedMessages,
                 unread: conv?.unread_count || 0,
-                lastMsgTimestamp: conv?.last_interaction_at ? new Date(conv.last_interaction_at).getTime() : new Date(dbC.created_at).getTime(),
+                lastMsgTimestamp: (conv?.last_message_at || conv?.updated_at) ? new Date(conv.last_message_at || conv.updated_at).getTime() : new Date(dbC.created_at).getTime(),
                 is_pinned: conv?.is_pinned || false,
                 is_favorite: conv?.is_favorite || false,
                 conv_status: conv?.status || 'pending',
@@ -3229,7 +3229,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Puxa até 2000 conversas para garantir o carregamento do histórico completo de todas as caixas
         const { data: dbConvs } = await convQuery
            .order('is_pinned', { ascending: false })
-           .order('last_message_at', { ascending: false, nullsFirst: false })
+           .order('last_message_at', { ascending: false })
            .limit(2000);
            
         if (!dbConvs || dbConvs.length === 0) {
@@ -3668,10 +3668,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 .order('created_at', { ascending: true }),
              resolveInstanceUuid(tenant.id, instanceName),
              supabase.from('conversations')
-                .select('id, status, last_interaction_at, updated_at')
+                .select('id, status, last_message_at, updated_at')
                 .eq('tenant_id', tenant.id)
                 .eq('contact_id', realContactId)
-                .order('last_interaction_at', { ascending: false, nullsFirst: false })
+                .order('updated_at', { ascending: false })
          ]);
 
         let dbNotes: any[] = notesRes.data || [];
