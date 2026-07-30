@@ -62,44 +62,42 @@ export const sortMessagesChronologically = (msgs: MessageType[]): MessageType[] 
 export const getEffectiveContactTime = (c: any): number => {
     if (!c) return 0;
     
-    // 1. Se tem mensagens carregadas em RAM, o timestamp da mensagem mais recente tem prioridade absoluta!
+    let maxTime = 0;
+    
     if (Array.isArray(c.messages) && c.messages.length > 0) {
         const lastMsg = c.messages[c.messages.length - 1];
         if (lastMsg && lastMsg.timestamp) {
             const t = lastMsg.timestamp instanceof Date ? lastMsg.timestamp.getTime() : new Date(lastMsg.timestamp).getTime();
-            if (!isNaN(t) && t > 0) return t;
+            if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
         }
     }
     
-    // 2. Se a conversa possui last_message_at
     if (c.last_message_at) {
         const t = new Date(c.last_message_at).getTime();
-        if (!isNaN(t) && t > 0) return t;
+        if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
     }
     
-    // 3. Fallback para lastMsgTimestamp
     if (c.lastMsgTimestamp) {
         const t = typeof c.lastMsgTimestamp === 'number' ? c.lastMsgTimestamp : new Date(c.lastMsgTimestamp).getTime();
-        if (!isNaN(t) && t > 0) return t;
+        if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
     }
 
-    // 4. Fallback para timestamp ou last_interaction_at ou created_at
     if (c.timestamp) {
         const t = typeof c.timestamp === 'number' ? c.timestamp : new Date(c.timestamp).getTime();
-        if (!isNaN(t) && t > 0) return t;
+        if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
     }
 
     if (c.last_interaction_at) {
         const t = new Date(c.last_interaction_at).getTime();
-        if (!isNaN(t) && t > 0) return t;
-    }
-    
-    if (c.created_at) {
-        const t = new Date(c.created_at).getTime();
-        if (!isNaN(t) && t > 0) return t;
+        if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
     }
 
-    return 0;
+    if (c.created_at) {
+        const t = new Date(c.created_at).getTime();
+        if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
+    }
+
+    return maxTime;
 };
 
 

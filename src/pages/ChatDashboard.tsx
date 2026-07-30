@@ -1631,19 +1631,22 @@ export default function ChatDashboard() {
         return String(a.id).localeCompare(String(b.id));
      });
 
-    // Deduplicação rígida de contatos na mesma caixa de atendimento (caixa_efetiva)
-    const seenKeys = new Set<string>();
-    const deduped: any[] = [];
-    for (const c of sorted) {
-      const realId = c.id.includes('_') ? c.id.split('_')[0] : c.id;
-      const caixa = (c.id.includes('_') ? c.id.split('_')[1] : c.instance_id) || connectedInstanceName || 'default';
-      const key = `${realId}_${caixa}`;
-      if (!seenKeys.has(key)) {
-        seenKeys.add(key);
-        deduped.push(c);
-      }
-    }
-    return deduped;
+     // Deduplicação rígida de contatos na mesma caixa de atendimento (caixa_efetiva)
+     const seenKeys = new Map<string, any>();
+     for (const c of sorted) {
+       const realId = getRealContactId(c.id);
+       const caixa = (c.id.includes('_') ? c.id.split('_')[1] : c.instance_id) || connectedInstanceName || 'default';
+       const key = `${realId}_${caixa}`;
+       if (!seenKeys.has(key)) {
+         seenKeys.set(key, c);
+       } else if (activeChatId) {
+         const existing = seenKeys.get(key);
+         if ((c.id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId)) && existing.id !== activeChatId) {
+           seenKeys.set(key, c);
+         }
+       }
+     }
+     return Array.from(seenKeys.values());
   }, [contacts, activeChannelFilter, searchTerm, filterType, selectedLabelId, activeChatId, ticketMode, agents, connectedInstanceName, activeChannelName]);
 
   const handleBatchResolveConfirm = async () => {
@@ -5719,8 +5722,19 @@ export default function ChatDashboard() {
               </motion.div>
             )}
 
-            {/* Expressão 2: Renderização estável dos contatos correspondentes */}
-            {!isChannelLoading && (filteredContacts.length > 0 || !searchTerm) && filteredContacts.slice(0, contactPageLimit).map((contact) => {
+            {/* Expressão 2: Renderização estável dos contatos correspondentes com garantia do chat ativo */}
+            {(() => {
+              const sliced = filteredContacts.slice(0, contactPageLimit);
+              if (activeChatId) {
+                const isAlreadyInSliced = sliced.some(c => c.id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId));
+                if (!isAlreadyInSliced) {
+                  const activeContactInFullList = filteredContacts.find(c => c.id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId));
+                  if (activeContactInFullList) {
+                    sliced.push(activeContactInFullList);
+                  }
+                }
+              }
+              return !isChannelLoading && (filteredContacts.length > 0 || !searchTerm) && sliced.map((contact) => {
               const lastMsg = Array.isArray(contact.messages) && contact.messages.length > 0 ? contact.messages[contact.messages.length - 1] : null;
               const effTime = getEffectiveContactTime(contact);
               const timeDisplay = effTime > 0
@@ -6165,10 +6179,9 @@ export default function ChatDashboard() {
                         </span>
                       )}
                     </div>
-                  </div>
-                </motion.div>
               );
-            })}
+            });
+            })()}
 
             {isChannelLoading && (
               <motion.div 
