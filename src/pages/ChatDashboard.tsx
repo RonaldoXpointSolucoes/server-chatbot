@@ -6785,7 +6785,8 @@ export default function ChatDashboard() {
             </div>
           ) : (
             <div 
-               className="flex-1 overflow-y-auto p-4 z-10 flex flex-col gap-2"
+               key={activeChat.id}
+               className="flex-1 overflow-y-auto p-4 z-10 flex flex-col gap-2 transition-all duration-300 ease-out animate-in fade-in"
                ref={messagesContainerRef}
              onScroll={handleScroll}
              onClick={() => {
