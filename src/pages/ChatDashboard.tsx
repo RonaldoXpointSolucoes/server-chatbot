@@ -1536,16 +1536,18 @@ export default function ChatDashboard() {
            if (c.is_blocked) return false;
        }
 
-       // Filtro de Adiado (Snoozed) - Se a conversa foi adiada e o horário não chegou, OCURTA da lista de atendimentos ativos
-       if (c.conv_status === 'snoozed' && c.snoozed_until) {
-          const untilTimestamp = new Date(c.snoozed_until).getTime();
-          if (untilTimestamp > Date.now() && !searchTerm && filterType !== 'snoozed' && filterType !== 'appointments') {
-             return false;
+       // REGRA DE OURO DO MODO TICKET:
+       // - Modo Ticket ATIVO (ticketMode === true OU filterType === 'tickets' OU filterType === 'open'):
+       //   Mostra APENAS tickets abertos. Oculta conversas resolvidas, encerradas e adiadas ativas.
+       // - Modo Ticket DESATIVADO (ticketMode === false E filterType === 'all'):
+       //   Mostra TODAS as conversas da caixa (abertas, resolvidas, encerradas, etc.).
+       if (!searchTerm && (ticketMode || filterType === 'tickets' || filterType === 'open')) {
+          if (c.conv_status === 'snoozed' && c.snoozed_until) {
+             const untilTimestamp = new Date(c.snoozed_until).getTime();
+             if (untilTimestamp > Date.now() && filterType !== 'snoozed' && filterType !== 'appointments') {
+                return false;
+             }
           }
-       }
-
-       // Filtro de Conversas Resolvidas/Encerradas (Oculta conversas finalizadas na visão de atendimento ativo)
-       if (!searchTerm && (ticketMode || filterType === 'tickets' || filterType === 'open' || filterType === 'all' || filterType === 'unread' || filterType === 'mine' || filterType === 'favorite')) {
           if (c.conv_status === 'resolved' || c.conv_status === 'closed') {
              return false;
           }
