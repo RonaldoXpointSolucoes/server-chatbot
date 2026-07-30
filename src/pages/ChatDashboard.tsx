@@ -594,7 +594,7 @@ export default function ChatDashboard() {
   // Garante que o chat ativo seja marcado como lido automaticamente ao ser aberto ou ao receber novas mensagens apenas se a tela/aba estiver com foco
   useEffect(() => {
     if (activeChatId) {
-      const activeContact = contacts.find(c => c.id === activeChatId);
+      const activeContact = contacts.find(c => c.id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId));
       if (activeContact && Number(activeContact.unread || 0) > 0 && !activeContact.isManuallyUnread) {
         if (typeof document !== 'undefined' && document.hasFocus()) {
           useChatStore.getState().markAsRead(activeChatId);
@@ -1529,6 +1529,14 @@ export default function ChatDashboard() {
            }
        }
 
+       // PROTEÇÃO RIGOROSA: Se a conversa estiver ATIVA no painel, NUNCA oculta do menu lateral!
+       const isSelectedContact = Boolean(
+         activeChatId && (c.id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId))
+       );
+       if (isSelectedContact) {
+           return true;
+       }
+
        // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa
        if (activeChannelFilter && !searchTerm) {
            const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
@@ -1566,14 +1574,9 @@ export default function ChatDashboard() {
            if (!hasActiveTask) return false;
        }
 
-       // PROTEÇÃO RIGOROSA: Se a conversa estiver ATIVA no painel (c.id === activeChatId), NUNCA oculta do menu lateral!
-       if (c.id === activeChatId) {
-           return true;
-       }
-
        // Filtros de Pills - IGNORADOS DURANTE PESQUISA
        if (!searchTerm) {
-           if (filterType === 'unread' && c.unread <= 0 && c.id !== activeChatId) return false;
+           if (filterType === 'unread' && c.unread <= 0 && !isSelectedContact) return false;
            if (filterType === 'favorite' && !c.is_favorite) return false;
            if (filterType === 'labels') {
               if (selectedLabelId) {
@@ -1606,7 +1609,7 @@ export default function ChatDashboard() {
        }
 
        // Esconde contatos que são apenas resultados de busca global quando a pesquisa é limpa (a menos que seja o chat ativo)
-       if (!searchTerm && c.isSearchResult && c.id !== activeChatId) {
+       if (!searchTerm && c.isSearchResult && !isSelectedContact) {
           return false;
        }
 
@@ -2562,7 +2565,7 @@ export default function ChatDashboard() {
     return () => window.removeEventListener('click', closeCb);
   }, []);
 
-  const activeChat = contacts.find(c => c.id === activeChatId);
+  const activeChat = contacts.find(c => c.id === activeChatId || (activeChatId && getRealContactId(c.id) === getRealContactId(activeChatId)));
   const wacallSessions = useWaCallsStore((s) => s.sessions) || [];
   const chatInstanceId = activeChat ? (getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName) : null;
   const resolvedInstanceUuid = chatInstanceId ? (instanceCache.getId(chatInstanceId) || chatInstanceId) : null;
