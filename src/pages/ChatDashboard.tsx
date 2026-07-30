@@ -1529,15 +1529,37 @@ export default function ChatDashboard() {
            }
        }
 
-       // PROTEÇÃO RIGOROSA: Se ESTE CARD ESPECÍFICO for o chat ativo no painel (c.id === activeChatId), NUNCA oculta do menu lateral!
+       // 2) LÓGICA DE STATUS: CONTATOS BLOQUEADOS, ADIADOS (SNOOZED) E RESOLVIDOS
+       if (filterType === 'blocked') {
+           if (!c.is_blocked) return false;
+       } else {
+           if (c.is_blocked) return false;
+       }
+
+       // Filtro de Adiado (Snoozed) - Se a conversa foi adiada e o horário não chegou, OCURTA da lista de atendimentos ativos
+       if (c.conv_status === 'snoozed' && c.snoozed_until) {
+          const untilTimestamp = new Date(c.snoozed_until).getTime();
+          if (untilTimestamp > Date.now() && !searchTerm && filterType !== 'snoozed' && filterType !== 'appointments') {
+             return false;
+          }
+       }
+
+       // Filtro de Conversas Resolvidas/Encerradas (Oculta conversas finalizadas na visão de atendimento ativo)
+       if (!searchTerm && (ticketMode || filterType === 'tickets' || filterType === 'open' || filterType === 'all' || filterType === 'unread' || filterType === 'mine' || filterType === 'favorite')) {
+          if (c.conv_status === 'resolved' || c.conv_status === 'closed') {
+             return false;
+          }
+       }
+
+       // PROTEÇÃO DE CHAT ATIVO: Se passou pelos filtros de status (não está bloqueado, não está adiado ativo e não está encerrado), mantém o chat ativo visível mesmo se mudar caixa ou filtro visual
        const isExactActiveChat = Boolean(
          activeChatId && (c.id === activeChatId || c.conv_id === activeChatId)
        );
-       if (isExactActiveChat) {
+       if (isExactActiveChat && !searchTerm) {
            return true;
        }
 
-       // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa
+       // 3) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa
        if (activeChannelFilter && !searchTerm) {
            const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
            const dbInstId = c.instance_id;
@@ -1547,7 +1569,6 @@ export default function ChatDashboard() {
            }
 
            // --- FILTRO DE AUTO-CONVERSA (SELF-CHAT DA PRÓPRIA INSTÂNCIA) ---
-           // Uma caixa de atendimento nunca deve mostrar um card com seu próprio número de telefone
            const channelPhone = instanceCache.phoneNumbers[activeChannelFilter] || (resolvedInstanceUuid ? instanceCache.phoneNumbers[resolvedInstanceUuid] : null);
            if (channelPhone) {
                const cleanChannelPhone = channelPhone.replace(/\D/g, '');
@@ -1558,7 +1579,7 @@ export default function ChatDashboard() {
            }
        }
 
-       // 3) BUSCA EM TEXTO E METADADOS
+       // 4) BUSCA EM TEXTO E METADADOS
        if (searchTerm) {
            const s = searchTerm.toLowerCase();
            const match = c.name?.toLowerCase().includes(s) ||
@@ -1570,13 +1591,6 @@ export default function ChatDashboard() {
                          c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(s));
            if (!match) return false;
        }
-       
-       // Lógica de Contatos Bloqueados
-       if (filterType === 'blocked') {
-           if (!c.is_blocked) return false;
-       } else {
-           if (c.is_blocked) return false; // Esconde os bloqueados em todas as outras views (All, Unread, Favoritos, etc)
-       }
 
        // Filtro de Tarefas CRM do operador ativo (independente de searchTerm)
        if (filterType === 'tasks') {
@@ -1587,7 +1601,7 @@ export default function ChatDashboard() {
 
        // Filtros de Pills - IGNORADOS DURANTE PESQUISA
        if (!searchTerm) {
-           if (filterType === 'unread' && c.unread <= 0 && !isExactActiveChat) return false;
+           if (filterType === 'unread' && c.unread <= 0) return false;
            if (filterType === 'favorite' && !c.is_favorite) return false;
            if (filterType === 'labels') {
               if (selectedLabelId) {
@@ -1601,22 +1615,6 @@ export default function ChatDashboard() {
                const currentAgent = agents.find(a => a.email === currentUserEmail);
                if (!currentAgent || !c.assigned_to?.split(',').includes(currentAgent.id)) return false;
            }
-       }
-       
-       // Filtro de Adiado (Snoozed)
-       if (c.conv_status === 'snoozed' && c.snoozed_until) {
-          const untilTimestamp = new Date(c.snoozed_until).getTime();
-          if (untilTimestamp > Date.now()) {
-             // Esconde se ainda não expirou e se o modo ticket estiver ativo, a menos que o usuário esteja forçando a pesquisa ativamente
-             if (ticketMode && !searchTerm) return false;
-          }
-       }
-
-       // Filtro de Conversas Resolvidas/Encerradas (Oculta conversas finalizadas quando o modo ticket estiver ativo ou filtros de tickets/abertos)
-       if (!searchTerm && (ticketMode || filterType === 'tickets' || filterType === 'open')) {
-          if (c.conv_status === 'resolved' || c.conv_status === 'closed') {
-             return false;
-          }
        }
 
        // Esconde contatos que são apenas resultados de busca global quando a pesquisa é limpa (a menos que seja o chat ativo)

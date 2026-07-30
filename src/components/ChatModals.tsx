@@ -1909,6 +1909,25 @@ export function SnoozeModal({ isOpen, onClose, contactId }: SnoozeModalProps) {
         snoozed_at: new Date().toISOString(),
         snoozed_by: me?.id || null
       });
+
+      // Se a conversa adiada era o chat atualmente ativo, alterna para o próximo atendimento aberto ou limpa a tela
+      const currentActiveId = useChatStore.getState().activeChatId;
+      if (currentActiveId === contactId || (currentActiveId && currentActiveId.startsWith(contactId + '_'))) {
+        const remaining = useChatStore.getState().contacts.filter(c => 
+          c.id !== contactId && 
+          c.conv_id !== contactId &&
+          !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && 
+          c.conv_status !== 'resolved' && 
+          c.conv_status !== 'closed' && 
+          !c.is_blocked
+        );
+        if (remaining.length > 0) {
+          useChatStore.setState({ activeChatId: remaining[0].id });
+        } else {
+          useChatStore.setState({ activeChatId: null });
+        }
+      }
+
       onClose();
     } catch (error) {
       console.error(error);
