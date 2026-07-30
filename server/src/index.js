@@ -430,53 +430,66 @@ app.listen(PORT, '0.0.0.0', async () => {
 
     try {
         console.log("[Worker Boot] Inicializando Realtime Auto-RAG Trainer...");
+        const notifiedResolvedConvs = new Set();
+        const notifiedAiPausedConvs = new Set();
+
         supabase.channel('backend_conversations_changes')
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations' }, async (payload) => {
               const oldConv = payload.old;
               const newConv = payload.new;
               
-              if (newConv && newConv.status === 'resolved' && (!oldConv || oldConv.status !== 'resolved')) {
-                  console.log(`[AutoRagTrainer] Conversa ${newConv.id} marcada como RESOLVIDA. (Treinamento automático desativado)`);
+              if (newConv && newConv.status === 'resolved') {
+                  if (oldConv && oldConv.status !== 'resolved' && !notifiedResolvedConvs.has(newConv.id)) {
+                      notifiedResolvedConvs.add(newConv.id);
+                      console.log(`[AutoRagTrainer] Conversa ${newConv.id} marcada como RESOLVIDA. (Treinamento automático desativado)`);
 
-                  // Trigger webhook
-                  (async () => {
-                      try {
-                          let phone = '';
-                          if (newConv.contact_id) {
-                              const { data: contact } = await supabase.from('contacts').select('phone').eq('id', newConv.contact_id).single();
-                              if (contact) phone = contact.phone || '';
+                      // Trigger webhook
+                      (async () => {
+                          try {
+                              let phone = '';
+                              if (newConv.contact_id) {
+                                  const { data: contact } = await supabase.from('contacts').select('phone').eq('id', newConv.contact_id).single();
+                                  if (contact) phone = contact.phone || '';
+                              }
+                              await dispatchWebhookTriggers(newConv.tenant_id, 'ticket_resolved', {
+                                  phone,
+                                  message: 'Ticket resolved',
+                                  conversation_id: newConv.id,
+                                  contact_id: newConv.contact_id || ''
+                              });
+                          } catch (err) {
+                              console.error('[WebhookTrigger] Erro ao processar webhook ticket_resolved:', err);
                           }
-                          await dispatchWebhookTriggers(newConv.tenant_id, 'ticket_resolved', {
-                              phone,
-                              message: 'Ticket resolved',
-                              conversation_id: newConv.id,
-                              contact_id: newConv.contact_id || ''
-                          });
-                      } catch (err) {
-                          console.error('[WebhookTrigger] Erro ao processar webhook ticket_resolved:', err);
-                      }
-                  })();
+                      })();
+                  }
+              } else if (newConv && newConv.status !== 'resolved') {
+                  notifiedResolvedConvs.delete(newConv.id);
               }
 
-              if (newConv && newConv.ai_paused === true && (!oldConv || !oldConv.ai_paused)) {
-                  console.log(`[WebhookTrigger] Conversa ${newConv.id} teve a IA pausada. Iniciando disparo de webhook.`);
-                  (async () => {
-                      try {
-                          let phone = '';
-                          if (newConv.contact_id) {
-                              const { data: contact } = await supabase.from('contacts').select('phone').eq('id', newConv.contact_id).single();
-                              if (contact) phone = contact.phone || '';
+              if (newConv && newConv.ai_paused === true) {
+                  if (oldConv && oldConv.ai_paused === false && !notifiedAiPausedConvs.has(newConv.id)) {
+                      notifiedAiPausedConvs.add(newConv.id);
+                      console.log(`[WebhookTrigger] Conversa ${newConv.id} teve a IA pausada. Iniciando disparo de webhook.`);
+                      (async () => {
+                          try {
+                              let phone = '';
+                              if (newConv.contact_id) {
+                                  const { data: contact } = await supabase.from('contacts').select('phone').eq('id', newConv.contact_id).single();
+                                  if (contact) phone = contact.phone || '';
+                              }
+                              await dispatchWebhookTriggers(newConv.tenant_id, 'ai_paused', {
+                                  phone,
+                                  message: 'AI Paused',
+                                  conversation_id: newConv.id,
+                                  contact_id: newConv.contact_id || ''
+                              });
+                          } catch (err) {
+                              console.error('[WebhookTrigger] Erro ao processar webhook ai_paused:', err);
                           }
-                          await dispatchWebhookTriggers(newConv.tenant_id, 'ai_paused', {
-                              phone,
-                              message: 'AI Paused',
-                              conversation_id: newConv.id,
-                              contact_id: newConv.contact_id || ''
-                          });
-                      } catch (err) {
-                          console.error('[WebhookTrigger] Erro ao processar webhook ai_paused:', err);
-                      }
-                  })();
+                      })();
+                  }
+              } else if (newConv && newConv.ai_paused === false) {
+                  notifiedAiPausedConvs.delete(newConv.id);
               }
           })
           .subscribe((status) => {
