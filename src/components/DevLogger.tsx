@@ -166,12 +166,100 @@ export default function DevLogger() {
   const [gastrofoodLogs, setGastrofoodLogs] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({});
+  
+  // Estados para agrupamento de erros e filtragem
+  const [viewMode, setViewMode] = useState<'grouped' | 'timeline'>('grouped');
+  const [logFilter, setLogFilter] = useState<'all' | 'node' | 'error' | 'warn'>('all');
 
   useEffect(() => {
     supabase.from('companies').select('id, name').then(({ data }) => {
       if (data) setCompanies(data);
     });
   }, []);
+
+  // Agrupamento Inteligente de Erros e Logs
+  const groupedAndFilteredLogs = useMemo(() => {
+    let filtered = logs;
+    
+    if (logFilter === 'node') {
+      filtered = logs.filter(l => 
+        l.source.toLowerCase().includes('server') || 
+        l.source.toLowerCase().includes('node') ||
+        l.source.toLowerCase().includes('backend')
+      );
+    } else if (logFilter === 'error') {
+      filtered = logs.filter(l => l.type === 'error');
+    } else if (logFilter === 'warn') {
+      filtered = logs.filter(l => l.type === 'warn');
+    }
+
+    if (viewMode === 'timeline') {
+      return filtered.map(l => ({
+        ...l,
+        count: 1,
+        latestTimestamp: l.timestamp,
+        firstTimestamp: l.timestamp,
+        occurrences: [l],
+        isServerNode: l.source.toLowerCase().includes('server') || l.source.toLowerCase().includes('node')
+      }));
+    }
+
+    const groupsMap = new Map<string, any>();
+    filtered.forEach(log => {
+      const cleanMsg = (log.message || '').trim().replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z/g, '');
+      const key = `${log.source}_${log.type}_${cleanMsg}`;
+
+      if (groupsMap.has(key)) {
+        const group = groupsMap.get(key);
+        group.count++;
+        group.occurrences.push(log);
+        if (new Date(log.timestamp) > new Date(group.latestTimestamp)) {
+          group.latestTimestamp = log.timestamp;
+          group.details = log.details || group.details;
+        }
+      } else {
+        groupsMap.set(key, {
+          id: log.id,
+          type: log.type,
+          source: log.source,
+          message: log.message,
+          details: log.details,
+          latestTimestamp: log.timestamp,
+          firstTimestamp: log.timestamp,
+          count: 1,
+          occurrences: [log],
+          isServerNode: log.source.toLowerCase().includes('server') || log.source.toLowerCase().includes('node')
+        });
+      }
+    });
+
+    return Array.from(groupsMap.values());
+  }, [logs, viewMode, logFilter]);
+
+  const nodeLogsCount = useMemo(() => {
+    return logs.filter(l => 
+      l.source.toLowerCase().includes('server') || 
+      l.source.toLowerCase().includes('node') ||
+      l.source.toLowerCase().includes('backend')
+    ).length;
+  }, [logs]);
+
+  const errorLogsCount = useMemo(() => logs.filter(l => l.type === 'error').length, [logs]);
+  const warnLogsCount = useMemo(() => logs.filter(l => l.type === 'warn').length, [logs]);
+
+  const handleSimulateNodeError = () => {
+    addLog({
+      type: 'error',
+      message: '[FlowEngine Node.js] Falha de Execução / Loop de Execução Detectado: Error: Maximum call stack size exceeded em session-manager/index.js:412',
+      source: 'Servidor Node.js',
+      details: {
+        error: 'Logic Loop Exception',
+        file: 'session-manager/index.js',
+        line: 412,
+        timestamp: new Date().toISOString()
+      }
+    });
+  };
 
   const groupedGastrofoodLogs = useMemo(() => {
     const grouped: any[] = [];
@@ -756,10 +844,19 @@ export default function DevLogger() {
           const initLogs: any[] = [];
           (data.logs || []).forEach((log: any) => {
             const parsed = parseGastrofoodMsg(log.message, log.timestamp);
-            if (parsed) initLogs.push(parsed);
+            if (parsed) {
+              initLogs.push(parsed);
+            } else if (log.level === 'error' || log.level === 'warn') {
+              addLog({
+                type: log.level === 'warn' ? 'warn' : 'error',
+                message: log.message || 'Erro/Warning no Servidor Node.js',
+                source: `Servidor Node.js`,
+                details: { timestamp: log.timestamp, level: log.level, id: log.id }
+              });
+            }
           });
           setGastrofoodLogs(initLogs);
-        } else if (data.message) {
+        } else if (data.message || data.level) {
           const parsed = parseGastrofoodMsg(data.message, data.timestamp);
           if (parsed) {
             setGastrofoodLogs(prev => {
@@ -769,6 +866,15 @@ export default function DevLogger() {
               const next = [...prev, parsed];
               if (next.length > 200) return next.slice(next.length - 200);
               return next;
+            });
+          }
+          
+          if (data.level === 'error' || data.level === 'warn' || (data.message && (data.message.toLowerCase().includes('error') || data.message.toLowerCase().includes('falha') || data.message.toLowerCase().includes('loop')))) {
+            addLog({
+              type: data.level === 'warn' ? 'warn' : 'error',
+              message: data.message || 'Exceção/Falha no Servidor Node.js',
+              source: `Servidor Node.js`,
+              details: { timestamp: data.timestamp, id: data.id, level: data.level }
             });
           }
         }
@@ -844,7 +950,7 @@ export default function DevLogger() {
     const fetchRecentErrors = async () => {
       try {
         const lastCheck = localStorage.getItem('devlogger_last_error_check') || '0';
-        const response = await fetch(`${engineUrl}/debug/recent-errors?since=${lastCheck}`);
+        const response = await fetch(`${engineUrl}/api/v1/system/logs/recent-errors?since=${lastCheck}`);
         if (response.ok) {
            const data = await response.json();
            if (data.success && data.errors && data.errors.length > 0) {
@@ -862,8 +968,8 @@ export default function DevLogger() {
 
                  addLog({
                     type: err.level === 'warn' ? 'warn' : 'error',
-                    message: msg || 'Erro/Aviso Interno no Servidor',
-                    source: `Server Node (${err.level || 'error'})`,
+                    message: msg || 'Erro/Aviso Interno no Servidor Node.js',
+                    source: `Servidor Node.js`,
                     details: err
                  });
               });
@@ -882,7 +988,7 @@ export default function DevLogger() {
     fetchGastrofoodLogs();
     const intervalTelemetry = setInterval(fetchTelemetry, 5000);
     const intervalGastrofood = setInterval(fetchGastrofoodLogs, 5000);
-    const intervalErrors = setInterval(fetchRecentErrors, 300000); // 5 minutos
+    const intervalErrors = setInterval(fetchRecentErrors, 5000);
     return () => {
        clearInterval(intervalTelemetry);
        clearInterval(intervalGastrofood);
@@ -2019,108 +2125,196 @@ export default function DevLogger() {
                 )}
               </div>
             ) : (
-              /* Console Logs - COM ESTADO VAZIO ILUSTRADO & DESIGN SYSTEM ALTO PADRÃO */
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 font-mono text-xs custom-scrollbar min-h-[280px] max-h-[500px] bg-[#0b141a]">
-                {logs.length === 0 ? (
-                  /* NOVO ESTADO VAZIO COM RADAR E ANIMAÇÃO CYBER */
-                  <div className="m-auto py-12 px-6 flex flex-col items-center justify-center text-center space-y-3.5 select-none animate-in fade-in zoom-in-95 duration-300">
-                    <div className="w-16 h-16 rounded-3xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/20 relative">
-                      <Terminal size={28} className="animate-pulse" />
-                      <div className="absolute inset-0 rounded-3xl border border-emerald-400/40 animate-ping" />
-                    </div>
-                    <h4 className="text-sm font-black text-white tracking-tight">Nenhum log detectado</h4>
-                    <p className="text-xs text-[#8696a0] max-w-xs leading-relaxed">
-                      O sistema está operando perfeitamente. Erros de rede, requisições HTTP e exceções do React serão capturados aqui em tempo real.
-                    </p>
+              /* Console & Server Logs - COM SUPORTE A AGRUPAMENTO DE ERROS IDENTICOS E FILTRAGEM DE NOVO PADRÃO */
+              <div className="flex-1 overflow-y-auto flex flex-col font-mono text-xs custom-scrollbar min-h-[300px] max-h-[500px] bg-[#0b141a]">
+                
+                {/* Sub-Barra de Controles: Agrupamento, Filtros de Origem e Disparo de Testes */}
+                <div className="flex items-center justify-between gap-2 p-2.5 bg-[#111b21] border-b border-white/10 text-xs font-mono select-none flex-wrap sticky top-0 z-20 backdrop-blur-md">
+                  {/* Seletor de Modo: Agrupado vs Linha do Tempo */}
+                  <div className="flex items-center gap-1 bg-[#182229] p-1 rounded-xl border border-white/10">
                     <button
-                      onClick={() => handleTestApp()}
-                      className="mt-2 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold px-4 py-2.5 rounded-2xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center gap-2"
+                      onClick={() => setViewMode('grouped')}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
+                        viewMode === 'grouped'
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20'
+                          : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                      }`}
+                      title="Agrupar erros e logs idênticos"
                     >
-                      <Activity size={14} /> Executar Teste Rápido
+                      📦 Agrupado ({groupedAndFilteredLogs.length})
+                    </button>
+                    <button
+                      onClick={() => setViewMode('timeline')}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
+                        viewMode === 'timeline'
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20'
+                          : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                      }`}
+                      title="Exibir histórico individual por ordem cronológica"
+                    >
+                      🕒 Linha do Tempo
                     </button>
                   </div>
-                ) : (() => {
-                  const groupedList: Array<{
-                    id: string;
-                    type: string;
-                    source: string;
-                    message: string;
-                    timestamp: any;
-                    details: any;
-                    count: number;
-                  }> = [];
 
-                  logs.forEach((log) => {
-                    const existing = groupedList.find(
-                      (item) =>
-                        item.type === log.type &&
-                        item.source === log.source &&
-                        item.message === log.message
-                    );
-                    if (existing) {
-                      existing.count++;
-                      existing.timestamp = log.timestamp;
-                      existing.details = log.details;
-                    } else {
-                      groupedList.push({
-                        ...log,
-                        count: 1
-                      });
-                    }
-                  });
-
-                  return groupedList.map((log) => {
-                    const isErr = log.type === 'error';
-                    const isWrn = log.type === 'warn';
-                    const isSucc = log.type === 'success';
-                    const isInf = log.type === 'info';
-
-                    return (
-                      <div 
-                        key={log.id} 
-                        className={`p-4 rounded-2xl border transition-all duration-200 flex flex-col gap-2 hover:border-white/20 shadow-lg ${
-                          isErr 
-                            ? 'bg-rose-500/10 border-rose-500/30 text-rose-200 shadow-rose-500/10' 
-                            : isWrn 
-                              ? 'bg-amber-500/10 border-amber-500/30 text-amber-200 shadow-amber-500/10' 
-                              : isSucc 
-                                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200' 
-                                : isInf 
-                                  ? 'bg-blue-500/10 border-blue-500/30 text-blue-200' 
-                                  : 'bg-[#182229] border-white/10 text-[#d1d7db]'
+                  {/* Chips de Filtro */}
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {[
+                      { id: 'all', label: 'Todos', count: logs.length },
+                      { id: 'node', label: '🖥️ Servidor Node', count: nodeLogsCount },
+                      { id: 'error', label: '🔴 Erros', count: errorLogsCount },
+                      { id: 'warn', label: '🟡 Alertas', count: warnLogsCount },
+                    ].map((f) => (
+                      <button
+                        key={f.id}
+                        onClick={() => setLogFilter(f.id as any)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase transition-all cursor-pointer border ${
+                          logFilter === f.id
+                            ? 'bg-indigo-500/25 border-indigo-500/50 text-indigo-300 shadow-sm'
+                            : 'bg-[#182229] border-white/10 text-[#8696a0] hover:text-white'
                         }`}
                       >
-                        <div className="flex justify-between items-center select-none gap-2">
-                          <div className="flex items-center gap-2 font-mono text-[10px] font-black uppercase tracking-wider min-w-0">
-                            {isErr && <AlertTriangle size={13} className="text-rose-400 animate-pulse shrink-0" />}
-                            {isWrn && <AlertTriangle size={13} className="text-amber-400 shrink-0" />}
-                            {isSucc && <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />}
-                            {isInf && <Info size={13} className="text-blue-400 shrink-0" />}
-                            {log.type === 'log' && <Terminal size={13} className="text-[#8696a0] shrink-0" />}
-                            <span className="truncate text-white font-bold">{log.source}</span>
-                            {log.count > 1 && (
-                              <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-white/15 text-white border border-white/10 shrink-0 animate-pulse">
-                                x{log.count}
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[10px] font-bold text-[#8696a0] shrink-0 font-mono">
-                            {new Date(log.timestamp).toLocaleTimeString('pt-BR', { hour12: false })}
-                          </span>
-                        </div>
-                        <p className="break-all whitespace-pre-wrap opacity-95 leading-relaxed font-semibold font-mono text-xs">
-                          {log.message}
-                        </p>
-                        {log.details && (
-                          <pre className="mt-1 p-3 bg-[#111b21] border border-white/10 rounded-xl text-[10px] text-cyan-300 overflow-x-auto max-h-[180px] custom-scrollbar font-mono leading-relaxed select-all">
-                            {typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details)}
-                          </pre>
-                        )}
+                        {f.label} ({f.count})
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Simulação de Erro do Servidor Node */}
+                  <button
+                    onClick={handleSimulateNodeError}
+                    className="bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 px-2.5 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1 shadow-sm"
+                    title="Simular disparo de erro no servidor Node.js para testar o agrupamento"
+                  >
+                    <Bug size={11} className="text-rose-400 animate-pulse" /> + Erro Node
+                  </button>
+                </div>
+
+                {/* Lista de Cards Agrupados / Cronológicos */}
+                <div className="p-4 flex flex-col gap-3">
+                  {groupedAndFilteredLogs.length === 0 ? (
+                    <div className="m-auto py-12 px-6 flex flex-col items-center justify-center text-center space-y-3.5 select-none animate-in fade-in zoom-in-95 duration-300">
+                      <div className="w-16 h-16 rounded-3xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/20 relative">
+                        <Terminal size={28} className="animate-pulse" />
+                        <div className="absolute inset-0 rounded-3xl border border-emerald-400/40 animate-ping" />
                       </div>
-                    );
-                  });
-                })()}
-                <div ref={bottomRef} />
+                      <h4 className="text-sm font-black text-white tracking-tight">
+                        {logFilter === 'node' ? 'Nenhum erro do Servidor Node capturado' : 'Nenhum log detectado'}
+                      </h4>
+                      <p className="text-xs text-[#8696a0] max-w-xs leading-relaxed">
+                        {logFilter === 'node' 
+                          ? 'O servidor Node.js está operando normalmente sem erros de lógica ou loops.' 
+                          : 'Erros do Servidor Node, requisições HTTP e exceções de lógica serão capturados e agrupados aqui.'}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleTestApp()}
+                          className="bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold px-3.5 py-2 rounded-2xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center gap-2"
+                        >
+                          <Activity size={14} /> Teste Rápido
+                        </button>
+                        <button
+                          onClick={handleSimulateNodeError}
+                          className="bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold px-3.5 py-2 rounded-2xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center gap-2"
+                        >
+                          <Bug size={14} /> Simular Erro Node
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    groupedAndFilteredLogs.map((log) => {
+                      const isErr = log.type === 'error';
+                      const isWrn = log.type === 'warn';
+                      const isSucc = log.type === 'success';
+                      const isInf = log.type === 'info';
+                      const isNode = log.isServerNode;
+                      const isExpanded = !!expandedLogs[log.id];
+
+                      return (
+                        <div 
+                          key={log.id} 
+                          className={`p-4 rounded-2xl border transition-all duration-200 flex flex-col gap-2 shadow-lg ${
+                            isNode && isErr
+                              ? 'bg-gradient-to-r from-rose-950/40 to-[#182229] border-rose-500/40 text-rose-200 shadow-rose-500/10'
+                              : isErr 
+                                ? 'bg-rose-500/10 border-rose-500/30 text-rose-200 shadow-rose-500/10' 
+                                : isWrn 
+                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-200 shadow-amber-500/10' 
+                                  : isSucc 
+                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200' 
+                                    : isInf 
+                                      ? 'bg-blue-500/10 border-blue-500/30 text-blue-200' 
+                                      : 'bg-[#182229] border-white/10 text-[#d1d7db]'
+                          }`}
+                        >
+                          {/* Cabeçalho do Card */}
+                          <div className="flex justify-between items-center select-none gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 font-mono text-[10px] font-black uppercase tracking-wider min-w-0">
+                              {isNode ? (
+                                <span className="flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2 py-0.5 rounded-lg text-[9px]">
+                                  🖥️ SERVIDOR NODE.JS
+                                </span>
+                              ) : null}
+
+                              {isErr && <AlertTriangle size={13} className="text-rose-400 animate-pulse shrink-0" />}
+                              {isWrn && <AlertTriangle size={13} className="text-amber-400 shrink-0" />}
+                              {isSucc && <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />}
+                              {isInf && <Info size={13} className="text-blue-400 shrink-0" />}
+                              {log.type === 'log' && <Terminal size={13} className="text-[#8696a0] shrink-0" />}
+
+                              <span className="truncate text-white font-bold">{log.source}</span>
+
+                              {/* PILULA DE CONTAGEM / AGRUPAMENTO */}
+                              {log.count > 1 && (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500/30 text-rose-200 border border-rose-400/40 shrink-0 animate-pulse shadow-md shadow-rose-500/20">
+                                  {log.count}x Ocorrências
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-bold text-[#8696a0] shrink-0 font-mono">
+                                {new Date(log.latestTimestamp).toLocaleTimeString('pt-BR', { hour12: false })}
+                              </span>
+                              <button
+                                onClick={() => toggleExpandLog(log.id)}
+                                className="text-[#8696a0] hover:text-white p-1 rounded-md transition-colors cursor-pointer"
+                              >
+                                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Mensagem do Log */}
+                          <p className="break-all whitespace-pre-wrap opacity-95 leading-relaxed font-semibold font-mono text-xs">
+                            {log.message}
+                          </p>
+
+                          {/* Detalhes Expandidos (Histórico de ocorrências e JSON payload) */}
+                          {(isExpanded || log.details) && (
+                            <div className="flex flex-col gap-2 mt-1">
+                              {log.count > 1 && (
+                                <div className="p-2 bg-[#111b21] border border-white/10 rounded-xl text-[10px] text-amber-300 font-mono flex items-center justify-between flex-wrap gap-2">
+                                  <span>
+                                    ⏱️ <strong>Primeira ocorrência:</strong> {new Date(log.firstTimestamp).toLocaleTimeString('pt-BR')} | <strong>Última:</strong> {new Date(log.latestTimestamp).toLocaleTimeString('pt-BR')}
+                                  </span>
+                                  <span className="text-[9px] text-[#8696a0] uppercase font-bold">
+                                    Agrupado ({log.count} repetições)
+                                  </span>
+                                </div>
+                              )}
+
+                              {log.details && (
+                                <pre className="p-3 bg-[#111b21] border border-white/10 rounded-xl text-[10px] text-cyan-300 overflow-x-auto max-h-[180px] custom-scrollbar font-mono leading-relaxed select-all">
+                                  {typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details)}
+                                </pre>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                  <div ref={bottomRef} />
+                </div>
               </div>
             )
           )}
