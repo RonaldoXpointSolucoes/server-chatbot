@@ -3223,7 +3223,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
            
         const activeChannel = get().activeChannelFilter;
         if (activeChannel) {
-           convQuery = convQuery.or(`instance_id.eq.${activeChannel},instance_id.is.null,unread_count.gt.0`);
+           const resolvedChannelUuid = instanceCache.getId(activeChannel) || (await resolveInstanceUuid(tenant.id, activeChannel)) || activeChannel;
+           const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedChannelUuid);
+           if (isUuid) {
+              convQuery = convQuery.or(`instance_id.eq.${resolvedChannelUuid},instance_id.is.null,unread_count.gt.0`);
+           }
         }
 
         // Puxa até 2000 conversas para garantir o carregamento do histórico completo de todas as caixas
@@ -3311,8 +3315,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                const effectiveInstanceId = conv.instance_id || dbC.instance_id;
                
                // --- FILTRO DE CONVERSAS FANTASMAS ---
-                // Ignorar conversas vazias (sem mensagens) no carregamento inicial para evitar poluição no painel.
-                const isEmpty = !conv.last_message_preview && (conv.unread_count === 0 || !conv.unread_count);
+                // Ignorar conversas vazias (sem mensagens nem data de interacao) no carregamento inicial para evitar poluição no painel.
+                const isEmpty = !conv.last_message_preview && !conv.last_message_at && (conv.unread_count === 0 || !conv.unread_count);
                 if (isEmpty) {
                     return false;
                 }
