@@ -1566,6 +1566,11 @@ export default function ChatDashboard() {
            if (!hasActiveTask) return false;
        }
 
+       // PROTEÇÃO RIGOROSA: Se a conversa estiver ATIVA no painel (c.id === activeChatId), NUNCA oculta do menu lateral!
+       if (c.id === activeChatId) {
+           return true;
+       }
+
        // Filtros de Pills - IGNORADOS DURANTE PESQUISA
        if (!searchTerm) {
            if (filterType === 'unread' && c.unread <= 0 && c.id !== activeChatId) return false;
