@@ -647,7 +647,6 @@ class EventProcessor {
              const { data: upsertedContacts, error: contactErr } = await supabase.from('contacts')
                   .upsert(safeContactsArray, { onConflict: 'tenant_id, phone' })
                   .select('id, tenant_id, phone, whatsapp_jid');
-                 
              if(contactErr) throw new Error("Contact Upsert Error: " + contactErr.message);
              
              const contactIdMap = new Map(); // phone+tenant -> contact_id
@@ -660,7 +659,8 @@ class EventProcessor {
                   const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
                   if(!cid) continue; 
                   
-                  const key = `${b.tenantId}_${cid}`;
+                  const instanceKey = b.instanceId || 'null_instance';
+                  const key = `${b.tenantId}_${instanceKey}_${cid}`;
                   if(!convMap.has(key)) {
                       convMap.set(key, {
                           tenant_id: b.tenantId,
@@ -701,8 +701,9 @@ class EventProcessor {
              
              const existingConvMap = new Map();
              for(const e of existingConvs) {
-                 // Usa tenant + contact como chave de unicidade da conversa
-                 existingConvMap.set(`${e.tenant_id}_${e.contact_id}`, e);
+                 // Usa tenant + instance + contact como chave de unicidade da conversa por caixa
+                 const instanceKey = e.instance_id || 'null_instance';
+                 existingConvMap.set(`${e.tenant_id}_${instanceKey}_${e.contact_id}`, e);
              }
              
              const toInsertConvs = [];

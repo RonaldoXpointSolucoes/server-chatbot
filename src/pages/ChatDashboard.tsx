@@ -1545,6 +1545,17 @@ export default function ChatDashboard() {
            if (targetInst) {
                if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
            }
+
+           // --- FILTRO DE AUTO-CONVERSA (SELF-CHAT DA PRÓPRIA INSTÂNCIA) ---
+           // Uma caixa de atendimento nunca deve mostrar um card com seu próprio número de telefone
+           const channelPhone = instanceCache.phoneNumbers[activeChannelFilter] || (resolvedInstanceUuid ? instanceCache.phoneNumbers[resolvedInstanceUuid] : null);
+           if (channelPhone) {
+               const cleanChannelPhone = channelPhone.replace(/\D/g, '');
+               const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
+               if (cleanChannelPhone && cleanContactPhone && cleanContactPhone === cleanChannelPhone) {
+                   return false;
+               }
+           }
        }
 
        // 3) BUSCA EM TEXTO E METADADOS
