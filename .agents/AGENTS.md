@@ -1,14 +1,32 @@
 # Customizações e Regras do Agente
 
+## Arquitetura de Homologação (Staging) e Regras de Prevenção de Falhas em Produção
+
+O projeto segue um pipeline estrito de homologação para impedir travamentos ou quebras em produção:
+
+1. **Estrutura de Ambientes e Branches**:
+   - **Produção (`main`)**:
+     - **AppWeb (Vercel)**: `https://chat-boot-theta.vercel.app`
+     - **Backend Node (Coolify)**: Aplicação de produção (`production-worker`).
+     - **Banco (Supabase)**: `https://yzbxsxabzncdzuxvlppt.supabase.co` (Clientes Reais).
+   - **Homologação / Staging (`staging`)**:
+     - **AppWeb (Vercel Preview)**: `https://chat-boot-staging.vercel.app` (branch `staging`).
+     - **Backend Node (Coolify Staging)**: Aplicação secundária (`staging-worker` na branch `staging`).
+     - **Banco (Supabase)**: Mesmo Supabase de produção isolado via Tenant "X-Point Testes & Dev" ou Supabase Staging secundário.
+
+2. **RECOMENDAÇÃO OBRIGATÓRIA DE TESTES EM STAGING ANTES DO DEPLOY DE PRODUÇÃO**:
+   - Sempre que o usuário solicitar o deploy em produção (`Deploy` ou `Deploy Server`), a IA **DEVE OBRIGATORIAMENTE RECOMENDAR E PERGUNTAR** se o usuário gostaria de publicar e testar primeiro no ambiente de Staging (`branch: staging` / `chat-boot-staging.vercel.app`), garantindo uma bateria de testes prévia para evitar travamentos ou regressões em produção.
+
 ## Regras de Deploy e Versionamento (Sem Deploy Automático e Sem Push Automático)
 
 O deploy NUNCA deve ser executado de forma automática após alterações de código. O agente só poderá iniciar um deploy ou enviar commits para a branch principal (`git push origin main`) se o usuário explicitamente solicitar.
 
 1. **Sugestão Proativa de Deploy**:
-   - Após concluir e verificar qualquer alteração de código ou correção de bug, a IA **PODE e DEVE SUGERIR** o deploy ao usuário (ex: "As alterações foram testadas localmente. Quando desejar publicar em produção, digite `Deploy` para Vercel ou `Deploy Server` para Coolify.").
+   - Após concluir e verificar qualquer alteração de código ou correção de bug, a IA **PODE e DEVE SUGERIR** o deploy ao usuário, recomendando a homologação prévia no ambiente de Staging (ex: "As alterações foram testadas localmente. Deseja publicar primeiro na branch `staging` para testar em `chat-boot-staging.vercel.app` ou prefere enviar direto para produção via `Deploy` / `Deploy Server`?").
    - A IA **NÃO DEVE** realizar o deploy nem executar `git push origin main` automaticamente sem a solicitação do usuário. Enquanto o usuário estiver desenvolvendo e testando várias soluções no ambiente local, o envio para produção/GitHub fica suspenso para evitar que webhooks do Coolify ou Vercel ativem builds indesejados.
 
 2. **Se o usuário digitar `Deploy`**:
+   - Recomenda a verificação prévia em Staging. Caso confirmado para produção:
    - Realiza o deploy do frontend na Vercel e atualiza a versão no `package.json` (apenas no frontend).
    - O incremento da versão deve seguir a regra de dígito único `X.Y.Z` (0 a 9 em cada componente, ex: de `4.9.4` para `4.9.5`). O valor máximo de cada componente é `9`.
    - Atualiza a variável `VITE_PACKAGE_BUILD_DATE` no `.env` para a data/hora atual.
@@ -16,6 +34,7 @@ O deploy NUNCA deve ser executado de forma automática após alterações de có
    - Relata a versão gerada e o status da publicação no chat.
 
 3. **Se o usuário digitar `Deploy Server`**:
+   - Recomenda a verificação prévia em Staging. Caso confirmado para produção:
    - Realiza o deploy do servidor de backend Node.js.
    - Incrementa a versão no arquivo `server/package.json` seguindo a regra de dígito único `X.Y.Z`.
    - Executa o commit e o push das alterações do servidor Node para o repositório GitHub, que por sua vez dispara o deploy automático no Coolify em nuvem.

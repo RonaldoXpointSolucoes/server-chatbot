@@ -37,6 +37,48 @@ graph TD
 - **RAG & Embeddings Locais**: `@xenova/transformers` (`Xenova/all-MiniLM-L6-v2` com dimensões de 384 vetores) executado diretamente no servidor para busca semântica em lote, sem dependência de serviços externos.
 - **Banco de Dados**: PostgreSQL do Supabase via driver `pg` (com migrações automáticas de DDL no startup) e `@supabase/supabase-js`.
 
+### 1.1. Arquitetura de Homologação (Staging Pipeline)
+
+O ChatBoot adota um pipeline estrito de ambientes para evitar quebras em produção:
+
+```mermaid
+graph TD
+    subgraph GitHub Repository
+        MainBranch[Branch: main]
+        StagingBranch[Branch: staging]
+    end
+
+    subgraph Produção [Ambiente de Produção Online]
+        VercelProd[Vercel: chat-boot-theta.vercel.app]
+        CoolifyProd[Coolify: Server Node Produção]
+        SupaProd[(Supabase: Tenant Clientes Reais)]
+    end
+
+    subgraph Staging [Ambiente de Testes / Homologação]
+        VercelStaging[Vercel: chat-boot-staging.vercel.app]
+        CoolifyStaging[Coolify: Server Node Staging]
+        SupaStaging[(Supabase: Tenant Empresa Teste)]
+    end
+
+    MainBranch -->|Auto Deploy / Push| VercelProd
+    MainBranch -->|Auto Deploy / Push| CoolifyProd
+    CoolifyProd --> SupaProd
+    VercelProd --> CoolifyProd
+
+    StagingBranch -->|Auto Deploy / Push| VercelStaging
+    StagingBranch -->|Auto Deploy / Push| CoolifyStaging
+    CoolifyStaging --> SupaStaging
+    VercelStaging --> CoolifyStaging
+```
+
+#### Os 4 Pilares da Estratégia de Staging:
+1. **Branch `staging` (Git Flow Simplificado)**: Código em desenvolvimento e testes.
+2. **AppWeb Staging (Vercel Preview)**: Domínio `chat-boot-staging.vercel.app` vinculado à branch `staging` com `VITE_WHATSAPP_ENGINE_URL` apontado para o backend de staging.
+3. **Backend Node Staging (Coolify Staging)**: Aplicação secundária no Coolify (`staging-worker`) conectada à branch `staging` com `IS_STAGING=true`.
+4. **Isolamento de Banco (Supabase)**: Mesmo Supabase de produção isolado pelo Tenant "X-Point Testes & Dev" com instâncias de WhatsApp exclusivas de teste.
+
+> ⚠️ **REGRA DE DEPLOY DE PRODUÇÃO**: Antes de realizar qualquer deploy para produção (`Deploy` ou `Deploy Server`), a IA deve obrigatoriamente recomendar e perguntar se o usuário deseja realizar um teste de homologação no ambiente de Staging (`chat-boot-staging.vercel.app`) primeiro.
+
 ---
 
 ## 2. Regras Críticas do Desenvolvedor
