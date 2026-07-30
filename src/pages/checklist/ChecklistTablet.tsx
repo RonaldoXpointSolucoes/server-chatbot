@@ -432,11 +432,6 @@ export default function ChecklistTablet() {
           .eq('user_id', userId);
         
         allowedUnits = uPerms?.map(p => p.unit_id) || [];
-
-        if (allowedUnits.length === 0) {
-          setChecklists([]);
-          return;
-        }
       }
 
       const { data: checklistsData, error } = await supabase
@@ -491,7 +486,7 @@ export default function ChecklistTablet() {
                 .filter(Boolean)
                 .map((name: string) => name.toLowerCase().trim());
                 
-              hasNameMatch = responsibleNames.includes(cleanUserName);
+              hasNameMatch = responsibleNames.some((rName: string) => rName === cleanUserName || cleanUserName.includes(rName) || rName.includes(cleanUserName));
             }
             
             isResponsible = hasDirectId || hasNameMatch;
@@ -500,13 +495,14 @@ export default function ChecklistTablet() {
           
           if (!isResponsible) return false;
 
-          if (isPowerUser) return true;
+          // Se for Admin/Manager ou se o operador foi atribuído diretamente como responsável pelo checklist, exibe!
+          if (isPowerUser || hasDirectAssignment) return true;
 
-          if (hasDirectAssignment) {
-            return allowedUnits.includes(c.unit_id);
-          }
-          
-          return allowedUnits.includes(c.unit_id) && (allowedSectors.length === 0 || allowedSectors.includes(c.sector_id));
+          // Caso contrário, valida permissões de Unidade e Setor (se configuradas)
+          const isUnitAllowed = allowedUnits.length === 0 || (c.unit_id && allowedUnits.includes(c.unit_id)) || !c.unit_id;
+          const isSectorAllowed = allowedSectors.length === 0 || (c.sector_id && allowedSectors.includes(c.sector_id));
+
+          return isUnitAllowed && isSectorAllowed;
         });
 
       setChecklists(list);

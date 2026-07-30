@@ -136,6 +136,36 @@ export function formatPhoneNumber(phone: string | undefined | null): string {
   return cleaned;
 }
 
+// --- HELPER DE PARSE PARA CHECKLIST MULTI-LINHA ---
+export const parseChecklistText = (rawText: string): string[] => {
+  if (!rawText) return [];
+  const lines = rawText.split(/\r?\n/);
+  const result: string[] = [];
+
+  for (let line of lines) {
+    let trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Remove marcadores tradicionais no início da linha (ex: •, -, *, 1., 1), etc.)
+    trimmed = trimmed.replace(/^[\s\t]*[•\-\*\+\d+[\.\)]]+\s*/, '').trim();
+    
+    // Remove marcadores de caixas de seleção brutas (ex: [ ], [x], [X], [v], ( ))
+    trimmed = trimmed.replace(/^\[[\s\nxXvV]*\]\s*/, '').trim();
+
+    // Se for uma linha pura de cabeçalho genérico de lista (ex: "Próximas etapas sugeridas" ou "Lista de tarefas:"), ignora
+    const isHeaderOnly = /^(próximas etapas|próximas etapas sugeridas|lista de tarefas|checklist|tarefas|sub-tarefas)[\s:]*$/i.test(trimmed);
+    if (isHeaderOnly) {
+      continue;
+    }
+
+    if (trimmed.length > 0) {
+      result.push(trimmed);
+    }
+  }
+
+  return result;
+};
+
 export function renderMessageText(text: string) {
   if (!text) return null;
   
@@ -7250,19 +7280,19 @@ export default function ChatDashboard() {
                 
                 {/* Alternador de Modo de Chat Premium (WhatsApp vs Anotação Interna) */}
                 {activeChat && (
-                  <div className="flex items-center justify-between gap-2 px-4.5 py-2.5 border-t border-black/[0.03] dark:border-white/[0.03] bg-[#f0f2f5]/30 dark:bg-[#111b21]/30 backdrop-blur-lg select-none shrink-0 animate-in fade-in duration-300">
-                    <div className="flex bg-gray-200/50 dark:bg-black/20 p-1 rounded-2xl gap-1 border border-black/[0.02] dark:border-white/[0.02] shadow-inner">
+                  <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-black/[0.04] dark:border-white/[0.05] bg-gradient-to-r from-gray-100/70 via-gray-50/50 to-gray-100/70 dark:from-[#111b21]/80 dark:via-[#182229]/60 dark:to-[#111b21]/80 backdrop-blur-xl select-none shrink-0 animate-in fade-in duration-300">
+                    <div className="flex bg-gray-200/60 dark:bg-black/40 p-1.5 rounded-2xl gap-1.5 border border-black/[0.04] dark:border-white/[0.08] shadow-inner backdrop-blur-md">
                       <button
                         type="button"
                         onClick={() => setChatMode('chat')}
                         className={cn(
-                          "flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all duration-300 active:scale-95 shadow-sm",
+                          "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 active:scale-95 shadow-sm",
                           chatMode === 'chat'
-                            ? "bg-white dark:bg-gray-800 text-emerald-650 dark:text-emerald-455 border border-emerald-500/10 shadow-[0_2px_8px_rgba(0,0,0,0.06)]"
-                            : "bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                            ? "bg-white dark:bg-[#202c33] text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shadow-[0_4px_12px_rgba(0,168,132,0.15)] scale-[1.02]"
+                            : "bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-black/5 dark:hover:bg-white/5"
                         )}
                       >
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" className={cn("shrink-0 transition-transform", chatMode === 'chat' && "scale-110")}>
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" className={cn("shrink-0 transition-transform duration-300", chatMode === 'chat' && "scale-110 text-emerald-500")}>
                           <path d="M12.004 2c-5.51 0-9.99 4.49-9.99 10 0 1.91.53 3.69 1.47 5.23L2.24 21.91c-.13.34-.04.73.23 1 .18.18.42.27.67.27.08 0 .17-.01.25-.03l4.89-1.25c1.47.8 3.12 1.25 4.88 1.25 5.51 0 9.99-4.49 9.99-10s-4.48-10-9.99-10zm.01 17.52c-1.63 0-3.17-.46-4.51-1.32-.15-.1-.34-.13-.51-.09l-3.08.79.82-3.08c.05-.18.01-.37-.1-.52-1.01-.1.44-2.48-1.51-4.09-1.51-1.61 0-3.15.46-4.51 1.32-.15.1-.34.13-.51.09l-3.08.79.82-3.08c.05-.18.01-.37-.1-.52-1.01-.1.44-2.48-1.51-4.09-1.51z" />
                         </svg>
                         <span>WhatsApp</span>
@@ -7271,13 +7301,13 @@ export default function ChatDashboard() {
                         type="button"
                         onClick={() => setChatMode('internal_note')}
                         className={cn(
-                          "flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all duration-300 active:scale-95 shadow-sm",
+                          "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 active:scale-95 shadow-sm",
                           chatMode === 'internal_note'
-                            ? "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-600 text-white border border-amber-500/10 shadow-md shadow-amber-500/20"
-                            : "bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                            ? "bg-gradient-to-r from-amber-500 via-amber-500 to-amber-600 text-white border border-amber-400/30 shadow-[0_4px_16px_rgba(245,158,11,0.3)] scale-[1.02]"
+                            : "bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-black/5 dark:hover:bg-white/5"
                         )}
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 transition-transform", chatMode === 'internal_note' && "scale-110")}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 transition-transform duration-300", chatMode === 'internal_note' && "scale-110")}>
                           <path d="M12 20h9"></path>
                           <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
                         </svg>
@@ -7290,7 +7320,7 @@ export default function ChatDashboard() {
                         type="button"
                         onClick={() => useWaCallsStore.getState().setIsOpenWidget(!isOpenWidget)}
                         className={cn(
-                          "flex items-center justify-center p-2 rounded-xl transition-all duration-300 active:scale-95 border",
+                          "flex items-center justify-center p-2.5 rounded-xl transition-all duration-300 active:scale-95 border",
                           isOpenWidget
                             ? "bg-[#00a884] text-white border-[#00a884] shadow-md shadow-emerald-500/20 scale-105"
                             : "bg-[#25d366]/10 border-[#25d366]/20 hover:bg-[#25d366]/25 text-[#00a884] hover:scale-105"
@@ -7385,20 +7415,41 @@ export default function ChatDashboard() {
                             <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
                               <span>📋</span> Itens do Checklist
                             </label>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setChecklistDraft([...checklistDraft, ""]);
-                                setTimeout(() => {
-                                  const nextInput = document.getElementById(`checklist-item-${checklistDraft.length}`);
-                                  if (nextInput) (nextInput as HTMLInputElement).focus();
-                                }, 50);
-                              }}
-                              className="text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 text-[10px] font-black tracking-wider uppercase flex items-center gap-1.5 hover:underline transition-all hover:scale-105 active:scale-95 bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/15 rounded-full px-3.5 py-1.5 shrink-0 shadow-sm"
-                            >
-                              <Plus size={11} strokeWidth={3} />
-                              <span>Adicionar Item</span>
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const raw = prompt("Cole aqui o texto com múltiplas linhas para gerar os itens do checklist:");
+                                  if (raw) {
+                                    const parsed = parseChecklistText(raw);
+                                    if (parsed.length > 0) {
+                                      const cleanDraft = checklistDraft.filter(i => i.trim() !== '');
+                                      setChecklistDraft([...cleanDraft, ...parsed]);
+                                    }
+                                  }
+                                }}
+                                className="text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 text-[10px] font-black tracking-wider uppercase flex items-center gap-1.5 hover:underline transition-all hover:scale-105 active:scale-95 bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/15 rounded-full px-3 py-1 shrink-0 shadow-sm"
+                                title="Colar ata de reunião ou lista de tarefas em lote"
+                              >
+                                <FileText size={11} strokeWidth={2.5} />
+                                <span>Colar Múltiplos</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setChecklistDraft([...checklistDraft, ""]);
+                                  setTimeout(() => {
+                                    const nextInput = document.getElementById(`checklist-item-${checklistDraft.length}`);
+                                    if (nextInput) (nextInput as HTMLInputElement).focus();
+                                  }, 50);
+                                }}
+                                className="text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 text-[10px] font-black tracking-wider uppercase flex items-center gap-1.5 hover:underline transition-all hover:scale-105 active:scale-95 bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/15 rounded-full px-3 py-1 shrink-0 shadow-sm"
+                              >
+                                <Plus size={11} strokeWidth={3} />
+                                <span>Adicionar Item</span>
+                              </button>
+                            </div>
                           </div>
 
                           <div className="flex flex-col gap-2 max-h-[180px] overflow-y-auto pr-1 scrollbar-thin">
@@ -7416,6 +7467,23 @@ export default function ChatDashboard() {
                                     const next = [...checklistDraft];
                                     next[index] = e.target.value;
                                     setChecklistDraft(next);
+                                  }}
+                                  onPaste={(e) => {
+                                    const pastedText = e.clipboardData.getData('text');
+                                    if (pastedText && (pastedText.includes('\n') || pastedText.includes('\r'))) {
+                                      e.preventDefault();
+                                      const parsed = parseChecklistText(pastedText);
+                                      if (parsed.length > 0) {
+                                        const next = [...checklistDraft];
+                                        if (!next[index] || next[index].trim() === '') {
+                                          next.splice(index, 1, ...parsed);
+                                        } else {
+                                          next.splice(index + 1, 0, ...parsed);
+                                        }
+                                        const filtered = next.filter((str, i) => str.trim() !== '' || i === 0);
+                                        setChecklistDraft(filtered.length > 0 ? filtered : [""]);
+                                      }
+                                    }
                                   }}
                                   onKeyDown={(e) => {
                                     if (e.key === 'Enter') {
@@ -8834,6 +8902,27 @@ export default function ChatDashboard() {
                               const newChecklist = [...editNoteChecklist];
                               newChecklist[idx].text = e.target.value;
                               setEditNoteChecklist(newChecklist);
+                            }}
+                            onPaste={(e) => {
+                              const pastedText = e.clipboardData.getData('text');
+                              if (pastedText && (pastedText.includes('\n') || pastedText.includes('\r'))) {
+                                e.preventDefault();
+                                const parsed = parseChecklistText(pastedText);
+                                if (parsed.length > 0) {
+                                  const newItems = parsed.map((t, i) => ({
+                                    id: 'temp_' + Date.now() + '_' + i,
+                                    text: t,
+                                    completed: false
+                                  }));
+                                  const newChecklist = [...editNoteChecklist];
+                                  if (!newChecklist[idx]?.text?.trim()) {
+                                    newChecklist.splice(idx, 1, ...newItems);
+                                  } else {
+                                    newChecklist.splice(idx + 1, 0, ...newItems);
+                                  }
+                                  setEditNoteChecklist(newChecklist);
+                                }
+                              }
                             }}
                             onKeyDown={(e) => handleEditChecklistKeyDown(e, idx)}
                             placeholder="Descreva a sub-tarefa..."

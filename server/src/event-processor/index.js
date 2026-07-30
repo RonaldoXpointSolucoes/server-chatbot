@@ -763,11 +763,14 @@ class EventProcessor {
                  } else {
                      let initialStatus = 'resolved';
                      let initialAiPaused = false;
-                     if (data.has_inbound) {
-                         initialStatus = 'bot';
-                     } else if (data.has_human_outbound) {
-                         initialStatus = 'open';
-                         initialAiPaused = true;
+                     const isOldHistory = data.last_message_at && (Date.now() - new Date(data.last_message_at).getTime() > 24 * 60 * 60 * 1000);
+                     if (!isOldHistory) {
+                         if (data.has_inbound) {
+                             initialStatus = 'bot';
+                         } else if (data.has_human_outbound) {
+                             initialStatus = 'open';
+                             initialAiPaused = true;
+                         }
                      }
                      
                      finalStatus = initialStatus;
