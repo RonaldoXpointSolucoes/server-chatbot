@@ -3741,7 +3741,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             set((s) => {
                const updated = [...s.contacts];
-               const idx = updated.findIndex(c => c.id === contactId);
+               const idx = updated.findIndex(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === getRealContactId(contactId)));
                if (idx !== -1) {
                    // Preserva mensagens otimistas em andamento (in-flight)
                    const currentMsgs = updated[idx].messages || [];

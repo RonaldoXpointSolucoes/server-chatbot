@@ -9,16 +9,19 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 let hasReportedServiceError = false;
 
-const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries = 3, delay = 1000): Promise<Response> => {
+const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries = 5, delay = 1000): Promise<Response> => {
+  const urlStr = typeof input === 'string' ? input : input.toString();
+  const isAuthRequest = urlStr.includes('/auth/v1/token') || urlStr.includes('grant_type=refresh_token');
+
   try {
     const response = await fetch(input, init);
 
-    // Identificar erros HTTP 5xx de servidor/infraestrutura Supabase (500 Internal, 502 Bad Gateway, 503 Service Unavailable, 504 Timeout)
+    // Identificar erros HTTP 5xx de servidor/infraestrutura Supabase
     if (response.status >= 500) {
       if (retries > 0) {
         console.warn(`[Supabase Cloud] Erro HTTP ${response.status} no servidor Supabase. Retentando em ${delay}ms... (Tentativas restantes: ${retries})`);
         await new Promise(resolve => setTimeout(resolve, delay));
-        return customFetch(input, init, retries - 1, delay * 2);
+        return customFetch(input, init, retries - 1, Math.min(delay * 2, 5000));
       }
 
       if (typeof window !== 'undefined') {
@@ -29,7 +32,7 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
             service: 'Supabase Cloud (Banco de Dados)',
             title: '☁️ Indisponibilidade na Nuvem (Supabase)',
             message: `O serviço em nuvem do Supabase retornou um erro de servidor (HTTP ${response.status}). O aplicativo continua operacional com dados em cache local.`,
-            url: typeof input === 'string' ? input : input.toString()
+            url: urlStr
           }
         }));
       }
@@ -52,9 +55,10 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
       error.name === 'TypeError' && (error.message === 'Failed to fetch' || error.message.includes('fetch'));
       
     if (retries > 0 && isNetworkError) {
-      console.warn(`[Supabase Cloud] Oscilação de rede no servidor Supabase. Retentando em ${delay}ms... (Tentativas restantes: ${retries})`, error);
+      hasReportedServiceError = true;
+      console.warn(`[Supabase Cloud] Oscilação de rede no servidor Supabase${isAuthRequest ? ' (Auth Refresh)' : ''}. Retentando em ${delay}ms... (Tentativas restantes: ${retries})`, error);
       await new Promise(resolve => setTimeout(resolve, delay));
-      return customFetch(input, init, retries - 1, delay * 2);
+      return customFetch(input, init, retries - 1, Math.min(delay * 2, 5000));
     }
     
     if (isNetworkError) {
@@ -113,9 +117,18 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // Interceptador global de ciclo de vida de autenticação para evitar sessões zumbis
 supabase.auth.onAuthStateChange((event, session) => {
   if (event === 'SIGNED_OUT') {
-    // Se estiver offline, não limpa a sessão local ainda, pois pode ser apenas falha temporária de rede ao tentar atualizar o token
-    if (typeof window !== 'undefined' && !window.navigator.onLine) {
-      console.warn("[Supabase Auth] SIGNED_OUT detectado mas o usuário está offline. Mantendo sessão local.");
+    const isExplicitLogout = typeof window !== 'undefined' && sessionStorage.getItem('user_explicit_logout') === 'true';
+    const isOffline = typeof window !== 'undefined' && !window.navigator.onLine;
+    const hasLocalUser = typeof window !== 'undefined' && Boolean(
+      localStorage.getItem('current_user_email') || 
+      sessionStorage.getItem('current_user_email') ||
+      localStorage.getItem('current_tenant_id') ||
+      sessionStorage.getItem('current_tenant_id')
+    );
+
+    // Se o evento SIGNED_OUT foi disparado por falha temporária de rede (Failed to fetch) ou sem um clique explícito em "Sair":
+    if (!isExplicitLogout && (isOffline || hasReportedServiceError || hasLocalUser)) {
+      console.warn("[Supabase Auth] SIGNED_OUT automático por oscilação de rede ignorado. Mantendo sessão local ativa.");
       return;
     }
 
@@ -141,6 +154,7 @@ supabase.auth.onAuthStateChange((event, session) => {
     sessionStorage.removeItem('allowed_instances');
     sessionStorage.removeItem('allowed_companies');
     sessionStorage.removeItem('admin_token');
+    sessionStorage.removeItem('user_explicit_logout');
     
     // Se estiver em uma rota restrita, força redirecionamento instantâneo para o login corporativo
     if (typeof window !== 'undefined') {

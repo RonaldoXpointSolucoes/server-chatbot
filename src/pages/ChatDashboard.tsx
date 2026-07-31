@@ -1559,7 +1559,16 @@ export default function ChatDashboard() {
            }
        }
 
-       // 2) LÓGICA DE STATUS: CONTATOS BLOQUEADOS, ADIADOS (SNOOZED) E RESOLVIDOS
+       // 2) PROTEÇÃO SUPREMA DE CHAT ATIVO:
+       // Se o chat está aberto na tela principal (activeChatId), ele NUNCA deve sumir da tela mesmo se estiver resolvido/encerrado!
+       const isExactActiveChat = Boolean(
+         activeChatId && (c.id === activeChatId || c.conv_id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId))
+       );
+       if (isExactActiveChat && !searchTerm) {
+           return true;
+       }
+
+       // 3) LÓGICA DE STATUS: CONTATOS BLOQUEADOS, ADIADOS (SNOOZED) E RESOLVIDOS
        if (filterType === 'blocked') {
            if (!c.is_blocked) return false;
        } else {
@@ -1568,7 +1577,7 @@ export default function ChatDashboard() {
 
        // REGRA DE OURO DO MODO TICKET:
        // - Modo Ticket ATIVO (ticketMode === true OU filterType === 'tickets' OU filterType === 'open'):
-       //   Mostra APENAS tickets abertos. Oculta conversas resolvidas, encerradas e adiadas ativas.
+       //   Mostra APENAS tickets abertos na lista lateral. Oculta conversas resolvidas, encerradas e adiadas ativas.
        // - Modo Ticket DESATIVADO (ticketMode === false E filterType === 'all'):
        //   Mostra TODAS as conversas da caixa (abertas, resolvidas, encerradas, etc.).
        if (!searchTerm && (ticketMode || filterType === 'tickets' || filterType === 'open')) {
@@ -1581,14 +1590,6 @@ export default function ChatDashboard() {
           if (c.conv_status === 'resolved' || c.conv_status === 'closed') {
              return false;
           }
-       }
-
-       // PROTEÇÃO DE CHAT ATIVO: Se passou pelos filtros de status (não está bloqueado, não está adiado ativo e não está encerrado), mantém o chat ativo visível mesmo se mudar caixa ou filtro visual
-       const isExactActiveChat = Boolean(
-         activeChatId && (c.id === activeChatId || c.conv_id === activeChatId)
-       );
-       if (isExactActiveChat && !searchTerm) {
-           return true;
        }
 
        // 3) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa

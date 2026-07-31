@@ -142,7 +142,11 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       console.error('Erro ao limpar chatStore:', storeErr);
     }
 
-    // 3. SignOut do Supabase em background (não bloqueia a navegação local)
+    // 3. Marca logout explícito e executa SignOut do Supabase em background
+    try {
+      sessionStorage.setItem('user_explicit_logout', 'true');
+    } catch (_) {}
+
     supabase.auth.signOut().catch((authErr) => {
       console.error('Erro ao fazer signOut no Supabase:', authErr);
     });
