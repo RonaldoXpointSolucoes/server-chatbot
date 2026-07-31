@@ -3865,13 +3865,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
         };
 
-        // 4. Montar filtro de busca de mensagens (APENAS UUIDs válidos de conversas)
-        const msgFilterParts: string[] = [];
-        if (convIds.length > 0) {
-            msgFilterParts.push(`conversation_id.in.(${convIds.join(',')})`);
-        }
-        const msgFilter = msgFilterParts.length > 0 ? msgFilterParts.join(',') : null;
-
+        // 4. Buscar mensagens usando .in('conversation_id', convIds) nativo ou fallback por contact_id
         if (conv?.id) {
             supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id).then(({ error }) => {
                 if (error) console.error("[loadHistoricalMessages] Erro ao limpar unread_count:", error);
@@ -3879,15 +3873,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         
         let rawFetchedMsgs: any[] = [];
-        if (msgFilter) {
+        if (convIds.length > 0) {
             const { data, error: msgErr } = await supabase.from('messages')
                    .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                    .eq('tenant_id', tenant.id)
-                   .or(msgFilter)
+                   .in('conversation_id', convIds)
                    .order('timestamp', { ascending: false })
                    .limit(500);
             if (msgErr) {
-                console.error("[loadHistoricalMessages] Erro ao buscar mensagens:", msgErr);
+                console.error("[loadHistoricalMessages] Erro ao buscar mensagens por conversation_id:", msgErr);
+            }
+            rawFetchedMsgs = data || [];
+        } else if (targetContactUuid) {
+            const { data, error: msgErr } = await supabase.from('messages')
+                   .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+                   .eq('tenant_id', tenant.id)
+                   .eq('contact_id', targetContactUuid)
+                   .order('timestamp', { ascending: false })
+                   .limit(500);
+            if (msgErr) {
+                console.error("[loadHistoricalMessages] Erro ao buscar mensagens por contact_id:", msgErr);
             }
             rawFetchedMsgs = data || [];
         }
