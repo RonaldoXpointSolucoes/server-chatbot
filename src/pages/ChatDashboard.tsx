@@ -1559,16 +1559,34 @@ export default function ChatDashboard() {
            }
        }
 
-       // 2) PROTEÇÃO SUPREMA DE CHAT ATIVO:
-       // Se o chat está aberto na tela principal (activeChatId), ele NUNCA deve sumir da tela mesmo se estiver resolvido/encerrado!
+       // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa
+       if (activeChannelFilter && !searchTerm && activeChannelFilter !== 'all') {
+           const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
+           const dbInstId = c.instance_id;
+           const targetInst = instIdFromContactId || dbInstId || 'default';
+           if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
+
+           // --- FILTRO DE AUTO-CONVERSA (SELF-CHAT DA PRÓPRIA INSTÂNCIA) ---
+           const channelPhone = instanceCache.phoneNumbers[activeChannelFilter] || (resolvedInstanceUuid ? instanceCache.phoneNumbers[resolvedInstanceUuid] : null);
+           if (channelPhone) {
+               const cleanChannelPhone = channelPhone.replace(/\D/g, '');
+               const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
+               if (cleanChannelPhone && cleanContactPhone && cleanContactPhone === cleanChannelPhone) {
+                   return false;
+               }
+           }
+       }
+
+       // 3) PROTEÇÃO RIGOROSA DE CHAT ATIVO:
+       // Se ESTE CARD ESPECÍFICO for o chat ativo aberto no painel principal, ele permanece visível na sidebar enquanto o usuário estiver interagindo com ele
        const isExactActiveChat = Boolean(
-         activeChatId && (c.id === activeChatId || c.conv_id === activeChatId || getRealContactId(c.id) === getRealContactId(activeChatId))
+         activeChatId && (c.id === activeChatId || c.conv_id === activeChatId)
        );
        if (isExactActiveChat && !searchTerm) {
            return true;
        }
 
-       // 3) LÓGICA DE STATUS: CONTATOS BLOQUEADOS, ADIADOS (SNOOZED) E RESOLVIDOS
+       // 4) LÓGICA DE STATUS: CONTATOS BLOQUEADOS, ADIADOS (SNOOZED) E RESOLVIDOS
        if (filterType === 'blocked') {
            if (!c.is_blocked) return false;
        } else {
@@ -1592,23 +1610,6 @@ export default function ChatDashboard() {
           }
        }
 
-       // 3) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa
-       if (activeChannelFilter && !searchTerm && activeChannelFilter !== 'all') {
-           const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
-           const dbInstId = c.instance_id;
-           const targetInst = instIdFromContactId || dbInstId || 'default';
-           if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
-
-           // --- FILTRO DE AUTO-CONVERSA (SELF-CHAT DA PRÓPRIA INSTÂNCIA) ---
-           const channelPhone = instanceCache.phoneNumbers[activeChannelFilter] || (resolvedInstanceUuid ? instanceCache.phoneNumbers[resolvedInstanceUuid] : null);
-           if (channelPhone) {
-               const cleanChannelPhone = channelPhone.replace(/\D/g, '');
-               const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
-               if (cleanChannelPhone && cleanContactPhone && cleanContactPhone === cleanChannelPhone) {
-                   return false;
-               }
-           }
-       }
 
        // 4) BUSCA EM TEXTO E METADADOS
        if (searchTerm) {
