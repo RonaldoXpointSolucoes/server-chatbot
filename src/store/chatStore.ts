@@ -3696,10 +3696,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const activeContactObj = get().contacts.find(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === realContactId));
         const knownConvId = activeContactObj?.conv_id;
 
-        let convQueryFilter = `contact_id.eq.${realContactId},contact_id.eq.${contactId}`;
-        if (knownConvId) {
-            convQueryFilter += `,id.eq.${knownConvId}`;
+        const isUuid = (val: string) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+        const validContactUuids = Array.from(new Set([realContactId, contactId])).filter(id => isUuid(id));
+        const convQueryParts = validContactUuids.map(id => `contact_id.eq.${id}`);
+        if (knownConvId && isUuid(knownConvId)) {
+            convQueryParts.push(`id.eq.${knownConvId}`);
         }
+        const convQueryFilter = convQueryParts.length > 0 ? convQueryParts.join(',') : `contact_id.eq.${realContactId}`;
 
         // Paralelizar a busca de notas, resolução do UUID da instância e a busca de TODAS as conversas do contato
         const [notesRes, resolvedInstanceId, allConvsRes] = await Promise.all([
@@ -3823,10 +3826,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
 
         // Busca de emergência de mensagens diretamente por contact_id caso conversations não encontre
-        let msgFilter = `contact_id.eq.${realContactId},contact_id.eq.${contactId}`;
-        if (convIds.length > 0) {
-            msgFilter = `conversation_id.in.(${convIds.join(',')}),` + msgFilter;
+        const msgFilterParts: string[] = [];
+        const validConvUuids = convIds.filter(id => isUuid(id));
+        if (validConvUuids.length > 0) {
+            msgFilterParts.push(`conversation_id.in.(${validConvUuids.join(',')})`);
         }
+        validContactUuids.forEach(id => {
+            msgFilterParts.push(`contact_id.eq.${id}`);
+        });
+        const msgFilter = msgFilterParts.length > 0 ? msgFilterParts.join(',') : `contact_id.eq.${realContactId}`;
 
         // Limpar unread em background (sem bloquear o carregamento das mensagens locais!)
         if (conv?.id) {
