@@ -2400,9 +2400,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let foundAny = false;
       const updatedContacts = state.contacts.map((c) => {
          const cRealId = getRealContactId(c.id);
-         const isMatch = cRealId === realContactId ||
+         const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+         const targetInst = contact.instance_id || (contact.id.includes('_') ? contact.id.split('_')[1] : null);
+         const sameInst = !cInst || !targetInst || cInst === 'default' || targetInst === 'default' || cInst === targetInst;
+
+         const isMatch = sameInst && (
+                         cRealId === realContactId ||
                          (c.whatsapp_jid && contact.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) ||
-                         (c.phone && contactPhoneMatch && c.phone === contactPhoneMatch);
+                         (c.phone && contactPhoneMatch && c.phone === contactPhoneMatch)
+         );
                          
          if (isMatch) {
             foundAny = true;
@@ -2410,8 +2416,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const isNewTemp = contact.id.includes('temp-');
             
             const baseId = (!isExistingTemp) ? getRealContactId(c.id) : (!isNewTemp ? getRealContactId(contact.id) : c.id);
-            // Preserva o composite ID original daquela caixa (se já tinha)
-            const effectiveInstanceId = c.instance_id || contact.instance_id || 'default';
+            // Preserva o composite ID original daquela caixa (priorizando a instância informada)
+            const effectiveInstanceId = contact.instance_id || c.instance_id || 'default';
             const finalId = c.id.includes('_') ? c.id : (baseId.includes('temp-') ? baseId : `${baseId}_${effectiveInstanceId}`);
             
             const finalCustomName = c.custom_name || contact.custom_name;
@@ -3379,11 +3385,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   const effectiveInst = conv.instance_id || dbC.instance_id || 'default';
                   const compositeId = dbC.id + '_' + effectiveInst;
                   
-                  const idx = newContacts.findIndex(c => 
-                      c.id === compositeId || 
-                      getRealContactId(c.id) === dbC.id ||
-                      (c.phone && phoneMatch && c.phone === phoneMatch)
-                  );
+                  const idx = newContacts.findIndex(c => {
+                       if (c.id === compositeId) return true;
+                       const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+                       if (cInst && effectiveInst && cInst !== 'default' && effectiveInst !== 'default' && cInst !== effectiveInst) {
+                           return false;
+                       }
+                       return getRealContactId(c.id) === dbC.id || (c.phone && phoneMatch && c.phone === phoneMatch);
+                   });
                   
                   const tname = tenant?.name || '';
                   let finalName = dbC.custom_name || dbC.name || dbC.push_name || phoneMatch || dbC.phone;
@@ -3431,7 +3440,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         priority: isExistingNewer ? existing.priority : conv.priority,
                         assigned_to: isExistingNewer ? existing.assigned_to : conv.assigned_to,
                         conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.tenant_labels).filter(Boolean) : existing.conv_labels || [],
-                        instance_id: existing.instance_id || conv.instance_id || dbC.instance_id || null,
+                        instance_id: conv.instance_id || dbC.instance_id || existing.instance_id || null,
                         conv_id: isExistingNewer ? existing.conv_id : conv.id,
                         ai_paused: isExistingNewer ? existing.ai_paused : (conv.ai_paused || false),
                         ai_paused_manually: isExistingNewer ? existing.ai_paused_manually : (conv.ai_paused_manually || false)
