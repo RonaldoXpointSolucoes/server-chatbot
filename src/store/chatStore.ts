@@ -1177,45 +1177,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const realContactId = getRealContactId(contactId);
       const instId = getInstanceIdFromContact(contactId);
       const resolvedInstId = await resolveInstanceUuid(tenantInfo.id, instId);
-      let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenantInfo.id);
-      if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
-      const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).single();
-
-      if (!conv) {
-          console.warn('Conversa não encontrada para reabrir o ticket.');
-          return;
-      }
-
-      // 1. Inserir a mensagem interna System de reabertura
-      const msgText = `🔓 Reaberta por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
       
-      const dbMsg = {
-         conversation_id: conv.id,
-         tenant_id: tenantInfo.id,
-         text_content: msgText,
-         sender_type: 'system',
-         direction: 'outgoing',
-         instance_id: resolvedInstId
-      };
+      const { data: convs } = await supabase
+        .from('conversations')
+        .select('id, instance_id')
+        .eq('contact_id', realContactId)
+        .eq('tenant_id', tenantInfo.id)
+        .order('last_interaction_at', { ascending: false, nullsFirst: false });
 
-      const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
-      
-      if (!error && insertedMsg) {
-          const msgTypeObj: MessageType = {
-             id: insertedMsg.id,
-             text: insertedMsg.text_content,
-             sender: 'system',
-             timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
+      const conv = convs && convs.length > 0 ? convs[0] : null;
+      const allConvIds = convs ? convs.map(c => c.id) : [];
+
+      if (conv) {
+          // 1. Inserir a mensagem interna System de reabertura
+          const msgText = `🔓 Reaberta por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
+          
+          const dbMsg = {
+             conversation_id: conv.id,
+             tenant_id: tenantInfo.id,
+             text_content: msgText,
+             sender_type: 'system',
+             direction: 'outgoing',
+             instance_id: conv.instance_id || resolvedInstId
           };
-          get().addMessageLocally(contactId, msgTypeObj);
+
+          const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
+          
+          if (!error && insertedMsg) {
+              const msgTypeObj: MessageType = {
+                 id: insertedMsg.id,
+                 text: insertedMsg.text_content,
+                 sender: 'system',
+                 timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
+              };
+              get().addMessageLocally(contactId, msgTypeObj);
+          }
       }
 
-      // 2. Atualiza no Supabase status para 'open'
-      await supabase.from('conversations').update({ status: 'open' }).eq('id', conv.id);
+      // 2. Atualiza no Supabase status para 'open' em TODAS as conversas do contato
+      if (allConvIds.length > 0) {
+        await supabase.from('conversations').update({ status: 'open' }).in('id', allConvIds);
+      }
 
-      // 3. Atualização local do estado para 'open'
+      // 3. Atualização local de TODOS os registros de contato correspondentes ao realContactId para 'open'
       set((state) => ({
-          contacts: state.contacts.map((c) => c.id === contactId ? { ...c, conv_status: 'open' } : c)
+          contacts: state.contacts.map((c) => getRealContactId(c.id) === realContactId ? { ...c, conv_status: 'open' } : c)
       }));
 
     } catch (e) {
@@ -2561,51 +2567,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (agent && agent.full_name) agentName = agent.full_name;
         }
 
-        // Descobre a Conversation vinculada para update do Status/Assigned_to e Insert de Message
+        // Descobre todas as conversas vinculadas ao contato para update de Status/Assigned_to e Insert de Message
         const realContactId = getRealContactId(contactId);
         const instId = getInstanceIdFromContact(contactId);
         const resolvedInstId = await resolveInstanceUuid(tenantInfo.id, instId);
-        let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenantInfo.id);
-        if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
-        const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
-
-        if (!conv) {
-            console.warn('Conversa não encontrada para resolver o ticket.');
-            return;
-        }
-
-        // 1. Inserir a mensagem interna System
-        const msgText = `✅ Resolvido por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
         
-        const dbMsg = {
-           conversation_id: conv.id, // Correto Schema: conversation_id e não contact_id
-           tenant_id: tenantInfo.id,
-           text_content: msgText, // Correto Schema: text_content e não text
-           sender_type: 'system', // Correto Schema: sender_type e não sender
-           direction: 'outgoing', // Coluna NOT NULL obrigatória no schema
-           instance_id: resolvedInstId
-        };
+        const { data: convs } = await supabase
+          .from('conversations')
+          .select('id, instance_id')
+          .eq('contact_id', realContactId)
+          .eq('tenant_id', tenantInfo.id)
+          .order('last_interaction_at', { ascending: false, nullsFirst: false });
 
-        const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
-        
-        if (!error && insertedMsg) {
-            // Atualiza a interface da mensagem local
-            const msgTypeObj: MessageType = {
-               id: insertedMsg.id,
-               text: insertedMsg.text_content,
-               sender: 'system',
-               timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
+        const conv = convs && convs.length > 0 ? convs[0] : null;
+        const allConvIds = convs ? convs.map(c => c.id) : [];
+
+        if (conv) {
+            // 1. Inserir a mensagem interna System
+            const msgText = `✅ Resolvido por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
+            
+            const dbMsg = {
+               conversation_id: conv.id,
+               tenant_id: tenantInfo.id,
+               text_content: msgText,
+               sender_type: 'system',
+               direction: 'outgoing',
+               instance_id: conv.instance_id || resolvedInstId
             };
-            get().addMessageLocally(contactId, msgTypeObj);
+
+            const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
+            
+            if (!error && insertedMsg) {
+                const msgTypeObj: MessageType = {
+                   id: insertedMsg.id,
+                   text: insertedMsg.text_content,
+                   sender: 'system',
+                   timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
+                };
+                get().addMessageLocally(contactId, msgTypeObj);
+            }
         }
 
-        const targetContact = get().contacts.find(c => c.id === contactId);
+        const targetContact = get().contacts.find(c => getRealContactId(c.id) === realContactId);
         let nextAiPaused = false;
         
         if (reactivateAi !== undefined) {
           nextAiPaused = !reactivateAi;
         } else {
-          // Fallback se não informado: segue o ai_paused_manually atual
           const isPausedManually = targetContact?.ai_paused_manually || false;
           nextAiPaused = isPausedManually ? true : false;
         }
@@ -2616,20 +2624,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
           .update({ bot_status: nextAiPaused ? 'paused' : 'active' })
           .eq('id', realContactId);
 
-        // 3. Remove o assignment direto na tabela certa (conversations) e limpa o snooze
-        await supabase.from('conversations').update({ 
-          assigned_to: null, 
-          status: 'resolved', 
-          ai_paused: nextAiPaused,
-          ai_paused_manually: nextAiPaused,
-          snoozed_until: null,
-          snoozed_at: null,
-          snoozed_by: null
-        }).eq('id', conv.id);
+        // 3. Remove o assignment e altera status para 'resolved' em TODAS as conversas do contato
+        if (allConvIds.length > 0) {
+            await supabase.from('conversations').update({ 
+              assigned_to: null, 
+              status: 'resolved', 
+              ai_paused: nextAiPaused,
+              ai_paused_manually: nextAiPaused,
+              snoozed_until: null,
+              snoozed_at: null,
+              snoozed_by: null
+            }).in('id', allConvIds);
+        }
 
-        // 4. Atualização local do estado para sumir da lista e fechar o chat ativo
+        // Encerra também tickets no chat_tickets se existirem
+        try {
+          await supabase.from('chat_tickets')
+            .update({ 
+              status: 'resolved', 
+              closed_at: new Date().toISOString(),
+              resolution_summary: `Resolvido por ${agentName}`
+            })
+            .eq('tenant_id', tenantInfo.id)
+            .eq('status', 'open')
+            .eq('contact_id', realContactId);
+        } catch (err) {}
+
+        // 4. Atualização local do estado para TODOS os cards do contato sumirem da lista e fechar o chat ativo
         set((state) => ({
-            contacts: state.contacts.map((c) => c.id === contactId ? { 
+            contacts: state.contacts.map((c) => getRealContactId(c.id) === realContactId ? { 
                 ...c, 
                 assigned_to: null, 
                 conv_status: 'resolved', 
@@ -2639,7 +2662,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 snoozed_at: null,
                 snoozed_by: null
             } : c),
-            activeChatId: state.activeChatId === contactId ? null : state.activeChatId
+            activeChatId: (state.activeChatId && getRealContactId(state.activeChatId) === realContactId) ? null : state.activeChatId
         }));
 
     } catch (e) {
@@ -3353,10 +3376,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   if (!dbC) return; // Segurança extra
 
                   const phoneMatch = dbC.phone || (dbC.whatsapp_jid ? dbC.whatsapp_jid.split('@')[0] : null);
-                  const compositeId = dbC.id + '_' + (conv.instance_id || dbC.instance_id || 'default');
+                  const effectiveInst = conv.instance_id || dbC.instance_id || 'default';
+                  const compositeId = dbC.id + '_' + effectiveInst;
+                  
                   const idx = newContacts.findIndex(c => 
                       c.id === compositeId || 
-                      c.id === dbC.id // also match the raw UUID to upgrade it!
+                      getRealContactId(c.id) === dbC.id ||
+                      (c.phone && phoneMatch && c.phone === phoneMatch)
                   );
                   
                   const tname = tenant?.name || '';
@@ -3376,35 +3402,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   if (idx !== -1) {
                      const existing = newContacts[idx];
                      const finalCustomName = dbC.custom_name || existing.custom_name;
-                     const tname = tenant?.name || '';
                      let finalName = finalCustomName || dbC.name || existing.name;
                      finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
                      
                      const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || dbC.phone)}&background=random&color=fff`;
+                     
+                     // validConvs está ordenado por last_message_at DESC.
+                     // Se o contato já existe no array, existing possui a conversa MAIS RECENTE.
+                     // Não devemos sobrescrever conv_id e conv_status com conversas mais antigas.
+                     const isExistingNewer = (existing.lastMsgTimestamp || 0) >= ts;
 
                      newContacts[idx] = {
                         ...existing,
                         ...dbC,
-                        id: compositeId,
+                        id: existing.id || compositeId,
                         custom_name: finalCustomName,
                         name: finalName,
                         avatar: dbC.profile_picture_url || (existing.avatar?.includes('ui-avatars') ? avatarFallback : (existing.avatar || avatarFallback)),
-                        unread: unread,
-                        is_favorite: isFavorite,
-                        is_pinned: isPinned,
-                        lastMsgTimestamp: ts,
+                        unread: isExistingNewer ? existing.unread : unread,
+                        is_favorite: existing.is_favorite || isFavorite,
+                        is_pinned: existing.is_pinned || isPinned,
+                        lastMsgTimestamp: isExistingNewer ? existing.lastMsgTimestamp : ts,
                         messages: existing.messages || [],
-                        conv_status: conv.status,
-                        snoozed_until: conv.snoozed_until,
-                        snoozed_at: conv.snoozed_at,
-                        snoozed_by: conv.snoozed_by,
-                        priority: conv.priority,
-                        assigned_to: conv.assigned_to,
-                        conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.tenant_labels).filter(Boolean) : [],
-                        instance_id: conv.instance_id || dbC.instance_id || null,
-                        conv_id: conv.id,
-                        ai_paused: conv.ai_paused || false,
-                        ai_paused_manually: conv.ai_paused_manually || false
+                        conv_status: isExistingNewer ? (existing.conv_status || conv.status) : conv.status,
+                        snoozed_until: isExistingNewer ? existing.snoozed_until : conv.snoozed_until,
+                        snoozed_at: isExistingNewer ? existing.snoozed_at : conv.snoozed_at,
+                        snoozed_by: isExistingNewer ? existing.snoozed_by : conv.snoozed_by,
+                        priority: isExistingNewer ? existing.priority : conv.priority,
+                        assigned_to: isExistingNewer ? existing.assigned_to : conv.assigned_to,
+                        conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.tenant_labels).filter(Boolean) : existing.conv_labels || [],
+                        instance_id: existing.instance_id || conv.instance_id || dbC.instance_id || null,
+                        conv_id: isExistingNewer ? existing.conv_id : conv.id,
+                        ai_paused: isExistingNewer ? existing.ai_paused : (conv.ai_paused || false),
+                        ai_paused_manually: isExistingNewer ? existing.ai_paused_manually : (conv.ai_paused_manually || false)
                      };
                      
                      // Injeta um preview fake se messages tiver vazio e tem preview no banco 

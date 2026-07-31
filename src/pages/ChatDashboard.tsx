@@ -1593,13 +1593,11 @@ export default function ChatDashboard() {
        }
 
        // 3) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa
-       if (activeChannelFilter && !searchTerm) {
+       if (activeChannelFilter && !searchTerm && activeChannelFilter !== 'all') {
            const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
            const dbInstId = c.instance_id;
-           const targetInst = instIdFromContactId || dbInstId;
-           if (targetInst) {
-               if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
-           }
+           const targetInst = instIdFromContactId || dbInstId || 'default';
+           if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
 
            // --- FILTRO DE AUTO-CONVERSA (SELF-CHAT DA PRÓPRIA INSTÂNCIA) ---
            const channelPhone = instanceCache.phoneNumbers[activeChannelFilter] || (resolvedInstanceUuid ? instanceCache.phoneNumbers[resolvedInstanceUuid] : null);
