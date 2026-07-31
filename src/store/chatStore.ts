@@ -3663,6 +3663,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         const realContactId = getRealContactId(contactId);
 
+        const activeContactObj = get().contacts.find(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === realContactId));
+        const knownConvId = activeContactObj?.conv_id;
+
+        let convQueryFilter = `contact_id.eq.${realContactId},contact_id.eq.${contactId}`;
+        if (knownConvId) {
+            convQueryFilter += `,id.eq.${knownConvId}`;
+        }
+
         // Paralelizar a busca de notas, resolução do UUID da instância e a busca de TODAS as conversas do contato
         const [notesRes, resolvedInstanceId, allConvsRes] = await Promise.all([
              supabase.from('contact_notes')
@@ -3674,14 +3682,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
              supabase.from('conversations')
                 .select('id, status, last_message_at, updated_at')
                 .eq('tenant_id', tenant.id)
-                .eq('contact_id', realContactId)
+                .or(convQueryFilter)
                 .order('updated_at', { ascending: false })
          ]);
 
         let dbNotes: any[] = notesRes.data || [];
         const allConvs = allConvsRes.data || [];
         const conv = allConvs.length > 0 ? allConvs[0] : null;
-        const convIds = allConvs.map(c => c.id);
+        const convIds = Array.from(new Set([...allConvs.map(c => c.id), ...(knownConvId ? [knownConvId] : [])])).filter(Boolean);
 
         const mappedNotes = dbNotes.map(n => ({
            id: n.id,
@@ -3784,12 +3792,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
         };
 
-        if (convIds.length === 0) {
-             // Em vez de inserir uma conversa vazia no banco e poluir o DB,
-             // inicializamos a UI com array vazio.
-             // A conversa será criada organicamente pelo Webhook no 1º envio/recebimento.
-             handleMapping([]);
-             return;
+        // Busca de emergência de mensagens diretamente por contact_id caso conversations não encontre
+        let msgFilter = `contact_id.eq.${realContactId},contact_id.eq.${contactId}`;
+        if (convIds.length > 0) {
+            msgFilter = `conversation_id.in.(${convIds.join(',')}),` + msgFilter;
         }
 
         // Limpar unread em background (sem bloquear o carregamento das mensagens locais!)
@@ -3802,7 +3808,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const { data: rawFetchedMsgs } = await supabase.from('messages')
                .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                .eq('tenant_id', tenant.id)
-               .in('conversation_id', convIds)
+               .or(msgFilter)
                .order('timestamp', { ascending: false })
                .limit(500);
                

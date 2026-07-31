@@ -6841,7 +6841,7 @@ export default function ChatDashboard() {
 
 
             {(() => {
-              const rawMsgs = activeChat.messages?.filter(m => m.text || m.mediaUrl || m.isTask || m.sender === 'internal_note') || [];
+              const rawMsgs = activeChat.messages?.filter(m => Boolean(m.text || m.mediaUrl || m.isTask || m.sender || m.payload || m.id)) || [];
               const sortedRawMsgs = sortMessagesChronologically(rawMsgs);
               const msgsFilteredByMode = (ticketMode && messageFilter === 'today')
                 ? sortedRawMsgs.filter(m => {
@@ -6863,41 +6863,64 @@ export default function ChatDashboard() {
                 return !nextMsg || nextMsg.sender !== 'system';
               });
 
-              if (ticketMode && messageFilter === 'today' && rawMsgs.length > 0 && dedupedMsgs.length === 0) {
-                const lastMsg = sortedRawMsgs[sortedRawMsgs.length - 1];
-                const lastMsgDate = lastMsg ? (lastMsg.timestamp instanceof Date ? lastMsg.timestamp : new Date(lastMsg.timestamp)) : null;
-                let lastMsgDateText = '';
-                if (lastMsgDate && !isNaN(lastMsgDate.getTime())) {
-                  if (isToday(lastMsgDate)) {
-                    lastMsgDateText = 'hoje';
-                  } else if (isYesterday(lastMsgDate)) {
-                    lastMsgDateText = 'ontem';
-                  } else {
-                    lastMsgDateText = `em ${format(lastMsgDate, 'dd/MM/yyyy')}`;
+              // SE NÃO HOUVER MENSAGENS NO FILTRO ATUAL (Ex: Modo Ticket filtrando hoje ou conversa vazia), EXIBE UM CARD MODERNO EM VEZ DE TELA PRETA
+              if (dedupedMsgs.length === 0) {
+                if (ticketMode && messageFilter === 'today') {
+                  const lastMsg = sortedRawMsgs[sortedRawMsgs.length - 1];
+                  const lastMsgDate = lastMsg ? (lastMsg.timestamp instanceof Date ? lastMsg.timestamp : new Date(lastMsg.timestamp)) : null;
+                  let lastMsgDateText = '';
+                  if (lastMsgDate && !isNaN(lastMsgDate.getTime())) {
+                    if (isToday(lastMsgDate)) {
+                      lastMsgDateText = 'hoje';
+                    } else if (isYesterday(lastMsgDate)) {
+                      lastMsgDateText = 'ontem';
+                    } else {
+                      lastMsgDateText = `em ${format(lastMsgDate, 'dd/MM/yyyy')}`;
+                    }
                   }
+
+                  return (
+                    <div className="flex-grow flex flex-col items-center justify-center p-6 select-none animate-in fade-in duration-300">
+                      <div className="max-w-sm p-6 bg-white/75 dark:bg-[#202c33]/75 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/10 shadow-lg flex flex-col items-center text-center gap-3">
+                        <div className="w-12 h-12 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-500 shadow-inner">
+                          <Ticket size={24} />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <h4 className="text-sm font-bold text-[#111b21] dark:text-[#e9edef]">
+                            {lastMsgDateText ? `Última mensagem foi ${lastMsgDateText}` : 'Nenhuma mensagem gravada hoje'}
+                          </h4>
+                          <p className="text-[11px] text-[#54656f] dark:text-[#8696a0] leading-relaxed">
+                            {lastMsgDateText 
+                              ? 'Esta conversa possui mensagens anteriores, mas nenhuma mensagem recebida ou enviada hoje.' 
+                              : 'O Modo Ticket exibe por padrão as mensagens do dia. Clique abaixo para carregar todo o histórico.'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setMessageFilter('all')}
+                          className="mt-1 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98] cursor-pointer"
+                        >
+                          Exibir Histórico Completo
+                        </button>
+                      </div>
+                    </div>
+                  );
                 }
 
                 return (
                   <div className="flex-grow flex flex-col items-center justify-center p-6 select-none animate-in fade-in duration-300">
                     <div className="max-w-sm p-6 bg-white/75 dark:bg-[#202c33]/75 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/10 shadow-lg flex flex-col items-center text-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-500 shadow-inner">
-                        <Ticket size={24} />
+                      <div className="w-12 h-12 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 flex items-center justify-center text-indigo-500 shadow-inner">
+                        <MessageSquare size={24} />
                       </div>
                       <div className="flex flex-col gap-1">
                         <h4 className="text-sm font-bold text-[#111b21] dark:text-[#e9edef]">
-                          Última mensagem foi {lastMsgDateText}
+                          Início do atendimento
                         </h4>
                         <p className="text-[11px] text-[#54656f] dark:text-[#8696a0] leading-relaxed">
-                          Esta conversa possui mensagens anteriores, mas nenhuma de hoje.
+                          Esta conversa ainda não possui mensagens armazenadas no histórico local. Responda no campo abaixo para enviar a primeira mensagem.
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setMessageFilter('all')}
-                        className="mt-1 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98] cursor-pointer"
-                      >
-                        Exibir Histórico Completo
-                      </button>
                     </div>
                   </div>
                 );
