@@ -1183,7 +1183,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         .select('id, instance_id')
         .eq('contact_id', realContactId)
         .eq('tenant_id', tenantInfo.id)
-        .order('last_interaction_at', { ascending: false, nullsFirst: false });
+        .order('last_message_at', { ascending: false });
 
       const conv = convs && convs.length > 0 ? convs[0] : null;
       const allConvIds = convs ? convs.map(c => c.id) : [];
@@ -2583,7 +2583,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           .select('id, instance_id')
           .eq('contact_id', realContactId)
           .eq('tenant_id', tenantInfo.id)
-          .order('last_interaction_at', { ascending: false, nullsFirst: false });
+          .order('last_message_at', { ascending: false });
 
         const conv = convs && convs.length > 0 ? convs[0] : null;
         const allConvIds = convs ? convs.map(c => c.id) : [];
