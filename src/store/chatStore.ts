@@ -3865,13 +3865,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
         };
 
-        // 4. Montar filtro de busca de mensagens (APENAS UUIDs válidos)
+        // 4. Montar filtro de busca de mensagens (APENAS UUIDs válidos de conversas)
         const msgFilterParts: string[] = [];
         if (convIds.length > 0) {
             msgFilterParts.push(`conversation_id.in.(${convIds.join(',')})`);
-        }
-        if (targetContactUuid) {
-            msgFilterParts.push(`contact_id.eq.${targetContactUuid}`);
         }
         const msgFilter = msgFilterParts.length > 0 ? msgFilterParts.join(',') : null;
 
