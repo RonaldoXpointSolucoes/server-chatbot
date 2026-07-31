@@ -1483,14 +1483,22 @@ export default function ChatDashboard() {
       }
     }
 
-    // 2) Filtro de Caixa Ativa
+    // 2) Filtro de Caixa Ativa (Verifica por ID, Nome e Cache de UUID)
     if (activeChannelFilter && activeChannelFilter !== 'all') {
       const targetInst = instanceIdFromId || c.instance_id || 'default';
-      if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
+      const resolvedTargetUuid = instanceCache.getId(targetInst) || targetInst;
+      const resolvedFilterUuid = instanceCache.getId(activeChannelFilter) || activeChannelFilter;
+      const resolvedTargetName = instanceCache.getName(targetInst) || targetInst;
+
+      const matchesChannel = targetInst === activeChannelFilter ||
+                             targetInst === activeChannelName ||
+                             resolvedTargetUuid === resolvedFilterUuid ||
+                             resolvedTargetName === activeChannelName;
+
+      if (!matchesChannel) return false;
 
       // Self-chat check
-      const filterInstUuid = activeChannelFilter ? (instanceCache.getId(activeChannelFilter) || activeChannelFilter) : null;
-      const channelPhone = filterInstUuid ? instanceCache.phoneNumbers[filterInstUuid] : null;
+      const channelPhone = resolvedFilterUuid ? instanceCache.phoneNumbers[resolvedFilterUuid] : null;
       if (channelPhone) {
         const cleanChannelPhone = channelPhone.replace(/\D/g, '');
         const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
@@ -1517,17 +1525,23 @@ export default function ChatDashboard() {
     return true;
   }, [activeChannelFilter, activeChannelName, connectedInstanceName]);
 
-  // Cálculo de Tickets Ativos Únicos da Caixa Selecionada (respeitando RBAC, status e pessoa única)
+  // Cálculo de Tickets Ativos Únicos da Caixa e Filtro Selecionados
   const activeTicketsCount = React.useMemo(() => {
+    const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+    const currentAgent = agents.find(a => a.email === currentUserEmail);
+
     const uniqueKeys = new Set<string>();
     contacts.forEach(c => {
       if (isContactOpenTicket(c)) {
+        if (filterType === 'mine') {
+          if (!currentAgent || !c.assigned_to?.split(',').includes(currentAgent.id)) return;
+        }
         const key = getUniquePersonKey(c) || c.id;
         uniqueKeys.add(key);
       }
     });
     return uniqueKeys.size;
-  }, [contacts, isContactOpenTicket]);
+  }, [contacts, isContactOpenTicket, filterType, agents]);
 
   const getRemainingSnoozeText = (dateStr: string) => {
     const diff = new Date(dateStr).getTime() - Date.now();
@@ -1587,7 +1601,16 @@ export default function ChatDashboard() {
            const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
            const dbInstId = c.instance_id;
            const targetInst = instIdFromContactId || dbInstId || 'default';
-           if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
+           const resolvedTargetUuid = instanceCache.getId(targetInst) || targetInst;
+           const resolvedFilterUuid = instanceCache.getId(activeChannelFilter) || activeChannelFilter;
+           const resolvedTargetName = instanceCache.getName(targetInst) || targetInst;
+
+           const matchesChannel = targetInst === activeChannelFilter ||
+                                  targetInst === activeChannelName ||
+                                  resolvedTargetUuid === resolvedFilterUuid ||
+                                  resolvedTargetName === activeChannelName;
+
+           if (!matchesChannel) return false;
 
            // --- FILTRO DE AUTO-CONVERSA (SELF-CHAT DA PRÓPRIA INSTÂNCIA) ---
            const filterInstUuid = activeChannelFilter ? (instanceCache.getId(activeChannelFilter) || activeChannelFilter) : null;

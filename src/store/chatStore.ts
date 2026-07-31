@@ -4941,7 +4941,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // BARREIRA DE INSTÂNCIA: Bloqueia injeção de mensagens de outras caixas na UI atual
         const currentActiveFilter = get().activeChannelFilter;
         if (currentActiveFilter && currentActiveFilter !== 'default' && currentActiveFilter !== 'all') {
-            if (convInstanceId && convInstanceId !== currentActiveFilter) {
+            const filterInstUuid = instanceCache.getId(currentActiveFilter) || currentActiveFilter;
+            const filterInstName = instanceCache.getName(currentActiveFilter) || currentActiveFilter;
+            const msgInstUuid = convInstanceId ? (instanceCache.getId(convInstanceId) || convInstanceId) : null;
+            const msgInstName = convInstanceId ? (instanceCache.getName(convInstanceId) || convInstanceId) : null;
+
+            const isMatch = !convInstanceId || convInstanceId === currentActiveFilter ||
+                            (msgInstUuid && msgInstUuid === filterInstUuid) ||
+                            (msgInstName && msgInstName === filterInstName);
+
+            if (!isMatch) {
                  console.log(`[Realtime Barreira] Ignorando msg INSERT da instância ${convInstanceId} na visualização ativa ${currentActiveFilter}`);
                  return;
             }
@@ -5230,6 +5239,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return { appointments: nextAppointments };
          });
       })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
+         const conv = payload.new as any;
+         console.log('[Realtime] Conversation INSERT:', conv);
+         if (!conv || !conv.contact_id) return;
+         try {
+            const { data: dbContact } = await supabase.from('contacts').select('*').eq('id', conv.contact_id).maybeSingle();
+            if (dbContact) {
+               const instanceId = conv.instance_id || dbContact.instance_id || 'default';
+               const compositeId = `${dbContact.id}_${instanceId}`;
+               const formattedContact: ContactType = {
+                  ...dbContact,
+                  id: compositeId,
+                  conv_id: conv.id,
+                  conv_status: conv.status || 'open',
+                  assigned_to: conv.assigned_to,
+                  unread: conv.unread_count || 0,
+                  instance_id: instanceId,
+                  messages: [],
+                  lastMsgTimestamp: conv.last_message_at ? new Date(conv.last_message_at).getTime() : Date.now()
+               };
+               get().upsertContactLocally(formattedContact);
+            }
+         } catch (err) {
+            console.error('[Realtime] Erro ao sincronizar nova conversa inserida:', err);
+         }
+      })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
          const conv = payload.new as any;
          console.log('[Realtime] Conversation UPDATE:', conv);
@@ -5244,7 +5279,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const realId = getRealContactId(c.id);
             const contactInstance = getInstanceIdFromContact(c.id) || c.instance_id || 'default';
             const convInstance = conv.instance_id || 'default';
-            if (realId === conv.contact_id && contactInstance === convInstance) {
+            
+            const cUuid = instanceCache.getId(contactInstance) || contactInstance;
+            const convUuid = instanceCache.getId(convInstance) || convInstance;
+            const isSameInstance = contactInstance === 'default' || convInstance === 'default' || contactInstance === convInstance || cUuid === convUuid;
+
+            if (realId === conv.contact_id && isSameInstance) {
                contactName = c.custom_name || c.name || c.phone;
                if ((c.conv_status === 'resolved' || c.conv_status === 'closed') && conv.status === 'open') {
                   shouldToast = true;
@@ -5285,7 +5325,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
                const realId = getRealContactId(c.id);
                const contactInstance = getInstanceIdFromContact(c.id) || c.instance_id || 'default';
                const convInstance = conv.instance_id || 'default';
-               if (realId === conv.contact_id && contactInstance === convInstance) {
+               
+               const cUuid = instanceCache.getId(contactInstance) || contactInstance;
+               const convUuid = instanceCache.getId(convInstance) || convInstance;
+               const isSameInstance = contactInstance === 'default' || convInstance === 'default' || contactInstance === convInstance || cUuid === convUuid;
+
+               if (realId === conv.contact_id && isSameInstance) {
                   const stillManuallyUnread = c.isManuallyUnread && conv.unread_count === 1;
                   return {
                      ...c,
