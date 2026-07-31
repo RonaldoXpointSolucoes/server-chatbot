@@ -1452,59 +1452,81 @@ export default function ChatDashboard() {
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [messageFilter, setMessageFilter] = useState<'today' | 'all'>('all');
 
-  // Cálculo de Tickets Ativos da Caixa Selecionada (respeitando RBAC e status)
-  const activeTicketsCount = React.useMemo(() => {
+  // Helper de validação de Ticket Aberto para a caixa atual
+  const isContactOpenTicket = React.useCallback((c: any) => {
+    if (!c) return false;
+
+    // 1) RBAC Enforcement & Proteção Ronaldo-Web
     const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
-    const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
-    
-    let allowedInstances: string[] = [];
-    if (!isGlobalAdmin) {
-      const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+    const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+    const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+    const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+
+    const instanceIdFromId = c.id && typeof c.id === 'string' && c.id.includes('_') ? c.id.split('_')[1] : null;
+    const effectiveInstId = instanceIdFromId || c.instance_id || connectedInstanceName || 'default';
+
+    if (!isRonaldo) {
+      if (effectiveInstId === '5c78d358-d449-41c4-b396-a04ab20a39e4') return false;
       if (allowedStr) {
-        try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
+        try {
+          const allowedInstances = JSON.parse(allowedStr);
+          if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+            if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) return false;
+          } else if (roleStr === 'agent' || roleStr === 'Agente') {
+            return false;
+          }
+        } catch(e) {
+          if (roleStr === 'agent' || roleStr === 'Agente') return false;
+        }
+      } else if (roleStr === 'agent' || roleStr === 'Agente') {
+        return false;
       }
     }
 
-    return contacts.filter(c => {
-      // 1) RBAC Enforcement
-      if (!isGlobalAdmin) {
-        const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-        if (allowedStr) {
-          if (allowedInstances.length === 0) return false;
-          const effectiveInstId = c.instance_id || connectedInstanceName;
-          if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) {
-            return false;
-          }
-        } else {
+    // 2) Filtro de Caixa Ativa
+    if (activeChannelFilter && activeChannelFilter !== 'all') {
+      const targetInst = instanceIdFromId || c.instance_id || 'default';
+      if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
+
+      // Self-chat check
+      const channelPhone = instanceCache.phoneNumbers[activeChannelFilter] || (resolvedInstanceUuid ? instanceCache.phoneNumbers[resolvedInstanceUuid] : null);
+      if (channelPhone) {
+        const cleanChannelPhone = channelPhone.replace(/\D/g, '');
+        const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
+        if (cleanChannelPhone && cleanContactPhone && cleanContactPhone === cleanChannelPhone) {
           return false;
         }
       }
+    }
 
-      // 2) Filtro de Caixa Ativa
-      if (activeChannelFilter) {
-        const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
-        const dbInstId = c.instance_id;
-        const targetInst = instIdFromContactId || dbInstId;
-        if (targetInst) {
-          if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
-        }
+    // 3) Não estar bloqueado
+    if (c.is_blocked) return false;
+
+    // 4) Não estar resolvido nem encerrado (Somente tickets ativos)
+    if (c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed') {
+      return false;
+    }
+
+    // 5) Não estar adiado ativo
+    if (c.conv_status === 'snoozed' && c.snoozed_until) {
+      const untilTimestamp = new Date(c.snoozed_until).getTime();
+      if (untilTimestamp > Date.now()) return false;
+    }
+
+    return true;
+  }, [activeChannelFilter, activeChannelName, connectedInstanceName, resolvedInstanceUuid]);
+
+  // Cálculo de Tickets Ativos Únicos da Caixa Selecionada (respeitando RBAC, status e pessoa única)
+  const activeTicketsCount = React.useMemo(() => {
+    const uniqueKeys = new Set<string>();
+    contacts.forEach(c => {
+      if (isContactOpenTicket(c)) {
+        const key = getUniquePersonKey(c) || c.id;
+        uniqueKeys.add(key);
       }
-
-      // 3) Não estar bloqueado
-      if (c.is_blocked) return false;
-
-      // 4) Não estar resolvido (Somente tickets ativos)
-      if (c.conv_status === 'resolved') return false;
-
-      // 5) Não estar adiado ativo
-      if (c.conv_status === 'snoozed' && c.snoozed_until) {
-        const untilTimestamp = new Date(c.snoozed_until).getTime();
-        if (untilTimestamp > Date.now()) return false;
-      }
-
-      return true;
-    }).length;
-  }, [contacts, activeChannelFilter, activeChannelName, connectedInstanceName]);
+    });
+    return uniqueKeys.size;
+  }, [contacts, isContactOpenTicket]);
 
   const getRemainingSnoozeText = (dateStr: string) => {
     const diff = new Date(dateStr).getTime() - Date.now();
@@ -1578,11 +1600,17 @@ export default function ChatDashboard() {
        }
 
        // 3) PROTEÇÃO RIGOROSA DE CHAT ATIVO:
-       // Se ESTE CARD ESPECÍFICO for o chat ativo aberto no painel principal, ele permanece visível na sidebar enquanto o usuário estiver interagindo com ele
+       // Se ESTE CARD ESPECÍFICO for o chat ativo aberto no painel principal, ele permanece visível na sidebar enquanto o usuário estiver interagindo com ele (EXCETO se tiver sido resolvido/encerrado no Modo Ticket)
        const isExactActiveChat = Boolean(
          activeChatId && (c.id === activeChatId || c.conv_id === activeChatId)
        );
+       const isResolvedOrClosed = c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed';
+
        if (isExactActiveChat && !searchTerm) {
+           // No Modo Ticket (ou filtros de tickets abertos), se o chat ativo foi RESOLVIDO/ENCERRADO ou BLOQUEADO, não força visibilidade na lista de tickets abertos
+           if ((ticketMode || filterType === 'tickets' || filterType === 'open') && (isResolvedOrClosed || c.is_blocked)) {
+               return false;
+           }
            return true;
        }
 
@@ -1605,7 +1633,7 @@ export default function ChatDashboard() {
                 return false;
              }
           }
-          if (c.conv_status === 'resolved' || c.conv_status === 'closed') {
+          if (isResolvedOrClosed) {
              return false;
           }
        }
