@@ -1672,20 +1672,35 @@ export default function ChatDashboard() {
         return String(a.id).localeCompare(String(b.id));
      });
 
-     // Deduplicação rígida de contatos na mesma caixa de atendimento (caixa_efetiva)
+     // Deduplicação inteligente de contatos por ID real (Pessoa Única)
      const seenKeys = new Map<string, any>();
      for (const c of sorted) {
        const realId = getRealContactId(c.id);
-       const caixa = (c.id.includes('_') ? c.id.split('_')[1] : c.instance_id) || connectedInstanceName || 'default';
-       const key = `${realId}_${caixa}`;
+       const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
+       const dbInstId = c.instance_id;
+       const targetInst = instIdFromContactId || dbInstId || 'default';
+
+       // Quando pesquisando ou aplicando filtro de caixa, a chave de unicidade é o realId (Pessoa)
+       const key = (searchTerm || (activeChannelFilter && activeChannelFilter !== 'all')) ? realId : `${realId}_${targetInst}`;
+
        if (!seenKeys.has(key)) {
          seenKeys.set(key, c);
-       } else if (activeChatId) {
+       } else {
          const existing = seenKeys.get(key);
-         const isCurrentExact = c.id === activeChatId || c.conv_id === activeChatId;
-         const isExistingExact = existing.id === activeChatId || existing.conv_id === activeChatId;
-         if (isCurrentExact && !isExistingExact) {
+         const existingInst = (existing.id.includes('_') ? existing.id.split('_')[1] : existing.instance_id) || 'default';
+         
+         // Se a nova entrada for da caixa ativa atual (activeChannelFilter / activeChannelName), PREFERIR a nova entrada!
+         const isCurrentInActiveBox = Boolean(activeChannelFilter && (targetInst === activeChannelFilter || targetInst === activeChannelName));
+         const isExistingInActiveBox = Boolean(activeChannelFilter && (existingInst === activeChannelFilter || existingInst === activeChannelName));
+
+         if (isCurrentInActiveBox && !isExistingInActiveBox) {
            seenKeys.set(key, c);
+         } else if (activeChatId) {
+           const isCurrentExact = c.id === activeChatId || c.conv_id === activeChatId;
+           const isExistingExact = existing.id === activeChatId || existing.conv_id === activeChatId;
+           if (isCurrentExact && !isExistingExact) {
+             seenKeys.set(key, c);
+           }
          }
        }
      }
@@ -5811,16 +5826,47 @@ export default function ChatDashboard() {
                   transition={{ type: "spring", stiffness: 350, damping: 35 }}
                   key={contact.id}
                   onClick={() => {
-                    setActiveChat(contact.id);
-                    const properTargetInstance = getStrictInstance(contact) || activeChannelFilter || contact.instance_id || connectedInstanceName;
-                    if (properTargetInstance) {
-                      useChatStore.getState().loadHistoricalMessages(contact.id, properTargetInstance);
+                    const realId = getRealContactId(contact.id);
+                    let targetContactId = contact.id;
+                    let targetInstance = getStrictInstance(contact) || activeChannelFilter || contact.instance_id || connectedInstanceName;
+
+                    if (activeChannelFilter && activeChannelFilter !== 'all') {
+                      // 1. Tenta encontrar se este contato já possui uma conversa na caixa ativa selecionada
+                      const sameBoxContact = contacts.find(c => {
+                        const cRealId = getRealContactId(c.id);
+                        const cInst = c.id.includes('_') ? c.id.split('_')[1] : c.instance_id;
+                        return cRealId === realId && (cInst === activeChannelFilter || cInst === activeChannelName);
+                      });
+
+                      if (sameBoxContact) {
+                        targetContactId = sameBoxContact.id;
+                        targetInstance = activeChannelFilter;
+                      } else {
+                        // 2. Se o contato ainda não tem conversa na caixa ativa atual, cria um registro local para iniciar a conversa nesta caixa
+                        const newBoxContactId = `${realId}_${activeChannelFilter}`;
+                        targetContactId = newBoxContactId;
+                        targetInstance = activeChannelFilter;
+
+                        useChatStore.getState().upsertContactLocally({
+                          ...contact,
+                          id: newBoxContactId,
+                          instance_id: activeChannelFilter,
+                          conv_status: 'bot',
+                          unread: 0,
+                          messages: []
+                        } as any);
+                      }
+                    }
+
+                    setActiveChat(targetContactId);
+                    if (targetInstance) {
+                      useChatStore.getState().loadHistoricalMessages(targetContactId, targetInstance);
                       if (contact.avatar?.includes('ui-avatars')) {
-                        useChatStore.getState().fetchContactPicture(contact.id, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), properTargetInstance);
+                        useChatStore.getState().fetchContactPicture(targetContactId, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), targetInstance);
                       }
                     }
                     if (contact.unread > 0) {
-                      useChatStore.getState().markAsRead(contact.id);
+                      useChatStore.getState().markAsRead(targetContactId);
                     }
                   }}
                   className={cn(
