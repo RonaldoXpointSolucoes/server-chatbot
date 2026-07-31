@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck } from 'lucide-react';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
-import { useChatStore, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId } from '../store/chatStore';
+import { useChatStore, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey } from '../store/chatStore';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import { Phone } from 'lucide-react';
 import { playNotificationSound } from '../utils/AudioEngine';
@@ -1672,16 +1672,16 @@ export default function ChatDashboard() {
         return String(a.id).localeCompare(String(b.id));
      });
 
-     // Deduplicação inteligente de contatos por ID real (Pessoa Única)
+     // Deduplicação estrita de contatos por Pessoa Única (Telefone/JID/Nome)
      const seenKeys = new Map<string, any>();
      for (const c of sorted) {
-       const realId = getRealContactId(c.id);
+       const personKey = getUniquePersonKey(c);
        const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
        const dbInstId = c.instance_id;
        const targetInst = instIdFromContactId || dbInstId || 'default';
 
-       // Quando pesquisando ou aplicando filtro de caixa, a chave de unicidade é o realId (Pessoa)
-       const key = (searchTerm || (activeChannelFilter && activeChannelFilter !== 'all')) ? realId : `${realId}_${targetInst}`;
+       // Quando pesquisando ou aplicando filtro de caixa, a chave de unicidade é o personKey (Pessoa Única)
+       const key = (searchTerm || (activeChannelFilter && activeChannelFilter !== 'all')) ? personKey : `${personKey}_${targetInst}`;
 
        if (!seenKeys.has(key)) {
          seenKeys.set(key, c);
@@ -1694,6 +1694,9 @@ export default function ChatDashboard() {
          const isExistingInActiveBox = Boolean(activeChannelFilter && (existingInst === activeChannelFilter || existingInst === activeChannelName));
 
          if (isCurrentInActiveBox && !isExistingInActiveBox) {
+           seenKeys.set(key, c);
+         } else if (!isExistingInActiveBox && getEffectiveContactTime(c) > getEffectiveContactTime(existing)) {
+           // Se nenhuma está na caixa ativa (ou ambas estão), preferir a que tiver mensagem mais recente
            seenKeys.set(key, c);
          } else if (activeChatId) {
            const isCurrentExact = c.id === activeChatId || c.conv_id === activeChatId;
@@ -5783,8 +5786,10 @@ export default function ChatDashboard() {
             {/* Expressão 2: Renderização estável dos contatos correspondentes com garantia do chat ativo */}
             {(() => {
               const sliced = filteredContacts.slice(0, contactPageLimit);
-              if (activeChatId) {
-                const isAlreadyInSliced = sliced.some(c => c.id === activeChatId || c.conv_id === activeChatId);
+              if (activeChatId && !searchTerm) {
+                const activeObj = contacts.find(x => x.id === activeChatId || x.conv_id === activeChatId);
+                const activePersonKey = activeObj ? getUniquePersonKey(activeObj) : null;
+                const isAlreadyInSliced = sliced.some(c => c.id === activeChatId || c.conv_id === activeChatId || (activePersonKey && getUniquePersonKey(c) === activePersonKey));
                 if (!isAlreadyInSliced) {
                   const activeContactInFullList = filteredContacts.find(c => c.id === activeChatId || c.conv_id === activeChatId);
                   if (activeContactInFullList) {

@@ -164,6 +164,25 @@ export const getInstanceIdFromContact = (id: any) => {
   return id.includes('_') ? id.split('_')[1] : null;
 };
 
+export const getUniquePersonKey = (c: any): string => {
+  if (!c) return '';
+  const phone = c.phone ? String(c.phone).replace(/\D/g, '') : '';
+  if (phone && phone.length >= 8) return `phone_${phone}`;
+  
+  if (c.whatsapp_jid) {
+    const cleanJid = String(c.whatsapp_jid).split('@')[0].replace(/\D/g, '');
+    if (cleanJid && cleanJid.length >= 8) return `phone_${cleanJid}`;
+  }
+
+  const realId = getRealContactId(c.id);
+  if (realId) return `id_${realId}`;
+
+  const name = (c.custom_name || c.name || '').trim().toLowerCase();
+  if (name) return `name_${name}`;
+
+  return String(c.id || '');
+};
+
 // Cache em memória para evitar requisições redundantes de rede ao Supabase para instâncias
 export const instanceCache = {
   byName: {} as Record<string, string>,   // display_name.toLowerCase() -> id
