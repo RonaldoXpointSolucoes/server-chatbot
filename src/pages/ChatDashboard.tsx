@@ -1489,7 +1489,8 @@ export default function ChatDashboard() {
       if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
 
       // Self-chat check
-      const channelPhone = instanceCache.phoneNumbers[activeChannelFilter] || (resolvedInstanceUuid ? instanceCache.phoneNumbers[resolvedInstanceUuid] : null);
+      const filterInstUuid = activeChannelFilter ? (instanceCache.getId(activeChannelFilter) || activeChannelFilter) : null;
+      const channelPhone = filterInstUuid ? instanceCache.phoneNumbers[filterInstUuid] : null;
       if (channelPhone) {
         const cleanChannelPhone = channelPhone.replace(/\D/g, '');
         const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
@@ -1514,7 +1515,7 @@ export default function ChatDashboard() {
     }
 
     return true;
-  }, [activeChannelFilter, activeChannelName, connectedInstanceName, resolvedInstanceUuid]);
+  }, [activeChannelFilter, activeChannelName, connectedInstanceName]);
 
   // Cálculo de Tickets Ativos Únicos da Caixa Selecionada (respeitando RBAC, status e pessoa única)
   const activeTicketsCount = React.useMemo(() => {
@@ -1589,7 +1590,8 @@ export default function ChatDashboard() {
            if (targetInst !== activeChannelFilter && targetInst !== activeChannelName) return false;
 
            // --- FILTRO DE AUTO-CONVERSA (SELF-CHAT DA PRÓPRIA INSTÂNCIA) ---
-           const channelPhone = instanceCache.phoneNumbers[activeChannelFilter] || (resolvedInstanceUuid ? instanceCache.phoneNumbers[resolvedInstanceUuid] : null);
+           const filterInstUuid = activeChannelFilter ? (instanceCache.getId(activeChannelFilter) || activeChannelFilter) : null;
+           const channelPhone = filterInstUuid ? instanceCache.phoneNumbers[filterInstUuid] : null;
            if (channelPhone) {
                const cleanChannelPhone = channelPhone.replace(/\D/g, '');
                const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
