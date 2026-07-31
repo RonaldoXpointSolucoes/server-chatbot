@@ -3647,8 +3647,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       
       const { error } = await supabase
         .from('companies')
-        .update({ settings: mergedSettings })
-        .eq('id', tenant.id);
+                        .update({ settings: mergedSettings })
+                        .eq('id', tenant.id);
 
       if (error) throw error;
 
@@ -3691,43 +3691,89 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const tenant = get().tenantInfo;
         if (!tenant) return;
 
+        const isUuid = (val: any) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
         const realContactId = getRealContactId(contactId);
 
-        const activeContactObj = get().contacts.find(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === realContactId));
+        const activeContactObj = get().contacts.find(c => 
+            c.id === contactId || 
+            (c.conv_id && c.conv_id === contactId) || 
+            (c.id && getRealContactId(c.id) === realContactId)
+        );
         const knownConvId = activeContactObj?.conv_id;
 
-        const isUuid = (val: string) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-        const validContactUuids = Array.from(new Set([realContactId, contactId])).filter(id => isUuid(id));
-        const convQueryParts = validContactUuids.map(id => `contact_id.eq.${id}`);
+        // 1. Tentar determinar o UUID do contato (contact_id)
+        let targetContactUuid: string | null = null;
+        if (isUuid(contactId)) {
+            targetContactUuid = contactId;
+        } else if (isUuid(realContactId)) {
+            targetContactUuid = realContactId;
+        } else if (activeContactObj?.id && isUuid(getRealContactId(activeContactObj.id))) {
+            targetContactUuid = getRealContactId(activeContactObj.id);
+        }
+
+        // Se ainda não temos o UUID do contato em mãos, busca no banco pelo número de telefone
+        if (!targetContactUuid && realContactId) {
+            const cleanPhone = realContactId.replace(/\D/g, '');
+            if (cleanPhone) {
+                const { data: dbContact } = await supabase
+                    .from('contacts')
+                    .select('id')
+                    .eq('tenant_id', tenant.id)
+                    .or(`phone.eq.${cleanPhone},whatsapp_jid.ilike.%${cleanPhone}%`)
+                    .limit(1)
+                    .maybeSingle();
+
+                if (dbContact?.id && isUuid(dbContact.id)) {
+                    targetContactUuid = dbContact.id;
+                }
+            }
+        }
+
+        // 2. Montar filtro de conversas ESTRITAMENTE com UUIDs válidos para evitar erro 400 no Postgres
+        const convQueryParts: string[] = [];
+        if (targetContactUuid) {
+            convQueryParts.push(`contact_id.eq.${targetContactUuid}`);
+        }
         if (knownConvId && isUuid(knownConvId)) {
             convQueryParts.push(`id.eq.${knownConvId}`);
         }
-        const convQueryFilter = convQueryParts.length > 0 ? convQueryParts.join(',') : `contact_id.eq.${realContactId}`;
+        const convQueryFilter = convQueryParts.length > 0 ? convQueryParts.join(',') : null;
 
-        // Paralelizar a busca de notas, resolução do UUID da instância e a busca de TODAS as conversas do contato
-        const [notesRes, resolvedInstanceId, allConvsRes] = await Promise.all([
-             supabase.from('contact_notes')
+        // 3. Executar chamadas em paralelo (contact_notes, resolveInstanceUuid, conversas)
+        const notesQuery = targetContactUuid
+            ? supabase.from('contact_notes')
                 .select('id, content, media_url, media_type, media_metadata, is_task, assigned_to, checklist_items, task_completed, created_by_name, created_at')
                 .eq('tenant_id', tenant.id)
-                .eq('contact_id', realContactId)
-                .order('created_at', { ascending: true }),
-             resolveInstanceUuid(tenant.id, instanceName),
-             supabase.from('conversations')
+                .eq('contact_id', targetContactUuid)
+                .order('created_at', { ascending: true })
+            : Promise.resolve({ data: [] });
+
+        const convsQuery = convQueryFilter
+            ? supabase.from('conversations')
                 .select('id, status, last_message_at, updated_at')
                 .eq('tenant_id', tenant.id)
                 .or(convQueryFilter)
                 .order('updated_at', { ascending: false })
-         ]);
+            : Promise.resolve({ data: [] });
+
+        const [notesRes, resolvedInstanceId, allConvsRes] = await Promise.all([
+             notesQuery,
+             resolveInstanceUuid(tenant.id, instanceName),
+             convsQuery
+        ]);
 
         let dbNotes: any[] = notesRes.data || [];
         const allConvs = allConvsRes.data || [];
         const conv = allConvs.length > 0 ? allConvs[0] : null;
-        const convIds = Array.from(new Set([...allConvs.map(c => c.id), ...(knownConvId ? [knownConvId] : [])])).filter(Boolean);
+        const convIds = Array.from(new Set([
+            ...allConvs.map(c => c.id),
+            ...(knownConvId ? [knownConvId] : [])
+        ])).filter(id => isUuid(id));
 
         const mappedNotes = dbNotes.map(n => ({
            id: n.id,
-           whatsapp_id: undefined, // Garante que a propriedade existe para unificação dos tipos!
-           text: n.content || n.text || '', // Suporte a 'content' do banco e fallback 'text'
+           whatsapp_id: undefined,
+           text: n.content || n.text || '',
            sender: 'internal_note' as const,
            mediaUrl: n.media_url || undefined,
            mediaType: n.media_type || undefined,
@@ -3742,8 +3788,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         const handleMapping = (messagesArray: any[]) => {
             const filteredArray = messagesArray.filter(m => m.sender_type !== 'automation');
-            // 2. Ordenar cronologicamente ASCENDENTE e extrair timestamp real
-            // O array bruto pode vir fora de ordem. Convertendo para ms caso haja epoch.
             const mappedMsgs = filteredArray.map(m => {
                 const advanced = parseAdvancedMsgMetadata(m);
                 const realTimestamp = new Date(m.timestamp);
@@ -3765,10 +3809,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 };
             });
 
-            // CRM: Mescla cronologicamente com todas as anotações carregadas
             const combinedMsgs = sortMessagesChronologically([...mappedMsgs, ...mappedNotes]);
             
-            // 3. Deduplicar baseando-se no whatsapp_id ou id (para anotações)
             const uniqueMsgs: any[] = [];
             const seenIds = new Set();
             for (const m of combinedMsgs) {
@@ -3784,7 +3826,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
                const updated = [...s.contacts];
                const idx = updated.findIndex(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === getRealContactId(contactId)));
                if (idx !== -1) {
-                   // Preserva mensagens otimistas em andamento (in-flight)
                    const currentMsgs = updated[idx].messages || [];
                    const optimisticMsgs = currentMsgs.filter(m => String(m.id).startsWith('optimistic-'));
 
@@ -3793,11 +3834,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                        return String(txt).replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
                    };
 
-                   // Filtra otimistas que já foram gravadas no banco ou expiraram (mais de 5 minutos sem envio)
                    const nowMs = Date.now();
                    const pendingOptimistic = optimisticMsgs.filter(opt => {
                        const optTime = opt.timestamp instanceof Date ? opt.timestamp.getTime() : new Date(opt.timestamp || 0).getTime();
-                       const isExpired = (nowMs - optTime) > 5 * 60 * 1000; // 5 minutos de tolerância para in-flight
+                       const isExpired = (nowMs - optTime) > 5 * 60 * 1000;
                        if (isExpired) return false;
 
                        const optNormText = normalizeTextForCompare(opt.text);
@@ -3825,31 +3865,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
         };
 
-        // Busca de emergência de mensagens diretamente por contact_id caso conversations não encontre
+        // 4. Montar filtro de busca de mensagens (APENAS UUIDs válidos)
         const msgFilterParts: string[] = [];
-        const validConvUuids = convIds.filter(id => isUuid(id));
-        if (validConvUuids.length > 0) {
-            msgFilterParts.push(`conversation_id.in.(${validConvUuids.join(',')})`);
+        if (convIds.length > 0) {
+            msgFilterParts.push(`conversation_id.in.(${convIds.join(',')})`);
         }
-        validContactUuids.forEach(id => {
-            msgFilterParts.push(`contact_id.eq.${id}`);
-        });
-        const msgFilter = msgFilterParts.length > 0 ? msgFilterParts.join(',') : `contact_id.eq.${realContactId}`;
+        if (targetContactUuid) {
+            msgFilterParts.push(`contact_id.eq.${targetContactUuid}`);
+        }
+        const msgFilter = msgFilterParts.length > 0 ? msgFilterParts.join(',') : null;
 
-        // Limpar unread em background (sem bloquear o carregamento das mensagens locais!)
         if (conv?.id) {
             supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id).then(({ error }) => {
                 if (error) console.error("[loadHistoricalMessages] Erro ao limpar unread_count:", error);
             });
         }
         
-        const { data: rawFetchedMsgs } = await supabase.from('messages')
-               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
-               .eq('tenant_id', tenant.id)
-               .or(msgFilter)
-               .order('timestamp', { ascending: false })
-               .limit(500);
-               
+        let rawFetchedMsgs: any[] = [];
+        if (msgFilter) {
+            const { data, error: msgErr } = await supabase.from('messages')
+                   .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+                   .eq('tenant_id', tenant.id)
+                   .or(msgFilter)
+                   .order('timestamp', { ascending: false })
+                   .limit(500);
+            if (msgErr) {
+                console.error("[loadHistoricalMessages] Erro ao buscar mensagens:", msgErr);
+            }
+            rawFetchedMsgs = data || [];
+        }
+
         const msgs = rawFetchedMsgs ? [...rawFetchedMsgs].reverse() : [];
         handleMapping(msgs);
                
@@ -3957,21 +4002,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     }
                 } catch (err: any) {
                     useDevStore.getState().addLog({
-                            type: 'error',
-                            message: `[History Sync] Exceção crítica ao tentar carregar histórico. Possível falha de rede/proxy no VITE_WHATSAPP_ENGINE_URL.`,
-                            source: 'ChatStore',
-                            details: err?.message || String(err)
-                        });
-                        console.error("Falha ao sincronizar histórico da Baileys (on demand):", err);
-                    } finally {
-                        set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: false } }));
-                    }
+                        type: 'error',
+                        message: `[History Sync] Exceção crítica ao tentar carregar histórico. Possível falha de rede/proxy no VITE_WHATSAPP_ENGINE_URL.`,
+                        source: 'ChatStore',
+                        details: err?.message || String(err)
+                    });
+                    console.error("Falha ao sincronizar histórico da Baileys (on demand):", err);
+                } finally {
+                    set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: false } }));
                 }
-        }
-        
-        // Sempre deve remapear o que tem em banco seja do forceSync atualizado ou se cair apenas no fallback
-        if (!forceSync && msgs) {
-           handleMapping(msgs);
+            }
         }
     } catch(err) {
         console.error("Erro carregando history:", err);
