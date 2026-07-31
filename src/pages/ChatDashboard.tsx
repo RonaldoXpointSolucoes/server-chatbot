@@ -1450,7 +1450,7 @@ export default function ChatDashboard() {
   const [batchResolvedCount, setBatchResolvedCount] = useState(0);
   const [isProcessingBatchResolve, setIsProcessingBatchResolve] = useState(false);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [messageFilter, setMessageFilter] = useState<'today' | 'all'>('today');
+  const [messageFilter, setMessageFilter] = useState<'today' | 'all'>('all');
 
   // Cálculo de Tickets Ativos da Caixa Selecionada (respeitando RBAC e status)
   const activeTicketsCount = React.useMemo(() => {
@@ -2674,7 +2674,7 @@ export default function ChatDashboard() {
         setInputText('');
       }
       setReplyMessage(null); // Limpa rascunho de resposta (quote) ao trocar de conversa
-      setMessageFilter('today'); // Reseta para 'today' por padrão no modo ticket
+      setMessageFilter('all'); // Mantém histórico completo visível por padrão ao trocar de conversa
       prevActiveChatId.current = activeChatId || null;
     }
   }, [activeChatId]);
