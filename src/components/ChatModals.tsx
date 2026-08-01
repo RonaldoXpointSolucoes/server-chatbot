@@ -4650,7 +4650,12 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       }
 
       if (selectedInstanceId && selectedInstanceId !== 'all') {
+        resolvedQuery = resolvedQuery.eq('instance_id', selectedInstanceId);
         convResolvedQuery = convResolvedQuery.eq('instance_id', selectedInstanceId);
+      } else if (instances && instances.length > 0) {
+        const allowedInstIds = instances.map(i => i.id);
+        resolvedQuery = resolvedQuery.in('instance_id', allowedInstIds);
+        convResolvedQuery = convResolvedQuery.in('instance_id', allowedInstIds);
       }
 
       // Aplicar filtros de data diretamente nas queries de banco de dados
@@ -4913,6 +4918,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       if (selectedInstanceId !== 'all') {
         const ticketInstId = t.instance_id || null;
         if (ticketInstId !== selectedInstanceId) return false;
+      } else if (instances && instances.length > 0) {
+        const allowedInstIds = new Set(instances.map(i => i.id));
+        const ticketInstId = t.instance_id || null;
+        if (ticketInstId && !allowedInstIds.has(ticketInstId)) return false;
       }
 
       if (dateFilter === 'all') return true;
@@ -4942,7 +4951,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       return true;
     });
-  }, [tickets, search, dateFilter, selectedDate, selectedInstanceId]);
+  }, [tickets, search, dateFilter, selectedDate, selectedInstanceId, instances]);
 
   const openContactsFiltered = useMemo(() => {
     const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
@@ -4975,6 +4984,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       if (selectedInstanceId !== 'all') {
         const dbInstId = c.instance_id || connectedInstanceName;
         if (dbInstId !== selectedInstanceId) return false;
+      } else if (instances && instances.length > 0) {
+        const allowedInstIds = new Set(instances.map(i => i.id));
+        const dbInstId = c.instance_id || connectedInstanceName;
+        if (dbInstId && !allowedInstIds.has(dbInstId)) return false;
       }
 
       // 3) Não estar bloqueado
