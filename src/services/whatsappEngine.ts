@@ -1,15 +1,17 @@
 const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim();
 
-export const createInstance = async (tenantId: string, instanceId: string, apiKey: string) => {
+export const createInstance = async (tenantId: string, instanceId: string, apiKey: string, forceNew = false) => {
   if (!API_URL) throw new Error("URL do motor Antigravity não definida (.env)");
 
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/connect`, {
+  const url = `${API_URL}/api/v1/instances/${instanceId}/connect${forceNew ? '?force_new=true' : ''}`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 
       'Content-Type': 'application/json',
       'x-tenant-id': tenantId,
       'apikey': apiKey
-    }
+    },
+    body: JSON.stringify({ forceNew })
   });
   
   if (!res.ok) throw new Error('Falha ao acionar a ignição do motor do Whatsapp.');

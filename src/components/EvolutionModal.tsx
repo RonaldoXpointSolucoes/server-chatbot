@@ -270,27 +270,41 @@ export default function EvolutionModal({
     } catch (e) {}
   };
 
-  const handleConnectExisting = async (inst: any) => {
+  const handleConnectExisting = async (inst: any, forceNew = false) => {
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
     setQrBase64(null);
-    setConnectionStatusMessage(null);
+    setConnectionStatusMessage("Iniciando gerador de QR Code...");
     setCodeEntered(false);
     setActivePollingId(inst.id);
     try {
+      let targetInst = inst;
+      if (!targetInst?.api_key) {
+        const { data: dbInst } = await supabase
+          .from("whatsapp_instances")
+          .select("*")
+          .eq("id", inst.id)
+          .maybeSingle();
+        if (dbInst) {
+          targetInst = dbInst;
+        }
+      }
+
       const liveStatus = instancesStatus[inst.id];
       const isConn =
-        inst.connection_status === "connected" ||
-        inst.status === "connected" ||
-        inst.connection_status === "connected_local" ||
-        inst.status === "connected_local" ||
-        inst.connection_status === "open" ||
-        inst.status === "open" ||
-        liveStatus === "connected" ||
-        liveStatus === "connected_local" ||
-        liveStatus === "open" ||
-        evolutionConnected;
+        !forceNew && (
+          targetInst.connection_status === "connected" ||
+          targetInst.status === "connected" ||
+          targetInst.connection_status === "connected_local" ||
+          targetInst.status === "connected_local" ||
+          targetInst.connection_status === "open" ||
+          targetInst.status === "open" ||
+          liveStatus === "connected" ||
+          liveStatus === "connected_local" ||
+          liveStatus === "open" ||
+          evolutionConnected
+        );
 
       if (isConn) {
         useChatStore.getState().updateTenantInstance(inst.id);
@@ -304,7 +318,7 @@ export default function EvolutionModal({
         sessionStorage.getItem("current_tenant_id");
       if (!cId) throw new Error("Tenant não identificado");
 
-      await createInstance(cId, inst.id, inst.api_key || "");
+      await createInstance(cId, inst.id, targetInst.api_key || "", true);
     } catch (err: any) {
       setError(err.message || "Erro ao conectar motor.");
       setLoading(false);
