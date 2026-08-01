@@ -77,7 +77,6 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
         }
         
         // Limpa credenciais apenas se for expressamente solicitado via parâmetro force_new=true
-        const forceNewQR = req.query.force_new === 'true' || req.body?.forceNew === true;
         if (forceNewQR) {
             console.log(`[API] Limpeza forçada de credenciais solicitada para a instância ${instanceId}...`);
             const { sessionCaches } = await import('../session-manager/auth.js');
