@@ -100,6 +100,20 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
         const cleanPhone = phoneNumber.replace(/\D/g, '');
 
         if (sessionManager.sessions.has(instanceId)) {
+            const sock = sessionManager.getSocket(instanceId);
+            const isConn = sessionManager.authenticatedSessions.has(instanceId) ||
+                (sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
+
+            if (isConn && req.query.force !== 'true' && req.body?.force !== true) {
+                console.log(`[API] /pairing-code ignorado pois a instância ${instanceId} já está conectada.`);
+                return res.json({ 
+                    ok: true, 
+                    alreadyConnected: true, 
+                    message: 'A instância já está conectada ao WhatsApp.', 
+                    instanceId 
+                });
+            }
+
             console.log(`[API] /pairing-code chamado, mas a sessão ${instanceId} já estava em memória. Forçando fechamento prévio.`);
             await sessionManager.closeSession(instanceId);
             if (sessionManager.connectingState.has(instanceId)) {

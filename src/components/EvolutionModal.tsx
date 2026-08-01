@@ -103,7 +103,7 @@ export default function EvolutionModal({
   onClose: () => void;
   targetInstanceName?: string | null;
 }) {
-  const { evolutionConnected, setEvolutionConnection, modalReason, contacts } =
+  const { evolutionConnected, setEvolutionConnection, modalReason, contacts, instancesStatus } =
     useChatStore();
   const [loading, setLoading] = useState(false);
   const [qrBase64, setQrBase64] = useState<string | null>(null);
@@ -277,18 +277,25 @@ export default function EvolutionModal({
     setQrBase64(null);
     setConnectionStatusMessage(null);
     setCodeEntered(false);
+    setActivePollingId(inst.id);
     try {
-      if (
+      const liveStatus = instancesStatus[inst.id];
+      const isConn =
         inst.connection_status === "connected" ||
         inst.status === "connected" ||
         inst.connection_status === "connected_local" ||
-        inst.status === "connected_local"
-      ) {
+        inst.status === "connected_local" ||
+        inst.connection_status === "open" ||
+        inst.status === "open" ||
+        liveStatus === "connected" ||
+        liveStatus === "connected_local" ||
+        liveStatus === "open" ||
+        evolutionConnected;
+
+      if (isConn) {
         useChatStore.getState().updateTenantInstance(inst.id);
         setEvolutionConnection(true, inst.id);
-        useChatStore.getState().syncEvolutionContacts(inst.id);
         setLoading(false);
-        setTimeout(onClose, 1000);
         return;
       }
 
@@ -297,7 +304,6 @@ export default function EvolutionModal({
         sessionStorage.getItem("current_tenant_id");
       if (!cId) throw new Error("Tenant não identificado");
 
-      setActivePollingId(inst.id);
       await createInstance(cId, inst.id, inst.api_key || "");
     } catch (err: any) {
       setError(err.message || "Erro ao conectar motor.");
@@ -567,14 +573,14 @@ export default function EvolutionModal({
   }, [activePollingId, connectMode]);
 
   useEffect(() => {
-    if (activePollingId) {
+    if (activePollingId && !isTargetConnected) {
       const inst = existingInstances.find(i => i.id === activePollingId);
       if (inst && inst.phone_number && !pairingCode && !pairingLoading && !pairingPhone) {
         setPairingPhone(inst.phone_number);
         handleRequestPairingCode(inst.id, inst.api_key, inst.phone_number);
       }
     }
-  }, [activePollingId, existingInstances]);
+  }, [activePollingId, existingInstances, isTargetConnected]);
 
   const handleRequestPairingCode = async (id: string, apiKey?: string, overridePhone?: string) => {
     const phoneToUse = overridePhone || pairingPhone;
@@ -786,12 +792,19 @@ export default function EvolutionModal({
     ? existingInstances.find((i) => i.id === targetInstanceName)
     : null;
 
-  const isTargetConnected = targetInstObj
+  const liveStatus = targetInstanceName ? instancesStatus[targetInstanceName] : null;
+  const isTargetConnected = (targetInstObj
     ? targetInstObj.status === "connected" ||
       targetInstObj.connection_status === "connected" ||
       targetInstObj.status === "connected_local" ||
-      targetInstObj.connection_status === "connected_local"
-    : evolutionConnected;
+      targetInstObj.connection_status === "connected_local" ||
+      targetInstObj.status === "open" ||
+      targetInstObj.connection_status === "open"
+    : false) ||
+    liveStatus === "connected" ||
+    liveStatus === "connected_local" ||
+    liveStatus === "open" ||
+    evolutionConnected;
 
   const displayNameToUse = targetInstObj
     ? targetInstObj.display_name

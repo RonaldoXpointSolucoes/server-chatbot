@@ -1260,15 +1260,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2 border-t border-[#2a3942] mt-1 pt-2"
               onClick={(e) => {
                  e.stopPropagation();
-                 const instId = instanceContextMenu.id;
-                 const currentStatus = instancesStatus[instId] ?? instanceContextMenu.status;
-                 const isConnected = currentStatus === 'connected' || currentStatus === 'connected_local' || currentStatus === 'open';
-
-                 if (isConnected) {
-                   navigate(`/settings/inboxes/${instId}?tab=config`);
-                 } else {
-                   useChatStore.getState().openQRModal(instId);
-                 }
+                 useChatStore.getState().openQRModal(instanceContextMenu.id);
                  setInstanceContextMenu(null);
               }}
             >
