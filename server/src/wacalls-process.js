@@ -91,12 +91,4 @@ export function startWaCallsProcess() {
     };
 
     process.on('exit', cleanExit);
-    process.on('SIGINT', () => {
-        cleanExit();
-        process.exit();
-    });
-    process.on('SIGTERM', () => {
-        cleanExit();
-        process.exit();
-    });
 }
