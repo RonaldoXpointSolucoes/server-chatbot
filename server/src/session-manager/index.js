@@ -87,7 +87,8 @@ class SessionManager {
                         'Failed to fetch stream',
                         'handling notification',
                         'mmg.whatsapp.net',
-                        'Precondition Required'
+                        'Precondition Required',
+                        'no name present, ignoring presence update request'
                     ];
                     
                     if (parsed.msg && ignoredLogs.some(text => parsed.msg.includes(text))) {
