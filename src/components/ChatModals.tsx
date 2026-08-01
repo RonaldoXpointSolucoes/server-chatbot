@@ -53,7 +53,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
 
   const [isGroupSearchOpen, setIsGroupSearchOpen] = useState(false);
   const [groupSearchQuery, setGroupSearchQuery] = useState('');
-  const [isLinksSectionOpen, setIsLinksSectionOpen] = useState(false);
+  const [isLinksSectionOpen, setIsLinksSectionOpen] = useState(true);
   const [activeAddressIndex, setActiveAddressIndex] = useState(0);
 
   const contactGroups = useChatStore(state => state.tenantInfo?.settings?.contactGroups) || [];
@@ -618,41 +618,29 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                   </div>
                 </div>
 
-               <div>
-                  <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">ID GastroFood</label>
-                  <div className="relative">
-                    <Building2 size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input 
-                      type="text" 
-                      value={formData.id_gastro_food || ''}
-                      onChange={e => setFormData({...formData, id_gastro_food: e.target.value})}
-                      className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
-                      placeholder="9EA3F679-5565-4DA0-930F-0971A8B8A3CD"
-                    />
-                  </div>
-                </div>
-
-                {formData.document_type === 'contato' && (
-                  <div className="border-t border-gray-100 dark:border-white/5 pt-4 mt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsLinksSectionOpen(!isLinksSectionOpen);
-                        setIsCompanySearchOpen(false);
-                        setIsGroupSearchOpen(false);
-                      }}
-                      className="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-[#8696a0] hover:text-[#00a884] transition-colors focus:outline-none"
-                    >
+                {/* Seção Empresas & Redes / Grupos Empresariais */}
+                <div className="border-t border-gray-100 dark:border-white/5 pt-4 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsLinksSectionOpen(!isLinksSectionOpen);
+                      setIsCompanySearchOpen(false);
+                      setIsGroupSearchOpen(false);
+                    }}
+                    className="flex items-center justify-between w-full text-xs font-bold text-[#00a884] uppercase tracking-wider hover:text-[#008f6f] transition-colors focus:outline-none"
+                  >
+                    <div className="flex items-center gap-2">
                       <ChevronDown size={16} className={cn("transition-transform duration-200", isLinksSectionOpen && "rotate-180")} />
-                      <span>Empresas & Grupos (Opcional)</span>
-                      {((formData.company_ids?.length || 0) + (formData.tags?.length || 0)) > 0 && (
-                        <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-[#00a884]/10 text-[#00a884] text-[10px] font-bold">
-                          {(formData.company_ids?.length || 0) + (formData.tags?.length || 0)}
-                        </span>
-                      )}
-                    </button>
-                    
-                    {isLinksSectionOpen && (
+                      <span>Empresas & Redes / Grupos Empresariais</span>
+                    </div>
+                    {((formData.company_ids?.length || 0) + (formData.tags?.length || 0)) > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-bold">
+                        {(formData.company_ids?.length || 0) + (formData.tags?.length || 0)} vinculado(s)
+                      </span>
+                    )}
+                  </button>
+                  
+                  {isLinksSectionOpen && (
                       <div className="flex flex-col sm:flex-row gap-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-200">
                         {/* Empresas Vinculadas */}
                         <div className="w-full sm:w-1/2 flex flex-col relative">
@@ -798,7 +786,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                           <label className="flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-[#8696a0] mb-1">
                             <span className="flex items-center gap-1.5">
                               <Building size={14} className="text-[#00a884]" />
-                              Grupos
+                              Rede / Grupo Empresarial
                               {formData.tags && formData.tags.length > 0 && (
                                 <span className="px-1.5 py-0.5 rounded-full bg-[#00a884]/10 text-[#00a884] text-[10px] font-bold">
                                   {formData.tags.length}
@@ -929,8 +917,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                       </div>
                     )}
                   </div>
-                )}
-             </div>
+                </div>
 
             {/* Seção Endereço */}
              <div className="bg-white dark:bg-[#202c33] p-5 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm space-y-4">
@@ -1200,6 +1187,21 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                              placeholder="Ex: 10 mins"
                              className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
                            />
+                        </div>
+                      </div>
+
+                      {/* ID GastroFood */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">ID GastroFood</label>
+                        <div className="relative">
+                          <Building2 size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input 
+                            type="text" 
+                            value={formData.id_gastro_food || ''}
+                            onChange={e => setFormData({...formData, id_gastro_food: e.target.value})}
+                            className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
+                            placeholder="9EA3F679-5565-4DA0-930F-0971A8B8A3CD"
+                          />
                         </div>
                       </div>
                     </div>

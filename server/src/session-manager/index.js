@@ -243,7 +243,10 @@ class SessionManager {
             );
 
             const { state, saveCreds } = await useSupabaseAuthState(tenantId, instanceId);
-            const wasAuthenticatedOnBoot = !!(state?.creds?.me?.id);
+            const wasAuthenticatedOnBoot = !!(state?.creds?.me?.id || state?.creds?.me?.jid);
+            if (wasAuthenticatedOnBoot) {
+                this.authenticatedSessions.add(instanceId);
+            }
             const { version, isLatest } = await fetchLatestBaileysVersion();
             
             console.log(`[SessionManager] Usando WA v${version.join('.')}, isLatest: ${isLatest}`);
@@ -429,8 +432,9 @@ class SessionManager {
                     const status = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.message || '';
 
-                    const meId = sock?.user?.id || state?.creds?.me?.id;
-                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || (meId && String(meId).includes(':'));
+                    const meId = sock?.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
+                    const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
+                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || wasAuthenticatedOnBoot || hasValidMeId;
                     const isQrTimeout = (status === 408 || reason.toLowerCase().includes('qr refs attempts ended')) && !isFullyAuthenticated;
 
                     if (isQrTimeout) {

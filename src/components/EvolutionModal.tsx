@@ -123,6 +123,25 @@ export default function EvolutionModal({
   const [extName, setExtName] = useState("");
   const [extApiKey, setExtApiKey] = useState("");
   const [customName, setCustomName] = useState<string>("");
+
+  const targetInstObj = targetInstanceName
+    ? existingInstances.find((i) => i.id === targetInstanceName)
+    : null;
+
+  const liveStatus = targetInstanceName ? instancesStatus[targetInstanceName] : null;
+  const isTargetConnected = targetInstanceName
+    ? ((targetInstObj
+        ? targetInstObj.status === "connected" ||
+          targetInstObj.connection_status === "connected" ||
+          targetInstObj.status === "connected_local" ||
+          targetInstObj.connection_status === "connected_local" ||
+          targetInstObj.status === "open" ||
+          targetInstObj.connection_status === "open"
+        : false) ||
+        liveStatus === "connected" ||
+        liveStatus === "connected_local" ||
+        liveStatus === "open")
+    : evolutionConnected;
   const [customApiKey, setCustomApiKey] = useState<string>("");
   const [customColor, setCustomColor] = useState<string>("#10b981");
   const [customSound, setCustomSound] = useState<string>("default");
@@ -210,7 +229,7 @@ export default function EvolutionModal({
   useEffect(() => {
     if (isOpen && targetInstanceName && !activePollingId) {
       const targetInst = existingInstances.find((i) => i.id === targetInstanceName) || { id: targetInstanceName };
-      handleConnectExisting(targetInst);
+      handleConnectExisting(targetInst, true);
     }
   }, [isOpen, targetInstanceName, activePollingId, existingInstances]);
 
@@ -302,8 +321,7 @@ export default function EvolutionModal({
           targetInst.status === "open" ||
           liveStatus === "connected" ||
           liveStatus === "connected_local" ||
-          liveStatus === "open" ||
-          evolutionConnected
+          liveStatus === "open"
         );
 
       if (isConn) {
@@ -802,24 +820,6 @@ export default function EvolutionModal({
 
   if (isOpen === false) return null;
 
-  const targetInstObj = targetInstanceName
-    ? existingInstances.find((i) => i.id === targetInstanceName)
-    : null;
-
-  const liveStatus = targetInstanceName ? instancesStatus[targetInstanceName] : null;
-  const isTargetConnected = (targetInstObj
-    ? targetInstObj.status === "connected" ||
-      targetInstObj.connection_status === "connected" ||
-      targetInstObj.status === "connected_local" ||
-      targetInstObj.connection_status === "connected_local" ||
-      targetInstObj.status === "open" ||
-      targetInstObj.connection_status === "open"
-    : false) ||
-    liveStatus === "connected" ||
-    liveStatus === "connected_local" ||
-    liveStatus === "open" ||
-    evolutionConnected;
-
   const displayNameToUse = targetInstObj
     ? targetInstObj.display_name
     : engineUser?.name || "Motor Ativado";
@@ -1132,11 +1132,11 @@ export default function EvolutionModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-300">
-      <div className={`bg-white/80 dark:bg-[#0b141a]/90 backdrop-blur-2xl rounded-[2.5rem] shadow-2xl w-full flex flex-col border border-slate-200/50 dark:border-white/10 relative transition-all duration-500 overflow-hidden ${isExpanded ? 'max-w-6xl h-[95vh]' : 'max-w-sm max-h-[90vh]'}`}>
-        <button onClick={onClose} className="absolute top-5 right-5 z-20 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all bg-slate-100 dark:bg-zinc-800/40 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-full w-8 h-8 flex items-center justify-center border border-slate-200/50 dark:border-white/5 shadow-sm active:scale-90 hover:rotate-90 duration-200">
+      <div className={`bg-white/90 dark:bg-[#0b141a]/95 backdrop-blur-2xl rounded-[2.5rem] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] w-full flex flex-col border border-slate-200/50 dark:border-white/10 relative transition-all duration-500 overflow-hidden ${isExpanded ? 'max-w-6xl h-[95vh]' : 'max-w-md max-h-[92vh]'}`}>
+        <button onClick={onClose} className="absolute top-4 right-4 z-20 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all bg-slate-100 dark:bg-zinc-800/60 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-full w-8 h-8 flex items-center justify-center border border-slate-200/50 dark:border-white/10 shadow-sm active:scale-90 hover:rotate-90 duration-200">
           <X size={16} />
         </button>
-        <div className={`w-full overflow-y-auto styled-scrollbar p-6 flex flex-col ${isExpanded ? 'items-stretch' : 'items-center'} h-full relative`}>
+        <div className={`w-full overflow-y-auto styled-scrollbar p-5 sm:p-6 pt-7 flex flex-col ${isExpanded ? 'items-stretch' : 'items-center'} h-full relative`}>
         
         {!isExpanded && !activePollingId && (
            <h2 className="text-xl font-black tracking-tight text-slate-800 dark:text-white mb-1 flex items-center gap-2 self-center font-sans">
@@ -2562,68 +2562,86 @@ export default function EvolutionModal({
                 )}
             </div>
           ) : (
-            <div className="w-full flex flex-col items-center justify-center min-h-[260px] bg-white/30 dark:bg-black/30 p-2 sm:p-5 rounded-3xl border border-white/20 dark:border-white/5 shadow-inner">
+            <div className="w-full flex flex-col items-center justify-center min-h-[260px] bg-white/40 dark:bg-[#111b21]/90 backdrop-blur-xl p-3 sm:p-5 rounded-3xl border border-white/20 dark:border-white/10 shadow-2xl">
               {activePollingId ? (
-                <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center w-full pb-4">
+                <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center w-full pb-2">
                   <div className="flex flex-col items-center w-full">
-                    {/* Header customizado igual ao print */}
-                    <div className="w-full flex flex-col items-center text-center mb-5">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <QrCode className="text-[#00a884]" size={20} />
-                        <h3 className="text-lg font-bold text-gray-800 dark:text-white">Conectar WhatsApp</h3>
+                    {/* Header customizado SaaS Premium */}
+                    <div className="w-full flex flex-col items-center text-center mb-4">
+                      <div className="flex items-center gap-2 mb-1 bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/20 px-3 py-1 rounded-full">
+                        <QrCode className="text-[#00a884] animate-pulse" size={16} />
+                        <span className="text-xs font-bold text-emerald-600 dark:text-[#00a884] tracking-wide uppercase">Conexão Oficial WhatsApp</span>
                       </div>
-                      <p className="text-xs text-gray-500 dark:text-[#8696a0] px-4 leading-relaxed">
-                        Escaneie o QR Code abaixo com seu WhatsApp para conectar a instância <strong className="text-gray-700 dark:text-white font-bold">{displayNameToUse}</strong>
+                      <h3 className="text-lg font-extrabold text-gray-900 dark:text-white flex items-center justify-center gap-1.5 mt-1">
+                        Conectar Instância
+                      </h3>
+                      <p className="text-xs text-gray-500 dark:text-[#8696a0] px-2 leading-relaxed mt-1">
+                        Escaneie o QR Code abaixo com seu celular para ativar <span className="inline-block mt-0.5 px-2 py-0.5 rounded-md bg-[#00a884]/10 dark:bg-[#00a884]/20 border border-[#00a884]/30 text-[#00a884] font-mono font-bold text-xs">{displayNameToUse}</span>
                       </p>
                     </div>
 
-                    {/* Slot superior: QR Code ou Card de Sucesso */}
-                    <div className="w-full flex justify-center items-center mb-5">
+                    {/* Slot superior: QR Code com Glow ou Card de Sucesso */}
+                    <div className="w-full flex justify-center items-center mb-4">
                       {codeEntered ? (
-                        <div className="w-full max-w-sm flex flex-col items-center py-4 px-4 bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/20 rounded-2xl animate-in zoom-in duration-300">
-                          <div className="w-12 h-12 bg-emerald-500/10 rounded-full border-2 border-emerald-500/30 flex items-center justify-center mb-2 shadow-inner">
-                            <CheckCircle size={24} className="text-emerald-500 animate-bounce" />
+                        <div className="w-full max-w-sm flex flex-col items-center py-4 px-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl shadow-[0_0_25px_rgba(0,168,132,0.15)] animate-in zoom-in duration-300">
+                          <div className="w-12 h-12 bg-emerald-500/20 rounded-full border-2 border-emerald-500/40 flex items-center justify-center mb-2 shadow-inner">
+                            <CheckCircle size={26} className="text-[#00a884] animate-bounce" />
                           </div>
-                          <h4 className="text-xs font-bold text-gray-800 dark:text-white text-center mb-0.5">
+                          <h4 className="text-sm font-bold text-gray-900 dark:text-white text-center mb-1">
                             Código Digitado no Celular!
                           </h4>
-                          <p className="text-[10px] text-gray-500 dark:text-[#8696a0] text-center mb-3 px-2 leading-relaxed">
-                            O celular confirmou o pareamento. Clique para liberar no painel:
+                          <p className="text-xs text-gray-500 dark:text-[#8696a0] text-center mb-3 px-2 leading-relaxed">
+                            O celular confirmou o pareamento. Clique abaixo para ativar o painel:
                           </p>
                           <button
                             onClick={() => {
                               handleSuccess();
                             }}
-                            className="w-full py-2 bg-[#00a884] hover:bg-[#008f6f] text-white rounded-xl font-bold transition-all text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer animate-pulse"
+                            className="w-full py-2.5 bg-gradient-to-r from-[#00a884] to-teal-600 hover:from-[#008f6f] hover:to-teal-700 text-white rounded-xl font-bold transition-all text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer animate-pulse"
                           >
-                            Confirmar e Liberar Conexão
+                            <CheckCircle size={16} /> Confirmar e Liberar Conexão
                           </button>
                         </div>
                       ) : (
-                        <div className="p-3 bg-white rounded-2xl shadow-md border border-gray-200 dark:border-white/5 flex justify-center items-center">
-                          {qrBase64 ? (
-                            <img
-                              src={qrBase64}
-                              alt="QR Code"
-                              className="w-[200px] h-[200px] rounded-xl"
-                            />
-                          ) : (
-                            <div className="w-[200px] h-[200px] rounded-xl bg-gray-100 dark:bg-black/30 flex items-center justify-center">
-                              <Loader2 className="animate-spin text-[#00a884]" size={24} />
-                            </div>
-                          )}
+                        <div className="relative p-3.5 bg-white dark:bg-[#111b21] rounded-3xl shadow-[0_15px_35px_rgba(0,0,0,0.35),0_0_25px_rgba(0,168,132,0.18)] border border-gray-200 dark:border-[#202c33] flex justify-center items-center transition-all duration-300 group">
+                          {/* Glow sutil ao redor do QR Code */}
+                          <div className="absolute -inset-0.5 bg-gradient-to-r from-[#00a884]/20 to-teal-500/20 rounded-3xl blur opacity-75 group-hover:opacity-100 transition duration-500"></div>
+
+                          <div className="relative bg-white p-2.5 rounded-2xl z-10 shadow-inner">
+                            {qrBase64 ? (
+                              <div className="relative overflow-hidden rounded-xl">
+                                <img
+                                  src={qrBase64}
+                                  alt="QR Code WhatsApp"
+                                  className="w-[210px] h-[210px] rounded-xl object-contain"
+                                />
+                              </div>
+                            ) : (
+                              <div className="w-[210px] h-[210px] rounded-xl bg-gray-50 dark:bg-[#0b141a]/60 flex flex-col items-center justify-center gap-2.5 border border-dashed border-gray-300 dark:border-white/10">
+                                <div className="p-3 rounded-full bg-[#00a884]/10 dark:bg-[#00a884]/20 animate-pulse">
+                                  <Loader2 className="animate-spin text-[#00a884]" size={28} />
+                                </div>
+                                <span className="text-[11px] font-semibold text-gray-500 dark:text-[#8696a0]">
+                                  Gerando QR Code oficial...
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
 
                     {/* Caixa de Código de Pareamento */}
-                    <div className="w-full max-w-sm bg-[#202c33] border border-[#2c3943]/30 p-3.5 rounded-2xl text-center mb-4">
-                      <p className="text-[10px] text-[#8696a0] font-bold uppercase tracking-wider mb-1">
-                        Código de Pareamento
-                      </p>
+                    <div className="w-full max-w-sm bg-white/70 dark:bg-[#202c33]/80 backdrop-blur-md border border-gray-200/60 dark:border-[#2c3943]/40 p-3.5 rounded-2xl text-center mb-3.5 shadow-sm">
+                      <div className="flex items-center justify-center gap-1.5 mb-1.5">
+                        <Smartphone size={13} className="text-[#00a884]" />
+                        <p className="text-[10px] text-gray-600 dark:text-[#8696a0] font-bold uppercase tracking-wider">
+                          Ou Conecte via Código de Pareamento
+                        </p>
+                      </div>
                       {pairingLoading ? (
-                        <div className="flex items-center justify-center py-2">
-                          <Loader2 className="animate-spin text-[#00a884]" size={16} />
+                        <div className="flex items-center justify-center py-2 gap-2 text-xs text-gray-500 dark:text-[#8696a0]">
+                          <Loader2 className="animate-spin text-[#00a884]" size={16} /> Solicitando código ao WhatsApp...
                         </div>
                       ) : pairingCode ? (
                         <div 
@@ -2631,32 +2649,32 @@ export default function EvolutionModal({
                             navigator.clipboard.writeText(pairingCode.replace(/[^a-zA-Z0-9]/g, ''));
                             alert("Código copiado!");
                           }}
-                          className="text-xl font-mono font-bold tracking-widest text-[#e9edef] hover:text-[#00a884] transition-colors cursor-pointer"
-                          title="Clique para copiar"
+                          className="py-2 px-4 bg-emerald-500/10 dark:bg-[#111b21] rounded-xl border border-emerald-500/30 text-xl font-mono font-black tracking-widest text-[#00a884] dark:text-[#e9edef] hover:text-[#00a884] transition-all cursor-pointer shadow-inner flex items-center justify-center gap-2"
+                          title="Clique para copiar o código"
                         >
-                          {pairingCode.toUpperCase().slice(0, 4)} - {pairingCode.toUpperCase().slice(4)}
+                          <span>{pairingCode.toUpperCase().slice(0, 4)} - {pairingCode.toUpperCase().slice(4)}</span>
                         </div>
                       ) : (
                         <div className="flex flex-col items-center gap-2 mt-1">
                           {targetInstObj?.phone_number ? (
                             <button
                               onClick={() => handleRequestPairingCode(activePollingId, targetInstObj?.api_key)}
-                              className="text-xs text-emerald-400 font-bold hover:text-emerald-300 transition-colors cursor-pointer py-1"
+                              className="w-full py-1.5 bg-[#00a884]/10 hover:bg-[#008f6f]/20 text-[#00a884] rounded-xl text-xs font-bold transition-all cursor-pointer border border-[#00a884]/20 flex items-center justify-center gap-1.5"
                             >
-                              Gerar para o número {targetInstObj.phone_number}
+                              <Smartphone size={14} /> Gerar código para {targetInstObj.phone_number}
                             </button>
                           ) : (
-                            <div className="flex gap-2 w-full px-2">
+                            <div className="flex gap-2 w-full">
                               <input
                                 type="text"
-                                placeholder="Número ex: 5511991649959"
+                                placeholder="DDD + Número (ex: 5511991649959)"
                                 value={pairingPhone}
                                 onChange={(e) => setPairingPhone(e.target.value)}
-                                className="flex-1 bg-[#111b21] border border-[#2c3943]/40 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884]"
+                                className="flex-1 bg-white dark:bg-[#111b21] border border-gray-300 dark:border-[#2c3943]/60 rounded-xl px-3 py-2 text-xs text-gray-900 dark:text-white focus:outline-none focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] shadow-inner"
                               />
                               <button
                                 onClick={() => handleRequestPairingCode(activePollingId, targetInstObj?.api_key)}
-                                className="px-3 py-1.5 bg-[#00a884] hover:bg-[#008f6f] text-white rounded-xl font-bold text-xs transition-colors cursor-pointer"
+                                className="px-4 py-2 bg-[#00a884] hover:bg-[#008f6f] text-white rounded-xl font-bold text-xs transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1"
                               >
                                 Gerar
                               </button>
@@ -2667,30 +2685,47 @@ export default function EvolutionModal({
                     </div>
 
                     {/* Caixa de Instruções "Como conectar:" */}
-                    <div className="w-full max-w-sm bg-[#202c33] border border-[#2c3943]/30 p-4 rounded-2xl text-left mb-4">
-                      <h4 className="text-xs font-bold text-[#e9edef] mb-2">Como conectar:</h4>
-                      <ol className="list-decimal list-inside text-xs text-[#8696a0] space-y-1.5 leading-relaxed">
-                        <li>Abra o WhatsApp no seu celular</li>
-                        <li>Toque em Menu ou Configurações</li>
-                        <li>Toque em Dispositivos conectados</li>
-                        <li>Toque em Conectar um dispositivo</li>
-                        <li>Aponte seu celular para esta tela para capturar o código</li>
+                    <div className="w-full max-w-sm bg-white/70 dark:bg-[#202c33]/80 backdrop-blur-md border border-gray-200/60 dark:border-[#2c3943]/40 p-3.5 rounded-2xl text-left mb-4 shadow-sm">
+                      <h4 className="text-xs font-bold text-gray-900 dark:text-[#e9edef] mb-2.5 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-[#00a884]"></span> Como conectar:
+                      </h4>
+                      <ol className="text-xs text-gray-600 dark:text-[#8696a0] space-y-2 leading-relaxed">
+                        <li className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-bold flex items-center justify-center flex-shrink-0">1</span>
+                          <span>Abra o WhatsApp no celular</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-bold flex items-center justify-center flex-shrink-0">2</span>
+                          <span>Toque em <strong>Menu (⋮)</strong> ou <strong>Configurações (⚙)</strong></span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-bold flex items-center justify-center flex-shrink-0">3</span>
+                          <span>Toque em <strong>Dispositivos conectados</strong></span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-bold flex items-center justify-center flex-shrink-0">4</span>
+                          <span>Toque em <strong>Conectar um dispositivo</strong></span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-bold flex items-center justify-center flex-shrink-0">5</span>
+                          <span>Aponte a câmera para esta tela</span>
+                        </li>
                       </ol>
                     </div>
 
                     {/* Botões de Ação na base */}
-                    <div className="flex gap-2 w-full mt-1 max-w-sm">
+                    <div className="flex gap-2.5 w-full max-w-sm">
                       <button
                         onClick={() => {
                           setQrBase64(null);
                           setConnectionStatusMessage(null);
                           setPairingCode(null);
                           setLoading(true);
-                          handleConnectExisting(existingInstances.find(i => i.id === activePollingId));
+                          handleConnectExisting(existingInstances.find(i => i.id === activePollingId), true);
                         }}
-                        className="flex-1 py-3 px-4 bg-[#202c33] border border-[#2c3943]/30 hover:bg-[#2c3943]/50 text-white rounded-xl transition-all font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                        className="flex-1 py-3 px-4 bg-gradient-to-r from-[#00a884] to-teal-600 hover:from-[#008f6f] hover:to-teal-700 text-white rounded-xl transition-all font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-95"
                       >
-                        <RefreshCcw size={14} /> Atualizar QR Code
+                        <RefreshCcw size={14} className="animate-spin-once" /> Atualizar QR Code
                       </button>
                       <button
                         onClick={() => {
@@ -2703,10 +2738,10 @@ export default function EvolutionModal({
                           setCodeEntered(false);
                           setHasSeenAwaitingState(false);
                         }}
-                        className="w-12 h-12 bg-[#202c33] border border-[#2c3943]/30 hover:bg-[#2c3943]/50 text-white rounded-xl transition-all flex items-center justify-center cursor-pointer font-bold text-sm"
-                        title="Fechar"
+                        className="py-3 px-4 bg-gray-200 dark:bg-[#202c33] border border-gray-300 dark:border-[#2c3943]/40 hover:bg-gray-300 dark:hover:bg-[#2c3943]/70 text-gray-800 dark:text-white rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer font-bold text-xs active:scale-95 shadow-sm"
+                        title="Fechar janela de pareamento"
                       >
-                        X
+                        <X size={14} /> Fechar
                       </button>
                     </div>
                   </div>
@@ -2756,7 +2791,7 @@ export default function EvolutionModal({
                     e ativá-la.
                   </p>
                   <button
-                    onClick={() => handleConnectExisting(targetInstObj)}
+                    onClick={() => handleConnectExisting(targetInstObj, true)}
                     className="w-full bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-4 rounded-2xl transition-all shadow-[0_10px_20px_-10px_rgba(0,168,132,0.5)] active:scale-95 flex items-center justify-center gap-2"
                   >
                     <RefreshCcw size={20} />
