@@ -279,8 +279,11 @@ class SessionManager {
                 maxMsgRetryCount: 0, // Desativado para evitar loops de retry em grupos que causam BAN
                 msgRetryCounterCache,
                 shouldSyncHistoryMessage: (histNotification) => {
-                    // Retorna false para evitar que o WhatsApp baixe todo o histórico antigo novamente a cada reconexão,
-                    // já que todas as mensagens e conversas já estão salvas no banco Supabase.
+                    // Mantém apenas os syncs essenciais de chaves LID/mídia e ignora dumps pesados (FULL/RECENT)
+                    const syncType = histNotification?.syncType;
+                    if (syncType === 0 || syncType === 'INITIAL_BOOT' || syncType === 4 || syncType === 'PUSH_NAME') {
+                        return true;
+                    }
                     return false;
                 },
                 getMessage: async (key) => {
