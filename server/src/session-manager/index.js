@@ -288,12 +288,15 @@ class SessionManager {
 
             sock.ev.on('creds.update', async () => {
                 await saveCreds();
+                const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
+                if (meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net'))) {
+                    this.authenticatedSessions.add(instanceId);
+                }
                 // Só dispara a atualização de pareamento se a sessão NÃO estava autenticada no boot
                 // e ainda não está autenticada/conectada em memória
-                if (!wasAuthenticatedOnBoot && !this.authenticatedSessions.has(instanceId)) {
-                    const meId = sock.user?.id || state?.creds?.me?.id;
+                if (!wasAuthenticatedOnBoot) {
                     if (meId) {
-                        const phone = meId.split('@')[0].split(':')[0];
+                        const phone = String(meId).split('@')[0].split(':')[0];
                         console.log(`[SessionManager] Credenciais de pareamento atualizadas com telefone: ${phone}. Sincronizando com o banco e o frontend.`);
                         await retryWithBackoff(() => 
                             supabase.from('whatsapp_instances')
@@ -434,6 +437,9 @@ class SessionManager {
 
                     const meId = sock?.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
                     const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
+                    if (hasValidMeId) {
+                        this.authenticatedSessions.add(instanceId);
+                    }
                     const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || wasAuthenticatedOnBoot || hasValidMeId;
                     const isQrTimeout = (status === 408 || reason.toLowerCase().includes('qr refs attempts ended')) && !isFullyAuthenticated;
 
@@ -454,13 +460,15 @@ class SessionManager {
                         return;
                     }
 
-                    if ((status === 515 || status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || status === DisconnectReason.restartRequired) && isFullyAuthenticated) {
-                        console.log(`[SessionManager] Oscilação temporária de conexão com servidores WhatsApp (código ${status}) na instância ${instanceId}. Reconectando sessão em 2s...`);
+                    const isStreamOscillation = status === 515 || status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('connection terminated') || reason.toLowerCase().includes('connection lost');
+
+                    if (isStreamOscillation && isFullyAuthenticated) {
+                        console.log(`[SessionManager] Oscilação temporária de conexão com servidores WhatsApp (${reason || status}) na instância ${instanceId}. Reconectando sessão em 2s...`);
                         this.sessions.delete(instanceId);
                         setTimeout(() => {
                             if (!this.sessions.has(instanceId)) {
                                 this.createSession(tenantId, instanceId).catch(err => {
-                                    console.error(`[SessionManager] Erro na reconexão automática de código ${status} para ${instanceId}:`, err.message);
+                                    console.error(`[SessionManager] Erro na reconexão automática de oscilação (${reason || status}) para ${instanceId}:`, err.message);
                                 });
                             }
                         }, 2000);

@@ -774,9 +774,11 @@ export default function EvolutionModal({
 
     setTimeout(() => { 
       clearInterval(interval);
+      setConnectionStatusMessage("Tempo de pareamento esgotado (3 min). Clique abaixo para gerar um novo código de 8 dígitos.");
+      setIsGeneratingPairingCode(false);
       logger.addLog({
-        type: 'error',
-        message: `TIMEOUT: Limite de tempo esgotado esperando a confirmação do pareamento no celular (180s). Tente novamente.`,
+        type: 'info',
+        message: `TIMEOUT: O tempo limite de 180s para confirmar o código no celular expirou. Clique em 'Gerar Novo Código' para continuar.`,
         source: 'WhatsApp Pairing'
       });
     }, 180000);
