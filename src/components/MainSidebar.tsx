@@ -203,7 +203,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const globalAiEnabled = useChatStore(state => state.globalAiEnabled);
   const setGlobalAiEnabled = useChatStore(state => state.setGlobalAiEnabled);
   const toggleGlobalAi = useChatStore(state => state.toggleGlobalAi);
-  const [instanceContextMenu, setInstanceContextMenu] = useState<{ id: string, name: string, x: number, y: number } | null>(null);
+  const [instanceContextMenu, setInstanceContextMenu] = useState<{ id: string, name: string, status?: string, x: number, y: number } | null>(null);
   const [myConversationsMenu, setMyConversationsMenu] = useState<{ x: number, y: number } | null>(null);
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
   const [agentSettingsTab, setAgentSettingsTab] = useState<'profile' | 'notifications'>('profile');
@@ -767,7 +767,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                         className="relative group/channel"
                         onContextMenu={(e) => {
                           e.preventDefault();
-                          setInstanceContextMenu({ id: inst.id, name: inst.display_name, x: e.clientX, y: e.clientY });
+                          setInstanceContextMenu({ id: inst.id, name: inst.display_name, status, x: e.clientX, y: e.clientY });
                         }}
                       >
                         <NavItem 
@@ -1260,7 +1260,15 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2 border-t border-[#2a3942] mt-1 pt-2"
               onClick={(e) => {
                  e.stopPropagation();
-                 useChatStore.getState().openQRModal(instanceContextMenu.id);
+                 const instId = instanceContextMenu.id;
+                 const currentStatus = instancesStatus[instId] ?? instanceContextMenu.status;
+                 const isConnected = currentStatus === 'connected' || currentStatus === 'connected_local' || currentStatus === 'open';
+
+                 if (isConnected) {
+                   navigate(`/settings/inboxes/${instId}?tab=config`);
+                 } else {
+                   useChatStore.getState().openQRModal(instId);
+                 }
                  setInstanceContextMenu(null);
               }}
             >

@@ -428,7 +428,28 @@ class SessionManager {
                     const status = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.message || '';
 
-                    if (status === 515 || status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || status === DisconnectReason.restartRequired) {
+                    const meId = sock?.user?.id || state?.creds?.me?.id;
+                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || (meId && String(meId).includes(':'));
+                    const isQrTimeout = (status === 408 || reason.toLowerCase().includes('qr refs attempts ended')) && !isFullyAuthenticated;
+
+                    if (isQrTimeout) {
+                        console.log(`[SessionManager] QR Code ou pareamento expirou por falta de leitura na instância ${instanceId}. Interrompendo loop de reconexão.`);
+                        this.sessions.delete(instanceId);
+                        this.authenticatedSessions.delete(instanceId);
+                        this.reconnectAttempts.delete(instanceId);
+
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .update({ 
+                                    status: 'disconnected', 
+                                    last_error: 'QR Code ou código de pareamento expirou por falta de leitura. Clique em Conectar para gerar um novo.' 
+                                })
+                                .eq('id', instanceId)
+                        );
+                        return;
+                    }
+
+                    if ((status === 515 || status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || status === DisconnectReason.restartRequired) && isFullyAuthenticated) {
                         console.log(`[SessionManager] Oscilação temporária de conexão com servidores WhatsApp (código ${status}) na instância ${instanceId}. Reconectando sessão em 2s...`);
                         this.sessions.delete(instanceId);
                         setTimeout(() => {
@@ -461,8 +482,6 @@ class SessionManager {
                     this.sessions.delete(instanceId);
                     this.pendingHistorySyncs.delete(instanceId);
 
-                    const meId = sock?.user?.id || state?.creds?.me?.id;
-                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || (meId && String(meId).includes(':'));
                     const isPairingPendingSync = this.pairingPendingSync.get(instanceId);
 
                     await this.logConnectionEvent(tenantId, instanceId, 'disconnected', 'close', reason || `status_${status}`, null, null);
