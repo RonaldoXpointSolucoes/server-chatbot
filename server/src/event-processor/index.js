@@ -533,7 +533,7 @@ class EventProcessor {
                     msgType,
                     textMessage,
                     isSelfChat,
-                    isHistory: m.type === 'append'
+                    isHistory: Boolean(m.type === 'append' || m.type === 'reconcile' || (tsDate && (Date.now() - tsDate.getTime() > 60000)))
                 });
 
                 // Otimização: Se a mensagem for enviada por um humano (atendente),
@@ -680,14 +680,16 @@ class EventProcessor {
                       conv.last_message_preview = b.textMessage;
                       conv.last_message_at = b.timestamp;
                   }
-                  if (b.direction === 'inbound') {
-                      conv.unread_count += 1;
-                      conv.has_inbound = true;
-                  }
-                  if (b.direction === 'outbound' && b.senderType === 'human') {
-                       conv.has_human_outbound = true;
-                       AutomationWorker.cancelPendingMessage(b.conversationId);
-                       AutomationWorker.cancelPendingMessage(b.jid);
+                  if (!b.isHistory) {
+                      if (b.direction === 'inbound') {
+                          conv.unread_count += 1;
+                          conv.has_inbound = true;
+                      }
+                      if (b.direction === 'outbound' && b.senderType === 'human') {
+                           conv.has_human_outbound = true;
+                           AutomationWorker.cancelPendingMessage(b.conversationId);
+                           AutomationWorker.cancelPendingMessage(b.jid);
+                      }
                   }
               }
              
@@ -1381,9 +1383,9 @@ class EventProcessor {
             const contact = contacts.find(c => c.phone === phone);
             if(contact) {
                 const conv = convs?.find(c => c.contact_id === contact.id);
-                if(conv && update.unreadCount !== undefined) {
-                      // Fire and forget
-                      supabase.from('conversations').update({ unread_count: update.unreadCount }).eq('id', conv.id).then(()=>{});
+                if(conv && update.unreadCount === 0) {
+                      // Fire and forget - atualiza apenas em zeramento explícito
+                      supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id).then(()=>{});
                 }
             }
         }
