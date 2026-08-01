@@ -46,6 +46,18 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
         const { instanceId } = req.params;
         const tenantId = req.tenantId;
 
+        const forceNewQR = req.query.force_new === 'true' || req.body?.forceNew === true;
+
+        // Se a sessão já estiver ativa/autenticada e não houver pedido explícito de force_new, mantém a conexão
+        const isAlreadyConnected = sessionManager.authenticatedSessions.has(instanceId) && sessionManager.sessions.has(instanceId);
+        if (isAlreadyConnected && !forceNewQR) {
+            console.log(`[API] /connect chamado para instância ${instanceId} que já está ativa e autenticada. Mantendo conexão existente.`);
+            return res.json({
+                status: 'connected',
+                message: 'Instância já está conectada e ativa em memória.'
+            });
+        }
+
         // Reset total de tentativas e timers de reconexão antigos em memória
         sessionManager.reconnectAttempts.delete(instanceId);
         sessionManager.conflictAttempts.delete(instanceId);
