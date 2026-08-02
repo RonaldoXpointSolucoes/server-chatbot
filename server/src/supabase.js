@@ -1,9 +1,20 @@
 import { config } from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-config({ path: path.resolve(__dirname, '../../.env') });
+
+const envServer = path.resolve(__dirname, '../.env');
+const envRoot = path.resolve(__dirname, '../../.env');
+
+if (fs.existsSync(envServer)) {
+  config({ path: envServer });
+} else if (fs.existsSync(envRoot)) {
+  config({ path: envRoot });
+} else {
+  config();
+}
 
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';

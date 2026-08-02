@@ -1,6 +1,6 @@
 {
   "name": "chatboot-server-v2",
-  "version": "5.5.4",
+  "version": "5.5.5",
   "type": "module",
   "description": "WhatsApp SaaS Backend Node.js + Supabase",
   "main": "src/index.js",

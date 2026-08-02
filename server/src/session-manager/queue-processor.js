@@ -342,14 +342,15 @@ class QueueProcessor {
                 }).catch(()=>{});
             } catch (err) {
                 if (msg) {
-                    console.error(`[QueueProcessor] Falha ao enviar mensagem ${msg.id}:`, err.message);
+                    const errMsg = err?.message || err?.error || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+                    console.error(`[QueueProcessor] Falha ao enviar mensagem ${msg.id}:`, errMsg);
                     
                     try {
                         const { default: sManager } = await import('./index.js');
                         sManager.logMonitoringEvent(instanceId, 'message_sent_failed', { 
                             msg_id: msg.id, 
                             chat_jid: msg.chat_jid,
-                            error: err.message,
+                            error: errMsg,
                             attempts: msg.attempts
                         }).catch(()=>{});
                     } catch (logErr) {}

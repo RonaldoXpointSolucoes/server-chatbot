@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, UserMinus, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical, Inbox, Ticket, Sparkles, CheckSquare, History } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, UserMinus, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, ChevronUp, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical, Inbox, Ticket, Sparkles, CheckSquare, History } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -55,6 +55,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
   const [groupSearchQuery, setGroupSearchQuery] = useState('');
   const [isLinksSectionOpen, setIsLinksSectionOpen] = useState(true);
   const [activeAddressIndex, setActiveAddressIndex] = useState(0);
+  const [isAdvancedLocationOpen, setIsAdvancedLocationOpen] = useState(false);
 
   const contactGroups = useChatStore(state => state.tenantInfo?.settings?.contactGroups) || [];
 
@@ -144,6 +145,12 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
         (contactData.tags && contactData.tags.length > 0)
       );
       setActiveAddressIndex(0);
+      const hasAdvancedValues = Boolean(
+        initialAddresses.some((addr: any) => addr.latitude || addr.longitude || addr.Distancia || addr.Tempo) ||
+        contactData.id_gastro_food ||
+        contactData.idGastroFood
+      );
+      setIsAdvancedLocationOpen(hasAdvancedValues);
     }
   }, [contactData, isOpen]);
 
@@ -1142,67 +1149,105 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
                         </div>
                       </div>
 
-                      {/* Latitude & Longitude */}
-                      <div className="flex flex-col sm:flex-row gap-4">
-                        <div className="w-full sm:w-1/2">
-                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Latitude</label>
-                           <input 
-                             type="text" 
-                             value={currentAddress.latitude || ''}
-                             onChange={e => updateActiveAddressField('latitude', e.target.value)}
-                             placeholder="-23.550520"
-                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
-                           />
-                        </div>
-                        <div className="w-full sm:w-1/2">
-                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Longitude</label>
-                           <input 
-                             type="text" 
-                             value={currentAddress.longitude || ''}
-                             onChange={e => updateActiveAddressField('longitude', e.target.value)}
-                             placeholder="-46.633308"
-                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
-                           />
-                        </div>
-                      </div>
+                      {/* Menu Suspenso: Geolocalização & GastroFood */}
+                      <div className="mt-2 border border-gray-200 dark:border-white/10 rounded-2xl overflow-hidden transition-all bg-gray-50/50 dark:bg-[#182229]/50 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => setIsAdvancedLocationOpen(!isAdvancedLocationOpen)}
+                          className="w-full px-4 py-3 flex items-center justify-between bg-gray-100/70 dark:bg-[#1f2c34] hover:bg-gray-200/60 dark:hover:bg-[#2a3942] transition-all cursor-pointer select-none text-left"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-lg bg-[#00a884]/10 dark:bg-[#00a884]/20 flex items-center justify-center text-[#00a884]">
+                              <Building2 size={18} />
+                            </div>
+                            <div>
+                              <span className="text-xs font-bold text-gray-800 dark:text-gray-200 uppercase tracking-wider block">
+                                Geolocalização & GastroFood
+                              </span>
+                              <span className="text-[11px] text-gray-500 dark:text-[#8696a0] font-normal">
+                                Latitude, Longitude, Distância, Tempo e ID GastroFood
+                              </span>
+                            </div>
+                          </div>
 
-                      {/* Distância & Tempo (GastroFood) */}
-                      <div className="flex flex-col sm:flex-row gap-4">
-                        <div className="w-full sm:w-1/2">
-                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Distância (km)</label>
-                           <input 
-                             type="text" 
-                             value={currentAddress.Distancia || ''}
-                             onChange={e => updateActiveAddressField('Distancia', e.target.value)}
-                             placeholder="Ex: 2,5"
-                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                           />
-                        </div>
-                        <div className="w-full sm:w-1/2">
-                           <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Tempo de Entrega</label>
-                           <input 
-                             type="text" 
-                             value={currentAddress.Tempo || ''}
-                             onChange={e => updateActiveAddressField('Tempo', e.target.value)}
-                             placeholder="Ex: 10 mins"
-                             className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all"
-                           />
-                        </div>
-                      </div>
+                          <div className="flex items-center gap-2">
+                            {(currentAddress.latitude || currentAddress.longitude || currentAddress.Distancia || currentAddress.Tempo || formData.id_gastro_food) && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#00a884]/15 text-[#00a884] dark:bg-[#00a884]/25">
+                                Preenchido
+                              </span>
+                            )}
+                            <div className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-transform">
+                              {isAdvancedLocationOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                            </div>
+                          </div>
+                        </button>
 
-                      {/* ID GastroFood */}
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">ID GastroFood</label>
-                        <div className="relative">
-                          <Building2 size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                          <input 
-                            type="text" 
-                            value={formData.id_gastro_food || ''}
-                            onChange={e => setFormData({...formData, id_gastro_food: e.target.value})}
-                            className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono"
-                            placeholder="9EA3F679-5565-4DA0-930F-0971A8B8A3CD"
-                          />
-                        </div>
+                        {isAdvancedLocationOpen && (
+                          <div className="p-4 space-y-4 border-t border-gray-200 dark:border-white/10 bg-white dark:bg-[#111b21]">
+                            {/* Latitude & Longitude */}
+                            <div className="flex flex-col sm:flex-row gap-4">
+                              <div className="w-full sm:w-1/2">
+                                 <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Latitude</label>
+                                 <input 
+                                   type="text" 
+                                   value={currentAddress.latitude || ''}
+                                   onChange={e => updateActiveAddressField('latitude', e.target.value)}
+                                   placeholder="-23.550520"
+                                   className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-gray-200 dark:border-white/10 focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono text-xs"
+                                 />
+                              </div>
+                              <div className="w-full sm:w-1/2">
+                                 <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Longitude</label>
+                                 <input 
+                                   type="text" 
+                                   value={currentAddress.longitude || ''}
+                                   onChange={e => updateActiveAddressField('longitude', e.target.value)}
+                                   placeholder="-46.633308"
+                                   className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-gray-200 dark:border-white/10 focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono text-xs"
+                                 />
+                              </div>
+                            </div>
+
+                            {/* Distância & Tempo (GastroFood) */}
+                            <div className="flex flex-col sm:flex-row gap-4">
+                              <div className="w-full sm:w-1/2">
+                                 <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Distância (km)</label>
+                                 <input 
+                                   type="text" 
+                                   value={currentAddress.Distancia || ''}
+                                   onChange={e => updateActiveAddressField('Distancia', e.target.value)}
+                                   placeholder="Ex: 2,5"
+                                   className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-gray-200 dark:border-white/10 focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all text-xs"
+                                 />
+                              </div>
+                              <div className="w-full sm:w-1/2">
+                                 <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">Tempo de Entrega</label>
+                                 <input 
+                                   type="text" 
+                                   value={currentAddress.Tempo || ''}
+                                   onChange={e => updateActiveAddressField('Tempo', e.target.value)}
+                                   placeholder="Ex: 10 mins"
+                                   className="w-full px-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-gray-200 dark:border-white/10 focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all text-xs"
+                                 />
+                              </div>
+                            </div>
+
+                            {/* ID GastroFood */}
+                            <div>
+                              <label className="block text-xs font-medium text-gray-500 dark:text-[#8696a0] mb-1">ID GastroFood</label>
+                              <div className="relative">
+                                <Building2 size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input 
+                                  type="text" 
+                                  value={formData.id_gastro_food || ''}
+                                  onChange={e => setFormData({...formData, id_gastro_food: e.target.value})}
+                                  className="w-full pl-10 pr-4 py-2.5 bg-[#f0f2f5] dark:bg-[#111b21] border border-gray-200 dark:border-white/10 focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all font-mono text-xs"
+                                  placeholder="9EA3F679-5565-4DA0-930F-0971A8B8A3CD"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
