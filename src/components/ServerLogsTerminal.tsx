@@ -95,6 +95,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           'carregadas',
           'wacalls sse proxy',
           'unhandled mex newsletter notification',
+          'mex newsletter notification',
           'vetorização rag finalizadas com sucesso',
           'sincronização e vetorização rag finalizadas',
           'salvando 12 grupos',
@@ -103,7 +104,10 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           'cache do cardápio limpo',
           'cache miss',
           'drenando lote',
-          'mensagens inseridas'
+          'mensagens inseridas',
+          'ia e automações globais estão desativadas',
+          'pushservice',
+          'batchprocessor'
         ];
 
         // Se for requisição Gastrofood com Sucesso (Status 200) ou sem erro, ignora
@@ -112,11 +116,14 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
         }
 
         // Descarta avisos puramente informativos do Baileys
-        if (msgLower.includes('history sync is disabled') || msgLower.includes('identity changed')) {
+        if (msgLower.includes('history sync is disabled') || msgLower.includes('identity changed') || msgLower.includes('mex newsletter notification')) {
           return false;
         }
         
         const isNormalOp = normalOperationalLogs.some(op => msgLower.includes(op));
+        if (isNormalOp && log.level !== 'error' && log.level !== 'warn') {
+          return false;
+        }
 
         // Se for nível ERROR genuíno
         if (log.level === 'error') return true;
@@ -127,26 +134,19 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           return true;
         }
         
-        // Se for Nível INFO ou LOG, inclui apenas se contiver palavra-chave explícita de erro ou falha
+        // Se for Nível INFO ou LOG, inclui apenas se contiver palavra-chave explícita de erro ou falha REAL
         const errorKeywords = [
           'error', 'erro', 'falha', 'failed', 'fail', 'timeout',
           'reconnecting', 'connection_lost', 'connection errored', 'connection terminated',
           'disconnect', 'code 4', 'code 5', 'statuscode 4', 'statuscode 5',
           'reject', '503', '405', '502', '408', '401', '500', 'lock', 'abort', 'denied',
-          'exception', 'uncaught', 'unhandled', 'badsession', 'bad_session', 'crash'
+          'exception', 'uncaught', 'badsession', 'bad_session', 'crash'
         ];
         
         const hasKeyword = errorKeywords.some(kw => msgLower.includes(kw));
 
-        // Apenas inclui se tiver palavra-chave de erro
-        if (hasKeyword) return true;
-
-        // Repetição de loop só é considerada se NÃO for uma operação normal do sistema
-        if (!isNormalOp && countInLogs >= 5) {
-          const operationalKeywords = ['salvando', 'consultando', 'sincronizando', 'buscando', 'ping', 'pong', 'heartbeat', 'cache'];
-          const isOperational = operationalKeywords.some(op => msgLower.includes(op));
-          if (!isOperational) return true;
-        }
+        // Apenas inclui se tiver palavra-chave de erro e não for operação normal
+        if (hasKeyword && !isNormalOp) return true;
 
         return false;
       };
