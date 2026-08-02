@@ -73,11 +73,11 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
     let textToCopy = '';
 
     if (mode === 'errors') {
-      // Detecta erros, avisos, falhas de lógica, reconexões e padrões de loop
+      // Detecta apenas erros reais, avisos críticos, falhas de lógica e loops de falhas para diagnóstico do servidor
       const isErrorOrLoopOrLogicFailure = (log: LogEntry, countInLogs: number) => {
         const msgLower = (log.message || '').toLowerCase();
         
-        // Ignora logs normais de operação/inicialização do Baileys e proxies de monitoramento
+        // Ignora logs normais de operação, rotinas de sucesso e eventos informativos do Baileys
         const normalOperationalLogs = [
           'ip de saída',
           'usando wa v2',
@@ -85,27 +85,70 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           'handled 0 offline messages',
           'awaitinginitialsync',
           'history sync is enabled',
+          'history sync is disabled',
+          'transitioning to online',
+          'identity changed',
           'opened connection to wa',
+          'connected to wa',
+          'instância conectada com sucesso',
           'chave recuperada via db fallback',
           'carregadas',
           'wacalls sse proxy',
-          'unhandled mex newsletter notification'
+          'unhandled mex newsletter notification',
+          'vetorização rag finalizadas com sucesso',
+          'sincronização e vetorização rag finalizadas',
+          'salvando 12 grupos',
+          'salvando',
+          'sincronizando adicionais',
+          'cache do cardápio limpo',
+          'cache miss',
+          'drenando lote',
+          'mensagens inseridas'
         ];
+
+        // Se for requisição Gastrofood com Sucesso (Status 200) ou sem erro, ignora
+        if (msgLower.includes('gastrofood api') && (msgLower.includes('"status":200') || msgLower.includes('"status": 200') || (msgLower.includes('"error":null') && !msgLower.includes('error:')))) {
+          return false;
+        }
+
+        // Descarta avisos puramente informativos do Baileys
+        if (msgLower.includes('history sync is disabled') || msgLower.includes('identity changed')) {
+          return false;
+        }
         
         const isNormalOp = normalOperationalLogs.some(op => msgLower.includes(op));
-        if (isNormalOp && log.level !== 'error' && log.level !== 'warn') return false;
 
-        if (log.level === 'warn' || log.level === 'error') return true;
+        // Se for nível ERROR genuíno
+        if (log.level === 'error') return true;
+
+        // Se for nível WARN
+        if (log.level === 'warn') {
+          if (isNormalOp) return false;
+          return true;
+        }
         
+        // Se for Nível INFO ou LOG, inclui apenas se contiver palavra-chave explícita de erro ou falha
         const errorKeywords = [
-          'error', 'erro', 'falha', 'failed', 'fail', 'loop', 'timeout',
-          'reconnecting', 'connection_lost', 'fechou', 'disconnect', 'code', 'statuscode',
+          'error', 'erro', 'falha', 'failed', 'fail', 'timeout',
+          'reconnecting', 'connection_lost', 'connection errored', 'connection terminated',
+          'disconnect', 'code 4', 'code 5', 'statuscode 4', 'statuscode 5',
           'reject', '503', '405', '502', '408', '401', '500', 'lock', 'abort', 'denied',
-          'exception', 'uncaught', 'unhandled'
+          'exception', 'uncaught', 'unhandled', 'badsession', 'bad_session', 'crash'
         ];
         
         const hasKeyword = errorKeywords.some(kw => msgLower.includes(kw));
-        return hasKeyword || (!isNormalOp && countInLogs >= 3);
+
+        // Apenas inclui se tiver palavra-chave de erro
+        if (hasKeyword) return true;
+
+        // Repetição de loop só é considerada se NÃO for uma operação normal do sistema
+        if (!isNormalOp && countInLogs >= 5) {
+          const operationalKeywords = ['salvando', 'consultando', 'sincronizando', 'buscando', 'ping', 'pong', 'heartbeat', 'cache'];
+          const isOperational = operationalKeywords.some(op => msgLower.includes(op));
+          if (!isOperational) return true;
+        }
+
+        return false;
       };
 
       // Conta frequência global de cada log no buffer para detectar loops

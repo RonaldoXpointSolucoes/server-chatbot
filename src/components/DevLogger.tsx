@@ -960,10 +960,13 @@ export default function DevLogger() {
                     msg.includes('socket zumbi') ||
                     msg.includes('não retornou novas mensagens') ||
                     msg.includes('[History Sync]') ||
+                    msg.includes('History sync is disabled') ||
+                    msg.includes('identity changed') ||
+                    msg.includes('GetCardapioCompleto') ||
                     (msg.includes('[WaCalls Listener]') && (msg.includes('Contato não encontrado') || msg.includes('mapeamento LID')));
                  
-                 if (isRoutineNoise && err.level === 'warn') {
-                    return; // Ignora avisos rotineiros no DevLogger
+                 if (isRoutineNoise && err.level !== 'error') {
+                    return; // Ignora avisos/infos rotineiros no DevLogger
                  }
 
                  addLog({
