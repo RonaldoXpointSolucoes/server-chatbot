@@ -519,8 +519,6 @@ class SessionManager {
                     this.sessions.delete(instanceId);
                     this.pendingHistorySyncs.delete(instanceId);
 
-                    const isPairingPendingSync = this.pairingPendingSync.get(instanceId);
-
                     await this.logConnectionEvent(tenantId, instanceId, 'disconnected', 'close', reason || `status_${status}`, null, null);
 
                     if ((loggedOut || status === 401 || status === 403 || status === 400) && !isFullyAuthenticated && !isPairingPendingSync) {
