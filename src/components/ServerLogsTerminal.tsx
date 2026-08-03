@@ -261,49 +261,88 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
     if (!isOpen) return;
 
     const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-    const sse = new EventSource(`${url}/api/v1/system/logs/stream`);
-    
-    sse.onopen = () => {
-      setIsConnected(true);
+    let isSubscribed = true;
+
+    const isSpamLog = (msg: string) => {
+      if (!msg) return false;
+      if (msg.includes('Mídia expirada/inacessível para JID') && msg.includes('Normal em History Sync')) return true;
+      if (msg.includes('stream errored out') && msg.includes('"reasonNode":{"tag":"conflict","attrs":{"type":"replaced"}}')) return true;
+      return false;
     };
 
-    sse.onerror = () => {
-      setIsConnected(false);
-    };
-
-    sse.onmessage = (event) => {
-      if (isPausedRef.current) return;
-      
+    const fetchLogsRest = async () => {
       try {
-        const data = JSON.parse(event.data);
-        
-        // Função de filtro para ignorar logs desnecessários
-        const isSpamLog = (msg: string) => {
-          if (!msg) return false;
-          if (msg.includes('Mídia expirada/inacessível para JID') && msg.includes('Normal em History Sync')) return true;
-          if (msg.includes('stream errored out') && msg.includes('"reasonNode":{"tag":"conflict","attrs":{"type":"replaced"}}')) return true;
-          return false;
-        };
-
-        if (data.type === 'init') {
-          const filteredLogs = (data.logs || []).filter((log: LogEntry) => !isSpamLog(log.message));
-          setLogs(filteredLogs);
-        } else if (data.message) {
-          if (isSpamLog(data.message)) return;
-
-          setLogs(prev => {
-            const next = [...prev, data];
-            if (next.length > 200) return next.slice(next.length - 200);
-            return next;
-          });
+        const res = await fetch(`${url}/api/v1/system/logs/all`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.logs) && isSubscribed) {
+            const filteredLogs = json.logs.filter((log: LogEntry) => !isSpamLog(log.message));
+            setLogs(filteredLogs);
+            setIsConnected(true);
+          }
         }
       } catch (err) {
-        console.error('SSE Pare Error', err);
+        // Silently swallow fetch errors
       }
     };
 
+    // Fetch immediately on open
+    fetchLogsRest();
+
+    let sse: EventSource | null = null;
+    let fallbackInterval: any = null;
+
+    try {
+      sse = new EventSource(`${url}/api/v1/system/logs/stream`);
+      
+      sse.onopen = () => {
+        if (isSubscribed) setIsConnected(true);
+      };
+
+      sse.onerror = () => {
+        if (isSubscribed) {
+          fetchLogsRest();
+        }
+      };
+
+      sse.onmessage = (event) => {
+        if (isPausedRef.current || !isSubscribed) return;
+        
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'init') {
+            const filteredLogs = (data.logs || []).filter((log: LogEntry) => !isSpamLog(log.message));
+            setLogs(filteredLogs);
+            setIsConnected(true);
+          } else if (data.message) {
+            if (isSpamLog(data.message)) return;
+
+            setLogs(prev => {
+              const next = [...prev, data];
+              if (next.length > 200) return next.slice(next.length - 200);
+              return next;
+            });
+            setIsConnected(true);
+          }
+        } catch (err) {
+          console.error('SSE Parse Error', err);
+        }
+      };
+    } catch (err) {
+      // Fallback
+    }
+
+    fallbackInterval = setInterval(() => {
+      if (isSubscribed && !isPausedRef.current) {
+        fetchLogsRest();
+      }
+    }, 3000);
+
     return () => {
-      sse.close();
+      isSubscribed = false;
+      if (sse) sse.close();
+      if (fallbackInterval) clearInterval(fallbackInterval);
       setIsConnected(false);
     };
   }, [isOpen]);
