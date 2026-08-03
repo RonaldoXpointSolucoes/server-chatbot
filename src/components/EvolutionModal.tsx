@@ -758,8 +758,8 @@ export default function EvolutionModal({
           clearInterval(interval);
         } else if (data && data.status === 'connecting') {
           if (pairingCodeRef.current && !pairingLoadingRef.current) {
-            if (data.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC') {
-              setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
+            if (data.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC' || (data.last_error && data.last_error.includes('515'))) {
+              setConnectionStatusMessage("Pareamento confirmado no celular! Sincronizando chaves e estabilizando conexão com o WhatsApp...");
             } else {
               setConnectionStatusMessage("Aguardando pareamento no celular...");
             }

@@ -61,6 +61,7 @@ class SessionManager {
         this.pendingHistorySyncs = new Map();
         this.consecutiveForbiddenAttempts = new Map();
         this.consecutiveBadSessionAttempts = new Map();
+        this.oscillationAttempts = new Map();
         
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -335,6 +336,7 @@ class SessionManager {
                 if (update.connection === 'open') {
                     this.authenticatedSessions.add(instanceId);
                     this.pairingPendingSync.delete(instanceId);
+                    this.oscillationAttempts.delete(instanceId);
                     
                     // Zera contadores de tentativas ao conectar com sucesso
                     this.reconnectAttempts.delete(instanceId);
@@ -500,7 +502,13 @@ class SessionManager {
                     const isStreamOscillation = status === 515 || status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('connection terminated') || reason.toLowerCase().includes('connection lost');
 
                     if (isStreamOscillation && isFullyAuthenticated) {
-                        console.log(`[SessionManager] Oscilação temporária de conexão com servidores WhatsApp (${reason || status}) na instância ${instanceId}. Reconectando sessão em 2s...`);
+                        const attempts = (this.oscillationAttempts.get(instanceId) || 0) + 1;
+                        this.oscillationAttempts.set(instanceId, attempts);
+
+                        const delays = [5000, 8000, 12000, 15000];
+                        const delay = delays[Math.min(attempts - 1, delays.length - 1)];
+
+                        console.log(`[SessionManager] Oscilação temporária de conexão com servidores WhatsApp (${reason || status}) na instância ${instanceId} (tentativa ${attempts}). Aguardando ${delay / 1000}s para estabilizar chaves...`);
                         try {
                             if (sock?.ws) sock.ws.close();
                             if (sock?.end) sock.end();
@@ -512,7 +520,7 @@ class SessionManager {
                                     console.error(`[SessionManager] Erro na reconexão automática de oscilação (${reason || status}) para ${instanceId}:`, err.message);
                                 });
                             }
-                        }, 2000);
+                        }, delay);
                         return;
                     }
 
