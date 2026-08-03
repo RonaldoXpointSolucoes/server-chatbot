@@ -1742,13 +1742,25 @@ export default function ChatDashboard() {
          const existing = seenKeys.get(key);
          const existingInst = (existing.id.includes('_') ? existing.id.split('_')[1] : existing.instance_id) || 'default';
          
+         const isBoxMatch = (inst: string | null | undefined) => {
+           if (!inst || !activeChannelFilter || activeChannelFilter === 'all') return false;
+           const resUuid = instanceCache.getId(inst) || inst;
+           const resFilterUuid = instanceCache.getId(activeChannelFilter) || activeChannelFilter;
+           const resName = instanceCache.getName(inst) || inst;
+           return inst === activeChannelFilter || 
+                  inst === activeChannelName || 
+                  resUuid === resFilterUuid || 
+                  resName === activeChannelName || 
+                  resName === activeChannelFilter;
+         };
+
          // Se a nova entrada for da caixa ativa atual (activeChannelFilter / activeChannelName), PREFERIR a nova entrada!
-         const isCurrentInActiveBox = Boolean(activeChannelFilter && (targetInst === activeChannelFilter || targetInst === activeChannelName));
-         const isExistingInActiveBox = Boolean(activeChannelFilter && (existingInst === activeChannelFilter || existingInst === activeChannelName));
+         const isCurrentInActiveBox = isBoxMatch(targetInst);
+         const isExistingInActiveBox = isBoxMatch(existingInst);
 
          if (isCurrentInActiveBox && !isExistingInActiveBox) {
            seenKeys.set(key, c);
-         } else if (!isExistingInActiveBox && getEffectiveContactTime(c) > getEffectiveContactTime(existing)) {
+         } else if (!isExistingInActiveBox && !isCurrentInActiveBox && getEffectiveContactTime(c) > getEffectiveContactTime(existing)) {
            // Se nenhuma está na caixa ativa (ou ambas estão), preferir a que tiver mensagem mais recente
            seenKeys.set(key, c);
          } else if (activeChatId) {
