@@ -811,12 +811,16 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                                   </span>
                                 )}
                               </div>
-                              {inst.phone_number && (
-                                <span className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 tracking-tight font-mono truncate select-all">
-                                  {formatPhoneNumber(inst.phone_number)}
-                                </span>
-                              )}
-                            </div>
+                               {(() => {
+                                 const phoneToDisplay = inst.phone_number || inst.settings?.phone_number || inst.settings?.pairing_phone || (inst as any).number;
+                                 if (!phoneToDisplay) return null;
+                                 return (
+                                   <span className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 tracking-tight font-mono truncate select-all">
+                                     {formatPhoneNumber(phoneToDisplay)}
+                                   </span>
+                                 );
+                               })()}
+                             </div>
                           }
                           isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
                           className={cn(!isConnected && !isConnecting ? "opacity-60 hover:opacity-100 hover:bg-gray-200/30 dark:hover:bg-[#202c33]/40" : isConnecting ? "opacity-90 hover:opacity-100 hover:bg-yellow-500/5" : "")}

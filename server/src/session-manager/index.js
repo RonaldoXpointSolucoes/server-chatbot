@@ -296,6 +296,14 @@ class SessionManager {
                 const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
                 if (meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net'))) {
                     this.authenticatedSessions.add(instanceId);
+                    const phone = String(meId).split('@')[0].split(':')[0];
+                    if (phone && phone.length >= 7) {
+                        retryWithBackoff(() => 
+                            supabase.from('whatsapp_instances')
+                                .update({ phone_number: phone })
+                                .eq('id', instanceId)
+                        ).catch(() => {});
+                    }
                 }
                 // Só dispara a atualização de pareamento se a sessão NÃO estava autenticada no boot
                 // e ainda não está autenticada/conectada em memória
@@ -340,14 +348,24 @@ class SessionManager {
                     if (sessionData) {
                         sessionData.monitoringUntil = monitoringUntil;
                     }
+
+                    const ownerJid = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
+                    const ownerPhone = ownerJid ? String(ownerJid).split('@')[0].split(':')[0] : null;
+
+                    const updatePayload = { 
+                        status: 'connected', 
+                        reconnect_attempts: 0,
+                        last_connected_at: new Date().toISOString(),
+                        monitoring_until: monitoringUntil,
+                        last_error: null 
+                    };
+
+                    if (ownerPhone && ownerPhone.length >= 7) {
+                        updatePayload.phone_number = ownerPhone;
+                    }
+
                     supabase.from('whatsapp_instances')
-                        .update({ 
-                            status: 'connected', 
-                            reconnect_attempts: 0,
-                            last_connected_at: new Date().toISOString(),
-                            monitoring_until: monitoringUntil,
-                            last_error: null 
-                        })
+                        .update(updatePayload)
                         .eq('id', instanceId)
                         .then(() => {});
 

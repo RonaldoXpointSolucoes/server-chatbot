@@ -886,7 +886,10 @@ export default function InstancesDashboard() {
                       <div className="flex flex-col">
                         <span className="text-[10px] text-gray-400 uppercase font-bold">Celular</span>
                         <span className="font-semibold text-gray-800 dark:text-gray-200 text-sm whitespace-nowrap">
-                           {inst.phone_number ? `+${inst.phone_number}` : 'N/A'}
+                           {(() => {
+                               const p = inst.phone_number || inst.settings?.phone_number || inst.settings?.pairing_phone;
+                               return p ? `+${p}` : 'N/A';
+                            })()}
                         </span>
                       </div>
                    </div>
