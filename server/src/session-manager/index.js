@@ -89,7 +89,10 @@ class SessionManager {
                         'handling notification',
                         'mmg.whatsapp.net',
                         'Precondition Required',
-                        'no name present, ignoring presence update request'
+                        'no name present, ignoring presence update request',
+                        'failed to sync state',
+                        'failed to find key',
+                        'critical_unblock'
                     ];
                     
                     if (parsed.msg && ignoredLogs.some(text => parsed.msg.includes(text))) {
