@@ -496,6 +496,7 @@ export default function ChatDashboard() {
     appVersion: state.appVersion,
     setActiveChat: state.setActiveChat, 
     sendHumanMessage: state.sendHumanMessage, 
+    shareContactMessage: state.shareContactMessage,
     sendPresenceUpdate: state.sendPresenceUpdate,
     forwardMessage: state.forwardMessage,
     setBotStatus: state.setBotStatus,
@@ -550,6 +551,11 @@ export default function ChatDashboard() {
   const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
   const [resolvingTicketContactId, setResolvingTicketContactId] = useState<string | null>(null);
   const [isCreateInboxModalOpen, setIsCreateInboxModalOpen] = useState(false);
+  const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
+  const [isShareContactModalOpen, setIsShareContactModalOpen] = useState(false);
+  const [contactShareSearch, setContactShareSearch] = useState('');
+  const [selectedContactToShare, setSelectedContactToShare] = useState<any>(null);
+  const [isSendingContact, setIsSendingContact] = useState(false);
   const activeTicket = useChatStore(s => s.activeTicket);
 
   const calculateFinalStats = async (contactId: string, customTicket?: any) => {
@@ -8205,14 +8211,57 @@ export default function ChatDashboard() {
                       : "contents"
                   )}>
                     {/* Botões de Ação da Esquerda */}
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button 
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="p-2 text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
-                      >
-                        <Paperclip size={20} />
-                      </button>
+                    <div className="flex items-center gap-1.5 shrink-0 relative">
+                      <div className="relative">
+                        <button 
+                          type="button"
+                          onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)}
+                          className={cn(
+                            "p-2 rounded-full transition-colors",
+                            isAttachmentMenuOpen 
+                              ? "bg-black/10 dark:bg-white/10 text-emerald-600 dark:text-emerald-400"
+                              : "text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5"
+                          )}
+                          title="Anexar arquivos ou compartilhar contato"
+                        >
+                          <Paperclip size={20} />
+                        </button>
+
+                        {isAttachmentMenuOpen && (
+                          <div className="absolute bottom-12 left-0 z-50 w-56 p-1.5 bg-white dark:bg-[#111b21] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsAttachmentMenuOpen(false);
+                                fileInputRef.current?.click();
+                              }}
+                              className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group font-medium"
+                            >
+                              <div className="w-8 h-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                <ImageIcon size={16} />
+                              </div>
+                              Fotos & Arquivos
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsAttachmentMenuOpen(false);
+                                setContactShareSearch('');
+                                setSelectedContactToShare(null);
+                                setIsShareContactModalOpen(true);
+                              }}
+                              className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group font-medium"
+                            >
+                              <div className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                <UserCheck size={16} />
+                              </div>
+                              Compartilhar Contato
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
                       <input 
                         type="file" 
                         ref={fileInputRef} 
@@ -9366,6 +9415,164 @@ export default function ChatDashboard() {
             >
               <X className="w-4 h-4" />
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Compartilhar Contato da Lista */}
+      {isShareContactModalOpen && (
+        <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-white dark:bg-[#111b21] rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+            
+            {/* Cabeçalho do Modal */}
+            <div className="px-6 py-4 bg-slate-50 dark:bg-[#202c33] border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                  <UserCheck size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
+                    Compartilhar Contato
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Selecione um contato da empresa para enviar no WhatsApp
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  setIsShareContactModalOpen(false);
+                  setSelectedContactToShare(null);
+                  setContactShareSearch('');
+                }}
+                className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-200/50 dark:hover:bg-white/5 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Busca de Contatos */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800/80 bg-white dark:bg-[#111b21]">
+              <div className="relative">
+                <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar por nome ou telefone..."
+                  value={contactShareSearch}
+                  onChange={(e) => setContactShareSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-100 dark:bg-[#202c33] text-sm text-slate-800 dark:text-slate-100 rounded-2xl border-none focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all placeholder:text-slate-400"
+                />
+              </div>
+            </div>
+
+            {/* Lista de Contatos Disponíveis */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {(() => {
+                const filtered = contacts.filter((c: any) => {
+                  if (!c.phone) return false;
+                  const search = contactShareSearch.toLowerCase().trim();
+                  if (!search) return true;
+                  const name = (c.custom_name || c.name || c.push_name || '').toLowerCase();
+                  const phone = (c.phone || '').replace(/\D/g, '');
+                  return name.includes(search) || phone.includes(search);
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="py-12 text-center text-slate-400 dark:text-slate-500">
+                      <UserCheck size={36} className="mx-auto mb-2 opacity-40" />
+                      <p className="text-sm font-medium">Nenhum contato encontrado na busca.</p>
+                    </div>
+                  );
+                }
+
+                return filtered.slice(0, 50).map((c: any) => {
+                  const isSelected = selectedContactToShare?.id === c.id;
+                  const displayName = getContactDisplayName(c.custom_name || c.name, c.push_name, c.phone);
+                  
+                  return (
+                    <div
+                      key={c.id}
+                      onClick={() => setSelectedContactToShare(c)}
+                      className={cn(
+                        "flex items-center justify-between p-3 rounded-2xl cursor-pointer transition-all duration-150 select-none",
+                        isSelected
+                          ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-950 dark:text-emerald-100"
+                          : "hover:bg-slate-50 dark:hover:bg-[#202c33]/50 text-slate-800 dark:text-slate-200"
+                      )}
+                    >
+                      <div className="flex items-center gap-3 overflow-hidden">
+                        <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center shrink-0 uppercase text-sm shadow-sm">
+                          {displayName.slice(0, 2)}
+                        </div>
+                        <div className="overflow-hidden">
+                          <p className="text-sm font-bold truncate">{displayName}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                            {formatPhoneNumber(c.phone)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 ml-2">
+                        {isSelected ? (
+                          <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center animate-in zoom-in duration-150">
+                            <Check size={14} strokeWidth={3} />
+                          </div>
+                        ) : (
+                          <div className="w-6 h-6 rounded-full border-2 border-slate-300 dark:border-slate-700" />
+                        )}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Rodapé do Modal */}
+            <div className="p-4 bg-slate-50 dark:bg-[#202c33] border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsShareContactModalOpen(false);
+                  setSelectedContactToShare(null);
+                }}
+                className="px-5 py-2.5 rounded-2xl text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-200/60 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 transition-colors"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                disabled={!selectedContactToShare || !activeChatId || isSendingContact}
+                onClick={async () => {
+                  if (!selectedContactToShare || !activeChatId) return;
+                  setIsSendingContact(true);
+                  try {
+                    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                    await shareContactMessage(activeChatId, selectedContactToShare, properTargetInstance as string);
+                    setIsShareContactModalOpen(false);
+                    setSelectedContactToShare(null);
+                  } catch (err: any) {
+                    console.error('Erro ao compartilhar contato:', err);
+                  } finally {
+                    setIsSendingContact(false);
+                  }
+                }}
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-2xl shadow-lg transition-all flex items-center gap-2"
+              >
+                {isSendingContact ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" /> Compartilhando...
+                  </>
+                ) : (
+                  <>
+                    <Send size={16} /> Compartilhar no Chat
+                  </>
+                )}
+              </button>
+            </div>
+
           </div>
         </div>
       )}

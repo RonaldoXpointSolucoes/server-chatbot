@@ -455,6 +455,7 @@ interface ChatState {
   upsertContactLocally: (contact: ContactRow) => void;
   sendPresenceUpdate: (contactId: string, presence: 'composing' | 'recording' | 'paused' | 'available' | 'unavailable', instanceName?: string) => Promise<void>;
   sendHumanMessage: (contactId: string, text: string, instanceName: string) => Promise<void>;
+  shareContactMessage: (contactId: string, selectedContact: Partial<ContactRow>, instanceName: string) => Promise<void>;
   editHumanMessage: (contactId: string, messageId: string, newText: string, instanceName: string) => Promise<void>;
   deleteHumanMessage: (contactId: string, messageId: string, instanceName: string) => Promise<void>;
   forwardMessage: (contactId: string, message: MessageType, instanceName: string) => Promise<void>;
@@ -1639,6 +1640,88 @@ export const useChatStore = create<ChatState>((set, get) => ({
          window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Conexão instável com o WhatsApp (Connection Closed). O motor Baileys está tentando reconectar em segundo plano. Aguarde 5 segundos e tente novamente.', type: 'warning', duration: 7000 } }));
       } else {
          window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Não foi possível enviar a mensagem: ${err.message}`, type: 'error' } }));
+      }
+    }
+  },
+
+  shareContactMessage: async (contactId, selectedContact, instanceName) => {
+    console.log("[shareContactMessage] Called with:", { contactId, selectedContact, instanceName });
+    const state = get();
+    const contact = state.contacts.find(c => c.id === contactId);
+    if (!contact) {
+       console.warn("[shareContactMessage] Contact not found in store!", contactId);
+       return;
+    }
+
+    const contactName = selectedContact.custom_name || selectedContact.name || selectedContact.push_name || selectedContact.phone || 'Contato';
+    const contactPhone = selectedContact.phone || '';
+    if (!contactPhone) {
+      throw new Error('Telefone do contato inválido');
+    }
+
+    const cardText = `👤 *Contato Compartilhado*\n*Nome:* ${contactName}\n*Telefone:* ${formatPhoneNumber(contactPhone)}`;
+
+    const pseudoId = 'optimistic-' + Math.random().toString();
+    state.addMessageLocally(contactId, { id: pseudoId, text: cardText, sender: 'human', timestamp: new Date() });
+
+    try {
+      const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
+      const expectedInstance = compositeInstance || contact.instance_id;
+      const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
+
+      const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', finalTargetInstance);
+
+      if (!resolvedInstanceId) {
+        throw new Error('Instância do WhatsApp não encontrada para envio.');
+      }
+
+      if (state.instancesStatus[resolvedInstanceId] && state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local') {
+         set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar contatos.' });
+         throw new Error('whatsapp_offline');
+      }
+
+      const apiKey = await getOrFetchApiKey(resolvedInstanceId);
+      const targetJid = getContactJid(contact);
+      if (!targetJid) {
+         throw new Error('Número de telefone do contato destino inválido.');
+      }
+
+      const { sendContactMessage } = await import('../services/whatsappEngine');
+      await sendContactMessage(state.tenantInfo?.id || '', resolvedInstanceId, targetJid, contactName, contactPhone, apiKey);
+
+      const cleanPhone = contactPhone.replace(/\D/g, '');
+      const vcardStr = `BEGIN:VCARD\nVERSION:3.0\nN:;${contactName};;;\nFN:${contactName}\nTEL;type=CELL;type=VOICE;waid=${cleanPhone}:${cleanPhone}\nEND:VCARD`;
+
+      await supabase.from('messages').insert({
+        tenant_id: state.tenantInfo?.id,
+        instance_id: resolvedInstanceId,
+        conversation_id: contact.conv_id || contact.id,
+        direction: 'outbound',
+        message_type: 'contact',
+        status: 'sent',
+        text_content: cardText,
+        sender_type: 'human',
+        raw_payload: {
+          contacts: {
+            displayName: contactName,
+            contacts: [{ vcard: vcardStr }]
+          }
+        }
+      });
+
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Contato "${contactName}" compartilhado com sucesso!`, type: 'success' } }));
+    } catch(err: any) {
+      console.error('[shareContactMessage] Erro:', err);
+      set((s) => ({
+        contacts: s.contacts.map(c => {
+          if (c.id === contactId) {
+            return { ...c, messages: c.messages.filter(m => m.id !== pseudoId) };
+          }
+          return c;
+        })
+      }));
+      if (err.message !== 'whatsapp_offline') {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Falha ao compartilhar contato: ${err.message}`, type: 'error' } }));
       }
     }
   },

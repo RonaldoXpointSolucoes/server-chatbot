@@ -319,3 +319,56 @@ export const sendEnginePresenceUpdate = async (tenantId: string, instanceId: str
   
   return resJson;
 };
+
+export const sendContactMessage = async (
+  tenantId: string, 
+  instanceId: string, 
+  number: string, 
+  contactName: string, 
+  contactPhone: string, 
+  apiKey: string
+) => {
+  if (!API_URL) throw new Error("URL do motor Antigravity não definida (.env)");
+  const cleanPhone = contactPhone.replace(/\D/g, '');
+  const vcard = 
+    'BEGIN:VCARD\n' +
+    'VERSION:3.0\n' +
+    `N:;${contactName};;;\n` +
+    `FN:${contactName}\n` +
+    `TEL;type=CELL;type=VOICE;waid=${cleanPhone}:${cleanPhone}\n` +
+    'END:VCARD';
+
+  const payload = {
+    contacts: {
+      displayName: contactName,
+      contacts: [{ vcard }]
+    }
+  };
+
+  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'x-tenant-id': tenantId,
+      'apikey': apiKey
+    },
+    body: JSON.stringify({ method: 'sendMessage', args: [number, payload] })
+  });
+
+  let resJson;
+  try {
+    resJson = await res.json();
+  } catch (e) {
+    resJson = {};
+  }
+
+  if (!res.ok || resJson.ok === false) {
+    let errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
+    if (errorDetail && typeof errorDetail === 'object') {
+       errorDetail = errorDetail.message || errorDetail.error || JSON.stringify(errorDetail);
+    }
+    throw new Error(`Falha ao compartilhar contato: ${errorDetail}`);
+  }
+
+  return resJson;
+};
