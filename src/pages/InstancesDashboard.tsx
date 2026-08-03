@@ -623,9 +623,11 @@ export default function InstancesDashboard() {
           details: data
         });
         setPairingCode(data.code);
-        // Salva o número associado no banco
-        const cleanPhone = pairingPhone.replace(/\D/g, '');
-        await supabase.from('whatsapp_instances').update({ phone_number: cleanPhone }).eq('id', id);
+        // Salva o número associado no banco apenas se tiver um número válido
+        const cleanPhone = pairingPhone ? pairingPhone.replace(/\D/g, '') : '';
+        if (cleanPhone && cleanPhone.length >= 7) {
+          await supabase.from('whatsapp_instances').update({ phone_number: cleanPhone }).eq('id', id);
+        }
         fetchInstances();
         pollPairingStatus(id, apiKey);
       } else {
@@ -1099,8 +1101,8 @@ export default function InstancesDashboard() {
                                defaultValue={inst.phone_number || ''}
                                onBlur={async (e) => {
                                  const val = e.target.value.replace(/\D/g, '');
-                                 if (val !== (inst.phone_number || '')) {
-                                   const { error } = await supabase.from('whatsapp_instances').update({ phone_number: val || null }).eq('id', inst.id);
+                                 if (val && val.length >= 7 && val !== (inst.phone_number || '')) {
+                                   const { error } = await supabase.from('whatsapp_instances').update({ phone_number: val }).eq('id', inst.id);
                                    if (error) {
                                      alert("Erro ao associar número: " + error.message);
                                    } else {

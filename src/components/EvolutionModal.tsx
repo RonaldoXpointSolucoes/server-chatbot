@@ -676,9 +676,11 @@ export default function EvolutionModal({
           details: data
         });
         setPairingCode(data.code);
-        // Salva o número associado no banco
-        const cleanPhone = pairingPhone.replace(/\D/g, '');
-        await supabase.from('whatsapp_instances').update({ phone_number: cleanPhone }).eq('id', id);
+        // Salva o número associado no banco apenas se tiver um número válido
+        const cleanPhone = pairingPhone ? pairingPhone.replace(/\D/g, '') : '';
+        if (cleanPhone && cleanPhone.length >= 7) {
+          await supabase.from('whatsapp_instances').update({ phone_number: cleanPhone }).eq('id', id);
+        }
         fetchExistingInstances();
         pollPairingStatus(id, apiKey);
       } else {
