@@ -463,7 +463,8 @@ class SessionManager {
                     if (hasValidMeId) {
                         this.authenticatedSessions.add(instanceId);
                     }
-                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || wasAuthenticatedOnBoot || hasValidMeId;
+                    const isPairingPendingSync = Boolean(this.pairingPendingSync.get(instanceId));
+                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || wasAuthenticatedOnBoot || hasValidMeId || isPairingPendingSync;
                     const isQrTimeout = (status === 408 || reason.toLowerCase().includes('qr refs attempts ended')) && !isFullyAuthenticated;
 
                     if (isQrTimeout) {

@@ -775,7 +775,7 @@ export default function EvolutionModal({
     setTimeout(() => { 
       clearInterval(interval);
       setConnectionStatusMessage("Tempo de pareamento esgotado (3 min). Clique abaixo para gerar um novo código de 8 dígitos.");
-      setIsGeneratingPairingCode(false);
+      setPairingLoading(false);
       logger.addLog({
         type: 'info',
         message: `TIMEOUT: O tempo limite de 180s para confirmar o código no celular expirou. Clique em 'Gerar Novo Código' para continuar.`,
