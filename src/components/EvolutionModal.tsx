@@ -228,7 +228,7 @@ export default function EvolutionModal({
 
   useEffect(() => {
     if (isOpen && targetInstanceName && !activePollingId) {
-      const targetInst = existingInstances.find((i) => i.id === targetInstanceName) || { id: targetInstanceName };
+      const targetInst = existingInstances.find((i) => i.id === targetInstanceName || i.display_name === targetInstanceName) || { id: targetInstanceName };
       handleConnectExisting(targetInst, true);
     }
   }, [isOpen, targetInstanceName, activePollingId, existingInstances]);
@@ -297,16 +297,20 @@ export default function EvolutionModal({
     setConnectionStatusMessage("Iniciando gerador de QR Code...");
     setCodeEntered(false);
     setActivePollingId(inst.id);
+
+    useDevStore.getState().addBreadcrumb(1, 7, `Iniciando reconexão da instância '${inst.display_name || inst.id}'`, 'EvolutionModal', { instanceId: inst.id, forceNew });
+
     try {
       let targetInst = inst;
-      if (!targetInst?.api_key) {
+      if (!targetInst?.api_key || !targetInst?.display_name) {
         const { data: dbInst } = await supabase
           .from("whatsapp_instances")
           .select("*")
-          .eq("id", inst.id)
+          .or(`id.eq.${inst.id},display_name.eq.${inst.id}`)
           .maybeSingle();
         if (dbInst) {
           targetInst = dbInst;
+          setActivePollingId(dbInst.id);
         }
       }
 
@@ -325,6 +329,7 @@ export default function EvolutionModal({
         );
 
       if (isConn) {
+        useDevStore.getState().addBreadcrumb(7, 7, `Instância já estava previamente conectada: ${targetInst.id}`, 'EvolutionModal');
         useChatStore.getState().updateTenantInstance(inst.id);
         setEvolutionConnection(true, inst.id);
         setLoading(false);
@@ -336,9 +341,16 @@ export default function EvolutionModal({
         sessionStorage.getItem("current_tenant_id");
       if (!cId) throw new Error("Tenant não identificado");
 
-      await createInstance(cId, inst.id, targetInst.api_key || "", true);
+      useDevStore.getState().addBreadcrumb(2, 7, `Enviando requisição de ignição para o servidor Node/Baileys...`, 'EvolutionModal', { tenantId: cId, instanceId: targetInst.id });
+      await createInstance(cId, targetInst.id, targetInst.api_key || "", true);
     } catch (err: any) {
       const msg = err?.message || "";
+      useDevStore.getState().addLog({
+        type: 'error',
+        message: `[MIGALHA ERRO 2/7] Falha ao comunicar com motor: ${msg}`,
+        source: 'EvolutionModal',
+        details: err
+      });
       if (msg === "Failed to fetch" || msg.includes("network") || msg.includes("fetch")) {
         console.warn("[EvolutionModal] Oscilação temporária de rede ao acionar motor:", err);
       } else {
@@ -475,12 +487,18 @@ export default function EvolutionModal({
       sessionStorage.getItem("current_tenant_id");
     const channelName = `tenant:${tenantId}:instance:${activePollingId}`;
 
+    useDevStore.getState().addBreadcrumb(3, 7, `Inscrito no canal Realtime Supabase: ${channelName}`, 'EvolutionModal');
     console.log(`[Realtime] Inscrito no canal: ${channelName} | Modo: ${connectMode}`);
     const channel = supabase.channel(channelName);
 
     // Timeout de segurança contra loop infinito
     const timeoutId = setTimeout(() => {
       if (loadingRef.current || activePollingIdRef.current) {
+        useDevStore.getState().addLog({
+          type: 'error',
+          message: `[MIGALHA ERRO TIMEOUT] O motor demorou mais de 3 minutos para responder`,
+          source: 'EvolutionModal'
+        });
         setError(
           "Erro: Timeout de Conexão. O Motor demorou muito para responder. Verifique se o seu celular tem acesso à internet ou reinicie a conexão.",
         );
@@ -496,6 +514,7 @@ export default function EvolutionModal({
     channel
       .on("broadcast", { event: "instance.qr_updated" }, (payload: any) => {
         if (payload.payload?.qr_code) {
+          useDevStore.getState().addBreadcrumb(4, 7, `QR Code recebido via Realtime e renderizado na tela`, 'EvolutionModal');
           setQrBase64(payload.payload.qr_code);
           setLoading(false);
           if (pairingCodeRef.current) {
@@ -509,7 +528,14 @@ export default function EvolutionModal({
         const st = payload.payload?.status;
         const lastError = payload.payload?.last_error;
 
+        useDevStore.getState().addBreadcrumb(5, 7, `Broadcast de status recebido: [${st}]`, 'EvolutionModal', payload.payload);
+
         if (lastError && (lastError.includes("Chave de Acesso") || lastError.includes("Passkey") || lastError.includes("PASSKEY_BLOCKED"))) {
+          useDevStore.getState().addLog({
+            type: 'error',
+            message: `[MIGALHA ERRO PASSKEY] ${lastError}`,
+            source: 'EvolutionModal'
+          });
           setError(lastError);
           setLoading(false);
           setQrBase64(null);
@@ -525,6 +551,11 @@ export default function EvolutionModal({
             console.log("[Realtime] Ignorando status offline na conexão via Pairing Code (transição esperada)");
             return;
           }
+          useDevStore.getState().addLog({
+            type: 'error',
+            message: `[MIGALHA ERRO OFFLINE] Instância declarou status offline: ${payload.payload?.reason || 'sem motivo informado'}`,
+            source: 'EvolutionModal'
+          });
           setError(
             payload.payload?.reason
               ? `Falha com código: ${payload.payload.reason}`
@@ -538,6 +569,7 @@ export default function EvolutionModal({
           if (pairingCodeRef.current) {
             if (pairingCodeRef.current && !pairingLoadingRef.current) {
               if (payload.payload?.pairingSuccess) {
+                useDevStore.getState().addBreadcrumb(6, 7, `Código digitado no celular! Vinculando dispositivo...`, 'EvolutionModal');
                 setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
               } else {
                 setConnectionStatusMessage("Aguardando pareamento no celular...");
@@ -546,7 +578,9 @@ export default function EvolutionModal({
           } else {
             setConnectionStatusMessage("Escaneie o QR Code no seu WhatsApp.");
           }
-        } else if ((st === "connected" || st === "connected_local") && !qrBase64Ref.current) {
+        } else if ((st === "connected" || st === "connected_local") && (payload.payload?.authenticated === true || payload.payload?.is_authenticated === true) && !qrBase64Ref.current) {
+          useDevStore.getState().addBreadcrumb(6, 7, `Conexão efetuada no celular! Finalizando vínculo...`, 'EvolutionModal');
+          useDevStore.getState().addBreadcrumb(7, 7, `Instância autenticada e operacional (${st})`, 'EvolutionModal');
           handleSuccess();
         }
       })
@@ -581,7 +615,10 @@ export default function EvolutionModal({
                 setError(null);
               }
 
-              if ((st?.data?.status === "connected" || st?.data?.status === "connected_local") && !runtimeQr) {
+              const isAuth = st?.data?.is_authenticated === true || st?.data?.authenticated === true;
+              if ((st?.data?.status === "connected" || st?.data?.status === "connected_local") && isAuth && !runtimeQr) {
+                useDevStore.getState().addBreadcrumb(6, 7, `Conexão efetuada no celular! Finalizando vínculo...`, 'EvolutionModal');
+                useDevStore.getState().addBreadcrumb(7, 7, `Instância autenticada e operacional (${st?.data?.status})`, 'EvolutionModal');
                 handleSuccess();
                 clearInterval(pollInterval);
               } else if (st?.data?.status === "connecting" || st?.data?.status === "qr_ready" || runtimeQr) {

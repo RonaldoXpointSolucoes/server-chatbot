@@ -8,6 +8,7 @@ import WaCallsWidget from './WaCallsWidget';
 export function MainLayout() {
   const [showMainSidebar, setShowMainSidebar] = useState(() => window.innerWidth >= 1024);
   const isQRModalOpen = useChatStore(s => s.isQRModalOpen);
+  const qrModalTargetInstance = useChatStore(s => s.qrModalTargetInstance);
   const modalReason = useChatStore(s => s.modalReason);
 
   React.useEffect(() => {
@@ -26,7 +27,7 @@ export function MainLayout() {
     <div className="flex h-[100dvh] w-full min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative safe-top-padding safe-bottom-padding safe-left-padding safe-right-padding">
       {isQRModalOpen && <EvolutionModal 
           isOpen={isQRModalOpen}
-          targetInstanceName={useChatStore.getState().qrModalTargetInstance}
+          targetInstanceName={qrModalTargetInstance}
           onClose={() => {
             useChatStore.getState().closeQRModal();
             useChatStore.getState().setModalReason(null);

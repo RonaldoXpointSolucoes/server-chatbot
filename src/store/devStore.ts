@@ -18,6 +18,8 @@ interface DevStore {
   isEnabled: boolean;
   showServerLogs: boolean;
   addLog: (log: Omit<LogEntry, 'id' | 'timestamp'>) => void;
+  addBreadcrumb: (stepIndex: number, totalSteps: number, title: string, source?: string, details?: any) => void;
+  log: (type: 'log' | 'info' | 'warn' | 'error' | 'success', message: string, details?: any, source?: string) => void;
   clearLogs: () => void;
   toggleVisibility: () => void;
   toggleEnabled: () => void;
@@ -65,7 +67,24 @@ export const useDevStore = create<DevStore>()(
             }
         }
         
-        set((state) => ({ logs: [newLog, ...state.logs].slice(0, 100) }));
+        set((state) => ({ logs: [newLog, ...state.logs].slice(0, 150) }));
+      },
+      addBreadcrumb: (stepIndex, totalSteps, title, source = 'WhatsApp Flow', details) => {
+        const message = `[MIGALHA ${stepIndex}/${totalSteps}] 📍 ${title}`;
+        get().addLog({
+          type: 'info',
+          message,
+          source,
+          details
+        });
+      },
+      log: (type, message, details, source = 'Sistema') => {
+        get().addLog({
+          type,
+          message,
+          source,
+          details
+        });
       },
       showServerLogs: false,
       clearLogs: () => set({ logs: [] }),

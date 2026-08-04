@@ -17,6 +17,13 @@ O projeto segue um pipeline estrito de homologação para impedir travamentos ou
 2. **RECOMENDAÇÃO OBRIGATÓRIA DE TESTES EM STAGING ANTES DO DEPLOY DE PRODUÇÃO**:
    - Sempre que o usuário solicitar o deploy em produção (`Deploy` ou `Deploy Server`), a IA **DEVE OBRIGATORIAMENTE RECOMENDAR E PERGUNTAR** se o usuário gostaria de publicar e testar primeiro no ambiente de Staging (`branch: staging` / `chat-boot-staging.vercel.app`), garantindo uma bateria de testes prévia para evitar travamentos ou regressões em produção.
 
+## Regra Obrigatoria de Analise Causal para Falhas Recorrentes (>2 Vezes)
+
+Sempre que o usuário solicitar a correção de um problema persistente ou que já tenha sido abordado mais de 2 vezes sem solução definitiva:
+1. **Acionamento da Skill**: A IA deve invocar e seguir o protocolo da skill `root-cause-analysis-expert`.
+2. **Uso da Trilha de Migalhas (DevLogger)**: Deve-se obrigatoriamente inspecionar e registrar a trilha de migalhas `[MIGALHA X/Y]` do Antigravity DevLogger e do Supabase `system_logs` do Passo 1 ao Passo 7 antes de realizar edições de código.
+3. **Mapeamento de Cadeia E2E**: Mapear UI -> State -> HTTP Gateway -> Baileys Socket -> Supabase DB para isolar o ponto exato da quebra.
+
 ## Regras de Deploy e Versionamento (Sem Deploy Automático e Sem Push Automático)
 
 O deploy NUNCA deve ser executado de forma automática após alterações de código. O agente só poderá iniciar um deploy ou enviar commits para a branch principal (`git push origin main`) se o usuário explicitamente solicitar.

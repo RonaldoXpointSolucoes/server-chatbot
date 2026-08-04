@@ -5287,7 +5287,10 @@ export default function ChatDashboard() {
                 A conexão com o WhatsApp oscilou e o sistema está reconectando automaticamente em segundo plano. Por favor, aguarde alguns instantes.
              </p>
              <div className="flex items-center gap-2 mt-1">
-                 <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
+                 <button onClick={() => {
+                   const resolvedId = (activeChannelFilter ? instanceCache.getId(activeChannelFilter) || activeChannelFilter : null);
+                   useChatStore.getState().openQRModal(resolvedId);
+                 }} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
                     <Power size={12} /> Reconectar
                  </button>
                  <button onClick={() => handleOpenLog48(activeChannelFilter)} className="text-xs bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/40 text-blue-700 dark:text-blue-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
@@ -5311,7 +5314,10 @@ export default function ChatDashboard() {
                 A instância "{activeChannelName || activeChannelFilter}" está offline. Verifique o aparelho ou tente reconectar.
              </p>
              <div className="flex items-center gap-2 mt-1">
-                 <button onClick={() => useChatStore.getState().openQRModal(activeChannelFilter)} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
+                 <button onClick={() => {
+                   const resolvedId = (activeChannelFilter ? instanceCache.getId(activeChannelFilter) || activeChannelFilter : null);
+                   useChatStore.getState().openQRModal(resolvedId);
+                 }} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">
                     <Power size={12} /> Reconectar
                  </button>
                  <button onClick={() => handleOpenLog48(activeChannelFilter)} className="text-xs bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/40 text-blue-700 dark:text-blue-300 py-1.5 px-3 rounded-md font-medium transition-colors w-fit flex items-center gap-1">

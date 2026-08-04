@@ -768,6 +768,11 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
                         .update({ status: finalStatus, assigned_node_id: NODE_ID, last_error: null })
                         .eq('id', instanceId);
                 }
+            } else {
+                // Se a sessão NÃO está autenticada em memória no servidor Node, o status NÃO pode ser 'connected' ou 'connected_local'
+                if (finalStatus === 'connected' || finalStatus === 'connected_local') {
+                    finalStatus = sessionManager.connectingState.has(instanceId) ? 'connecting' : 'offline';
+                }
             }
 
             const qrCode = data.whatsapp_instance_runtime?.qr_code || null;
@@ -776,6 +781,7 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
                 data: {
                     ...data,
                     status: finalStatus,
+                    is_authenticated: isAuthInMemory,
                     qr_code: qrCode,
                     qr_base64: qrCode,
                     pairing_code: pairingCode
