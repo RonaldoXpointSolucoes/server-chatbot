@@ -269,10 +269,7 @@ class SessionManager {
             );
 
             const { state, saveCreds } = await useSupabaseAuthState(tenantId, instanceId);
-            const wasAuthenticatedOnBoot = !!(state?.creds?.me?.id || state?.creds?.me?.jid);
-            if (wasAuthenticatedOnBoot) {
-                this.authenticatedSessions.add(instanceId);
-            }
+            // authenticatedSessions só deve ser populado quando o evento connection === 'open' for realmente emitido pelo Baileys com sucesso
             const { version, isLatest } = await fetchLatestBaileysVersion();
             
             console.log(`[SessionManager] Usando WA v${version.join('.')}, isLatest: ${isLatest}`);
@@ -485,20 +482,16 @@ class SessionManager {
                     const status = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.message || '';
 
-                    const meId = sock?.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
+                    const meId = sock?.user?.id;
                     const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
-                    if (hasValidMeId) {
-                        this.authenticatedSessions.add(instanceId);
-                    }
-                    const isPairingPendingSync = Boolean(this.pairingPendingSync.get(instanceId));
-                    const hasCredsInAuth = Boolean(state?.creds?.registered || state?.creds?.me?.id || state?.creds?.me?.jid);
-                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || wasAuthenticatedOnBoot || hasValidMeId || isPairingPendingSync || (hasCredsInAuth && Boolean(state?.creds?.me?.id || state?.creds?.me?.jid));
                     
-                    if (isFullyAuthenticated) {
+                    if (hasValidMeId) {
                         this.authenticatedSessions.add(instanceId);
                     } else {
                         this.authenticatedSessions.delete(instanceId);
                     }
+
+                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId);
 
                     const isQrTimeout = (status === 408 || reason.toLowerCase().includes('qr refs attempts ended')) && !isFullyAuthenticated;
 

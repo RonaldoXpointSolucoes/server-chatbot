@@ -746,6 +746,7 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
 
         const sock = sessionManager.getSocket(instanceId);
         const isAuthInMemory = sessionManager.authenticatedSessions.has(instanceId) &&
+            Boolean(sock?.user?.id) &&
             Boolean(sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
 
         const { data, error } = await supabase

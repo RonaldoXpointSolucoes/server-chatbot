@@ -546,7 +546,7 @@ export default function EvolutionModal({
           } else {
             setConnectionStatusMessage("Escaneie o QR Code no seu WhatsApp.");
           }
-        } else if (st === "connected" || st === "connected_local") {
+        } else if ((st === "connected" || st === "connected_local") && !qrBase64Ref.current) {
           handleSuccess();
         }
       })
@@ -581,7 +581,7 @@ export default function EvolutionModal({
                 setError(null);
               }
 
-              if (st?.data?.status === "connected" || st?.data?.status === "connected_local") {
+              if ((st?.data?.status === "connected" || st?.data?.status === "connected_local") && !runtimeQr) {
                 handleSuccess();
                 clearInterval(pollInterval);
               } else if (st?.data?.status === "connecting" || st?.data?.status === "qr_ready" || runtimeQr) {
