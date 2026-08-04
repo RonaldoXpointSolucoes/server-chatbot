@@ -332,8 +332,9 @@ class SessionManager {
                 // Só dispara a atualização de pareamento se a sessão NÃO estava autenticada no boot
                 // e ainda não está autenticada/conectada em memória
                 if (!wasAuthenticatedOnBoot) {
-                    if (meId) {
-                        const phone = String(meId).split('@')[0].split(':')[0];
+                    const actualMeId = sock.user?.id;
+                    if (actualMeId) {
+                        const phone = String(actualMeId).split('@')[0].split(':')[0];
                         console.log(`[SessionManager] Credenciais de pareamento atualizadas com telefone: ${phone}. Sincronizando com o banco e o frontend.`);
                         await retryWithBackoff(() => 
                             supabase.from('whatsapp_instances')

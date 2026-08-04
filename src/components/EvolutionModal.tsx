@@ -1193,9 +1193,7 @@ export default function EvolutionModal({
     if (
       pairingCode &&
       connectionStatusMessage &&
-      (connectionStatusMessage.includes("digitado") ||
-       connectionStatusMessage.includes("Cód") ||
-       connectionStatusMessage.includes("Cdigo"))
+      connectionStatusMessage.includes("digitado no celular")
     ) {
       setCodeEntered(true);
     }
