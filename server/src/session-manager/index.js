@@ -330,12 +330,13 @@ class SessionManager {
                     }
                 }
                 // Só dispara a atualização de pareamento se a sessão NÃO estava autenticada no boot
-                // e ainda não está autenticada/conectada em memória
+                // e as credenciais foram devidamente registradas (registered === true)
                 if (!wasAuthenticatedOnBoot) {
-                    const actualMeId = sock.user?.id;
-                    if (actualMeId) {
+                    const isRegistered = Boolean(state?.creds?.registered === true);
+                    const actualMeId = sock.user?.id || (isRegistered ? state?.creds?.me?.id : null);
+                    if (actualMeId && isRegistered) {
                         const phone = String(actualMeId).split('@')[0].split(':')[0];
-                        console.log(`[SessionManager] Credenciais de pareamento atualizadas com telefone: ${phone}. Sincronizando com o banco e o frontend.`);
+                        console.log(`[SessionManager] Credenciais de pareamento registradas no celular com telefone: ${phone}. Sincronizando com o banco e o frontend.`);
                         await retryWithBackoff(() => 
                             supabase.from('whatsapp_instances')
                                 .update({ phone_number: phone })
@@ -350,6 +351,7 @@ class SessionManager {
                         await eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
                             connection: 'connecting',
                             pairingSuccess: true,
+                            registered: true,
                             phone
                         });
                     }

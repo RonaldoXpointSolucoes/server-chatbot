@@ -568,7 +568,7 @@ export default function EvolutionModal({
         } else if (st === "connecting" || st === "qr_ready") {
           if (pairingCodeRef.current) {
             if (pairingCodeRef.current && !pairingLoadingRef.current) {
-              if (payload.payload?.pairingSuccess) {
+              if (payload.payload?.pairingSuccess && (payload.payload?.registered === true || payload.payload?.authenticated === true)) {
                 useDevStore.getState().addBreadcrumb(6, 7, `Código digitado no celular! Vinculando dispositivo...`, 'EvolutionModal');
                 setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
               } else {
