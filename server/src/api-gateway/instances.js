@@ -110,26 +110,25 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
         if (!phoneNumber) return res.status(400).json({ error: 'Número de telefone obrigatório' });
         const cleanPhone = phoneNumber.replace(/\D/g, '');
 
-        if (sessionManager.sessions.has(instanceId)) {
-            const sock = sessionManager.getSocket(instanceId);
-            const isConn = sessionManager.authenticatedSessions.has(instanceId) ||
-                (sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
+        const forceNew = req.query.force === 'true' || req.query.force_new === 'true' || req.body?.force === true || req.body?.force_new === true;
 
-            if (isConn && req.query.force !== 'true' && req.body?.force !== true) {
-                console.log(`[API] /pairing-code ignorado pois a instância ${instanceId} já está conectada.`);
-                return res.json({ 
-                    ok: true, 
-                    alreadyConnected: true, 
-                    message: 'A instância já está conectada ao WhatsApp.', 
-                    instanceId 
-                });
-            }
+        const sock = sessionManager.getSocket(instanceId);
+        const isAuthReal = sessionManager.authenticatedSessions.has(instanceId) && Boolean(sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
 
-            console.log(`[API] /pairing-code chamado, mas a sessão ${instanceId} já estava em memória. Forçando fechamento prévio.`);
-            await sessionManager.closeSession(instanceId);
-            if (sessionManager.connectingState.has(instanceId)) {
-                 sessionManager.connectingState.delete(instanceId);
-            }
+        if (isAuthReal && !forceNew) {
+            console.log(`[API] /pairing-code ignorado pois a instância ${instanceId} já está conectada legitimamente.`);
+            return res.json({ 
+                ok: true, 
+                alreadyConnected: true, 
+                message: 'A instância já está conectada ao WhatsApp.', 
+                instanceId 
+            });
+        }
+
+        console.log(`[API] /pairing-code: Encerrando e limpando sessão antiga para instância ${instanceId}...`);
+        await sessionManager.closeSession(instanceId);
+        if (sessionManager.connectingState.has(instanceId)) {
+             sessionManager.connectingState.delete(instanceId);
         }
 
         console.log(`[API] Limpando credenciais antigas para Pairing Code na instância ${instanceId}...`);

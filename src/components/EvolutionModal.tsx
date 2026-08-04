@@ -664,7 +664,7 @@ export default function EvolutionModal({
           'x-tenant-id': tenantId!,
           'apikey': apiKey || ''
         },
-        body: JSON.stringify({ phoneNumber: phoneToUse })
+        body: JSON.stringify({ phoneNumber: phoneToUse, force: true })
       });
       
       const data = await res.json();
