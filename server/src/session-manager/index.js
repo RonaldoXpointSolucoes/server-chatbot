@@ -136,10 +136,7 @@ class SessionManager {
                     const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
                     const activeStatus = isLocalDev ? 'connected_local' : 'connected';
 
-                    const authenticatedIds = activeIds.filter(id => {
-                        const sock = this.getSocket(id);
-                        return this.authenticatedSessions.has(id) || (sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
-                    });
+                    const authenticatedIds = activeIds.filter(id => this.authenticatedSessions.has(id) && !this.pairingPendingSync.get(id));
 
                     if (authenticatedIds.length > 0) {
                         await retryWithBackoff(() =>
@@ -151,6 +148,19 @@ class SessionManager {
                                     updated_at: new Date().toISOString()
                                 })
                                 .in('id', authenticatedIds)
+                                .eq('assigned_node_id', NODE_ID)
+                        );
+                    }
+
+                    const unauthenticatedIds = activeIds.filter(id => !authenticatedIds.includes(id));
+                    if (unauthenticatedIds.length > 0) {
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .update({
+                                    lease_until: new Date(Date.now() + 90000).toISOString(),
+                                    updated_at: new Date().toISOString()
+                                })
+                                .in('id', unauthenticatedIds)
                                 .eq('assigned_node_id', NODE_ID)
                         );
                     }
@@ -481,6 +491,7 @@ class SessionManager {
                         this.authenticatedSessions.add(instanceId);
                     }
                     const isPairingPendingSync = Boolean(this.pairingPendingSync.get(instanceId));
+                    const hasCredsInAuth = Boolean(state?.creds?.registered || state?.creds?.me?.id || state?.creds?.me?.jid);
                     const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || wasAuthenticatedOnBoot || hasValidMeId || isPairingPendingSync || (hasCredsInAuth && Boolean(state?.creds?.me?.id || state?.creds?.me?.jid));
                     
                     if (isFullyAuthenticated) {
