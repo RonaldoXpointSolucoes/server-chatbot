@@ -33,8 +33,7 @@ class QueueProcessor {
                 const { data, error } = await supabase
                     .from('whatsapp_instances')
                     .select('id, tenant_id')
-                    .eq('status', 'connected')
-                    .eq('assigned_node_id', NODE_ID);
+                    .in('status', ['connected', 'connected_local']);
                 if (error) throw error;
                 return data;
             });
@@ -115,9 +114,9 @@ class QueueProcessor {
                     attempts: msg.attempts 
                 }).catch(()=>{});
 
-                // 2. Obtém o socket da instância ativa (Importação dinâmica para evitar dependência circular)
-                const sock = sessionManager.getSocket(instanceId);
-                const isSocketReady = sock && (!sock.ws || sock.ws.readyState === 1);
+                // 2. Obtém o socket da instância ativa ou desperta a sessão se necessário (Importação dinâmica)
+                const sock = await sessionManager.getSocketOrWake(tenantId, instanceId);
+                const isSocketReady = sock && (!sock.ws || sock.ws.readyState === 1 || sock.ws.isOpen);
 
                 if (!sock || !isSocketReady) {
                     console.log(`[QueueProcessor] Socket da instância ${instanceId} está reconectando/offline. Reagendando mensagem ${msg.id} em 10s...`);
