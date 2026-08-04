@@ -317,9 +317,13 @@ class SessionManager {
 
             sock.ev.on('creds.update', async () => {
                 await saveCreds();
-                const isRegistered = Boolean(state?.creds?.registered === true);
-                const meId = sock.user?.id || (isRegistered ? (state?.creds?.me?.id || state?.creds?.me?.jid) : null);
-                if (isRegistered && meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net'))) {
+                const isPairingPending = Boolean(
+                    this.connectingState.get(instanceId)?.pairing ||
+                    state?.creds?.pairingCode ||
+                    (state?.creds?.me?.id && state?.creds?.registered === false)
+                );
+                const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
+                if (meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')) && !isPairingPending) {
                     this.authenticatedSessions.add(instanceId);
                     const phone = String(meId).split('@')[0].split(':')[0];
                     if (phone && phone.length >= 7) {
@@ -331,11 +335,11 @@ class SessionManager {
                     }
                 }
                 // Só dispara a atualização de pareamento se a sessão NÃO estava autenticada no boot
-                // e as credenciais foram devidamente registradas (registered === true)
+                // e concluiu a autenticação no celular
                 if (!wasAuthenticatedOnBoot) {
-                    const isRegistered = Boolean(state?.creds?.registered === true);
+                    const isRegistered = Boolean(state?.creds?.registered === true || (sock.user?.id && !isPairingPending));
                     const actualMeId = sock.user?.id || (isRegistered ? state?.creds?.me?.id : null);
-                    if (actualMeId && isRegistered) {
+                    if (actualMeId && isRegistered && !isPairingPending) {
                         const phone = String(actualMeId).split('@')[0].split(':')[0];
                         console.log(`[SessionManager] Credenciais de pareamento registradas no celular com telefone: ${phone}. Sincronizando com o banco e o frontend.`);
                         await retryWithBackoff(() => 
@@ -360,9 +364,14 @@ class SessionManager {
             });
 
             sock.ev.on('connection.update', async (update) => {
-                const isRegistered = Boolean(state?.creds?.registered === true);
-                const hasUser = Boolean(sock?.user?.id || (isRegistered && (state?.creds?.me?.id || state?.creds?.me?.jid)));
-                const isRealAuthConnection = update.connection === 'open' && isRegistered && hasUser;
+                const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
+                const isPairingPending = Boolean(
+                    this.connectingState.get(instanceId)?.pairing ||
+                    state?.creds?.pairingCode ||
+                    (state?.creds?.me?.id && state?.creds?.registered === false)
+                );
+                const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
+                const isRealAuthConnection = update.connection === 'open' && hasValidMeId && !isPairingPending;
 
                 if (isRealAuthConnection) {
                     this.authenticatedSessions.add(instanceId);
@@ -407,8 +416,8 @@ class SessionManager {
                     this.logConnectionEvent(tenantId, instanceId, 'connected', 'connected', null, null, null).catch(()=>{});
                 }
 
-                // Se update.connection for 'open' mas NÃO for uma conexão autenticada real (sessão não registrada),
-                // trata como 'connecting' para não enviar falso 'connected' ao Supabase/Realtime
+                // Se update.connection for 'open' mas a sessão estiver em pareamento pendente (QR/Pairing Code),
+                // trata como 'connecting' para o Realtime/Supabase
                 const safeUpdate = { ...update };
                 if (update.connection === 'open' && !isRealAuthConnection) {
                     safeUpdate.connection = 'connecting';

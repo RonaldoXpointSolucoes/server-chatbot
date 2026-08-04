@@ -200,4 +200,19 @@ Quando o token de segurança (`tctoken`) não estiver presente no cache de chave
 Para evitar que confirmações de entrega (ACKs) ou eventos de recebimento gerados por LIDs criem contatos duplicados no CRM:
 * Intercepte o processamento no `handleMessageUpsert` do `event-processor/index.js`. Se o JID da mensagem recebida contiver `@lid`, consulte o mapeamento reverso `lid-mapping-[LID]_reverse` no cache de chaves da instância para traduzir o JID de volta para o telefone correspondente antes de qualquer salvamento ou atualização no banco.
 
+---
+
+## 7. Regra Estrita de Validação de Estado de Sessões (Prevenção de Desconexão de Instâncias Ativas)
+
+Para evitar que a reconexão de uma instância derrube ou mude o estado de outras instâncias ativas para `conectando`/`offline`:
+
+1. **Diferenciação de Instâncias com Credenciais Válidas vs. Sessões de Pareamento Pendente**:
+   * Instâncias já pareadas e salvas no banco de dados carregam `state.creds.me` com o JID do WhatsApp. Em reinicializações ou deploys, `state.creds.registered` pode não vir explicitamente serializado como `true` nas tabelas do Supabase.
+   * **NUNCA** exija `state.creds.registered === true` como condição estrita para validar conexões existentes de instâncias salvas.
+2. **Definição de Conexão Autenticada Válida (`isRealAuthConnection`)**:
+   * Uma conexão é considerada validamente autenticada se `sock.user?.id` estiver populado **OU** se `state.creds.me.id` estiver presente **E** a sessão NÃO estiver em estado de solicitação de código de pareamento pendente (`isPairingPending === false`).
+   * A flag `isPairingPending` só é `true` quando a API `/pairing-code` está ativamente em execução ou quando `state.creds.registered === false` com `pairingCode` gerado.
+3. **Preservação de Instâncias em Execução**:
+   * O rebaixamento de eventos `connection: 'open'` para `connecting` só deve ocorrer se a instância estiver ativamente em fluxo de pareamento preliminar não concluído (`isPairingPending === true`). Instâncias normais em inicialização ou reconexão automática jamais devem ser rebaixadas.
+
 
