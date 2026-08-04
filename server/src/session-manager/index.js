@@ -481,18 +481,12 @@ class SessionManager {
                         this.authenticatedSessions.add(instanceId);
                     }
                     const isPairingPendingSync = Boolean(this.pairingPendingSync.get(instanceId));
-                    const hasCredsInAuth = Boolean(state?.creds?.registered || state?.creds?.me?.id || state?.creds?.me?.jid);
-
-                    const { data: dbInst } = await retryWithBackoff(() => 
-                        supabase.from('whatsapp_instances').select('phone_number').eq('id', instanceId).single()
-                    ).catch(() => ({ data: null }));
-
-                    const hasDbPhone = Boolean(dbInst?.phone_number && String(dbInst.phone_number).trim().length >= 7);
-
-                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || wasAuthenticatedOnBoot || hasValidMeId || isPairingPendingSync || hasCredsInAuth || hasDbPhone;
+                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || wasAuthenticatedOnBoot || hasValidMeId || isPairingPendingSync || (hasCredsInAuth && Boolean(state?.creds?.me?.id || state?.creds?.me?.jid));
                     
                     if (isFullyAuthenticated) {
                         this.authenticatedSessions.add(instanceId);
+                    } else {
+                        this.authenticatedSessions.delete(instanceId);
                     }
 
                     const isQrTimeout = (status === 408 || reason.toLowerCase().includes('qr refs attempts ended')) && !isFullyAuthenticated;

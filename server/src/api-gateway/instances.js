@@ -746,8 +746,8 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
         const { instanceId } = req.params;
 
         const sock = sessionManager.getSocket(instanceId);
-        const isAuthInMemory = sessionManager.authenticatedSessions.has(instanceId) ||
-            (sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
+        const isAuthInMemory = sessionManager.authenticatedSessions.has(instanceId) &&
+            Boolean(sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
 
         const { data, error } = await supabase
             .from('whatsapp_instances')
