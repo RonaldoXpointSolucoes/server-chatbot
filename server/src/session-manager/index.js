@@ -269,6 +269,7 @@ class SessionManager {
             );
 
             const { state, saveCreds } = await useSupabaseAuthState(tenantId, instanceId);
+            const wasAuthenticatedOnBoot = Boolean(state?.creds?.me?.id || state?.creds?.me?.jid);
             // authenticatedSessions só deve ser populado quando o evento connection === 'open' for realmente emitido pelo Baileys com sucesso
             const { version, isLatest } = await fetchLatestBaileysVersion();
             
