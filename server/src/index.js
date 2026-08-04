@@ -89,6 +89,84 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use(morgan('dev'));
 
+// Metadata da Versão do Baileys rodando no servidor
+let baileysVersion = '7.0.0-rc.9';
+let baileysDate = '29/07/2026';
+try {
+    const bPkgPath = path.join(__dirname, '../../baileys-core/package.json');
+    if (fs.existsSync(bPkgPath)) {
+        const bPkg = JSON.parse(fs.readFileSync(bPkgPath, 'utf8'));
+        if (bPkg.version) {
+            baileysVersion = bPkg.version;
+        }
+    }
+} catch (e) {}
+
+const baileysHistory = [
+    {
+        tag: 'v7.0.0-rc14',
+        version: '7.0.0-rc14',
+        name: 'v7.0.0-rc14 (Latest)',
+        date: '2026-08-01',
+        isLatest: true,
+        isCurrent: true,
+        repoUrl: 'https://github.com/WhiskeySockets/Baileys/releases/tag/v7.0.0-rc14',
+        commit: '7e7b075',
+        highlights: [
+            'fix: advertise WIN_HYBRID instead of retired WIN32 web sub-platform (substitui WIN32 aposentado pela Meta por WIN_HYBRID)',
+            'ci: pin npm to 11.x, last line that still runs on node 20',
+            'example: fix logging of contact upserts',
+            'WAProto: perf: optimize history sync memory and CPU usage (#2333)',
+            'Resiliência aprimorada no processamento de lotes de mensagens e Bad MAC retry'
+        ]
+    },
+    {
+        tag: 'v6.7.24',
+        version: '6.7.24',
+        name: 'v6.7.24 (2026-07-29)',
+        date: '2026-07-29',
+        isLatest: false,
+        isCurrent: false,
+        repoUrl: 'https://github.com/WhiskeySockets/Baileys/releases/tag/v6.7.24',
+        commit: 'e062994',
+        highlights: [
+            'Reverts: Revert "chore(release): v6.7.24 (c7a17f5)"',
+            'Estabilização de sinalização de chamadas de voz e vídeo (WaCalls)',
+            'Suporte a vCards interativos e múltiplos contatos (ContactMessage)',
+            'Tratamento aprimorado de tokens de segurança E2E (tctoken)'
+        ]
+    },
+    {
+        tag: 'v7.0.0-rc.12',
+        version: '7.0.0-rc.12',
+        name: 'v7.0.0-rc.12',
+        date: '2026-07-20',
+        isLatest: false,
+        isCurrent: false,
+        repoUrl: 'https://github.com/WhiskeySockets/Baileys',
+        commit: 'a12b34c',
+        highlights: [
+            'feat: Add support for pastParticipants in history sync (#2426)',
+            'Novo compilador estático Protobuf (WAProto/GenerateStatics.sh)',
+            'Otimização de memória RAM para instâncias multi-tenant'
+        ]
+    },
+    {
+        tag: 'v6.7.21',
+        version: '6.7.21',
+        name: 'v6.7.21',
+        date: '2026-07-10',
+        isLatest: false,
+        isCurrent: false,
+        repoUrl: 'https://github.com/WhiskeySockets/Baileys',
+        commit: 'f98e721',
+        highlights: [
+            'Correções de heartbeat e presenciais (composing/recording)',
+            'Mitigação de desconexões 408 (QR Code timeout)'
+        ]
+    }
+];
+
 app.get('/debug/healthz', async (req, res) => {
     // Tenta ler o historico de releases para o front (data e hora reais do banco se possível)
     let releaseHistory = [];
@@ -107,7 +185,10 @@ app.get('/debug/healthz', async (req, res) => {
         engineVersion: ENGINE_VERSION,
         compileDate: COMPILE_DATE,
         changelog: serverChangelog, // Retornando as novidades!
-        history: releaseHistory
+        history: releaseHistory,
+        baileysVersion,
+        baileysDate,
+        baileysHistory
     });
 });
 app.get('/debug/readyz', async (req, res) => {

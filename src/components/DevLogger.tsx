@@ -13,6 +13,7 @@ export default function DevLogger() {
   const [lastPing, setLastPing] = useState<Date | null>(null);
   const [serverMeta, setServerMeta] = useState<any>(null);
   const [showChangelog, setShowChangelog] = useState(false);
+  const [showBaileysModal, setShowBaileysModal] = useState(false);
   const [showEndpoints, setShowEndpoints] = useState(false);
   const [telemetry, setTelemetry] = useState<{ cpu: number, memory: number, uptime: number } | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
@@ -1776,8 +1777,19 @@ export default function DevLogger() {
                     <span>Compilação: {serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString('pt-BR') : '29/07/2026, 19:28:38'}</span>
                   </div>
 
-                  <div className="flex items-center gap-1.5 text-purple-300 bg-purple-500/15 px-2.5 py-1 rounded-xl border border-purple-500/30 text-[11px] font-bold" title="Resolução atual da tela">
-                    <AppWindow size={13} className="text-purple-400" />
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setShowBaileysModal(!showBaileysModal); }}
+                    className="flex items-center gap-1.5 text-purple-300 bg-purple-500/15 hover:bg-purple-500/25 px-2.5 py-1 rounded-xl border border-purple-500/30 text-[11px] font-bold transition-all cursor-pointer group active:scale-95"
+                    title="Clique para ver o Histórico de Versões e Releases do Baileys no GitHub"
+                  >
+                    <Smartphone size={13} className="text-purple-400 group-hover:scale-110 transition-transform" />
+                    <span>Baileys: {serverMeta?.baileysVersion || 'v7.0.0-rc.9'} ({serverMeta?.baileysDate || '29/07/2026'})</span>
+                    <ChevronDown size={11} className={`transition-transform duration-200 ${showBaileysModal ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  <div className="flex items-center gap-1.5 text-blue-300 bg-blue-500/15 px-2.5 py-1 rounded-xl border border-blue-500/30 text-[11px] font-bold" title="Resolução atual da tela">
+                    <AppWindow size={13} className="text-blue-400" />
                     <span>{windowSize.width}x{windowSize.height}</span>
                   </div>
 
@@ -1803,6 +1815,135 @@ export default function DevLogger() {
                   <Rocket size={13} className="text-emerald-400" /> Novidades <ChevronDown size={13} className={`transition-transform duration-200 ${showChangelog ? 'rotate-180' : ''}`}/>
                 </button>
               </div>
+
+              {/* Baileys Version History & GitHub Releases Dropdown */}
+              {showBaileysModal && (
+                <div className="mt-2 animate-in fade-in slide-in-from-top-2 relative overflow-hidden rounded-2xl bg-[#182229] border border-purple-500/30 shadow-2xl p-4 transition-all">
+                  <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-white/10">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center">
+                        <Smartphone size={18} className="text-purple-400 animate-pulse" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-white block text-xs">Baileys Core ({serverMeta?.baileysVersion || 'v7.0.0-rc.9'})</span>
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold uppercase">
+                            Em Uso no Servidor
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-[#8696a0]">
+                          Motor Socket TypeScript/JavaScript para WhatsApp Web — <a href="https://github.com/WhiskeySockets/Baileys" target="_blank" rel="noopener noreferrer" className="text-purple-300 hover:underline font-bold" onClick={(e)=>e.stopPropagation()}>WhiskeySockets/Baileys</a>
+                        </span>
+                      </div>
+                    </div>
+
+                    <a
+                      href="https://github.com/WhiskeySockets/Baileys/releases"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex items-center gap-1.5 text-xs text-purple-300 hover:text-white bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 px-3 py-1.5 rounded-xl font-bold transition-all shadow-sm shrink-0"
+                    >
+                      <span>Releases GitHub</span> <ExternalLink size={12} />
+                    </a>
+                  </div>
+
+                  {/* Lista de Releases e Histórico de Versões */}
+                  <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar">
+                    {(serverMeta?.baileysHistory || [
+                      {
+                        tag: 'v7.0.0-rc14',
+                        version: '7.0.0-rc14',
+                        name: 'v7.0.0-rc14 (Latest)',
+                        date: '2026-08-01',
+                        isLatest: true,
+                        isCurrent: true,
+                        commit: '7e7b075',
+                        highlights: [
+                          'fix: advertise WIN_HYBRID instead of retired WIN32 web sub-platform (substitui WIN32 aposentado pela Meta por WIN_HYBRID)',
+                          'ci: pin npm to 11.x, last line that still runs on node 20',
+                          'example: fix logging of contact upserts',
+                          'WAProto: perf: optimize history sync memory and CPU usage (#2333)',
+                          'Resiliência aprimorada no processamento de lotes de mensagens e Bad MAC retry'
+                        ]
+                      },
+                      {
+                        tag: 'v6.7.24',
+                        version: '6.7.24',
+                        name: 'v6.7.24 (2026-07-29)',
+                        date: '2026-07-29',
+                        isLatest: false,
+                        isCurrent: false,
+                        commit: 'e062994',
+                        highlights: [
+                          'Reverts: Revert "chore(release): v6.7.24 (c7a17f5)"',
+                          'Estabilização de sinalização de chamadas de voz e vídeo (WaCalls)',
+                          'Suporte a vCards interativos e múltiplos contatos (ContactMessage)',
+                          'Tratamento aprimorado de tokens de segurança E2E (tctoken)'
+                        ]
+                      },
+                      {
+                        tag: 'v7.0.0-rc.12',
+                        version: '7.0.0-rc.12',
+                        name: 'v7.0.0-rc.12',
+                        date: '2026-07-20',
+                        isLatest: false,
+                        isCurrent: false,
+                        commit: 'a12b34c',
+                        highlights: [
+                          'feat: Add support for pastParticipants in history sync (#2426)',
+                          'Novo compilador estático Protobuf (WAProto/GenerateStatics.sh)',
+                          'Otimização de memória RAM para instâncias multi-tenant'
+                        ]
+                      },
+                      {
+                        tag: 'v6.7.21',
+                        version: '6.7.21',
+                        name: 'v6.7.21',
+                        date: '2026-07-10',
+                        isLatest: false,
+                        isCurrent: false,
+                        commit: 'f98e721',
+                        highlights: [
+                          'Correções de heartbeat e presenciais (composing/recording)',
+                          'Mitigação de desconexões 408 (QR Code timeout)'
+                        ]
+                      }
+                    ]).map((rel: any, idx: number) => (
+                      <div key={idx} className="bg-[#111b21] p-3 rounded-2xl border border-white/10 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white text-xs font-mono">{rel.tag || rel.version}</span>
+                            {rel.isLatest && (
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-black uppercase">
+                                Latest
+                              </span>
+                            )}
+                            {rel.isCurrent && (
+                              <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[9px] font-black uppercase">
+                                Rodando no Nó
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] text-[#8696a0]">
+                            {rel.commit && <span className="font-mono bg-white/5 px-1.5 py-0.5 rounded">commit {rel.commit}</span>}
+                            <span>{rel.date}</span>
+                          </div>
+                        </div>
+
+                        <ul className="space-y-1.5 pt-1">
+                          {rel.highlights && rel.highlights.map((item: string, iIdx: number) => (
+                            <li key={iIdx} className="flex items-start gap-2 text-[11px] text-[#d1d7db] leading-relaxed">
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 mt-1.5 shrink-0" />
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Changelog Dropdown */}
               {showChangelog && (serverMeta.changelog || serverMeta.history) && (
