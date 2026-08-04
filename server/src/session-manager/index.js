@@ -133,15 +133,27 @@ class SessionManager {
             const activeIds = Array.from(this.sessions.keys());
             if (activeIds.length > 0) {
                 try {
-                    await retryWithBackoff(() =>
-                        supabase.from('whatsapp_instances')
-                            .update({
-                                lease_until: new Date(Date.now() + 90000).toISOString(),
-                                updated_at: new Date().toISOString()
-                            })
-                            .in('id', activeIds)
-                            .eq('assigned_node_id', NODE_ID)
-                    );
+                    const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
+                    const activeStatus = isLocalDev ? 'connected_local' : 'connected';
+
+                    const authenticatedIds = activeIds.filter(id => {
+                        const sock = this.getSocket(id);
+                        return this.authenticatedSessions.has(id) || (sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
+                    });
+
+                    if (authenticatedIds.length > 0) {
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .update({
+                                    status: activeStatus,
+                                    last_error: null,
+                                    lease_until: new Date(Date.now() + 90000).toISOString(),
+                                    updated_at: new Date().toISOString()
+                                })
+                                .in('id', authenticatedIds)
+                                .eq('assigned_node_id', NODE_ID)
+                        );
+                    }
                 } catch (e) {
                     console.error("[SessionManager/Heartbeat] Erro ao renovar leases:", e.message);
                 }

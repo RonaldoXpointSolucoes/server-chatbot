@@ -669,6 +669,20 @@ export default function EvolutionModal({
       
       const data = await res.json();
       if (res.ok && data.ok) {
+        if (data.alreadyConnected) {
+          logger.addLog({
+            type: 'info',
+            message: `Instância já conectada: ${data.message || 'A conexão com o WhatsApp já está ativa.'}`,
+            source: 'WhatsApp Pairing',
+            details: data
+          });
+          setEvolutionConnection(true, id);
+          useChatStore.getState().setInstanceStatus(id, 'connected');
+          setConnectionStatusMessage("Esta instância já está conectada ao WhatsApp.");
+          setLoading(false);
+          return;
+        }
+
         logger.addLog({
           type: 'success',
           message: `Passo 2/3: Código gerado com sucesso: "${data.code}"! Por favor, insira este código no celular.`,

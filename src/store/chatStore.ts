@@ -3706,36 +3706,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         if (tenantData.evolution_api_instance) {
-           const { fetchEngineStatus, createInstance } = await import('../services/whatsappEngine');
+           const { fetchEngineStatus } = await import('../services/whatsappEngine');
            
-           // Buscar DB state
-           const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key, status').eq('id', tenantData.evolution_api_instance).single();
+           const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key, status').eq('id', tenantData.evolution_api_instance).maybeSingle();
            const apiKey = instDataDB?.api_key || '';
            
-           if (instDataDB?.status === 'connected') {
-              try {
-                 await fetchEngineStatus(currentTenantId, tenantData.evolution_api_instance, apiKey);
+           try {
+              const res = await fetchEngineStatus(currentTenantId, tenantData.evolution_api_instance, apiKey);
+              const realSt = res?.data?.status || instDataDB?.status;
+              const isConnected = realSt === 'connected' || realSt === 'connected_local';
+
+              if (isConnected) {
                  set({ evolutionConnected: true, modalReason: null, isOffline: false });
+                 get().setInstanceStatus(tenantData.evolution_api_instance, realSt);
                  get().fetchInitialData();
-              } catch (e: any) {
-                 if (e.message === 'Failed to fetch' || e.message?.includes('network') || e.message?.includes('fetch') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-                   set({ isOffline: true });
-                 } else {
-                   set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
-                 }
-              }
-           } else if (instDataDB?.status === 'connecting') {
-             set({ evolutionConnected: false });
-           } else {
-              try {
-                 await fetchEngineStatus(currentTenantId, tenantData.evolution_api_instance, apiKey);
+              } else if (realSt === 'connecting') {
                  set({ evolutionConnected: false, isOffline: false });
-              } catch (e: any) {
-                 if (e.message === 'Failed to fetch' || e.message?.includes('network') || e.message?.includes('fetch') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-                   set({ isOffline: true });
-                 } else {
-                   set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
-                 }
+                 get().setInstanceStatus(tenantData.evolution_api_instance, 'connecting');
+              } else {
+                 set({ evolutionConnected: false, isOffline: false });
+                 get().setInstanceStatus(tenantData.evolution_api_instance, 'offline');
+              }
+           } catch (e: any) {
+              if (e.message === 'Failed to fetch' || e.message?.includes('network') || e.message?.includes('fetch') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+                set({ isOffline: true });
+              } else {
+                set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
               }
            }
         } else {

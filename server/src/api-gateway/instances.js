@@ -744,6 +744,11 @@ router.put('/instances/:instanceId/groups/:groupId/ephemeral', requireTenant, as
 router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
     try {
         const { instanceId } = req.params;
+
+        const sock = sessionManager.getSocket(instanceId);
+        const isAuthInMemory = sessionManager.authenticatedSessions.has(instanceId) ||
+            (sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
+
         const { data, error } = await supabase
             .from('whatsapp_instances')
             .select('status, phone_number, display_name, last_error, whatsapp_instance_runtime(qr_code, pairing_code)')
@@ -753,11 +758,24 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
         if (error) throw error;
         
         if (data) {
+            let finalStatus = data.status;
+            if (isAuthInMemory) {
+                const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
+                finalStatus = isLocalDev ? 'connected_local' : 'connected';
+
+                if (data.status !== finalStatus) {
+                    await supabase.from('whatsapp_instances')
+                        .update({ status: finalStatus, assigned_node_id: NODE_ID, last_error: null })
+                        .eq('id', instanceId);
+                }
+            }
+
             const qrCode = data.whatsapp_instance_runtime?.qr_code || null;
             const pairingCode = data.whatsapp_instance_runtime?.pairing_code || null;
             return res.json({
                 data: {
                     ...data,
+                    status: finalStatus,
                     qr_code: qrCode,
                     qr_base64: qrCode,
                     pairing_code: pairingCode
