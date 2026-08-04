@@ -319,8 +319,7 @@ class SessionManager {
                 await saveCreds();
                 const isPairingPending = Boolean(
                     this.connectingState.get(instanceId)?.pairing ||
-                    state?.creds?.pairingCode ||
-                    (state?.creds?.me?.id && state?.creds?.registered === false)
+                    state?.creds?.pairingCode
                 );
                 const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
                 if (meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')) && !isPairingPending) {
@@ -367,8 +366,7 @@ class SessionManager {
                 const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
                 const isPairingPending = Boolean(
                     this.connectingState.get(instanceId)?.pairing ||
-                    state?.creds?.pairingCode ||
-                    (state?.creds?.me?.id && state?.creds?.registered === false)
+                    state?.creds?.pairingCode
                 );
                 const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
                 const isRealAuthConnection = update.connection === 'open' && hasValidMeId && !isPairingPending;
