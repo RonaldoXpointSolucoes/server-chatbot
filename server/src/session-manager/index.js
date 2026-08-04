@@ -535,7 +535,25 @@ class SessionManager {
                         return;
                     }
 
-                    const isStreamOscillation = status === 515 || status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('connection terminated') || reason.toLowerCase().includes('connection lost');
+                    const isRestartRequired = status === 515 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('restart required');
+                    if (isRestartRequired) {
+                        console.log(`[SessionManager] WhatsApp solicitou reinicialização imediata (status 515 / restartRequired) para a instância ${instanceId}. Reconectando imediatamente com as novas chaves pareadas...`);
+                        try {
+                            if (sock?.ws) sock.ws.close();
+                            if (sock?.end) sock.end();
+                        } catch (e) {}
+                        this.sessions.delete(instanceId);
+                        setTimeout(() => {
+                            if (!this.sessions.has(instanceId)) {
+                                this.createSession(tenantId, instanceId).catch(err => {
+                                    console.error(`[SessionManager] Erro ao reconectar pós restartRequired para ${instanceId}:`, err.message);
+                                });
+                            }
+                        }, 500);
+                        return;
+                    }
+
+                    const isStreamOscillation = status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || reason.toLowerCase().includes('connection terminated') || reason.toLowerCase().includes('connection lost');
 
                     if (isStreamOscillation && isFullyAuthenticated) {
                         const attempts = (this.oscillationAttempts.get(instanceId) || 0) + 1;
