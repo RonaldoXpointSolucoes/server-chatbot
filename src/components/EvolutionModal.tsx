@@ -338,7 +338,12 @@ export default function EvolutionModal({
 
       await createInstance(cId, inst.id, targetInst.api_key || "", true);
     } catch (err: any) {
-      setError(err.message || "Erro ao conectar motor.");
+      const msg = err?.message || "";
+      if (msg === "Failed to fetch" || msg.includes("network") || msg.includes("fetch")) {
+        console.warn("[EvolutionModal] Oscilação temporária de rede ao acionar motor:", err);
+      } else {
+        setError(msg || "Erro ao conectar motor.");
+      }
       setLoading(false);
     }
   };
@@ -432,7 +437,12 @@ export default function EvolutionModal({
       setCustomSound("default");
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Erro de comunicação com o sistema.");
+      const msg = err?.message || "";
+      if (msg === "Failed to fetch" || msg.includes("network") || msg.includes("fetch")) {
+        console.warn("[EvolutionModal] Oscilação temporária de rede ao criar instância:", err);
+      } else {
+        setError(msg || "Erro de comunicação com o sistema.");
+      }
       setLoading(false);
     }
   };
@@ -568,6 +578,7 @@ export default function EvolutionModal({
               if (runtimeQr) {
                 setQrBase64(runtimeQr);
                 setLoading(false);
+                setError(null);
               }
 
               if (st?.data?.status === "connected" || st?.data?.status === "connected_local") {
@@ -709,11 +720,16 @@ export default function EvolutionModal({
       }
     } catch (err: any) {
       logger.addLog({
-        type: 'error',
-        message: `Falha de rede/comunicação com a Engine: ${err.message || err}`,
+        type: 'warn',
+        message: `Oscilação temporária de rede ao solicitar código de pareamento: ${err.message || err}`,
         source: 'WhatsApp Pairing'
       });
-      setError("Erro de comunicação com o servidor ao gerar o código.");
+      const msg = err?.message || "";
+      if (msg === "Failed to fetch" || msg.includes("network") || msg.includes("fetch")) {
+        // Ignora erro genérico de rede para não poluir a tela enquanto o QR Code carrega
+      } else {
+        setError("Erro de comunicação com o servidor ao gerar o código.");
+      }
     } finally {
       setPairingLoading(false);
     }
