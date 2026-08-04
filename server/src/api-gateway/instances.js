@@ -169,8 +169,18 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
         }
 
         console.log(`[API] Solicitando Pairing Code para o número ${cleanPhone}...`);
-        const code = await activeSock.requestPairingCode(cleanPhone);
+        let code = await activeSock.requestPairingCode(cleanPhone);
         
+        if (!code && activeSock.authState?.creds?.pairingCode) {
+            code = activeSock.authState.creds.pairingCode;
+        }
+
+        console.log(`[API] Pairing Code gerado para ${cleanPhone}:`, code);
+
+        if (!code) {
+            return res.status(500).json({ error: 'O motor Baileys não devolveu o código de pareamento. Tente novamente.' });
+        }
+
         res.json({ ok: true, code, instanceId });
     } catch (e) {
         console.error('[API/pairing-code] Erro ao gerar pairing code:', e.message);

@@ -99,11 +99,6 @@ export default function InstancesDashboard() {
   const handleTestWacallsConnection = async (sid: string, instName: string) => {
     const logger = useDevStore.getState();
     
-    // Força a exibição do painel do Dev Logger se ele não estiver visível
-    if (!logger.isVisible) {
-      logger.toggleVisibility();
-    }
-    
     logger.addLog({
       type: 'info',
       message: `==================================================`,
@@ -576,9 +571,6 @@ export default function InstancesDashboard() {
     }
     
     const logger = useDevStore.getState();
-    if (!logger.isVisible) {
-      logger.toggleVisibility();
-    }
     logger.setShowServerLogs(true);
     
     logger.addLog({

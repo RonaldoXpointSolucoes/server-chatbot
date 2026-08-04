@@ -698,9 +698,6 @@ export default function EvolutionModal({
     setQrBase64(null);
     
     const logger = useDevStore.getState();
-    if (!logger.isVisible) {
-      logger.toggleVisibility();
-    }
     logger.setShowServerLogs(true);
     
     logger.addLog({
@@ -757,20 +754,31 @@ export default function EvolutionModal({
           return;
         }
 
-        logger.addLog({
-          type: 'success',
-          message: `Passo 2/3: Código gerado com sucesso: "${data.code}"! Por favor, insira este código no celular.`,
-          source: 'WhatsApp Pairing',
-          details: data
-        });
-        setPairingCode(data.code);
-        // Salva o número associado no banco apenas se tiver um número válido
-        const cleanPhone = pairingPhone ? pairingPhone.replace(/\D/g, '') : '';
-        if (cleanPhone && cleanPhone.length >= 7) {
-          await supabase.from('whatsapp_instances').update({ phone_number: cleanPhone }).eq('id', id);
+        if (data.code) {
+          logger.addLog({
+            type: 'success',
+            message: `Passo 2/3: Código gerado com sucesso: "${data.code}"! Por favor, insira este código no celular.`,
+            source: 'WhatsApp Pairing',
+            details: data
+          });
+          setPairingCode(data.code);
+          // Salva o número associado no banco apenas se tiver um número válido
+          const cleanPhone = pairingPhone ? pairingPhone.replace(/\D/g, '') : '';
+          if (cleanPhone && cleanPhone.length >= 7) {
+            await supabase.from('whatsapp_instances').update({ phone_number: cleanPhone }).eq('id', id);
+          }
+          fetchExistingInstances();
+          pollPairingStatus(id, apiKey);
+        } else {
+          const errMsg = data.error || "O servidor não retornou um código de pareamento válido.";
+          logger.addLog({
+            type: 'error',
+            message: `Falha ao obter código: ${errMsg}`,
+            source: 'WhatsApp Pairing',
+            details: data
+          });
+          setError(errMsg);
         }
-        fetchExistingInstances();
-        pollPairingStatus(id, apiKey);
       } else {
         const errMsg = data.error || "Erro ao solicitar código de pareamento.";
         logger.addLog({
@@ -847,14 +855,16 @@ export default function EvolutionModal({
             message: `SUCESSO: Conexão com o WhatsApp estabelecida! O celular confirmou o pareamento.`,
             source: 'WhatsApp Pairing'
           });
+          setCodeEntered(true);
           handleSuccess();
           clearInterval(interval);
         } else if (data && data.status === 'connecting') {
           if (pairingCodeRef.current && !pairingLoadingRef.current) {
-            if (data.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC' || (data.last_error && data.last_error.includes('515'))) {
-              setConnectionStatusMessage("Pareamento confirmado no celular! Sincronizando chaves e estabilizando conexão com o WhatsApp...");
+            if (data.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC' || data.pairingSuccess || (data.last_error && data.last_error.includes('515'))) {
+              setCodeEntered(true);
+              setConnectionStatusMessage("Pareamento confirmado no celular! Sincronizando chaves e liberando acesso ao sistema...");
             } else {
-              setConnectionStatusMessage("Aguardando pareamento no celular...");
+              setConnectionStatusMessage("Aguardando você digitar o código no WhatsApp do celular...");
             }
           }
         }
@@ -865,7 +875,7 @@ export default function EvolutionModal({
           source: 'WhatsApp Pairing'
         });
       }
-    }, 3000);
+    }, 2000);
 
     setTimeout(() => { 
       clearInterval(interval);
@@ -976,9 +986,6 @@ export default function EvolutionModal({
 
   const handleTestWacallsConnection = async (sid: string, instName: string) => {
     const logger = useDevStore.getState();
-    if (!logger.isVisible) {
-      logger.toggleVisibility();
-    }
     
     logger.addLog({
       type: 'info',
