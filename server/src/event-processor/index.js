@@ -305,9 +305,10 @@ class EventProcessor {
     }
 
     async handleMessageUpsert(tenantId, instanceId, sock, m) {
-        if (!m.messages || m.messages.length === 0) return;
+        if (!m || !m.messages || !Array.isArray(m.messages) || m.messages.length === 0) return;
  
         for (const msg of m.messages) {
+            if (!msg || !msg.key) continue;
             const msgId = msg.key?.id;
             if (msgId) {
                 const safeInstanceId = instanceId || 'null_instance';

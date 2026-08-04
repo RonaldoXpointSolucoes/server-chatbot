@@ -117,8 +117,18 @@ class QueueProcessor {
 
                 // 2. Obtém o socket da instância ativa (Importação dinâmica para evitar dependência circular)
                 const sock = sessionManager.getSocket(instanceId);
-                if (!sock) {
-                    throw new Error('Sessão/Socket offline ou desconectado no SessionManager.');
+                const isSocketReady = sock && (!sock.ws || sock.ws.readyState === 1);
+
+                if (!sock || !isSocketReady) {
+                    console.log(`[QueueProcessor] Socket da instância ${instanceId} está reconectando/offline. Reagendando mensagem ${msg.id} em 10s...`);
+                    await supabase
+                        .from('wa_outgoing_messages')
+                        .update({ 
+                            status: 'pending',
+                            scheduled_at: new Date(Date.now() + 10000).toISOString()
+                        })
+                        .eq('id', msg.id);
+                    continue;
                 }
 
                 // 3. Rate Limit / Delay Humano Inteligente:
@@ -323,7 +333,7 @@ class QueueProcessor {
                 // 6. Sincroniza a mensagem enviada com a tabela clássica de mensagens para o Frontend refletir
                 try {
                     const { default: eventProcessor } = await import('../event-processor/index.js');
-                    if (eventProcessor && result) {
+                    if (eventProcessor && result && result.key) {
                         const mockUpsert = {
                             messages: [result],
                             type: 'append'
@@ -343,26 +353,34 @@ class QueueProcessor {
             } catch (err) {
                 if (msg) {
                     const errMsg = err?.message || err?.error || (typeof err === 'object' ? JSON.stringify(err) : String(err));
-                    console.error(`[QueueProcessor] Falha ao enviar mensagem ${msg.id}:`, errMsg);
+                    const isTransient = errMsg.includes('Connection Closed') || errMsg.includes('WebSocket') || errMsg.includes('restartRequired');
                     
+                    if (isTransient) {
+                        console.warn(`[QueueProcessor] Oscilação temporária ao enviar mensagem ${msg.id}: ${errMsg}. Reagendando em 15s...`);
+                    } else {
+                        console.error(`[QueueProcessor] Falha ao enviar mensagem ${msg.id}:`, errMsg);
+                    }
+
+                    const newAttempts = (msg.attempts || 0) + 1;
+                    const maxAttempts = 3;
+                    const newStatus = newAttempts >= maxAttempts ? 'failed' : 'pending';
+
                     try {
                         const { default: sManager } = await import('./index.js');
                         sManager.logMonitoringEvent(instanceId, 'message_sent_failed', { 
                             msg_id: msg.id, 
                             chat_jid: msg.chat_jid,
                             error: errMsg,
-                            attempts: msg.attempts
+                            attempts: newAttempts
                         }).catch(()=>{});
                     } catch (logErr) {}
-                    
-                    const maxAttempts = 3;
-                    const newStatus = msg.attempts + 1 >= maxAttempts ? 'failed' : 'pending';
 
                     await supabase
                         .from('wa_outgoing_messages')
                         .update({ 
                             status: newStatus,
-                            last_error: err.message || 'Erro de conexão/envio',
+                            attempts: newAttempts,
+                            last_error: errMsg || 'Erro de conexão/envio',
                             scheduled_at: new Date(Date.now() + 15000).toISOString() // Retenta em 15s
                         })
                         .eq('id', msg.id);
