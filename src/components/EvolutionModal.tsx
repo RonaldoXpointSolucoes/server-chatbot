@@ -173,6 +173,32 @@ export default function EvolutionModal({
   const pairingCodeRef = useRef(pairingCode);
   const pairingLoadingRef = useRef(pairingLoading);
 
+  const [breadcrumbsLogs, setBreadcrumbsLogs] = useState<any[]>([]);
+
+  useEffect(() => {
+    const unsub = useDevStore.subscribe((state) => {
+      const relevant = state.logs
+        .filter(l => l.source === 'EvolutionModal' || l.source === 'WhatsApp Pairing' || (l.message && l.message.includes('[MIGALHA')))
+        .slice(-8)
+        .map(l => {
+          const match = l.message.match(/\[MIGALHA (?:PASSO )?(\d+)\/(\d+)\]/i) || l.message.match(/Passo (\d+)\/(\d+)/i);
+          const step = match ? parseInt(match[1]) : 1;
+          const total = match ? parseInt(match[2]) : 7;
+          const cleanMsg = l.message.replace(/\[MIGALHA (?:PASSO )?\d+\/\d+\]\s*📍?\s*/gi, '').trim();
+          return {
+            id: l.id,
+            step,
+            total,
+            message: cleanMsg,
+            timestamp: new Date(l.timestamp).toLocaleTimeString(),
+            type: l.type
+          };
+        });
+      setBreadcrumbsLogs(relevant);
+    });
+    return () => unsub();
+  }, []);
+
   useEffect(() => {
     existingInstancesRef.current = existingInstances;
   }, [existingInstances]);
@@ -2751,6 +2777,48 @@ export default function EvolutionModal({
                           )}
                         </div>
                       )}
+                    </div>
+
+                    {/* Console da Trilha de Migalhas (Live Stream DevLogger) */}
+                    <div className="w-full max-w-sm bg-slate-950/90 dark:bg-[#0b141a]/95 backdrop-blur-xl border border-emerald-500/30 p-3.5 rounded-2xl text-left mb-3.5 shadow-[0_10px_30px_rgba(0,168,132,0.15)] relative overflow-hidden transition-all duration-300">
+                      <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                          </span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 font-mono flex items-center gap-1">
+                            <Activity size={12} className="animate-spin-once" /> Trilha de Migalhas ao Vivo (Handshake)
+                          </span>
+                        </div>
+                        <span className="text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                          {breadcrumbsLogs.length > 0 ? `Passo ${breadcrumbsLogs[breadcrumbsLogs.length - 1]?.step || 1}/7` : 'Aguardando Leitura'}
+                        </span>
+                      </div>
+
+                      <div className="max-h-36 overflow-y-auto styled-scrollbar font-mono text-[11px] space-y-1.5 pr-1">
+                        {breadcrumbsLogs.length === 0 ? (
+                          <div className="py-3 text-center text-slate-400 dark:text-slate-500 text-[10px] italic flex flex-col items-center justify-center gap-1.5">
+                            <Loader2 size={16} className="animate-spin text-[#00a884]" />
+                            <span>Escaneie o QR Code ou digite o código no celular para iniciar a trilha de migalhas...</span>
+                          </div>
+                        ) : (
+                          breadcrumbsLogs.map((log, idx) => (
+                            <div 
+                              key={log.id || idx}
+                              className={`flex flex-col p-2 rounded-xl border text-slate-200 animate-in fade-in slide-in-from-bottom-2 duration-300 ${log.type === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-300' : log.step >= 6 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-white/5 border-white/10 text-slate-200'}`}
+                            >
+                              <div className="flex items-center justify-between text-[9px] text-slate-400 mb-0.5">
+                                <span className="text-emerald-400 font-bold font-mono">Passo {log.step}/{log.total}</span>
+                                <span className="text-[9px] opacity-75 font-mono">{log.timestamp}</span>
+                              </div>
+                              <p className="text-[11px] font-medium leading-snug font-mono flex items-start gap-1">
+                                <span>{log.message}</span>
+                              </p>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
 
                     {/* Caixa de Instruções "Como conectar:" */}
