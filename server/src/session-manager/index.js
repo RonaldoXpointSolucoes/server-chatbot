@@ -360,7 +360,11 @@ class SessionManager {
             });
 
             sock.ev.on('connection.update', async (update) => {
-                if (update.connection === 'open') {
+                const isRegistered = Boolean(state?.creds?.registered === true);
+                const hasUser = Boolean(sock?.user?.id || (isRegistered && (state?.creds?.me?.id || state?.creds?.me?.jid)));
+                const isRealAuthConnection = update.connection === 'open' && isRegistered && hasUser;
+
+                if (isRealAuthConnection) {
                     this.authenticatedSessions.add(instanceId);
                     this.pairingPendingSync.delete(instanceId);
                     this.oscillationAttempts.delete(instanceId);
@@ -403,10 +407,17 @@ class SessionManager {
                     this.logConnectionEvent(tenantId, instanceId, 'connected', 'connected', null, null, null).catch(()=>{});
                 }
 
-                await eventProcessor.handleConnectionUpdate(tenantId, instanceId, update);
+                // Se update.connection for 'open' mas NÃO for uma conexão autenticada real (sessão não registrada),
+                // trata como 'connecting' para não enviar falso 'connected' ao Supabase/Realtime
+                const safeUpdate = { ...update };
+                if (update.connection === 'open' && !isRealAuthConnection) {
+                    safeUpdate.connection = 'connecting';
+                }
+
+                await eventProcessor.handleConnectionUpdate(tenantId, instanceId, safeUpdate);
 
                 const { connection, lastDisconnect } = update;
-                if (connection === 'open') {
+                if (isRealAuthConnection) {
                     this.startWatchdog(tenantId, instanceId, sock);
                     
                     // Proteção contra duplicação de chip (mesmo número em múltiplas instâncias)
