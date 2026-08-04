@@ -202,17 +202,46 @@ Para evitar que confirmações de entrega (ACKs) ou eventos de recebimento gerad
 
 ---
 
-## 7. Regra Estrita de Validação de Estado de Sessões (Prevenção de Desconexão de Instâncias Ativas)
+## 7. Regra Estrita de Validação de Estado de Sessões e Protocolo de Pareamento (Prevenção de Trava de Conexão e Desconexão de Instâncias Ativas)
 
-Para evitar que a reconexão de uma instância derrube ou mude o estado de outras instâncias ativas para `conectando`/`offline`:
+### A. O Problema Anatômico (A Armadilha do `pairingCode` Persistido)
+1. **Onde ocorria a falha**:
+   Ao solicitar um Código de Pareamento de 8 dígitos (ex: `SL54X6MD`), a biblioteca Baileys grava a propriedade `pairingCode` no objeto de credenciais em memória (`state.creds.pairingCode`).
+2. **Ciclo de Persistência Supabase**:
+   O `SessionManager` salva ciclicamente esse estado de credenciais na tabela `wa_auth_credentials` do Supabase via `saveCreds()`.
+3. **A Armadilha do Reinício**:
+   Mesmo após o usuário digitar o código no celular e o WhatsApp vincular o dispositivo, a propriedade `state.creds.pairingCode` permanecia gravada no JSON salvo no Supabase.
+   Quando a instância reiniciava (ou ao reavaliar eventos `connection.update`), o código verificava:
+   `isPairingPending = Boolean(state?.creds?.pairingCode)`
+   Como a propriedade `pairingCode` ainda existia no JSON recarregado do banco, o sistema classificava a conexão como **"Pareamento Pendente" perpetuamente**, mesmo com a conexão no estado `open` e com o WhatsApp do celular já vinculado.
+4. **Impacto em Cascata (Desconexão de Instâncias Ativas)**:
+   Esse bloqueio falso forçava a sessão a ser mascarada como `connecting` para o Supabase, forçando os sockets a tentarem reconectar continuamente e derrubando sessões ativas com erro de colisão (código 409).
 
-1. **Diferenciação de Instâncias com Credenciais Válidas vs. Sessões de Pareamento Pendente**:
-   * Instâncias já pareadas e salvas no banco de dados carregam `state.creds.me` com o JID do WhatsApp. Em reinicializações ou deploys, `state.creds.registered` pode não vir explicitamente serializado como `true` nas tabelas do Supabase.
-   * **NUNCA** exija `state.creds.registered === true` como condição estrita para validar conexões existentes de instâncias salvas.
-2. **Definição de Conexão Autenticada Válida (`isRealAuthConnection`)**:
-   * Uma conexão é considerada validamente autenticada se `sock.user?.id` estiver populado **OU** se `state.creds.me.id` estiver presente **E** a sessão NÃO estiver em estado de solicitação de código de pareamento pendente (`isPairingPending === false`).
-   * A flag `isPairingPending` só é `true` quando a API `/pairing-code` está ativamente em execução ou quando `state.creds.registered === false` com `pairingCode` gerado.
-3. **Preservação de Instâncias em Execução**:
-   * O rebaixamento de eventos `connection: 'open'` para `connecting` só deve ocorrer se a instância estiver ativamente em fluxo de pareamento preliminar não concluído (`isPairingPending === true`). Instâncias normais em inicialização ou reconexão automática jamais devem ser rebaixadas.
+---
+
+### B. Regra Definitiva de Resolução do Fluxo de Autenticação (`SessionManager`)
+1. **Determinação Absoluta da Identidade de Usuário (`hasValidMeId`)**:
+   Uma sessão já possui identidade WhatsApp válida se `sock.user?.id` ou `state.creds.me.id` contiver uma string de telefone válida (comprimento > 5 ou finalizada em `@s.whatsapp.net`).
+2. **Regra Estrita de `isPairingPending`**:
+   Uma sessão **NUNCA** pode ser tratada como "Pareamento Pendente" se ela já possui um `hasValidMeId` verdadeiro.
+   ```javascript
+   const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
+   const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
+
+   // Regra de Ouro: Só há pareamento pendente se AINDA NÃO EXISTIR um JID de usuário válido!
+   const isPairingPending = !hasValidMeId && Boolean(state?.creds?.pairingCode);
+   ```
+3. **Limpeza Mandatória do Cache de Credenciais**:
+   Assim que `hasValidMeId === true`, o `pairingCode` deve ser sumariamente excluído do objeto de credenciais em memória (`delete state.creds.pairingCode`) antes de salvar no Supabase, garantindo que o banco de dados seja limpo.
+4. **NUNCA Exigir `registered === true` Estrito**:
+   No Supabase, o campo `registered` em `wa_auth_credentials` frequentemente não é gravado explicitamente como booleano `true`. Exigir `registered === true` provoca falsos negativos. A presença de `hasValidMeId` é a autoridade máxima de autenticação.
+
+---
+
+### C. Check-list Rápido de Diagnóstico para Agentes Futuros (Se o Celular Mostrar Conectado mas o Sistema Ficar Preso em `Conectando`)
+1. Inspecione `server/src/session-manager/index.js` nos ouvintes `creds.update` e `connection.update`.
+2. Certifique-se de que `isPairingPending` dependa estritamente de `!hasValidMeId`.
+3. Verifique se `isRealAuthConnection` avalia `update.connection === 'open' && hasValidMeId && !isPairingPending`.
+4. Garanta que o incremento de versão no `server/package.json` respeite a regra de dígito único (`0` a `9` por campo) antes de enviar para o Coolify via `Deploy Server`.
 
 
