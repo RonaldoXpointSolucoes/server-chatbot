@@ -317,13 +317,11 @@ class SessionManager {
 
             sock.ev.on('creds.update', async () => {
                 await saveCreds();
-                const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
+                const isPairingPending = Boolean(state?.creds?.pairingCode && state?.creds?.registered !== true && !sock?.user?.id);
+                const meId = sock.user?.id || (!isPairingPending ? (state?.creds?.me?.id || state?.creds?.me?.jid) : null);
                 const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
                 
-                // Uma sessão só está em pareamento pendente se AINDA NÃO possui meId/JID válido de usuário do WhatsApp
-                const isPairingPending = !hasValidMeId && Boolean(state?.creds?.pairingCode);
-
-                if (hasValidMeId && state?.creds?.pairingCode) {
+                if ((state?.creds?.registered === true || sock?.user?.id) && state?.creds?.pairingCode) {
                     delete state.creds.pairingCode;
                 }
 
@@ -341,7 +339,7 @@ class SessionManager {
                 // Só dispara a atualização de pareamento se a sessão NÃO estava autenticada no boot
                 // e concluiu a autenticação no celular
                 if (!wasAuthenticatedOnBoot) {
-                    const isRegistered = Boolean(hasValidMeId || state?.creds?.registered === true);
+                    const isRegistered = Boolean(sock?.user?.id || (hasValidMeId && state?.creds?.registered === true));
                     const actualMeId = sock.user?.id || (isRegistered ? state?.creds?.me?.id : null);
                     if (actualMeId && isRegistered && !isPairingPending) {
                         const phone = String(actualMeId).split('@')[0].split(':')[0];
@@ -368,13 +366,11 @@ class SessionManager {
             });
 
             sock.ev.on('connection.update', async (update) => {
-                const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
+                const isPairingPending = Boolean(state?.creds?.pairingCode && state?.creds?.registered !== true && !sock?.user?.id);
+                const meId = sock.user?.id || (!isPairingPending ? (state?.creds?.me?.id || state?.creds?.me?.jid) : null);
                 const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
                 
-                // Uma sessão só está em pareamento pendente se AINDA NÃO possui meId/JID válido
-                const isPairingPending = !hasValidMeId && Boolean(state?.creds?.pairingCode);
-
-                if (hasValidMeId && state?.creds?.pairingCode) {
+                if (update.connection === 'open' && (state?.creds?.registered === true || sock?.user?.id) && state?.creds?.pairingCode) {
                     delete state.creds.pairingCode;
                 }
 
