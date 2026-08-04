@@ -317,8 +317,9 @@ class SessionManager {
 
             sock.ev.on('creds.update', async () => {
                 await saveCreds();
-                const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
-                if (meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net'))) {
+                const isRegistered = Boolean(state?.creds?.registered === true);
+                const meId = sock.user?.id || (isRegistered ? (state?.creds?.me?.id || state?.creds?.me?.jid) : null);
+                if (isRegistered && meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net'))) {
                     this.authenticatedSessions.add(instanceId);
                     const phone = String(meId).split('@')[0].split(':')[0];
                     if (phone && phone.length >= 7) {
