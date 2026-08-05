@@ -119,10 +119,8 @@ func (m *SessionManager) Restore(ctx context.Context) error {
 	return nil
 }
 
-func (m *SessionManager) Create(id string, name string) (string, error) {
-	if id == "" {
-		id = newSessionID()
-	}
+func (m *SessionManager) Create(name string) (string, error) {
+	id := newSessionID()
 	if err := m.store.insert(m.appCtx, id, name); err != nil {
 		return "", err
 	}

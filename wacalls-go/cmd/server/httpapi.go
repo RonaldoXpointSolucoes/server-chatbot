@@ -83,15 +83,13 @@ func (s *server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
-		ID   string `json:"id"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
 		name = "Session"
 	}
-	idVal := strings.TrimSpace(body.ID)
-	id, err := s.sessions.Create(idVal, name)
+	id, err := s.sessions.Create(name)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
