@@ -1626,16 +1626,16 @@ export default function DevLogger() {
         </button>
       )}
 
-      <div className={`fixed z-[9999] right-2 sm:right-6 transition-all duration-300 ease-out ${isVisible ? 'top-2 sm:top-3' : '-top-[750px]'}`}>
-        <div className="bg-[#070c10]/95 backdrop-blur-3xl border border-white/10 rounded-[28px] shadow-[0_25px_70px_rgba(0,0,0,0.95)] w-[94vw] sm:w-[660px] flex flex-col max-h-[90vh] overflow-hidden text-[#d1d7db] transition-all duration-300 relative group/card border-t border-white/20">
+      <div className={`fixed z-[9999] right-2 sm:right-6 transition-all duration-300 ease-out ${isVisible ? 'top-2 sm:top-3 bottom-2 sm:bottom-3 flex flex-col pointer-events-auto' : '-top-[1000px] pointer-events-none'}`}>
+        <div className="bg-[#070c10]/95 backdrop-blur-3xl border border-white/10 rounded-[28px] shadow-[0_25px_70px_rgba(0,0,0,0.95)] w-[94vw] sm:w-[660px] flex flex-col max-h-full overflow-hidden text-[#d1d7db] transition-all duration-300 relative group/card border-t border-white/20 my-auto">
           
           {/* Brilho Radial de Fundo Neon */}
           <div className="absolute -top-24 -left-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
 
-          {/* Header Superior Neon Glassmorphism */}
+          {/* Header Superior Neon Glassmorphism (Fixo & Sticky) */}
           <div 
-            className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-white/10 cursor-pointer bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/15 hover:to-indigo-500/15 transition-all select-none relative z-10 gap-2 flex-wrap sm:flex-nowrap"
+            className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-white/10 cursor-pointer bg-[#070c10] bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/15 hover:to-indigo-500/15 transition-all select-none relative z-30 shrink-0 sticky top-0 gap-2 flex-wrap sm:flex-nowrap"
             onClick={toggleVisibility}
           >
             <div className="flex items-center gap-2.5 min-w-0">
@@ -1779,7 +1779,7 @@ export default function DevLogger() {
 
           {/* Cockpit de Telemetria e Metadados do Servidor */}
           {isVisible && serverMeta && (
-            <div className="bg-[#0e161c]/90 border-b border-white/10 p-2.5 px-4 flex flex-col gap-2 text-xs font-mono transition-all relative z-10">
+            <div className="bg-[#0e161c]/90 border-b border-white/10 p-2.5 px-4 flex flex-col gap-2 text-xs font-mono transition-all relative z-10 shrink-0 max-h-[35vh] overflow-y-auto custom-scrollbar">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar max-w-full py-1 whitespace-nowrap scroll-smooth">
                   <div className="flex items-center gap-1.5 text-indigo-300 bg-indigo-500/10 px-2.5 py-1 rounded-xl border border-indigo-500/25 text-[10px] font-bold shrink-0">
@@ -2071,7 +2071,7 @@ export default function DevLogger() {
           {isVisible && (
             showTestPanel ? (
               /* Antigravity Application Simulator & Test Suite (ASTS) */
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs custom-scrollbar min-h-[300px] max-h-[500px] bg-[#070c10] transition-all duration-300 relative rounded-b-[28px]">
+              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs custom-scrollbar min-h-[180px] bg-[#070c10] transition-all duration-300 relative rounded-b-[28px]">
                 {/* Cabeçalho do Painel ASTS */}
                 <div className="flex items-center justify-between pb-3 border-b border-white/10 relative z-10 shrink-0">
                   <div className="flex items-center gap-2.5">
@@ -2223,7 +2223,7 @@ export default function DevLogger() {
               </div>
             ) : activeTab === 'gastrofood' ? (
               /* Gastrofood API Logs Monitor */
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 font-mono text-xs custom-scrollbar min-h-[250px] max-h-[500px] bg-[#070c10] relative rounded-b-[28px] select-none">
+              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 font-mono text-xs custom-scrollbar min-h-[180px] bg-[#070c10] relative rounded-b-[28px] select-none">
                 {groupedGastrofoodLogs.length === 0 ? (
                   <div className="m-auto py-12 px-6 flex flex-col items-center justify-center text-center space-y-4 select-none animate-in fade-in zoom-in-95 duration-300 relative">
                     <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-blue-500/20 via-indigo-500/10 to-purple-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shadow-2xl shadow-blue-500/20 relative group">
@@ -2287,7 +2287,7 @@ export default function DevLogger() {
               </div>
             ) : (
               /* Console & Server Logs - COM SUPORTE A AGRUPAMENTO DE ERROS IDENTICOS E FILTRAGEM DE NOVO PADRÃO */
-              <div className="flex-1 overflow-y-auto flex flex-col font-mono text-xs custom-scrollbar min-h-[300px] max-h-[500px] bg-[#070c10] rounded-b-[28px]">
+              <div className="flex-1 overflow-y-auto flex flex-col font-mono text-xs custom-scrollbar min-h-[180px] bg-[#070c10] rounded-b-[28px]">
                 
                 {/* Sub-Barra de Controles: Agrupamento, Filtros de Origem e Disparo de Testes */}
                 <div className="flex items-center justify-between gap-2 p-3 px-4 bg-[#0d151b] border-b border-white/10 text-xs font-mono select-none flex-wrap sticky top-0 z-20 backdrop-blur-xl">
