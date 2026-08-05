@@ -258,10 +258,13 @@ class SessionManager {
                 throw ipErr;
             }
 
-            // 3. Assume o lease/lock da sessão com 90 segundos de TTL
+            // 3. Assume o lease/lock da sessão com 90 segundos de TTL (preservando o status connected se já estiver ativo)
+            const isAlreadyActive = currentInstance?.status === 'connected' || currentInstance?.status === 'connected_local';
+            const nextStatus = isAlreadyActive ? currentInstance.status : 'connecting';
+
             await retryWithBackoff(() =>
                 supabase.from('whatsapp_instances').update({
-                    status: 'connecting',
+                    status: nextStatus,
                     assigned_node_id: NODE_ID,
                     lease_until: new Date(Date.now() + 90000).toISOString(),
                     updated_at: new Date().toISOString()
@@ -418,6 +421,12 @@ class SessionManager {
                 const safeUpdate = { ...update };
                 if (update.connection === 'open' && !isRealAuthConnection) {
                     safeUpdate.connection = 'connecting';
+                }
+
+                // Se a instância já possui credenciais de usuário válidas (aparelho pareado),
+                // suprime qualquer evento parasita de QR Code emitido antes do handshake completo
+                if (hasValidMeId && safeUpdate.qr) {
+                    delete safeUpdate.qr;
                 }
 
                 await eventProcessor.handleConnectionUpdate(tenantId, instanceId, safeUpdate);
