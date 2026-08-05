@@ -1066,14 +1066,26 @@ export const makeChatsSocket = (config: SocketConfig) => {
 	const executeInitQueries = async () => {
 		await Promise.all([
 			fetchProps().catch(err => {
-				if (err && err.data === 400) {
-					logger.debug('fetch props returned 400 (expected on some accounts), ignoring')
+				if (err && (err.data === 400 || err.output?.statusCode === 428 || err.message?.includes('Connection Closed'))) {
+					logger.debug('fetch props returned 400 or connection closed, ignoring')
 				} else {
 					logger.warn({ err }, 'failed to fetch props')
 				}
 			}),
-			fetchBlocklist().catch(err => logger.warn({ err }, 'failed to fetch blocklist')),
-			fetchPrivacySettings().catch(err => logger.warn({ err }, 'failed to fetch privacy settings'))
+			fetchBlocklist().catch(err => {
+				if (err && (err.output?.statusCode === 428 || err.message?.includes('Connection Closed'))) {
+					logger.debug('fetch blocklist connection closed, ignoring')
+				} else {
+					logger.warn({ err }, 'failed to fetch blocklist')
+				}
+			}),
+			fetchPrivacySettings().catch(err => {
+				if (err && (err.output?.statusCode === 428 || err.message?.includes('Connection Closed'))) {
+					logger.debug('fetch privacy settings connection closed, ignoring')
+				} else {
+					logger.warn({ err }, 'failed to fetch privacy settings')
+				}
+			})
 		])
 	}
 
@@ -1193,9 +1205,13 @@ export const makeChatsSocket = (config: SocketConfig) => {
 				executeInitQueries().catch(error => onUnexpectedError(error, 'init queries'))
 			}
 
-			sendPresenceUpdate(markOnlineOnConnect ? 'available' : 'unavailable').catch(error =>
-				onUnexpectedError(error, 'presence update requests')
-			)
+			sendPresenceUpdate(markOnlineOnConnect ? 'available' : 'unavailable').catch(error => {
+				if (error && (error.output?.statusCode === 428 || error.message?.includes('Connection Closed'))) {
+					logger.debug('presence update skipped because connection closed')
+				} else {
+					onUnexpectedError(error, 'presence update requests')
+				}
+			})
 		}
 
 		if (!receivedPendingNotifications || syncState !== SyncState.Connecting) {

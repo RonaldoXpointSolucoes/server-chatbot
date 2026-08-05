@@ -117,9 +117,10 @@ class QueueProcessor {
                 // 2. Obtém o socket da instância ativa ou desperta a sessão se necessário (Importação dinâmica)
                 const sock = await sessionManager.getSocketOrWake(tenantId, instanceId);
                 const isSocketReady = sock && (!sock.ws || sock.ws.readyState === 1 || sock.ws.isOpen);
+                const meId = sock?.user?.id || sock?.authState?.creds?.me?.id;
 
-                if (!sock || !isSocketReady) {
-                    console.log(`[QueueProcessor] Socket da instância ${instanceId} está reconectando/offline. Reagendando mensagem ${msg.id} em 10s...`);
+                if (!sock || !isSocketReady || !meId) {
+                    console.log(`[QueueProcessor] Socket/Autenticação da instância ${instanceId} está indisponível/reconectando. Reagendando mensagem ${msg.id} em 10s...`);
                     await supabase
                         .from('wa_outgoing_messages')
                         .update({ 
