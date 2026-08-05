@@ -513,16 +513,14 @@ class SessionManager {
                     const status = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.message || '';
 
-                    const meId = sock?.user?.id;
+                    const meId = sock?.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
                     const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
                     
                     if (hasValidMeId) {
                         this.authenticatedSessions.add(instanceId);
-                    } else {
-                        this.authenticatedSessions.delete(instanceId);
                     }
 
-                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId);
+                    const isFullyAuthenticated = this.authenticatedSessions.has(instanceId) || hasValidMeId;
 
                     const isQrTimeout = (status === 408 || reason.toLowerCase().includes('qr refs attempts ended')) && !isFullyAuthenticated;
 
@@ -543,9 +541,9 @@ class SessionManager {
                         return;
                     }
 
-                    const isRestartRequired = (status === 515 || status === 428 || status === 1006 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('restart required') || reason.toLowerCase().includes('precondition required') || reason.toLowerCase().includes('connection closed')) && isFullyAuthenticated;
+                    const isRestartRequired = (status === 515 || status === 428 || status === 1006 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('restart required') || reason.toLowerCase().includes('precondition required') || reason.toLowerCase().includes('connection closed') || reason.toLowerCase().includes('connection terminated') || reason.toLowerCase().includes('stream errored')) && isFullyAuthenticated;
                     if (isRestartRequired) {
-                        console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização pós-pareamento (status ${status} / ${reason}) para a instância ${instanceId}. Reconectando imediatamente em 1s com as novas chaves pareadas...`);
+                        console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização pós-pareamento (status ${status} / ${reason}) para a instância ${instanceId}. Reconectando imediatamente em 500ms com as novas chaves pareadas...`);
                         try {
                             if (sock?.ws) sock.ws.close();
                             if (sock?.end) sock.end();
@@ -557,7 +555,7 @@ class SessionManager {
                                     console.error(`[SessionManager] Erro ao reconectar pós restartRequired/428 para ${instanceId}:`, err.message);
                                 });
                             }
-                        }, 1000);
+                        }, 500);
                         return;
                     }
 
