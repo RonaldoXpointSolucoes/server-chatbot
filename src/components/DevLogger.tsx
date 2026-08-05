@@ -1626,8 +1626,8 @@ export default function DevLogger() {
         </button>
       )}
 
-      <div className={`fixed z-[9999] right-2 sm:right-6 transition-all duration-300 ease-out ${isVisible ? 'top-3 sm:top-4' : '-top-[750px]'}`}>
-        <div className="bg-[#070c10]/95 backdrop-blur-3xl border border-white/10 rounded-[28px] shadow-[0_25px_70px_rgba(0,0,0,0.95)] w-[94vw] sm:w-[640px] flex flex-col max-h-[88vh] overflow-hidden text-[#d1d7db] transition-all duration-300 relative group/card border-t border-white/20">
+      <div className={`fixed z-[9999] right-2 sm:right-6 transition-all duration-300 ease-out ${isVisible ? 'top-2 sm:top-3' : '-top-[750px]'}`}>
+        <div className="bg-[#070c10]/95 backdrop-blur-3xl border border-white/10 rounded-[28px] shadow-[0_25px_70px_rgba(0,0,0,0.95)] w-[94vw] sm:w-[660px] flex flex-col max-h-[90vh] overflow-hidden text-[#d1d7db] transition-all duration-300 relative group/card border-t border-white/20">
           
           {/* Brilho Radial de Fundo Neon */}
           <div className="absolute -top-24 -left-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -1635,19 +1635,19 @@ export default function DevLogger() {
 
           {/* Header Superior Neon Glassmorphism */}
           <div 
-            className="flex items-center justify-between px-5 py-3.5 border-b border-white/10 cursor-pointer bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/15 hover:to-indigo-500/15 transition-all select-none relative z-10"
+            className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-white/10 cursor-pointer bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/15 hover:to-indigo-500/15 transition-all select-none relative z-10 gap-2 flex-wrap sm:flex-nowrap"
             onClick={toggleVisibility}
           >
-            <div className="flex items-center gap-3">
-              <div className="relative flex items-center justify-center">
-                <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-emerald-300 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative flex items-center justify-center shrink-0">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-emerald-300 flex items-center justify-center shadow-lg shadow-emerald-500/30">
                   <Terminal size={18} className="text-black stroke-[2.5]" />
                 </div>
                 <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-[#070c10] animate-pulse" />
               </div>
-              <div className="text-left">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-black text-white tracking-tight leading-none font-mono">Antigravity</h3>
+              <div className="text-left shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <h3 className="text-xs sm:text-sm font-black text-white tracking-tight leading-none font-mono">Antigravity</h3>
                   <span className="text-[8px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-extrabold uppercase tracking-widest font-mono">
                     COCKPIT
                   </span>
@@ -1656,7 +1656,7 @@ export default function DevLogger() {
               </div>
               
               {/* Chip de Status do Motor */}
-              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black border font-mono shadow-sm transition-all ${
+              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black border font-mono shadow-sm transition-all shrink-0 ${
                 engineStatus === 'online' 
                   ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-emerald-500/10' 
                   : engineStatus === 'checking' 
@@ -1666,26 +1666,26 @@ export default function DevLogger() {
                 <span className={`w-2 h-2 rounded-full ${
                   engineStatus === 'online' ? 'bg-emerald-400 animate-ping' : engineStatus === 'checking' ? 'bg-blue-400 animate-pulse' : 'bg-rose-400 animate-ping'
                 }`} />
-                <Activity size={12} className={engineStatus === 'online' ? 'animate-pulse text-emerald-400' : ''} />
+                <Activity size={11} className={engineStatus === 'online' ? 'animate-pulse text-emerald-400' : ''} />
                 <span>{engineStatus.toUpperCase()}</span>
               </div>
 
               {logs.filter(l => l.type === 'error').length > 0 && (
-                <span className="flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono shadow-sm animate-pulse">
-                  <Bug size={12} /> {logs.filter(l => l.type === 'error').length}
+                <span className="flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono shadow-sm animate-pulse shrink-0">
+                  <Bug size={11} /> {logs.filter(l => l.type === 'error').length}
                 </span>
               )}
             </div>
 
             {/* Barra de Ferramentas Dev no Header */}
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
               <button 
                 onClick={(e) => { 
                   e.stopPropagation(); 
                   setShowServerLogs(true); 
                   useDevStore.setState({ isVisible: false }); 
                 }} 
-                className="text-[#8696a0] hover:text-emerald-400 hover:bg-white/10 p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
+                className="text-[#8696a0] hover:text-emerald-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
                 title="Abrir Server Terminal SSE"
               >
                 <Terminal size={15} />
@@ -1693,7 +1693,7 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); handleTestSupabase(); }} 
-                className="text-[#8696a0] hover:text-purple-400 hover:bg-white/10 p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
+                className="text-[#8696a0] hover:text-purple-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
                 title="Testar Supabase DB"
               >
                 <Database size={15} />
@@ -1701,7 +1701,7 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); handleTestApp(); }} 
-                className="text-[#8696a0] hover:text-cyan-400 hover:bg-white/10 p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
+                className="text-[#8696a0] hover:text-cyan-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
                 title="Testar App React"
               >
                 <AppWindow size={15} />
@@ -1709,7 +1709,7 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); handleTestEngine(); }} 
-                className="text-[#8696a0] hover:text-blue-400 hover:bg-white/10 p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
+                className="text-[#8696a0] hover:text-blue-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
                 title="Testar Baileys Engine"
               >
                 <Smartphone size={15} />
@@ -1717,7 +1717,7 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setShowTestPanel(!showTestPanel); }} 
-                className={`p-2 rounded-xl transition-all cursor-pointer relative active:scale-95 ${
+                className={`p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer relative active:scale-95 ${
                   showTestPanel 
                     ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-lg shadow-amber-500/20' 
                     : 'text-[#8696a0] hover:text-amber-400 hover:bg-white/10'
@@ -1733,12 +1733,12 @@ export default function DevLogger() {
                 )}
               </button>
 
-              <div className="w-px h-4 bg-white/15 mx-1" />
+              <div className="w-px h-4 bg-white/15 mx-0.5" />
 
               <div className="relative flex items-center">
                 <button 
                   onClick={(e) => { e.stopPropagation(); copyLogs(); }} 
-                  className="text-[#8696a0] hover:text-emerald-400 hover:bg-white/10 p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
+                  className="text-[#8696a0] hover:text-emerald-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
                   title="Copiar Logs"
                 >
                   <Copy size={15} />
@@ -1752,26 +1752,26 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); clearLogs(); }} 
-                className="text-[#8696a0] hover:text-rose-400 hover:bg-white/10 p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
+                className="text-[#8696a0] hover:text-rose-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
                 title="Limpar Logs"
               >
                 <Trash2 size={15} />
               </button>
 
-              <div className="w-px h-4 bg-white/15 mx-1" />
+              <div className="w-px h-4 bg-white/15 mx-0.5" />
 
               <a 
                 href={`${engineUrl}/swagger/teste.html`} 
                 target="_blank" 
                 rel="noopener noreferrer" 
                 onClick={(e) => e.stopPropagation()} 
-                className="bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 px-2.5 py-1 rounded-xl text-[10px] font-black transition-all flex items-center gap-1 shadow-sm active:scale-95" 
+                className="bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 px-2 py-1 rounded-xl text-[10px] font-black transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0" 
                 title="Abrir Documentação da API"
               >
                 API Docs
               </a>
 
-              <button className="text-[#8696a0] hover:text-white transition-colors ml-0.5 p-1">
+              <button className="text-[#8696a0] hover:text-white transition-colors p-1 shrink-0">
                 {isVisible ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
               </button>
             </div>
@@ -1780,11 +1780,11 @@ export default function DevLogger() {
           {/* Cockpit de Telemetria e Metadados do Servidor */}
           {isVisible && serverMeta && (
             <div className="bg-[#0e161c]/90 border-b border-white/10 p-2.5 px-4 flex flex-col gap-2 text-xs font-mono transition-all relative z-10">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-1.5 flex-wrap overflow-x-auto custom-scrollbar max-w-full py-0.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar max-w-full py-1 whitespace-nowrap scroll-smooth">
                   <div className="flex items-center gap-1.5 text-indigo-300 bg-indigo-500/10 px-2.5 py-1 rounded-xl border border-indigo-500/25 text-[10px] font-bold shrink-0">
                     <Layers size={12} className="text-indigo-400" />
-                    <span>Engine: {serverMeta?.engineVersion || '5.8.3'}</span>
+                    <span>Engine: {serverMeta?.engineVersion || '5.8.4'}</span>
                   </div>
 
                   <div className="flex items-center gap-1.5 text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/25 text-[10px] font-bold shrink-0">
@@ -2350,17 +2350,18 @@ export default function DevLogger() {
                 </div>
 
                 {/* Lista de Cards Agrupados / Cronológicos */}
-                <div className="p-4 flex flex-col gap-3 min-h-[220px]">
+                <div className="p-4 flex flex-col gap-3 min-h-[240px]">
                   {groupedAndFilteredLogs.length === 0 ? (
                     <div className="m-auto py-12 px-6 flex flex-col items-center justify-center text-center space-y-4 select-none animate-in fade-in zoom-in-95 duration-300 relative">
                       <div className="relative flex items-center justify-center">
-                        <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-emerald-500/20 via-teal-500/10 to-indigo-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/20">
-                          <Terminal size={32} className="animate-pulse text-emerald-400" />
+                        <div className="absolute -inset-4 rounded-full bg-gradient-to-tr from-emerald-500/20 via-teal-500/15 to-indigo-500/20 blur-2xl animate-pulse" />
+                        <div className="w-20 h-20 rounded-3xl bg-[#0c141a]/90 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/20 relative z-10 backdrop-blur-xl">
+                          <Terminal size={36} className="animate-pulse text-emerald-400" />
                         </div>
                         <div className="absolute inset-0 rounded-3xl border border-emerald-400/30 animate-ping pointer-events-none" />
                       </div>
-                      <div className="space-y-1">
-                        <h4 className="text-base font-black text-white tracking-tight font-mono">
+                      <div className="space-y-1.5 z-10 max-w-md">
+                        <h4 className="text-base font-black text-white tracking-tight font-mono bg-gradient-to-r from-white via-emerald-100 to-teal-200 bg-clip-text text-transparent">
                           {logFilter === 'node' ? 'Nenhum erro do Servidor Node capturado' : 'Nenhum log detectado'}
                         </h4>
                         <p className="text-xs text-[#8696a0] max-w-sm leading-relaxed font-mono">
@@ -2369,16 +2370,16 @@ export default function DevLogger() {
                             : 'Erros do Servidor Node, requisições HTTP e exceções de lógica serão capturados e agrupados aqui.'}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2.5 pt-1">
+                      <div className="flex items-center gap-3 pt-2 z-10 flex-wrap justify-center">
                         <button
                           onClick={() => handleTestApp()}
-                          className="bg-gradient-to-r from-indigo-500/20 to-teal-500/20 hover:from-indigo-500/30 hover:to-teal-500/30 text-indigo-200 border border-indigo-500/40 text-xs font-black px-4 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg shadow-indigo-500/20 active:scale-95 flex items-center gap-2 font-mono"
+                          className="bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-indigo-500/20 hover:from-emerald-500/30 hover:to-indigo-500/30 text-emerald-200 border border-emerald-500/40 text-xs font-black px-4 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg shadow-emerald-500/10 active:scale-95 flex items-center gap-2 font-mono"
                         >
                           <Activity size={14} className="text-teal-400" /> Teste Rápido
                         </button>
                         <button
                           onClick={handleSimulateNodeError}
-                          className="bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-black px-4 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg shadow-rose-500/20 active:scale-95 flex items-center gap-2 font-mono"
+                          className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/40 text-xs font-black px-4 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg shadow-rose-500/20 active:scale-95 flex items-center gap-2 font-mono"
                         >
                           <Bug size={14} className="text-rose-400 animate-pulse" /> Simular Erro Node
                         </button>
@@ -2396,25 +2397,25 @@ export default function DevLogger() {
                       return (
                         <div 
                           key={log.id} 
-                          className={`p-4 rounded-2xl border transition-all duration-200 flex flex-col gap-2 shadow-lg ${
+                          className={`p-4 rounded-2xl border transition-all duration-200 flex flex-col gap-2 shadow-lg backdrop-blur-md ${
                             isNode && isErr
-                              ? 'bg-gradient-to-r from-rose-950/40 to-[#182229] border-rose-500/40 text-rose-200 shadow-rose-500/10'
+                              ? 'bg-gradient-to-r from-rose-950/40 via-[#141d24] to-[#182229] border-l-4 border-l-rose-500 border-rose-500/40 text-rose-200 shadow-rose-500/10'
                               : isErr 
-                                ? 'bg-rose-500/10 border-rose-500/30 text-rose-200 shadow-rose-500/10' 
+                                ? 'bg-rose-500/10 border-l-4 border-l-rose-500 border-rose-500/30 text-rose-200 shadow-rose-500/10' 
                                 : isWrn 
-                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-200 shadow-amber-500/10' 
+                                  ? 'bg-amber-500/10 border-l-4 border-l-amber-500 border-amber-500/30 text-amber-200 shadow-amber-500/10' 
                                   : isSucc 
-                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200' 
+                                    ? 'bg-emerald-500/10 border-l-4 border-l-emerald-500 border-emerald-500/30 text-emerald-200 shadow-emerald-500/10' 
                                     : isInf 
-                                      ? 'bg-blue-500/10 border-blue-500/30 text-blue-200' 
-                                      : 'bg-[#182229] border-white/10 text-[#d1d7db]'
+                                      ? 'bg-blue-500/10 border-l-4 border-l-blue-500 border-blue-500/30 text-blue-200 shadow-blue-500/10' 
+                                      : 'bg-[#121b22] border-white/10 text-[#d1d7db] hover:border-white/20'
                           }`}
                         >
                           {/* Cabeçalho do Card */}
                           <div className="flex justify-between items-center select-none gap-2 flex-wrap">
                             <div className="flex items-center gap-2 font-mono text-[10px] font-black uppercase tracking-wider min-w-0">
                               {isNode ? (
-                                <span className="flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2 py-0.5 rounded-lg text-[9px]">
+                                <span className="flex items-center gap-1 bg-purple-500/20 border border-purple-500/40 text-purple-300 px-2 py-0.5 rounded-lg text-[9px] font-mono">
                                   🖥️ SERVIDOR NODE.JS
                                 </span>
                               ) : null}
@@ -2429,7 +2430,7 @@ export default function DevLogger() {
 
                               {/* PILULA DE CONTAGEM / AGRUPAMENTO */}
                               {log.count > 1 && (
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500/30 text-rose-200 border border-rose-400/40 shrink-0 animate-pulse shadow-md shadow-rose-500/20">
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-gradient-to-r from-rose-500/30 to-amber-500/30 text-rose-200 border border-rose-400/50 shrink-0 animate-pulse shadow-md shadow-rose-500/20">
                                   {log.count}x Ocorrências
                                 </span>
                               )}
@@ -2457,18 +2458,18 @@ export default function DevLogger() {
                           {(isExpanded || log.details) && (
                             <div className="flex flex-col gap-2 mt-1">
                               {log.count > 1 && (
-                                <div className="p-2 bg-[#111b21] border border-white/10 rounded-xl text-[10px] text-amber-300 font-mono flex items-center justify-between flex-wrap gap-2">
+                                <div className="p-2.5 bg-[#0a1116] border border-white/10 rounded-xl text-[10px] text-amber-300 font-mono flex items-center justify-between flex-wrap gap-2">
                                   <span>
                                     ⏱️ <strong>Primeira ocorrência:</strong> {new Date(log.firstTimestamp).toLocaleTimeString('pt-BR')} | <strong>Última:</strong> {new Date(log.latestTimestamp).toLocaleTimeString('pt-BR')}
                                   </span>
-                                  <span className="text-[9px] text-[#8696a0] uppercase font-bold">
+                                  <span className="text-[9px] text-[#8696a0] uppercase font-bold bg-white/5 px-2 py-0.5 rounded-md">
                                     Agrupado ({log.count} repetições)
                                   </span>
                                 </div>
                               )}
 
                               {log.details && (
-                                <pre className="p-3 bg-[#111b21] border border-white/10 rounded-xl text-[10px] text-cyan-300 overflow-x-auto max-h-[180px] custom-scrollbar font-mono leading-relaxed select-all">
+                                <pre className="p-3.5 bg-[#050a0e] border border-white/10 rounded-xl text-[10px] text-cyan-300 overflow-x-auto max-h-[180px] custom-scrollbar font-mono leading-relaxed select-all shadow-inner">
                                   {typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details)}
                                 </pre>
                               )}
