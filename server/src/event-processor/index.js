@@ -1510,6 +1510,17 @@ class EventProcessor {
             }
 
             if (qr) {
+                // Se a instância já estiver conectada, ignora a emissão de QR code para não poluir o frontend
+                const { data: currentInstForQr } = await supabase.from('whatsapp_instances')
+                    .select('status')
+                    .eq('id', instanceId)
+                    .maybeSingle();
+
+                if (currentInstForQr && ['connected', 'connected_local'].includes(currentInstForQr.status)) {
+                    console.log(`[EventProcessor] Ignorando evento de QR Code parasita para instância ${instanceId} que já está ativa (${currentInstForQr.status}).`);
+                    return;
+                }
+
                 try {
                     const toDataURL = qrcode.toDataURL || (qrcode.default && qrcode.default.toDataURL) || qrcode;
                     const qrBase64 = await toDataURL(qr);
@@ -1569,13 +1580,16 @@ class EventProcessor {
 
                 // Trata como transiente qualquer erro que não seja um encerramento definitivo/manual ou logout
                 const isTransient = ![401, 403, 409, 410].includes(reason) || !reason || isPairingPendingSync;
+                const isAlreadyConnected = currentInst && ['connected', 'connected_local'].includes(currentInst.status);
 
                 if (isTransient) {
-                    await supabase.from('whatsapp_instances')
-                        .update({ status: 'connecting', last_error: `Reconnecting (Code: ${reason})` })
-                        .eq('id', instanceId)
-                        .eq('assigned_node_id', NODE_ID);
-                    payload.status = 'connecting';
+                    if (!isAlreadyConnected) {
+                        await supabase.from('whatsapp_instances')
+                            .update({ status: 'connecting', last_error: `Reconnecting (Code: ${reason})` })
+                            .eq('id', instanceId)
+                            .eq('assigned_node_id', NODE_ID);
+                        payload.status = 'connecting';
+                    }
                     payload.reason = reason;
                 } else {
                     const errMsg = reason === 409
@@ -1591,11 +1605,19 @@ class EventProcessor {
                 }
             }
             if (connection === 'connecting') {
-                await supabase.from('whatsapp_instances')
-                    .update({ status: 'connecting', last_error: null })
+                const { data: currentInstForConn } = await supabase.from('whatsapp_instances')
+                    .select('status')
                     .eq('id', instanceId)
-                    .eq('assigned_node_id', NODE_ID);
-                payload.status = 'connecting';
+                    .maybeSingle();
+                const isAlreadyConnected = currentInstForConn && ['connected', 'connected_local'].includes(currentInstForConn.status);
+
+                if (!isAlreadyConnected) {
+                    await supabase.from('whatsapp_instances')
+                        .update({ status: 'connecting', last_error: null })
+                        .eq('id', instanceId)
+                        .eq('assigned_node_id', NODE_ID);
+                    payload.status = 'connecting';
+                }
                 if (update.pairingSuccess) {
                     payload.pairingSuccess = true;
                     payload.phone = update.phone;
