@@ -4697,11 +4697,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       }
 
       if (selectedInstanceId && selectedInstanceId !== 'all') {
-        resolvedQuery = resolvedQuery.eq('instance_id', selectedInstanceId);
         convResolvedQuery = convResolvedQuery.eq('instance_id', selectedInstanceId);
       } else if (instances && instances.length > 0) {
         const allowedInstIds = instances.map(i => i.id);
-        resolvedQuery = resolvedQuery.in('instance_id', allowedInstIds);
         convResolvedQuery = convResolvedQuery.in('instance_id', allowedInstIds);
       }
 

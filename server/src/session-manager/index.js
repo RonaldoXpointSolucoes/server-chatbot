@@ -317,15 +317,14 @@ class SessionManager {
 
             sock.ev.on('creds.update', async () => {
                 await saveCreds();
-                const isPairingPending = Boolean(state?.creds?.pairingCode && state?.creds?.registered !== true && !sock?.user?.id);
-                const meId = sock.user?.id || (!isPairingPending ? (state?.creds?.me?.id || state?.creds?.me?.jid) : null);
+                const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
                 const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
                 
-                if ((state?.creds?.registered === true || sock?.user?.id) && state?.creds?.pairingCode) {
+                if (hasValidMeId && state?.creds?.pairingCode) {
                     delete state.creds.pairingCode;
                 }
 
-                if (hasValidMeId && !isPairingPending) {
+                if (hasValidMeId) {
                     this.authenticatedSessions.add(instanceId);
                     const phone = String(meId).split('@')[0].split(':')[0];
                     if (phone && phone.length >= 7) {
@@ -337,44 +336,39 @@ class SessionManager {
                     }
                 }
                 // Só dispara a atualização de pareamento se a sessão NÃO estava autenticada no boot
-                // e concluiu a autenticação no celular
-                if (!wasAuthenticatedOnBoot) {
-                    const isRegistered = Boolean(sock?.user?.id || (hasValidMeId && state?.creds?.registered === true));
-                    const actualMeId = sock.user?.id || (isRegistered ? state?.creds?.me?.id : null);
-                    if (actualMeId && isRegistered && !isPairingPending) {
-                        const phone = String(actualMeId).split('@')[0].split(':')[0];
-                        console.log(`[SessionManager] Credenciais de pareamento registradas no celular com telefone: ${phone}. Sincronizando com o banco e o frontend.`);
-                        await retryWithBackoff(() => 
-                            supabase.from('whatsapp_instances')
-                                .update({ phone_number: phone })
-                                .eq('id', instanceId)
-                        );
-                        this.pairingPendingSync.set(instanceId, true);
-                        await retryWithBackoff(() =>
-                            supabase.from('whatsapp_instance_runtime')
-                                .update({ pairing_code: 'CONNECTED_PENDING_SYNC' })
-                                .eq('instance_id', instanceId)
-                        );
-                        await eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
-                            connection: 'connecting',
-                            pairingSuccess: true,
-                            registered: true,
-                            phone
-                        });
-                    }
+                // e concluiu a autenticação no celular (tem meId válido agora)
+                if (!wasAuthenticatedOnBoot && hasValidMeId) {
+                    const phone = String(meId).split('@')[0].split(':')[0];
+                    console.log(`[SessionManager] Credenciais de pareamento registradas no celular com telefone: ${phone}. Sincronizando com o banco e o frontend.`);
+                    await retryWithBackoff(() => 
+                        supabase.from('whatsapp_instances')
+                            .update({ phone_number: phone })
+                            .eq('id', instanceId)
+                    );
+                    this.pairingPendingSync.set(instanceId, true);
+                    await retryWithBackoff(() =>
+                        supabase.from('whatsapp_instance_runtime')
+                            .update({ pairing_code: 'CONNECTED_PENDING_SYNC' })
+                            .eq('instance_id', instanceId)
+                    );
+                    await eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
+                        connection: 'connecting',
+                        pairingSuccess: true,
+                        registered: true,
+                        phone
+                    });
                 }
             });
 
             sock.ev.on('connection.update', async (update) => {
-                const isPairingPending = Boolean(state?.creds?.pairingCode && state?.creds?.registered !== true && !sock?.user?.id);
-                const meId = sock.user?.id || (!isPairingPending ? (state?.creds?.me?.id || state?.creds?.me?.jid) : null);
+                const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
                 const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
                 
-                if (update.connection === 'open' && (state?.creds?.registered === true || sock?.user?.id) && state?.creds?.pairingCode) {
+                if (hasValidMeId && state?.creds?.pairingCode) {
                     delete state.creds.pairingCode;
                 }
 
-                const isRealAuthConnection = update.connection === 'open' && hasValidMeId && !isPairingPending;
+                const isRealAuthConnection = update.connection === 'open' && hasValidMeId;
 
                 if (isRealAuthConnection) {
                     this.authenticatedSessions.add(instanceId);

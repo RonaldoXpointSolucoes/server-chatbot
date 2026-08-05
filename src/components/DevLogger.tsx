@@ -1626,44 +1626,59 @@ export default function DevLogger() {
         </button>
       )}
 
-      <div className={`fixed z-[9999] right-4 sm:right-8 transition-all duration-300 ease-in-out ${isVisible ? 'top-4' : '-top-[650px]'}`}>
-        <div className="bg-[#0b141a]/95 backdrop-blur-2xl border border-white/15 rounded-[32px] shadow-[0_25px_60px_rgba(0,0,0,0.85)] w-[92vw] sm:w-[620px] flex flex-col max-h-[88vh] overflow-hidden text-[#d1d7db] transition-all duration-300 relative">
+      <div className={`fixed z-[9999] right-2 sm:right-6 transition-all duration-300 ease-out ${isVisible ? 'top-3 sm:top-4' : '-top-[750px]'}`}>
+        <div className="bg-[#070c10]/95 backdrop-blur-3xl border border-white/10 rounded-[28px] shadow-[0_25px_70px_rgba(0,0,0,0.95)] w-[94vw] sm:w-[640px] flex flex-col max-h-[88vh] overflow-hidden text-[#d1d7db] transition-all duration-300 relative group/card border-t border-white/20">
           
+          {/* Brilho Radial de Fundo Neon */}
+          <div className="absolute -top-24 -left-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+
           {/* Header Superior Neon Glassmorphism */}
           <div 
-            className="flex items-center justify-between px-5 py-4 border-b border-white/10 cursor-pointer bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 hover:from-emerald-500/15 hover:to-indigo-500/15 transition-all select-none"
+            className="flex items-center justify-between px-5 py-3.5 border-b border-white/10 cursor-pointer bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/15 hover:to-indigo-500/15 transition-all select-none relative z-10"
             onClick={toggleVisibility}
           >
-            <div className="flex items-center gap-3.5">
-              <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/25">
-                <Terminal size={18} className="text-black stroke-[2.5]" />
+            <div className="flex items-center gap-3">
+              <div className="relative flex items-center justify-center">
+                <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-emerald-300 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                  <Terminal size={18} className="text-black stroke-[2.5]" />
+                </div>
+                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-[#070c10] animate-pulse" />
               </div>
               <div className="text-left">
-                <h3 className="text-sm font-black text-white tracking-tight leading-tight">Antigravity</h3>
-                <span className="text-[9px] text-emerald-400 font-extrabold tracking-widest block uppercase font-mono leading-none mt-0.5">DEV LOGGER</span>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-black text-white tracking-tight leading-none font-mono">Antigravity</h3>
+                  <span className="text-[8px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-extrabold uppercase tracking-widest font-mono">
+                    COCKPIT
+                  </span>
+                </div>
+                <span className="text-[9px] text-emerald-400/80 font-bold tracking-widest block uppercase font-mono leading-none mt-1">DEV LOGGER SYSTEM</span>
               </div>
               
               {/* Chip de Status do Motor */}
-              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black border font-mono shadow-sm ${
+              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black border font-mono shadow-sm transition-all ${
                 engineStatus === 'online' 
-                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400' 
+                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-emerald-500/10' 
                   : engineStatus === 'checking' 
-                    ? 'bg-blue-500/15 border-blue-500/40 text-blue-400' 
-                    : 'bg-rose-500/15 border-rose-500/40 text-rose-400'
+                    ? 'bg-blue-500/15 border-blue-500/40 text-blue-300 shadow-blue-500/10' 
+                    : 'bg-rose-500/15 border-rose-500/40 text-rose-300 shadow-rose-500/10'
               }`}>
+                <span className={`w-2 h-2 rounded-full ${
+                  engineStatus === 'online' ? 'bg-emerald-400 animate-ping' : engineStatus === 'checking' ? 'bg-blue-400 animate-pulse' : 'bg-rose-400 animate-ping'
+                }`} />
                 <Activity size={12} className={engineStatus === 'online' ? 'animate-pulse text-emerald-400' : ''} />
                 <span>{engineStatus.toUpperCase()}</span>
               </div>
 
               {logs.filter(l => l.type === 'error').length > 0 && (
-                <span className="flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono shadow-sm">
+                <span className="flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono shadow-sm animate-pulse">
                   <Bug size={12} /> {logs.filter(l => l.type === 'error').length}
                 </span>
               )}
             </div>
 
             {/* Barra de Ferramentas Dev no Header */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
               <button 
                 onClick={(e) => { 
                   e.stopPropagation(); 
@@ -1729,7 +1744,7 @@ export default function DevLogger() {
                   <Copy size={15} />
                 </button>
                 {copyFeedback && (
-                  <div className="absolute right-full mr-2 whitespace-nowrap bg-emerald-500 text-black font-black text-[10px] px-2.5 py-1 rounded-lg shadow-xl animate-in fade-in slide-in-from-right-2">
+                  <div className="absolute right-full mr-2 whitespace-nowrap bg-emerald-500 text-black font-black text-[10px] px-2.5 py-1 rounded-lg shadow-xl animate-in fade-in slide-in-from-right-2 z-30">
                     {copyFeedback}
                   </div>
                 )}
@@ -1756,52 +1771,52 @@ export default function DevLogger() {
                 API Docs
               </a>
 
-              <button className="text-[#8696a0] hover:text-white transition-colors ml-1 p-1">
+              <button className="text-[#8696a0] hover:text-white transition-colors ml-0.5 p-1">
                 {isVisible ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
               </button>
             </div>
           </div>
 
-          {/* Sub-Régua de Telemetria e Metadados do Servidor */}
+          {/* Cockpit de Telemetria e Metadados do Servidor */}
           {isVisible && serverMeta && (
-            <div className="bg-[#111b21]/90 border-b border-white/10 p-3 px-4 flex flex-col gap-2 text-xs font-mono transition-all">
+            <div className="bg-[#0e161c]/90 border-b border-white/10 p-2.5 px-4 flex flex-col gap-2 text-xs font-mono transition-all relative z-10">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="flex items-center gap-1.5 text-indigo-300 bg-indigo-500/15 px-2.5 py-1 rounded-xl border border-indigo-500/30 text-[11px] font-bold">
-                    <Layers size={13} className="text-indigo-400" />
-                    <span>Engine: {serverMeta?.engineVersion || '5.3.7'}</span>
+                <div className="flex items-center gap-1.5 flex-wrap overflow-x-auto custom-scrollbar max-w-full py-0.5">
+                  <div className="flex items-center gap-1.5 text-indigo-300 bg-indigo-500/10 px-2.5 py-1 rounded-xl border border-indigo-500/25 text-[10px] font-bold shrink-0">
+                    <Layers size={12} className="text-indigo-400" />
+                    <span>Engine: {serverMeta?.engineVersion || '5.8.3'}</span>
                   </div>
 
-                  <div className="flex items-center gap-1.5 text-amber-300 bg-amber-500/15 px-2.5 py-1 rounded-xl border border-amber-500/30 text-[11px] font-bold">
-                    <Calendar size={13} className="text-amber-400" />
-                    <span>Compilação: {serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString('pt-BR') : '29/07/2026, 19:28:38'}</span>
+                  <div className="flex items-center gap-1.5 text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/25 text-[10px] font-bold shrink-0">
+                    <Calendar size={12} className="text-amber-400" />
+                    <span>Compilação: {serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString('pt-BR') : '04/08/2026, 22:10:37'}</span>
                   </div>
 
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setShowBaileysModal(!showBaileysModal); }}
-                    className="flex items-center gap-1.5 text-purple-300 bg-purple-500/15 hover:bg-purple-500/25 px-2.5 py-1 rounded-xl border border-purple-500/30 text-[11px] font-bold transition-all cursor-pointer group active:scale-95"
+                    className="flex items-center gap-1.5 text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 px-2.5 py-1 rounded-xl border border-purple-500/25 text-[10px] font-bold transition-all cursor-pointer group active:scale-95 shrink-0"
                     title="Clique para ver o Histórico de Versões e Releases do Baileys no GitHub"
                   >
-                    <Smartphone size={13} className="text-purple-400 group-hover:scale-110 transition-transform" />
+                    <Smartphone size={12} className="text-purple-400 group-hover:scale-110 transition-transform" />
                     <span>Baileys: {serverMeta?.baileysVersion || 'v7.0.0-rc.9'} ({serverMeta?.baileysDate || '29/07/2026'})</span>
                     <ChevronDown size={11} className={`transition-transform duration-200 ${showBaileysModal ? 'rotate-180' : ''}`} />
                   </button>
 
-                  <div className="flex items-center gap-1.5 text-blue-300 bg-blue-500/15 px-2.5 py-1 rounded-xl border border-blue-500/30 text-[11px] font-bold" title="Resolução atual da tela">
-                    <AppWindow size={13} className="text-blue-400" />
+                  <div className="flex items-center gap-1.5 text-blue-300 bg-blue-500/10 px-2.5 py-1 rounded-xl border border-blue-500/25 text-[10px] font-bold shrink-0" title="Resolução atual da tela">
+                    <AppWindow size={12} className="text-blue-400" />
                     <span>{windowSize.width}x{windowSize.height}</span>
                   </div>
 
                   {telemetry && (
                     <>
-                      <div className="flex items-center gap-1.5 text-emerald-300 bg-emerald-500/15 px-2.5 py-1 rounded-xl border border-emerald-500/30 text-[11px] font-bold" title="Uso de CPU">
-                        <Cpu size={13} className={telemetry.cpu > 50 ? 'animate-pulse text-rose-400' : 'text-emerald-400'} />
+                      <div className="flex items-center gap-1.5 text-emerald-300 bg-emerald-500/10 px-2.5 py-1 rounded-xl border border-emerald-500/25 text-[10px] font-bold shrink-0" title="Uso de CPU">
+                        <Cpu size={12} className={telemetry.cpu > 50 ? 'animate-pulse text-rose-400' : 'text-emerald-400'} />
                         <span>{telemetry.cpu.toFixed(1)}%</span>
                       </div>
 
-                      <div className="flex items-center gap-1.5 text-cyan-300 bg-cyan-500/15 px-2.5 py-1 rounded-xl border border-cyan-500/30 text-[11px] font-bold" title="Uso de Memória RAM">
-                        <Activity size={13} className="text-cyan-400" />
+                      <div className="flex items-center gap-1.5 text-cyan-300 bg-cyan-500/10 px-2.5 py-1 rounded-xl border border-cyan-500/25 text-[10px] font-bold shrink-0" title="Uso de Memória RAM">
+                        <Activity size={12} className="text-cyan-400" />
                         <span>{telemetry.memory.toFixed(1)} MB</span>
                       </div>
                     </>
@@ -1810,15 +1825,15 @@ export default function DevLogger() {
 
                 <button 
                   onClick={(e) => { e.stopPropagation(); setShowChangelog(!showChangelog); }}
-                  className="flex items-center gap-1.5 text-emerald-300 hover:text-white transition-all bg-emerald-500/20 border border-emerald-500/40 px-3 py-1 rounded-xl text-xs font-black shadow-md cursor-pointer active:scale-95"
+                  className="flex items-center gap-1.5 text-emerald-300 hover:text-white transition-all bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 px-2.5 py-1 rounded-xl text-[10px] font-black shadow-md cursor-pointer active:scale-95 shrink-0"
                 >
-                  <Rocket size={13} className="text-emerald-400" /> Novidades <ChevronDown size={13} className={`transition-transform duration-200 ${showChangelog ? 'rotate-180' : ''}`}/>
+                  <Rocket size={12} className="text-emerald-400" /> Novidades <ChevronDown size={11} className={`transition-transform duration-200 ${showChangelog ? 'rotate-180' : ''}`}/>
                 </button>
               </div>
 
               {/* Baileys Version History & GitHub Releases Dropdown */}
               {showBaileysModal && (
-                <div className="mt-2 animate-in fade-in slide-in-from-top-2 relative overflow-hidden rounded-2xl bg-[#182229] border border-purple-500/30 shadow-2xl p-4 transition-all">
+                <div className="mt-2 animate-in fade-in slide-in-from-top-2 relative overflow-hidden rounded-2xl bg-[#141d24] border border-purple-500/30 shadow-2xl p-4 transition-all">
                   <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-white/10">
                     <div className="flex items-center gap-2.5">
                       <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center">
@@ -1910,7 +1925,7 @@ export default function DevLogger() {
                         ]
                       }
                     ]).map((rel: any, idx: number) => (
-                      <div key={idx} className="bg-[#111b21] p-3 rounded-2xl border border-white/10 space-y-2">
+                      <div key={idx} className="bg-[#0b141a] p-3 rounded-2xl border border-white/10 space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-white text-xs font-mono">{rel.tag || rel.version}</span>
@@ -1947,7 +1962,7 @@ export default function DevLogger() {
 
               {/* Changelog Dropdown */}
               {showChangelog && (serverMeta.changelog || serverMeta.history) && (
-                <div className="mt-2 animate-in fade-in slide-in-from-top-2 relative overflow-hidden rounded-2xl bg-[#182229] border border-emerald-500/30 shadow-2xl p-4 transition-all">
+                <div className="mt-2 animate-in fade-in slide-in-from-top-2 relative overflow-hidden rounded-2xl bg-[#141d24] border border-emerald-500/30 shadow-2xl p-4 transition-all">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
                       <Rocket size={16} className="text-emerald-400 animate-pulse" />
@@ -1971,18 +1986,18 @@ export default function DevLogger() {
                 </div>
               )}
               
-              <div className="flex items-center justify-between font-mono mt-1 pt-2 border-t border-white/10">
-                <span className="text-[#8696a0] font-bold text-[11px]">Ferramentas Dev:</span>
+              <div className="flex items-center justify-between font-mono mt-0.5 pt-1.5 border-t border-white/10">
+                <span className="text-[#8696a0] font-bold text-[10px] uppercase tracking-wider">Ferramentas Dev:</span>
                 <button 
                   onClick={(e) => { e.stopPropagation(); setShowEndpoints(!showEndpoints); }}
-                  className="flex items-center gap-1.5 text-indigo-300 hover:text-white transition-all bg-indigo-500/20 border border-indigo-500/40 px-2.5 py-1 rounded-xl text-[11px] font-bold cursor-pointer"
+                  className="flex items-center gap-1.5 text-indigo-300 hover:text-white transition-all bg-indigo-500/15 border border-indigo-500/30 px-2 py-0.5 rounded-lg text-[10px] font-bold cursor-pointer"
                 >
-                  <Network size={12} className="text-indigo-400" /> Root Endpoints <ChevronDown size={12} className={`transition-transform ${showEndpoints ? 'rotate-180' : ''}`}/>
+                  <Network size={11} className="text-indigo-400" /> Root Endpoints <ChevronDown size={11} className={`transition-transform ${showEndpoints ? 'rotate-180' : ''}`}/>
                 </button>
               </div>
                
               {showEndpoints && (
-                <div className="bg-[#182229] rounded-2xl p-3 border border-indigo-500/20 mt-2 space-y-2 animate-in fade-in">
+                <div className="bg-[#141d24] rounded-2xl p-3 border border-indigo-500/20 mt-2 space-y-2 animate-in fade-in">
                   <span className="font-black text-indigo-300 text-xs block">Endpoints Globais do Motor Baileys:</span>
                   <div className="grid grid-cols-1 gap-2">
                     {(() => {
@@ -1995,7 +2010,7 @@ export default function DevLogger() {
                         { name: 'Listar Contatos/Agenda da Instância (GET)', path: `/instance/${myTenant}/contacts` },
                       ];
                     })().map((ep, idx) => (
-                      <div key={idx} className="flex justify-between items-center bg-[#111b21] p-2.5 rounded-xl border border-white/10">
+                      <div key={idx} className="flex justify-between items-center bg-[#0b141a] p-2.5 rounded-xl border border-white/10">
                         <span className="text-white font-mono text-[11px] break-all max-w-[70%]">{ep.name} <br/><span className="text-[#8696a0] text-[10px]">{engineUrl}{ep.path}</span></span>
                         <a 
                           href={`${engineUrl}${ep.path}`}
@@ -2014,26 +2029,26 @@ export default function DevLogger() {
             </div>
           )}
 
-          {/* Abas de Navegação Deslizantes (CONSOLE / GASTROFOOD / ASTS) */}
+          {/* Abas de Navegação Principal em Segmented Control Neon (CONSOLE / GASTROFOOD / ASTS) */}
           {isVisible && (
-            <div className="p-2 bg-[#111b21] border-b border-white/10 flex gap-2 shrink-0 select-none">
+            <div className="p-2 bg-[#0a1116] border-b border-white/10 flex gap-2 shrink-0 select-none relative z-10">
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('console'); }}
-                className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all cursor-pointer border-0 ${
+                className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'console' 
-                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-lg shadow-emerald-500/30' 
-                    : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                    ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 text-black border-emerald-300/40 shadow-lg shadow-emerald-500/25 font-black scale-[1.01]' 
+                    : 'bg-[#121c23]/60 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <Terminal size={14} /> Console ({logs.length})
+                <Terminal size={14} className={activeTab === 'console' ? 'text-black' : ''} /> Console ({logs.length})
               </button>
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('gastrofood'); }}
-                className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all cursor-pointer border-0 ${
+                className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'gastrofood' 
-                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30' 
-                    : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                    ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 text-white border-blue-400/40 shadow-lg shadow-blue-500/25 font-black scale-[1.01]' 
+                    : 'bg-[#121c23]/60 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
                 <Network size={14} /> Gastrofood ({groupedGastrofoodLogs.length})
@@ -2041,10 +2056,10 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('asts'); }}
-                className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all cursor-pointer border-0 ${
+                className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'asts' 
-                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-black shadow-lg shadow-amber-500/30' 
-                    : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                    ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 text-black border-amber-300/40 shadow-lg shadow-amber-500/25 font-black scale-[1.01]' 
+                    : 'bg-[#121c23]/60 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
                 <Activity size={14} className={isTestingApp ? 'animate-pulse text-amber-950' : ''} /> ASTS {testSummary ? `(${testSummary.healthScore}%)` : ''}
@@ -2056,7 +2071,7 @@ export default function DevLogger() {
           {isVisible && (
             showTestPanel ? (
               /* Antigravity Application Simulator & Test Suite (ASTS) */
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs custom-scrollbar min-h-[300px] max-h-[500px] bg-[#0b141a] transition-all duration-300 relative rounded-b-[32px]">
+              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs custom-scrollbar min-h-[300px] max-h-[500px] bg-[#070c10] transition-all duration-300 relative rounded-b-[28px]">
                 {/* Cabeçalho do Painel ASTS */}
                 <div className="flex items-center justify-between pb-3 border-b border-white/10 relative z-10 shrink-0">
                   <div className="flex items-center gap-2.5">
@@ -2106,7 +2121,7 @@ export default function DevLogger() {
 
                 {/* Barra de Progresso Futurista */}
                 {isTestingApp && (
-                  <div className="flex flex-col gap-2.5 bg-[#111b21] border border-white/10 rounded-2xl p-3.5 relative z-10 animate-in zoom-in-95 duration-200 shrink-0">
+                  <div className="flex flex-col gap-2.5 bg-[#0f171e] border border-white/10 rounded-2xl p-3.5 relative z-10 animate-in zoom-in-95 duration-200 shrink-0">
                     <div className="flex items-center justify-between font-mono text-xs text-white">
                       <span className="font-bold text-amber-400 uppercase flex items-center gap-1.5 min-w-0">
                         <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" />
@@ -2152,7 +2167,7 @@ export default function DevLogger() {
                       <div 
                         key={mod.id} 
                         className={`p-3 rounded-2xl border flex flex-col gap-1 font-mono select-none transition-all duration-300 min-w-0 ${
-                          isIdle ? 'bg-[#111b21] border-white/10 text-[#8696a0]' : ''
+                          isIdle ? 'bg-[#0f171e] border-white/10 text-[#8696a0]' : ''
                         } ${
                           isTesting ? 'bg-blue-500/15 border-blue-500/40 text-blue-300 animate-pulse' : ''
                         } ${
@@ -2178,7 +2193,7 @@ export default function DevLogger() {
 
                 {/* Relatório Final */}
                 {testSummary && (
-                  <div className="flex flex-col gap-3 bg-[#111b21] border border-white/10 rounded-2xl p-4 relative z-10 animate-in fade-in duration-300">
+                  <div className="flex flex-col gap-3 bg-[#0f171e] border border-white/10 rounded-2xl p-4 relative z-10 animate-in fade-in duration-300">
                     <div className="flex justify-between items-center pb-2 border-b border-white/10 flex-wrap gap-2">
                       <div className="flex items-center gap-3 text-xs text-[#8696a0]">
                         <span className="uppercase font-bold font-mono">Métricas de Auditoria:</span>
@@ -2200,7 +2215,7 @@ export default function DevLogger() {
                       </div>
                     </div>
                     
-                    <p className="text-xs leading-relaxed text-[#d1d7db] font-mono bg-[#182229] p-3 rounded-xl border border-white/10">
+                    <p className="text-xs leading-relaxed text-[#d1d7db] font-mono bg-[#141d24] p-3 rounded-xl border border-white/10">
                       {testSummary.diagnosis}
                     </p>
                   </div>
@@ -2208,17 +2223,19 @@ export default function DevLogger() {
               </div>
             ) : activeTab === 'gastrofood' ? (
               /* Gastrofood API Logs Monitor */
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 font-mono text-xs custom-scrollbar min-h-[250px] max-h-[500px] bg-[#0b141a] relative rounded-b-[32px] select-none">
+              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 font-mono text-xs custom-scrollbar min-h-[250px] max-h-[500px] bg-[#070c10] relative rounded-b-[28px] select-none">
                 {groupedGastrofoodLogs.length === 0 ? (
-                  <div className="m-auto py-12 px-6 flex flex-col items-center justify-center text-center space-y-3.5 select-none animate-in fade-in zoom-in-95 duration-300">
-                    <div className="w-16 h-16 rounded-3xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shadow-2xl shadow-blue-500/20 relative">
-                      <Network size={28} className="animate-pulse" />
-                      <div className="absolute inset-0 rounded-3xl border border-blue-400/40 animate-ping" />
+                  <div className="m-auto py-12 px-6 flex flex-col items-center justify-center text-center space-y-4 select-none animate-in fade-in zoom-in-95 duration-300 relative">
+                    <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-blue-500/20 via-indigo-500/10 to-purple-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shadow-2xl shadow-blue-500/20 relative group">
+                      <Network size={32} className="animate-pulse text-blue-400" />
+                      <div className="absolute inset-0 rounded-3xl border border-blue-400/30 animate-ping pointer-events-none" />
                     </div>
-                    <h4 className="text-sm font-black text-white tracking-tight">Aguardando Transações Gastrofood</h4>
-                    <p className="text-xs text-[#8696a0] max-w-xs leading-relaxed">
-                      Interaja com o chat ou aguarde a sincronização automática do cardápio para acompanhar chamadas de API em tempo real.
-                    </p>
+                    <div className="space-y-1">
+                      <h4 className="text-base font-black text-white tracking-tight font-mono">Aguardando Transações Gastrofood</h4>
+                      <p className="text-xs text-[#8696a0] max-w-sm leading-relaxed">
+                        Interaja com o chat ou aguarde a sincronização automática do cardápio para acompanhar chamadas de API em tempo real.
+                      </p>
+                    </div>
                   </div>
                 ) : (
                   <div className="flex flex-col gap-3">
@@ -2234,7 +2251,7 @@ export default function DevLogger() {
                       return (
                         <div 
                           key={log.id} 
-                          className="bg-[#182229] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2 transition-all cursor-pointer hover:border-white/20"
+                          className="bg-[#121c23] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2 transition-all cursor-pointer hover:border-white/20 hover:bg-[#16232c]"
                           onClick={() => toggleExpandLog(log.id)}
                         >
                           <div className="flex justify-between items-center gap-2 select-none">
@@ -2270,17 +2287,17 @@ export default function DevLogger() {
               </div>
             ) : (
               /* Console & Server Logs - COM SUPORTE A AGRUPAMENTO DE ERROS IDENTICOS E FILTRAGEM DE NOVO PADRÃO */
-              <div className="flex-1 overflow-y-auto flex flex-col font-mono text-xs custom-scrollbar min-h-[300px] max-h-[500px] bg-[#0b141a]">
+              <div className="flex-1 overflow-y-auto flex flex-col font-mono text-xs custom-scrollbar min-h-[300px] max-h-[500px] bg-[#070c10] rounded-b-[28px]">
                 
                 {/* Sub-Barra de Controles: Agrupamento, Filtros de Origem e Disparo de Testes */}
-                <div className="flex items-center justify-between gap-2 p-2.5 bg-[#111b21] border-b border-white/10 text-xs font-mono select-none flex-wrap sticky top-0 z-20 backdrop-blur-md">
+                <div className="flex items-center justify-between gap-2 p-3 px-4 bg-[#0d151b] border-b border-white/10 text-xs font-mono select-none flex-wrap sticky top-0 z-20 backdrop-blur-xl">
                   {/* Seletor de Modo: Agrupado vs Linha do Tempo */}
-                  <div className="flex items-center gap-1 bg-[#182229] p-1 rounded-xl border border-white/10">
+                  <div className="flex items-center gap-1 bg-[#141f27] p-1 rounded-xl border border-white/10">
                     <button
                       onClick={() => setViewMode('grouped')}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
+                      className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
                         viewMode === 'grouped'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20'
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
                           : 'text-[#8696a0] hover:text-white hover:bg-white/5'
                       }`}
                       title="Agrupar erros e logs idênticos"
@@ -2289,9 +2306,9 @@ export default function DevLogger() {
                     </button>
                     <button
                       onClick={() => setViewMode('timeline')}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
+                      className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
                         viewMode === 'timeline'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20'
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
                           : 'text-[#8696a0] hover:text-white hover:bg-white/5'
                       }`}
                       title="Exibir histórico individual por ordem cronológica"
@@ -2301,7 +2318,7 @@ export default function DevLogger() {
                   </div>
 
                   {/* Chips de Filtro */}
-                  <div className="flex items-center gap-1 flex-wrap">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     {[
                       { id: 'all', label: 'Todos', count: logs.length },
                       { id: 'node', label: '🖥️ Servidor Node', count: nodeLogsCount },
@@ -2311,10 +2328,10 @@ export default function DevLogger() {
                       <button
                         key={f.id}
                         onClick={() => setLogFilter(f.id as any)}
-                        className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase transition-all cursor-pointer border ${
+                        className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer border ${
                           logFilter === f.id
-                            ? 'bg-indigo-500/25 border-indigo-500/50 text-indigo-300 shadow-sm'
-                            : 'bg-[#182229] border-white/10 text-[#8696a0] hover:text-white'
+                            ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300 shadow-sm shadow-indigo-500/20'
+                            : 'bg-[#141f27] border-white/10 text-[#8696a0] hover:text-white hover:bg-white/5'
                         }`}
                       >
                         {f.label} ({f.count})
@@ -2325,41 +2342,45 @@ export default function DevLogger() {
                   {/* Simulação de Erro do Servidor Node */}
                   <button
                     onClick={handleSimulateNodeError}
-                    className="bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 px-2.5 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1 shadow-sm"
+                    className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-3 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
                     title="Simular disparo de erro no servidor Node.js para testar o agrupamento"
                   >
-                    <Bug size={11} className="text-rose-400 animate-pulse" /> + Erro Node
+                    <Bug size={12} className="text-rose-400 animate-pulse" /> + Erro Node
                   </button>
                 </div>
 
                 {/* Lista de Cards Agrupados / Cronológicos */}
-                <div className="p-4 flex flex-col gap-3">
+                <div className="p-4 flex flex-col gap-3 min-h-[220px]">
                   {groupedAndFilteredLogs.length === 0 ? (
-                    <div className="m-auto py-12 px-6 flex flex-col items-center justify-center text-center space-y-3.5 select-none animate-in fade-in zoom-in-95 duration-300">
-                      <div className="w-16 h-16 rounded-3xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/20 relative">
-                        <Terminal size={28} className="animate-pulse" />
-                        <div className="absolute inset-0 rounded-3xl border border-emerald-400/40 animate-ping" />
+                    <div className="m-auto py-12 px-6 flex flex-col items-center justify-center text-center space-y-4 select-none animate-in fade-in zoom-in-95 duration-300 relative">
+                      <div className="relative flex items-center justify-center">
+                        <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-emerald-500/20 via-teal-500/10 to-indigo-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/20">
+                          <Terminal size={32} className="animate-pulse text-emerald-400" />
+                        </div>
+                        <div className="absolute inset-0 rounded-3xl border border-emerald-400/30 animate-ping pointer-events-none" />
                       </div>
-                      <h4 className="text-sm font-black text-white tracking-tight">
-                        {logFilter === 'node' ? 'Nenhum erro do Servidor Node capturado' : 'Nenhum log detectado'}
-                      </h4>
-                      <p className="text-xs text-[#8696a0] max-w-xs leading-relaxed">
-                        {logFilter === 'node' 
-                          ? 'O servidor Node.js está operando normalmente sem erros de lógica ou loops.' 
-                          : 'Erros do Servidor Node, requisições HTTP e exceções de lógica serão capturados e agrupados aqui.'}
-                      </p>
-                      <div className="flex items-center gap-2">
+                      <div className="space-y-1">
+                        <h4 className="text-base font-black text-white tracking-tight font-mono">
+                          {logFilter === 'node' ? 'Nenhum erro do Servidor Node capturado' : 'Nenhum log detectado'}
+                        </h4>
+                        <p className="text-xs text-[#8696a0] max-w-sm leading-relaxed font-mono">
+                          {logFilter === 'node' 
+                            ? 'O servidor Node.js está operando normalmente sem erros de lógica ou loops.' 
+                            : 'Erros do Servidor Node, requisições HTTP e exceções de lógica serão capturados e agrupados aqui.'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2.5 pt-1">
                         <button
                           onClick={() => handleTestApp()}
-                          className="bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold px-3.5 py-2 rounded-2xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center gap-2"
+                          className="bg-gradient-to-r from-indigo-500/20 to-teal-500/20 hover:from-indigo-500/30 hover:to-teal-500/30 text-indigo-200 border border-indigo-500/40 text-xs font-black px-4 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg shadow-indigo-500/20 active:scale-95 flex items-center gap-2 font-mono"
                         >
-                          <Activity size={14} /> Teste Rápido
+                          <Activity size={14} className="text-teal-400" /> Teste Rápido
                         </button>
                         <button
                           onClick={handleSimulateNodeError}
-                          className="bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold px-3.5 py-2 rounded-2xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center gap-2"
+                          className="bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-black px-4 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg shadow-rose-500/20 active:scale-95 flex items-center gap-2 font-mono"
                         >
-                          <Bug size={14} /> Simular Erro Node
+                          <Bug size={14} className="text-rose-400 animate-pulse" /> Simular Erro Node
                         </button>
                       </div>
                     </div>
