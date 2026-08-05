@@ -534,9 +534,9 @@ class SessionManager {
                         return;
                     }
 
-                    const isRestartRequired = status === 515 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('restart required');
+                    const isRestartRequired = (status === 515 || status === 428 || status === 1006 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('restart required') || reason.toLowerCase().includes('precondition required') || reason.toLowerCase().includes('connection closed')) && isFullyAuthenticated;
                     if (isRestartRequired) {
-                        console.log(`[SessionManager] WhatsApp solicitou reinicialização imediata (status 515 / restartRequired) para a instância ${instanceId}. Reconectando imediatamente com as novas chaves pareadas...`);
+                        console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização pós-pareamento (status ${status} / ${reason}) para a instância ${instanceId}. Reconectando imediatamente em 1s com as novas chaves pareadas...`);
                         try {
                             if (sock?.ws) sock.ws.close();
                             if (sock?.end) sock.end();
@@ -545,10 +545,10 @@ class SessionManager {
                         setTimeout(() => {
                             if (!this.sessions.has(instanceId)) {
                                 this.createSession(tenantId, instanceId).catch(err => {
-                                    console.error(`[SessionManager] Erro ao reconectar pós restartRequired para ${instanceId}:`, err.message);
+                                    console.error(`[SessionManager] Erro ao reconectar pós restartRequired/428 para ${instanceId}:`, err.message);
                                 });
                             }
-                        }, 500);
+                        }, 1000);
                         return;
                     }
 
