@@ -870,7 +870,13 @@ export default function DevLogger() {
             });
           }
           
-          if (data.level === 'error' || data.level === 'warn' || (data.message && (data.message.toLowerCase().includes('error') || data.message.toLowerCase().includes('falha') || data.message.toLowerCase().includes('loop')))) {
+          const isRoutineNoise = 
+            data.message?.includes('Connection Terminated') ||
+            data.message?.includes('connection errored') ||
+            data.message?.includes('socket zumbi') ||
+            data.message?.includes('[History Sync]');
+
+          if (!isRoutineNoise && (data.level === 'error' || data.level === 'warn' || (data.level !== 'info' && data.message && (data.message.toLowerCase().includes('error') || data.message.toLowerCase().includes('falha') || data.message.toLowerCase().includes('loop'))))) {
             addLog({
               type: data.level === 'warn' ? 'warn' : 'error',
               message: data.message || 'Exceção/Falha no Servidor Node.js',
@@ -959,6 +965,8 @@ export default function DevLogger() {
                  const msg = err.message || '';
                  const isRoutineNoise = 
                     msg.includes('socket zumbi') ||
+                    msg.includes('Connection Terminated') ||
+                    msg.includes('connection errored') ||
                     msg.includes('não retornou novas mensagens') ||
                     msg.includes('[History Sync]') ||
                     msg.includes('History sync is disabled') ||
@@ -966,7 +974,7 @@ export default function DevLogger() {
                     msg.includes('GetCardapioCompleto') ||
                     (msg.includes('[WaCalls Listener]') && (msg.includes('Contato não encontrado') || msg.includes('mapeamento LID')));
                  
-                 if (isRoutineNoise && err.level !== 'error') {
+                 if (isRoutineNoise || err.level === 'info') {
                     return; // Ignora avisos/infos rotineiros no DevLogger
                  }
 
@@ -1635,16 +1643,18 @@ export default function DevLogger() {
 
           {/* Header Superior Neon Glassmorphism (Fixo & Sticky) */}
           <div 
-            className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-white/10 cursor-pointer bg-[#070c10] bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/15 hover:to-indigo-500/15 transition-all select-none relative z-30 shrink-0 sticky top-0 gap-2 flex-wrap sm:flex-nowrap"
+            className="flex items-center justify-between px-3 sm:px-5 py-3 border-b border-white/10 cursor-pointer bg-[#070c10] bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/15 hover:to-indigo-500/15 transition-all select-none relative z-30 shrink-0 sticky top-0 gap-2 overflow-hidden"
             onClick={toggleVisibility}
           >
-            <div className="flex items-center gap-2.5 min-w-0">
+            {/* Lado Esquerdo: Logo, Título e Chip ONLINE */}
+            <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
               <div className="relative flex items-center justify-center shrink-0">
                 <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-emerald-300 flex items-center justify-center shadow-lg shadow-emerald-500/30">
                   <Terminal size={18} className="text-black stroke-[2.5]" />
                 </div>
                 <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-[#070c10] animate-pulse" />
               </div>
+
               <div className="text-left shrink-0">
                 <div className="flex items-center gap-1.5">
                   <h3 className="text-xs sm:text-sm font-black text-white tracking-tight leading-none font-mono">Antigravity</h3>
@@ -1671,58 +1681,58 @@ export default function DevLogger() {
               </div>
 
               {logs.filter(l => l.type === 'error').length > 0 && (
-                <span className="flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono shadow-sm animate-pulse shrink-0">
+                <span className="hidden md:flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono shadow-sm animate-pulse shrink-0">
                   <Bug size={11} /> {logs.filter(l => l.type === 'error').length}
                 </span>
               )}
             </div>
 
             {/* Barra de Ferramentas Dev no Header */}
-            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 overflow-x-auto custom-scrollbar py-0.5">
               <button 
                 onClick={(e) => { 
                   e.stopPropagation(); 
                   setShowServerLogs(true); 
                   useDevStore.setState({ isVisible: false }); 
                 }} 
-                className="text-[#8696a0] hover:text-emerald-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
-                title="Abrir Server Terminal SSE"
+                className="text-[#8696a0] hover:text-emerald-300 bg-white/5 hover:bg-emerald-500/15 border border-white/10 hover:border-emerald-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
+                title="Abrir Terminal Server Node.js (SSE Stream)"
               >
                 <Terminal size={15} />
               </button>
 
               <button 
                 onClick={(e) => { e.stopPropagation(); handleTestSupabase(); }} 
-                className="text-[#8696a0] hover:text-purple-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
-                title="Testar Supabase DB"
+                className="text-[#8696a0] hover:text-purple-300 bg-white/5 hover:bg-purple-500/15 border border-white/10 hover:border-purple-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
+                title="Testar Conexão Supabase DB"
               >
                 <Database size={15} />
               </button>
 
               <button 
                 onClick={(e) => { e.stopPropagation(); handleTestApp(); }} 
-                className="text-[#8696a0] hover:text-cyan-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
-                title="Testar App React"
+                className="text-[#8696a0] hover:text-cyan-300 bg-white/5 hover:bg-cyan-500/15 border border-white/10 hover:border-cyan-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
+                title="Testar Aplicação React (State & Hooks)"
               >
                 <AppWindow size={15} />
               </button>
 
               <button 
                 onClick={(e) => { e.stopPropagation(); handleTestEngine(); }} 
-                className="text-[#8696a0] hover:text-blue-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
-                title="Testar Baileys Engine"
+                className="text-[#8696a0] hover:text-blue-300 bg-white/5 hover:bg-blue-500/15 border border-white/10 hover:border-blue-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
+                title="Testar Status do Baileys WhatsApp Engine"
               >
                 <Smartphone size={15} />
               </button>
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setShowTestPanel(!showTestPanel); }} 
-                className={`p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer relative active:scale-95 ${
+                className={`p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer relative active:scale-95 border shrink-0 ${
                   showTestPanel 
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-lg shadow-amber-500/20' 
-                    : 'text-[#8696a0] hover:text-amber-400 hover:bg-white/10'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-lg shadow-amber-500/20' 
+                    : 'text-[#8696a0] hover:text-amber-300 bg-white/5 hover:bg-amber-500/15 border-white/10 hover:border-amber-500/30'
                 }`}
-                title="Antigravity Test Suite (ASTS)"
+                title="Antigravity Test Suite (ASTS Cockpit)"
               >
                 <Activity size={15} className={isTestingApp ? 'animate-pulse text-amber-400' : ''} />
                 {isTestingApp && (
@@ -1733,18 +1743,18 @@ export default function DevLogger() {
                 )}
               </button>
 
-              <div className="w-px h-4 bg-white/15 mx-0.5" />
+              <div className="w-px h-4 bg-white/15 mx-0.5 shrink-0" />
 
-              <div className="relative flex items-center">
+              <div className="relative flex items-center shrink-0">
                 <button 
                   onClick={(e) => { e.stopPropagation(); copyLogs(); }} 
-                  className="text-[#8696a0] hover:text-emerald-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
-                  title="Copiar Logs"
+                  className="text-[#8696a0] hover:text-emerald-300 bg-white/5 hover:bg-emerald-500/15 border border-white/10 hover:border-emerald-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm" 
+                  title="Copiar Logs Estruturados"
                 >
                   <Copy size={15} />
                 </button>
                 {copyFeedback && (
-                  <div className="absolute right-full mr-2 whitespace-nowrap bg-emerald-500 text-black font-black text-[10px] px-2.5 py-1 rounded-lg shadow-xl animate-in fade-in slide-in-from-right-2 z-30">
+                  <div className="absolute right-full mr-2 whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-400 text-black font-black text-[10px] px-2.5 py-1 rounded-lg shadow-xl animate-in fade-in slide-in-from-right-2 z-30 font-mono">
                     {copyFeedback}
                   </div>
                 )}
@@ -1752,21 +1762,21 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); clearLogs(); }} 
-                className="text-[#8696a0] hover:text-rose-400 hover:bg-white/10 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95" 
-                title="Limpar Logs"
+                className="text-[#8696a0] hover:text-rose-300 bg-white/5 hover:bg-rose-500/15 border border-white/10 hover:border-rose-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
+                title="Limpar Histórico de Logs"
               >
                 <Trash2 size={15} />
               </button>
 
-              <div className="w-px h-4 bg-white/15 mx-0.5" />
+              <div className="w-px h-4 bg-white/15 mx-0.5 shrink-0" />
 
               <a 
                 href={`${engineUrl}/swagger/teste.html`} 
                 target="_blank" 
                 rel="noopener noreferrer" 
                 onClick={(e) => e.stopPropagation()} 
-                className="bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 px-2 py-1 rounded-xl text-[10px] font-black transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0" 
-                title="Abrir Documentação da API"
+                className="bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 px-2.5 py-1 rounded-xl text-[10px] font-black transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0 font-mono" 
+                title="Abrir Documentação Interativa da API (Swagger)"
               >
                 API Docs
               </a>
@@ -1778,18 +1788,18 @@ export default function DevLogger() {
           </div>
 
           {/* Cockpit de Telemetria e Metadados do Servidor */}
-          {isVisible && serverMeta && (
+          {isVisible && (
             <div className="bg-[#0e161c]/90 border-b border-white/10 p-2.5 px-4 flex flex-col gap-2 text-xs font-mono transition-all relative z-10 shrink-0 max-h-[35vh] overflow-y-auto custom-scrollbar">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar max-w-full py-1 whitespace-nowrap scroll-smooth">
                   <div className="flex items-center gap-1.5 text-indigo-300 bg-indigo-500/10 px-2.5 py-1 rounded-xl border border-indigo-500/25 text-[10px] font-bold shrink-0">
                     <Layers size={12} className="text-indigo-400" />
-                    <span>Engine: {serverMeta?.engineVersion || '5.8.4'}</span>
+                    <span>Engine: {serverMeta?.engineVersion || '5.8.5'}</span>
                   </div>
 
                   <div className="flex items-center gap-1.5 text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/25 text-[10px] font-bold shrink-0">
                     <Calendar size={12} className="text-amber-400" />
-                    <span>Compilação: {serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString('pt-BR') : '04/08/2026, 22:10:37'}</span>
+                    <span>Compilação: {serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString('pt-BR') : '05/08/2026, 13:20:00'}</span>
                   </div>
 
                   <button
@@ -1799,7 +1809,7 @@ export default function DevLogger() {
                     title="Clique para ver o Histórico de Versões e Releases do Baileys no GitHub"
                   >
                     <Smartphone size={12} className="text-purple-400 group-hover:scale-110 transition-transform" />
-                    <span>Baileys: {serverMeta?.baileysVersion || 'v7.0.0-rc.9'} ({serverMeta?.baileysDate || '29/07/2026'})</span>
+                    <span>Baileys: {serverMeta?.baileysVersion || '7.0.0-rc.9'} ({serverMeta?.baileysDate || '29/07/2026'})</span>
                     <ChevronDown size={11} className={`transition-transform duration-200 ${showBaileysModal ? 'rotate-180' : ''}`} />
                   </button>
 
@@ -1834,16 +1844,16 @@ export default function DevLogger() {
               {/* Baileys Version History & GitHub Releases Dropdown */}
               {showBaileysModal && (
                 <div className="mt-2 animate-in fade-in slide-in-from-top-2 relative overflow-hidden rounded-2xl bg-[#141d24] border border-purple-500/30 shadow-2xl p-4 transition-all">
-                  <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-white/10">
+                  <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-white/10 flex-wrap">
                     <div className="flex items-center gap-2.5">
                       <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center">
                         <Smartphone size={18} className="text-purple-400 animate-pulse" />
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-black text-white block text-xs">Baileys Core ({serverMeta?.baileysVersion || 'v7.0.0-rc.9'})</span>
+                          <span className="font-black text-white block text-xs">Baileys Core ({serverMeta?.baileysVersion || '7.0.0-rc.9'})</span>
                           <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold uppercase">
-                            Em Uso no Servidor
+                            Em Uso no Servidor Node
                           </span>
                         </div>
                         <span className="text-[10px] text-[#8696a0]">
@@ -1852,15 +1862,24 @@ export default function DevLogger() {
                       </div>
                     </div>
 
-                    <a
-                      href="https://github.com/WhiskeySockets/Baileys/releases"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-1.5 text-xs text-purple-300 hover:text-white bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 px-3 py-1.5 rounded-xl font-bold transition-all shadow-sm shrink-0"
-                    >
-                      <span>Releases GitHub</span> <ExternalLink size={12} />
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href="/features"
+                        onClick={(e) => { e.stopPropagation(); useDevStore.setState({ isVisible: false }); }}
+                        className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-white bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 px-3 py-1.5 rounded-xl font-bold transition-all shadow-sm shrink-0"
+                      >
+                        <span>🗺️ Mapa Geral</span>
+                      </a>
+                      <a
+                        href="https://github.com/WhiskeySockets/Baileys/releases"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-1.5 text-xs text-purple-300 hover:text-white bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 px-3 py-1.5 rounded-xl font-bold transition-all shadow-sm shrink-0"
+                      >
+                        <span>Releases GitHub</span> <ExternalLink size={12} />
+                      </a>
+                    </div>
                   </div>
 
                   {/* Lista de Releases e Histórico de Versões */}
@@ -2469,9 +2488,24 @@ export default function DevLogger() {
                               )}
 
                               {log.details && (
-                                <pre className="p-3.5 bg-[#050a0e] border border-white/10 rounded-xl text-[10px] text-cyan-300 overflow-x-auto max-h-[180px] custom-scrollbar font-mono leading-relaxed select-all shadow-inner">
-                                  {typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details)}
-                                </pre>
+                                <div className="relative group/code">
+                                  <pre className="p-3.5 bg-[#050a0e] border border-white/10 rounded-xl text-[10px] text-cyan-300 overflow-x-auto max-h-[180px] custom-scrollbar font-mono leading-relaxed select-all shadow-inner pr-16">
+                                    {typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details)}
+                                  </pre>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const text = typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details);
+                                      navigator.clipboard.writeText(text);
+                                      setCopyFeedback('JSON Copiado!');
+                                      setTimeout(() => setCopyFeedback(null), 2500);
+                                    }}
+                                    className="absolute top-2 right-2 opacity-80 group-hover/code:opacity-100 bg-[#121c23] hover:bg-emerald-500 hover:text-black text-[#8696a0] border border-white/10 px-2 py-1 rounded-lg text-[9px] font-bold font-mono transition-all flex items-center gap-1 shadow-md active:scale-95 cursor-pointer"
+                                    title="Copiar JSON Payload para a área de transferência"
+                                  >
+                                    <Copy size={11} /> <span>Copiar</span>
+                                  </button>
+                                </div>
                               )}
                             </div>
                           )}

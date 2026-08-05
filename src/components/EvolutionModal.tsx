@@ -681,9 +681,8 @@ export default function EvolutionModal({
   useEffect(() => {
     if (activePollingId && !isTargetConnected) {
       const inst = existingInstances.find(i => i.id === activePollingId);
-      if (inst && inst.phone_number && !pairingCode && !pairingLoading && !pairingPhone) {
+      if (inst && inst.phone_number && !pairingPhone) {
         setPairingPhone(inst.phone_number);
-        handleRequestPairingCode(inst.id, inst.api_key, inst.phone_number);
       }
     }
   }, [activePollingId, existingInstances, isTargetConnected]);

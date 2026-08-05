@@ -599,8 +599,8 @@ class SessionManager {
 
                     await this.logConnectionEvent(tenantId, instanceId, 'disconnected', 'close', reason || `status_${status}`, null, null);
 
-                    if ((loggedOut || status === 401 || status === 403 || status === 400) && !isFullyAuthenticated && !isPairingPendingSync) {
-                        console.log(`[SessionManager] Pareamento pendente falhou/rejeitado na instância ${instanceId} (status: ${status}). Limpando credenciais temporárias.`);
+                    if ((loggedOut || status === 401 || status === 403 || status === 400 || status === 500 || isBadSession) && !isFullyAuthenticated && !isPairingPendingSync) {
+                        console.log(`[SessionManager] Pareamento pendente ou conexão falhou na instância ${instanceId} (status: ${status}, reason: ${reason}). Limpando credenciais temporárias corrompidas.`);
                         this.authenticatedSessions.delete(instanceId);
                         this.pairingPendingSync.delete(instanceId);
                         await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));

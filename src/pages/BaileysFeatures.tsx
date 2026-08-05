@@ -23,7 +23,12 @@ import {
   AtSign,
   Tv,
   Forward,
-  Eraser
+  Eraser,
+  Lock,
+  Eye,
+  FileText,
+  Sparkles,
+  ExternalLink
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -34,19 +39,19 @@ const engineFeatures = [
     icon: <Key className="text-amber-500" size={24} />,
     bg: 'bg-amber-500/10',
     border: 'border-amber-500/20',
-    title: 'Autenticação Resiliente',
-    description: 'Gestão de conexão Multi-Device com o novo recurso de Pairing Code (sem QR) da Baileys, ideal para SaaS e automações cloud.',
+    title: 'Autenticação Resiliente & Pairing Code',
+    description: 'Gestão de conexão Multi-Device com Paring Code de 8 dígitos (sem câmera) e atualização automática para sub-plataforma WIN_HYBRID.',
     testMethod: 'requestPairingCode',
     testArgs: '[\n  "5521999999999"\n]',
-    code: `// Conexão via Paring Code (Sem Câmera)
+    code: `// Conexão via Paring Code (Sem Câmera) & WIN_HYBRID
 const { state, saveCreds } = await useMultiFileAuthState('auth_info')
 const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
-    mobile: false
+    browser: ['Ubuntu', 'Chrome', '20.0.04']
 })
 
-// Solicitando o Código
+// Solicitando o Código de 8 Dígitos
 const code = await sock.requestPairingCode("5521999999999")
 console.log("Seu Pairing Code:", code)`
   },
@@ -56,10 +61,10 @@ console.log("Seu Pairing Code:", code)`
     icon: <ImageIcon className="text-pink-500" size={24} />,
     bg: 'bg-pink-500/10',
     border: 'border-pink-500/20',
-    title: 'Disparo de Mídias Livres',
-    description: 'O método sendMessage permite montar buffers ou URLs dinâmicas para enviar Fotos, Vídeos, Documentos e Áudios Nativos (PTT).',
+    title: 'Disparo de Mídias Livres & PTT',
+    description: 'Envio completo de Fotos, Vídeos, GIFs animados, PDFs/Documentos e Áudios Nativos de voz (PTT com forma de onda).',
     testMethod: 'sendMessage',
-    testArgs: '[\n  "5521999999999@s.whatsapp.net",\n  {\n    "text": "Teste de Mídias via Tester!"\n  }\n]',
+    testArgs: '[\n  "5521999999999@s.whatsapp.net",\n  {\n    "text": "Teste de Mídias via Engine!"\n  }\n]',
     code: `// Envio de Imagem Otimizada com Legenda
 await sock.sendMessage(jid, { 
     image: { url: 'https://exemplo.com/hero.jpg' }, 
@@ -79,20 +84,18 @@ await sock.sendMessage(jid, {
     icon: <Users className="text-blue-500" size={24} />,
     bg: 'bg-blue-500/10',
     border: 'border-blue-500/20',
-    title: 'Administração Absoluta',
-    description: 'Sua engine no controle. Crie grupos, promova administradores, altere decrições ou expulse usuários maliciosos automaticamente.',
+    title: 'Administração Absoluta de Grupos',
+    description: 'Crie salas de grupo, promova/rebaixe administradores, gerencie links de convite e aprove solicitações pendentes de novos membros.',
     testMethod: 'groupCreate',
     testArgs: '[\n  "QG de Testes",\n  ["5521999999999@s.whatsapp.net"]\n]',
-    code: `// Criação de um novo QG da Empresa
+    code: `// Criar grupo e gerenciar membros
 const group = await sock.groupCreate("QG Lançamento", ["55219999@s.whatsapp.net"])
-console.log("Grupo Criado ID:", group.id)
 
-// Promover Funcinário para Admin
-await sock.groupParticipantsUpdate(
-    group.id, 
-    ["55219888@s.whatsapp.net"],
-    "promote" // "add" | "remove" | "promote" | "demote"
-)`
+// Promover administrador & Moderação
+await sock.groupParticipantsUpdate(group.id, ["55219888@s.whatsapp.net"], "promote")
+
+// Aprovar solicitações pendentes de entrada
+await sock.groupRequestParticipantsUpdate(group.id, ["55219777@s.whatsapp.net"], "approve")`
   },
   {
     id: 4,
@@ -100,15 +103,15 @@ await sock.groupParticipantsUpdate(
     icon: <Activity className="text-emerald-500" size={24} />,
     bg: 'bg-emerald-500/10',
     border: 'border-emerald-500/20',
-    title: 'Comportamento Humano',
-    description: 'Deixe o bot invisível enviando status de presença para a rede indicando que alguém está atualmente "digitando" ou "gravando áudio".',
+    title: 'Comportamento Humano & Presença',
+    description: 'Simulação realista para disparar estados "digitando..." ou "gravando áudio..." antes do envio de respostas automáticas.',
     code: `// Disparar o status "Digitando..." por uns segundos
 await sock.sendPresenceUpdate('composing', jid)
 
 // Disparar o status "Gravando Áudio..." 
 await sock.sendPresenceUpdate('recording', jid)
 
-// Pausar
+// Pausar estado de presença
 await sock.sendPresenceUpdate('paused', jid)`
   },
   {
@@ -117,22 +120,18 @@ await sock.sendPresenceUpdate('paused', jid)`
     icon: <MessageCircle className="text-indigo-500" size={24} />,
     bg: 'bg-indigo-500/10',
     border: 'border-indigo-500/20',
-    title: 'Reações, Citações e Deletes',
-    description: 'Ações diretas sobre mensagens enviadas para aumentar o poder das automações: emojis rápidos, revogação de mensagens e marcações.',
+    title: 'Reações, Citações, Edição e Deletes',
+    description: 'Ações diretas sobre mensagens enviadas: reações com emoji, respostas citadas (reply), revogação remota e edição de conteúdo.',
     testMethod: 'sendMessage',
     testArgs: '[\n  "5521999999999@s.whatsapp.net",\n  {\n    "react": {\n      "text": "🚀",\n      "key": { "remoteJid": "5521999999999@s.whatsapp.net", "fromMe": true, "id": "12345" }\n    }\n  }\n]',
-    code: `// Reagir a uma mensagem enviada
-await sock.sendMessage(jid, { 
-    react: { text: "🔥", key: messageKey } 
-})
+    code: `// Reagir com Emoji
+await sock.sendMessage(jid, { react: { text: "🔥", key: messageKey } })
+
+// Editar Mensagem Enviada
+await sock.sendMessage(jid, { text: "Novo texto corrigido", edit: messageKey })
 
 // Deletar para Todos (Wipe)
-await sock.sendMessage(jid, { 
-    delete: messageKey 
-})
-
-// Responder Citando 
-await sock.sendMessage(jid, { text: 'Perfeito!' }, { quoted: msg })`
+await sock.sendMessage(jid, { delete: messageKey })`
   },
   {
     id: 6,
@@ -140,18 +139,18 @@ await sock.sendMessage(jid, { text: 'Perfeito!' }, { quoted: msg })`
     icon: <Zap className="text-violet-500" size={24} />,
     bg: 'bg-violet-500/10',
     border: 'border-violet-500/20',
-    title: 'Acessos Essenciais da API',
-    description: 'Colete dados cruciais da rede, como validar de quem é um número, descobrir a foto de perfil oficial, ou bloquear contas.',
+    title: 'Validação de Contatos & Fotos',
+    description: 'Verifique se um número existe no WhatsApp (onWhatsApp), obtenha a URL da foto de perfil HD ou bloqueie instâncias de spam.',
     testMethod: 'onWhatsApp',
     testArgs: '[\n  "5521999999999"\n]',
-    code: `// Validar se número realmente tem WhatsApp
+    code: `// Validar se número realmente tem WhatsApp registrado
 const id = await sock.onWhatsApp("5521999999999")
-if (id[0]?.exists) { ... }
+if (id[0]?.exists) console.log("JID Válido:", id[0].jid)
 
-// Roubar... digo, coletar a foto de perfil =D
+// Baixar foto de perfil HD oficial
 const profilePic = await sock.profilePictureUrl(jid, 'image')
 
-// Bloquear contato Spam
+// Bloquear ou desbloquear contato
 await sock.updateBlockStatus(jid, 'block')`
   },
   {
@@ -160,14 +159,14 @@ await sock.updateBlockStatus(jid, 'block')`
     icon: <CheckCheck className="text-cyan-500" size={24} />,
     bg: 'bg-cyan-500/10',
     border: 'border-cyan-500/20',
-    title: 'Sincronização de Leitura',
-    description: 'Assuma o controle dos "Checks Azuis". Marque mensagens como lidas nativamente informando diretamente os servidores do WhatsApp.',
+    title: 'Sincronização dos Checks Azuis',
+    description: 'Assuma o controle total dos recibos de leitura. Marque mensagens como lidas em lote ou em tempo real via socket.',
     testMethod: 'readMessages',
     testArgs: '[\n  [\n    { "remoteJid": "5521999999999@s.whatsapp.net", "id": "MSGID", "fromMe": false }\n  ]\n]',
     code: `// Transformar o Check cinza em Azul
 await sock.readMessages([message.key])
 
-// Automatizando leitura em tempo real:
+// Leitura automática no recebimento
 sock.ev.on('messages.upsert', async (m) => {
     const msg = m.messages[0];
     if (!msg.key.fromMe) await sock.readMessages([msg.key]);
@@ -179,16 +178,16 @@ sock.ev.on('messages.upsert', async (m) => {
     icon: <Radio className="text-fuchsia-500" size={24} />,
     bg: 'bg-fuchsia-500/10',
     border: 'border-fuchsia-500/20',
-    title: 'Enquetes Nativas V2',
-    description: 'Gere enquetes interativas (Polls) para engajar clientes ou membros de um grupo, com configuração para voto único ou múltiplo.',
+    title: 'Enquetes Nativas (Polls V2)',
+    description: 'Dispare enquetes interativas nativas com suporte a seleção única ou múltipla e receba atualizações de votos via evento pollUpdate.',
     testMethod: 'sendMessage',
-    testArgs: '[\n  "5521999999999@s.whatsapp.net",\n  {\n    "poll": {\n      "name": "Qual o melhor framework?",\n      "values": ["React", "Vue", "Svelte"],\n      "selectableCount": 1\n    }\n  }\n]',
-    code: `// Enviar Enquete Simples de Múltipla Escolha
+    testArgs: '[\n  "5521999999999@s.whatsapp.net",\n  {\n    "poll": {\n      "name": "Qual a melhor opção para seu pedido?",\n      "values": ["Opção A", "Opção B", "Opção C"],\n      "selectableCount": 1\n    }\n  }\n]',
+    code: `// Enviar Enquete Simples
 await sock.sendMessage(jid, {
     poll: {
-        name: 'Qual o melhor dia para a reunião técnica?',
-        values: ['Segunda', 'Quarta', 'Sexta'],
-        selectableCount: 1 // Força voto único
+        name: 'Qual o melhor horário de atendimento?',
+        values: ['Manhã (09h)', 'Tarde (14h)', 'Noite (19h)'],
+        selectableCount: 1
     }
 })`
   },
@@ -198,18 +197,18 @@ await sock.sendMessage(jid, {
     icon: <Globe className="text-teal-500" size={24} />,
     bg: 'bg-teal-500/10',
     border: 'border-teal-500/20',
-    title: 'Event Emitter Poderoso',
-    description: 'Sistema assíncrono interno da Baileys (EventEmitter) dispara hooks em tempo real para mensagens novas, alterações de grupo ou falhas de conexão.',
+    title: 'Event Emitter em Tempo Real',
+    description: 'Escute eventos em tempo real do WhatsApp: novas mensagens, mudanças de sessão, participantes de grupo e desconexões.',
     code: `// Interceptar mensagens recebidas
 sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
-    console.log("Chegou mensagem:", msg.message?.conversation)
+    console.log("Mensagem recebida:", msg.message?.conversation)
 })
 
-// Controlar quedas e reconexões
+// Tratar atualização de conexão e reconexões
 sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect } = update
-    if(connection === 'close') reconnect(lastDisconnect)
+    if (connection === 'close') reconnect()
 })`
   },
   {
@@ -218,17 +217,17 @@ sock.ev.on('connection.update', (update) => {
     icon: <UserCheck className="text-orange-500" size={24} />,
     bg: 'bg-orange-500/10',
     border: 'border-orange-500/20',
-    title: 'Contatos e Localizações',
-    description: 'Transmita payloads estruturados nativos. Permite enviar cartões de visita virtuais (.vcf) nativos ou Pins dinâmicos de mapa (latitude/longitude).',
-    code: `// Compartilhar um Contato (vCard)
-const vcard = 'BEGIN:VCARD\\nVERSION:3.0\\nFN:Suporte Ti\\nTEL;type=CELL;waid=55219999:55219999\\nEND:VCARD'
+    title: 'vCards & Localização GPS',
+    description: 'Transmita cartões de visita virtuais (.vcf v3.0) e coordenadas de GPS dinâmicas (latitude/longitude) para clientes.',
+    code: `// Compartilhar Cartão de Contato (vCard)
+const vcard = 'BEGIN:VCARD\\nVERSION:3.0\\nFN:Suporte Técnico\\nTEL;type=CELL;waid=55219999:55219999\\nEND:VCARD'
 await sock.sendMessage(jid, { 
     contacts: { displayName: 'Suporte', contacts: [{ vcard }] }
 })
 
-// Compartilhar Pino de Localização
+// Compartilhar Pino de Localização GPS
 await sock.sendMessage(jid, { 
-    location: { degreesLatitude: -23.5505, degreesLongitude: -46.6333 }
+    location: { degreesLatitude: -22.9068, degreesLongitude: -43.1729 }
 })`
   },
   {
@@ -237,43 +236,50 @@ await sock.sendMessage(jid, {
     icon: <Pin className="text-rose-500" size={24} />,
     bg: 'bg-rose-500/10',
     border: 'border-rose-500/20',
-    title: 'Fixar e Desafixar',
-    description: 'Fixe as conversas ou mensagens mais importantes no topo do chat para destaque permanente.',
-    code: `// Fixar uma conversa no topo da lista (Pin)
+    title: 'Fixar e Desafixar Chats/Msgs',
+    description: 'Mantenha as conversas estratégicas fixadas no topo do aplicativo ou destaque mensagens específicas.',
+    code: `// Fixar uma conversa no topo
 await sock.chatModify({
-    pin: true // true para fixar, false para desafixar
+    pin: true
 }, jid)
 
-// A WhatsApp Web atual suporta fixar mensagens dentro do chat também (Message Pinning)`
+// Desafixar conversa
+await sock.chatModify({
+    pin: false
+}, jid)`
   },
   {
     id: 12,
-    category: 'Mensagens Efêmeras',
+    category: 'Privacidade Efêmera',
     icon: <Timer className="text-lime-500" size={24} />,
     bg: 'bg-lime-500/10',
     border: 'border-lime-500/20',
-    title: 'Disappearing Messages',
-    description: 'Envie mensagens confidenciais que desaparecem automaticamente após o tempo determinado (WA_DEFAULT_EPHEMERAL).',
+    title: 'Mensagens Efêmeras & View Once',
+    description: 'Mensagens sigilosas com expiração automática programada ou fotos/vídeos de visualização única (View Once).',
     code: `import { WA_DEFAULT_EPHEMERAL } from '@whiskeysockets/baileys'
 
-// Enviar mensagem que some (7 dias padrão)
-await sock.sendMessage(jid, {
-    text: 'Esta senha sumirá em breve: 1234'
-}, { ephemeralExpiration: WA_DEFAULT_EPHEMERAL })`
+// Enviar mensagem efêmera (some em 7 dias)
+await sock.sendMessage(jid, { text: 'Código sigiloso: 8941' }, { ephemeralExpiration: WA_DEFAULT_EPHEMERAL })
+
+// Enviar Imagem View Once (Visualização Única)
+await sock.sendMessage(jid, { image: { url: 'foto.jpg' }, viewOnce: true })`
   },
   {
     id: 13,
-    category: 'Perfil do Bot',
+    category: 'Perfil da Instância',
     icon: <UserCog className="text-slate-500" size={24} />,
     bg: 'bg-slate-500/10',
     border: 'border-slate-500/20',
-    title: 'Gestão de Nome e Bio',
-    description: 'Altere nativamente o "Recado" (About) ou o "Nome de Exibição" do bot / usuário vinculado sem abrir o celular.',
-    code: `// Altera o Nome de exibição "Pushname"
-await sock.updateProfileName('Atendimento Fazer.ai 🚀')
+    title: 'Gestão de Nome, Bio e Foto',
+    description: 'Atualização programática de nome de exibição (Pushname), recado público (About) e avatar de perfil do chip.',
+    code: `// Alterar Nome de Exibição público
+await sock.updateProfileName('Atendimento Antigravity 🚀')
 
-// Altera o Recado / Bio (Status Text)
-await sock.updateProfileStatus('Trabalhando em códigos... 💻')`
+// Alterar Bio / Recado público
+await sock.updateProfileStatus('SaaS WhatsApp Engine Online 🟢')
+
+// Atualizar Foto de Perfil da Instância
+await sock.updateProfilePicture(sock.user.id, { url: 'https://exemplo.com/logo.jpg' })`
   },
   {
     id: 14,
@@ -281,37 +287,28 @@ await sock.updateProfileStatus('Trabalhando em códigos... 💻')`
     icon: <ArchiveX className="text-stone-500" size={24} />,
     bg: 'bg-stone-500/10',
     border: 'border-stone-500/20',
-    title: 'Arquivamento & Silêncio',
-    description: 'Limpe a interface arquivando chats inativos automaticamente ou mutando alertas de pessoas indesejadas.',
-    code: `// Arquivar uma conversa inteira
-await sock.chatModify({
-    archive: true,
-    lastMessages: [{ key: messageKey, messageTimestamp: 161000000 }]
-}, jid)
+    title: 'Arquivamento & Mute',
+    description: 'Organize a caixa de entrada arquivando conversas finalizadas ou silenciando notificações de grupos movimentados.',
+    code: `// Arquivar conversa
+await sock.chatModify({ archive: true, lastMessages: [msgKey] }, jid)
 
 // Silenciar grupo por 8 horas (Mute)
-await sock.chatModify({
-    mute: Date.now() + 8 * 60 * 60 * 1000
-}, jid)`
+await sock.chatModify({ mute: Date.now() + 8 * 60 * 60 * 1000 }, jid)`
   },
   {
     id: 15,
-    category: 'Cache Sincronizado',
+    category: 'Memória & Histórico',
     icon: <History className="text-cyan-400" size={24} />,
     bg: 'bg-cyan-400/10',
     border: 'border-cyan-400/20',
-    title: 'Baileys Store (Memória)',
-    description: 'Sincronize todo o histórico antigo de conversas contido no celular pareando com o InMemoryStore.',
-    code: `// Cria o banco de memória JSON
+    title: 'InMemoryStore & History Sync',
+    description: 'Sincronização e cache em RAM de contatos, mensagens antigas e grupos via InMemoryStore da Baileys.',
+    code: `// Criar store em memória sincronizada
 const store = makeInMemoryStore({})
-store.readFromFile('./baileys_store.json')
-
-// Vincula ouvintes e salva num arquivo a cada 10s
 store.bind(sock.ev)
-setInterval(() => store.writeToFile('./baileys_store.json'), 10_000)
 
-// Consulta rápida: tem dados desse chat?
-const chat = store.chats.get(jid)`
+// Consultar contato rápido em memória
+const contact = store.contacts[jid]`
   },
   {
     id: 16,
@@ -319,17 +316,14 @@ const chat = store.chats.get(jid)`
     icon: <PhoneOff className="text-red-500" size={24} />,
     bg: 'bg-red-500/10',
     border: 'border-red-500/20',
-    title: 'Rejeição de Ligações',
-    description: 'Você pode receber callbacks se alguém ligar em áudio ou vídeo para o bot e rejeitar chamadas para evitar spam sonoros.',
-    code: `sock.ev.on('call', async (call) => {
-    // Alguém ligou!
-    if(call[0].status === 'offer') {
-        const callerId = call[0].from;
-        const callId = call[0].id;
-        
-        // Desligar na cara :)
-        await sock.rejectCall(callId, callerId)
-        await sock.sendMessage(callerId, { text: "⚠️ Não aceitamos ligações!" })
+    title: 'Rejeição de Chamadas (WaCalls)',
+    description: 'Interceptação e rejeição automática de chamadas telefônicas de voz ou vídeo para evitar travamentos do chip.',
+    code: `sock.ev.on('call', async (calls) => {
+    for (const call of calls) {
+        if (call.status === 'offer') {
+            await sock.rejectCall(call.id, call.from)
+            await sock.sendMessage(call.from, { text: "⚠️ Atendimento exclusivo via texto." })
+        }
     }
 })`
   },
@@ -339,30 +333,26 @@ const chat = store.chats.get(jid)`
     icon: <AtSign className="text-yellow-500" size={24} />,
     bg: 'bg-yellow-500/10',
     border: 'border-yellow-500/20',
-    title: 'Citações Silenciosas e Menções',
-    description: 'Force a notificação do celular das pessoas de um grupo marcando (mention) o @ delas nas suas campanhas de broadcast.',
-    code: `// Mencionar alguém (Notification forced no celular)
-const participant = '551199999999@s.whatsapp.net'
-
+    title: 'Menções Silenciosas (@mentions)',
+    description: 'Force a notificação sonora no celular de membros de um grupo marcando o @ do participante na mensagem.',
+    code: `// Notificação direta de membro no grupo
 await sock.sendMessage(groupJid, {
-    text: "Bom dia, o que fará hoje @551199999999?",
-    mentions: [participant] 
+    text: "Atenção @5521999999999, seu pedido foi enviado!",
+    mentions: ['5521999999999@s.whatsapp.net']
 })`
   },
   {
     id: 18,
-    category: 'Status e Broadcast',
+    category: 'Stories / Status',
     icon: <Tv className="text-blue-400" size={24} />,
     bg: 'bg-blue-400/10',
     border: 'border-blue-400/20',
-    title: 'Stories via Engine',
-    description: 'Poste status que desaparecem em 24h na conta do Bot e notifique todos que têm você salvo na agenda.',
-    code: `// Enviar um story na aba STATUS
-await sock.sendMessage(
-    'status@broadcast', 
-    { text: 'Promoção relâmpago de sexta!' },
-    { statusJidList: [/* ... jids de quem pode ver ... */] }
-)`
+    title: 'Status Broadcast (Stories)',
+    description: 'Postagem de Stories de 24 horas no WhatsApp para promoção de ofertas com direcionamento de audiência.',
+    code: `// Postar Story na aba Atualizações
+await sock.sendMessage('status@broadcast', { 
+    text: '🚀 Lançamento exclusivo hoje às 20h!' 
+}, { statusJidList: [/* jids selecionados */] })`
   },
   {
     id: 19,
@@ -370,43 +360,55 @@ await sock.sendMessage(
     icon: <Forward className="text-purple-400" size={24} />,
     bg: 'bg-purple-400/10',
     border: 'border-purple-400/20',
-    title: 'Encaminhamento',
-    description: 'A Baileys permite o preenchimento da array de "forwards" redirecionando mídias inteiras sem precisar baixar a foto para a RAM (zero-copy routing).',
-    code: `// Captura a mensagem a partir do disco/memória
-const msgToForward = await store.loadMessage(oldJid, messageKey)
-
-// Repassa "encaminhada" para outro cliente
-await sock.sendMessage(newJid, {
-    forward: msgToForward,
-})`
+    title: 'Encaminhamento Zero-Copy',
+    description: 'Encaminhe mensagens e mídias pesadas sem recarregar o arquivo na RAM do servidor (encaminhamento nativo).',
+    code: `// Encaminhar mensagem preservando payload
+await sock.sendMessage(destJid, { forward: originalMessage })`
   },
   {
     id: 20,
-    category: 'Limpeza e Rescisão',
+    category: 'Limpeza Operacional',
     icon: <Eraser className="text-pink-600" size={24} />,
     bg: 'bg-pink-600/10',
     border: 'border-pink-600/20',
-    title: 'Excluir Interações',
-    description: 'A API pode forçar a exclusão ou limpeza completa (Clear Chat) do app para a economia de espaço no celular que hospeda o chip.',
-    code: `// Delete Chat (Zerar toda a conversa com um ID)
-await sock.chatModify({
-    delete: true,
-    lastMessages: [{ key: lastKey, messageTimestamp: 161000 }]
-}, jid)
+    title: 'Clear Chat & Delete Chat',
+    description: 'Limpeza programática de histórico de conversas para preservar espaço de armazenamento na instância.',
+    code: `// Limpar mensagens mas manter a sala
+await sock.chatModify({ clear: { messages: [lastMsgKey] } }, jid)
 
-// Clear Chat (Remover as msgs, mas manter a sala e o Fixado)
-await sock.chatModify({
-    clear: { messages: [{ id: '...', fromMe: true, timestamp: 12345 }] }
-}, jid)`
+// Apagar sala de conversa por completo
+await sock.chatModify({ delete: true }, jid)`
+  },
+  {
+    id: 21,
+    category: 'Configurações de Conta',
+    icon: <Lock className="text-teal-400" size={24} />,
+    bg: 'bg-teal-400/10',
+    border: 'border-teal-400/20',
+    title: 'Privacidade da Conta',
+    description: 'Ajuste quem pode visualizar o Visto por Último, Foto de Perfil, Recado e Status através de chamadas nativas.',
+    code: `// Configurar visto por último para "Meus Contatos"
+await sock.updateLastSeenPrivacy('contacts')
+
+// Configurar foto de perfil pública
+await sock.updateProfilePicturePrivacy('all')`
+  },
+  {
+    id: 22,
+    category: 'Segurança & Sinalização',
+    icon: <Sparkles className="text-amber-400" size={24} />,
+    bg: 'bg-amber-400/10',
+    border: 'border-amber-400/20',
+    title: 'Criptografia E2E & Protocol Keys',
+    description: 'Tratamento de Bad MAC retry, rotação automática de PreKeys do Signal Protocol e sub-plataforma WIN_HYBRID.',
+    code: `// Suporte nativo ao libsignal-node com auto-retry
+// Baileys v7.0.0-rc.9 otimizado para evitar estouro de pilha e desconexões 401`
   }
 ];
-
 
 export default function BaileysFeatures() {
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<'engine' | 'fazerai'>('engine');
-  
   // Tester State
   const [testModalOpen, setTestModalOpen] = useState(false);
   const [testMethod, setTestMethod] = useState('');
@@ -469,25 +471,41 @@ export default function BaileysFeatures() {
         
         {/* Header Animado */}
         <div className="flex flex-col gap-3 mb-8 w-full animate-in slide-in-from-top-4 fade-in duration-700">
-          <button 
-            onClick={() => navigate('/admin')}
-            className="flex items-center gap-2 text-gray-400 hover:text-white font-semibold mb-2 bg-white/5 hover:bg-white/10 w-fit px-4 py-2 rounded-full border border-white/10 transition-all"
-          >
-            <ChevronLeft size={18} /> Voltar ao Painel
-          </button>
+          <div className="flex items-center justify-between w-full flex-wrap gap-4">
+            <button 
+              onClick={() => navigate(-1)}
+              className="flex items-center gap-2 text-gray-400 hover:text-white font-semibold bg-white/5 hover:bg-white/10 px-4 py-2 rounded-full border border-white/10 transition-all cursor-pointer"
+            >
+              <ChevronLeft size={18} /> Voltar
+            </button>
+
+            <a
+              href="https://github.com/WhiskeySockets/Baileys/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-purple-300 hover:text-white bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 px-4 py-2 rounded-full font-bold transition-all shadow-md text-sm"
+            >
+              <span>GitHub Baileys Releases</span> <ExternalLink size={16} />
+            </a>
+          </div>
           
-          <div className="flex flex-col md:flex-row md:items-end justify-between w-full gap-6">
+          <div className="flex flex-col md:flex-row md:items-end justify-between w-full gap-6 mt-2">
             <div className="flex items-center gap-3">
-               <div className={`p-3 rounded-2xl border transition-colors duration-500 bg-emerald-500/20 border-emerald-500/30`}>
-                 <Rocket className="text-emerald-400" size={32} />
+               <div className="p-3.5 rounded-2xl border transition-colors duration-500 bg-purple-500/20 border-purple-500/30 shadow-lg shadow-purple-500/20">
+                 <Rocket className="text-purple-400" size={36} />
                </div>
                <div>
-                 <h1 className="text-4xl md:text-5xl font-black bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent tracking-tight transition-all duration-500">
-                    Baileys V6 Showcase
-                 </h1>
+                 <div className="flex items-center gap-3 flex-wrap">
+                   <h1 className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-r from-white via-purple-200 to-emerald-400 bg-clip-text text-transparent tracking-tight">
+                      Baileys Engine 7.0.0-rc.9
+                   </h1>
+                   <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-bold uppercase tracking-wider">
+                     Servidor Node Ativo
+                   </span>
+                 </div>
                  <p className="text-gray-400 font-medium text-sm md:text-base mt-2 flex items-center gap-2">
-                   <ShieldCheck size={16} className="text-emerald-500"/> 
-                   Visão geral técnica da Engine Antigravity e seus recursos nativos.
+                   <ShieldCheck size={18} className="text-emerald-500"/> 
+                   Mapa Geral de Funcionalidades e Contratos da API Baileys (WhiskeySockets/Baileys).
                  </p>
                </div>
             </div>
@@ -506,7 +524,10 @@ export default function BaileysFeatures() {
                     {feature.icon}
                   </div>
                   <div>
-                    <h3 className={`text-xl font-bold text-white mb-1 tracking-wide transition-colors duration-300 group-hover:text-emerald-300`}>
+                    <span className="text-[10px] uppercase font-bold text-gray-500 font-mono tracking-widest block mb-0.5">
+                      {feature.category}
+                    </span>
+                    <h3 className="text-xl font-bold text-white mb-1 tracking-wide transition-colors duration-300 group-hover:text-emerald-300">
                       {feature.title}
                     </h3>
                     <p className="text-sm font-medium text-gray-400 leading-relaxed">
@@ -516,21 +537,19 @@ export default function BaileysFeatures() {
                </div>
 
                {/* Editor Glass Code */}
-
                <div className="mt-auto pt-6">
                  {/* Test Button */}
                  {(feature as any).testMethod && (
                     <div className="mb-4">
                       <button
                         onClick={() => openTester((feature as any).testMethod, (feature as any).testArgs)}
-                        className="w-full py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-semibold flex items-center justify-center gap-2 transition-all"
+                        className="w-full py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
                       >
                         <Play size={16} /> Executar Teste no Servidor
                       </button>
                     </div>
                   )}
                  <div className="bg-black/40 rounded-2xl border border-white/5 overflow-hidden shadow-inner">
-
                    <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-white/[0.02]">
                        <div className="flex gap-1.5">
                          <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
@@ -538,10 +557,10 @@ export default function BaileysFeatures() {
                          <div className="w-3 h-3 rounded-full bg-emerald-500/80"></div>
                        </div>
                        <span className="text-xs text-gray-500 font-mono flex items-center gap-1">
-                          <Code2 size={12}/> engine.ts
+                          <Code2 size={12}/> baileys-engine.ts
                        </span>
                    </div>
-                   <pre className={`p-4 overflow-x-auto text-xs sm:text-sm font-mono leading-relaxed CustomScrollbar text-emerald-300`}>
+                   <pre className="p-4 overflow-x-auto text-xs sm:text-sm font-mono leading-relaxed CustomScrollbar text-emerald-300">
                      <code>
                        {feature.code}
                      </code>
@@ -579,7 +598,7 @@ export default function BaileysFeatures() {
           <div className="bg-[#0f141a] border border-white/10 p-6 rounded-3xl shadow-2xl w-full max-w-3xl relative z-10 flex flex-col gap-4 animate-in zoom-in-95 duration-200">
             <button 
               onClick={() => setTestModalOpen(false)}
-              className="absolute top-4 right-4 bg-white/5 hover:bg-white/10 p-2 rounded-full transition-colors"
+              className="absolute top-4 right-4 bg-white/5 hover:bg-white/10 p-2 rounded-full transition-colors cursor-pointer"
             >
               <X size={20} className="text-gray-400" />
             </button>
@@ -589,8 +608,8 @@ export default function BaileysFeatures() {
                 <KeySquare size={24} />
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-white">Tester da API</h2>
-                <p className="text-gray-400 text-sm">Testando endpoint genérico no Servidor Ativo</p>
+                <h2 className="text-2xl font-bold text-white">Tester de API Baileys</h2>
+                <p className="text-gray-400 text-sm">Disparar chamadas nativas diretamente no servidor Node.js</p>
               </div>
             </div>
 
@@ -619,7 +638,7 @@ export default function BaileysFeatures() {
             <button
               onClick={handleRunTest}
               disabled={testLoading}
-              className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all flex justify-center items-center gap-2 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all flex justify-center items-center gap-2 mt-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {testLoading ? (
                 <>Processando no Motor...</>
@@ -650,4 +669,3 @@ export default function BaileysFeatures() {
     </div>
   );
 }
-
