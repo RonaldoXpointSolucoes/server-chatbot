@@ -935,17 +935,7 @@ class SessionManager {
                                             if (!cleanPhone.startsWith('55') && (cleanPhone.length === 10 || cleanPhone.length === 11)) {
                                                 cleanPhone = '55' + cleanPhone;
                                             }
-                                            if (cleanPhone.startsWith('55') && (cleanPhone.length === 12 || cleanPhone.length === 13)) {
-                                                const ddd = cleanPhone.slice(2, 4);
-                                                const rest = cleanPhone.slice(4);
-                                                if (rest.length === 9 && rest.startsWith('9')) {
-                                                    targetJid = `55${ddd}${rest.slice(1)}@s.whatsapp.net`;
-                                                } else if (rest.length === 8) {
-                                                    targetJid = `55${ddd}${rest}@s.whatsapp.net`;
-                                                }
-                                            } else {
-                                                targetJid = `${cleanPhone}@s.whatsapp.net`;
-                                            }
+                                            targetJid = `${cleanPhone}@s.whatsapp.net`;
                                         }
                                     }
 
