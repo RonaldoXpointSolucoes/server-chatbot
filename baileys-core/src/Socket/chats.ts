@@ -1063,25 +1063,32 @@ export const makeChatsSocket = (config: SocketConfig) => {
 	 * queries need to be fired on connection open
 	 * help ensure parity with WA Web
 	 * */
+	const isTransientErr = (err: any) => {
+		if (!err) return false
+		if (err.data === 400 || err.output?.statusCode === 428 || err.err === 1006 || err.code === 1006) return true
+		const msg = String(err.message || err.err || err).toLowerCase()
+		return msg.includes('connection closed') || msg.includes('1006') || msg.includes('stream errored')
+	}
+
 	const executeInitQueries = async () => {
 		await Promise.all([
 			fetchProps().catch(err => {
-				if (err && (err.data === 400 || err.output?.statusCode === 428 || err.message?.includes('Connection Closed'))) {
-					logger.debug('fetch props returned 400 or connection closed, ignoring')
+				if (isTransientErr(err)) {
+					logger.debug('fetch props returned transient connection closure (1006/428), ignoring')
 				} else {
 					logger.warn({ err }, 'failed to fetch props')
 				}
 			}),
 			fetchBlocklist().catch(err => {
-				if (err && (err.output?.statusCode === 428 || err.message?.includes('Connection Closed'))) {
-					logger.debug('fetch blocklist connection closed, ignoring')
+				if (isTransientErr(err)) {
+					logger.debug('fetch blocklist connection closed (1006/428), ignoring')
 				} else {
 					logger.warn({ err }, 'failed to fetch blocklist')
 				}
 			}),
 			fetchPrivacySettings().catch(err => {
-				if (err && (err.output?.statusCode === 428 || err.message?.includes('Connection Closed'))) {
-					logger.debug('fetch privacy settings connection closed, ignoring')
+				if (isTransientErr(err)) {
+					logger.debug('fetch privacy settings connection closed (1006/428), ignoring')
 				} else {
 					logger.warn({ err }, 'failed to fetch privacy settings')
 				}

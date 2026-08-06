@@ -297,6 +297,7 @@ class SessionManager {
                 browser: Browsers.ubuntu('Chrome'),
                 generateHighQualityLinkPreview: true,
                 syncFullHistory: false,
+                fireInitQueries: false,
                 markOnlineOnConnect: true,
                 emitOwnEvents: true,
                 connectTimeoutMs: 90000,
