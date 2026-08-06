@@ -40,12 +40,36 @@ import {
   ArrowUpRight
 } from 'lucide-react';
 
-// Configurações do Supabase & Engine
+// Configurações do Supabase & Engines com Fallback Automático
 const SUPABASE_URL = 'https://yzbxsxabzncdzuxvlppt.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k';
-const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
+
+const ENGINE_CANDIDATES = [
+  import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim(),
+  'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io',
+  'https://serverchat.xpointsolucoes.com.br',
+  'http://localhost:9000'
+].filter(Boolean) as string[];
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// Helper resiliente com auto-fallback de servidor backend
+const fetchEngineApi = async (path: string, options: RequestInit = {}) => {
+  let lastError: any = null;
+  for (const baseUrl of ENGINE_CANDIDATES) {
+    try {
+      const url = `${baseUrl}${path}`;
+      const res = await fetch(url, options);
+      if (res.ok || res.status === 400 || res.status === 401 || res.status === 404 || res.status === 409) {
+        return res;
+      }
+    } catch (e) {
+      lastError = e;
+      console.warn(`[Engine API] Falha de rota em ${baseUrl}${path}, tentando próximo servidor...`);
+    }
+  }
+  throw lastError || new Error('Não foi possível conectar ao motor backend do WhatsApp.');
+};
 
 interface WhatsAppInstance {
   id: string;
@@ -351,8 +375,8 @@ export default function InstanceManagerStandalone() {
     setConnectLoading(true);
 
     try {
-      // 1. Iniciar ignição do motor Baileys com os headers corretos da instância
-      const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/connect?force_new=true`, {
+      // 1. Iniciar ignição do motor Baileys via endpoint resiliente com fallback
+      const res = await fetchEngineApi(`/api/v1/instances/${inst.id}/connect?force_new=true`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -379,34 +403,42 @@ export default function InstanceManagerStandalone() {
     }
   };
 
-  // Solicitar Código de Pareamento
+  // Solicitar Código de Pareamento de 8 Dígitos
   const handleGeneratePairingCode = async () => {
-    if (!connectInstance || !pairingPhone.replace(/\D/g, '')) return;
+    if (!connectInstance || !pairingPhone.replace(/\D/g, '')) {
+      setConnectError('Por favor informe o número de telefone com DDD para gerar o código.');
+      return;
+    }
 
     setConnectLoading(true);
     setConnectError(null);
+    setPairingCode(null);
+
     try {
       const cleanPhone = pairingPhone.replace(/\D/g, '');
-      const res = await fetch(`${ENGINE_URL}/api/v1/instances/${connectInstance.id}/connect`, {
+      const res = await fetchEngineApi(`/api/v1/instances/${connectInstance.id}/pairing-code?force_new=true`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-tenant-id': connectInstance.tenant_id,
           'apikey': connectInstance.api_key || ''
         },
-        body: JSON.stringify({ phoneNumber: cleanPhone })
+        body: JSON.stringify({ phoneNumber: cleanPhone, force_new: true })
       });
 
       const data = await res.json();
-      if (data.pairingCode || data.pairing_code) {
-        setPairingCode(data.pairingCode || data.pairing_code);
+      if (data.pairingCode || data.code) {
+        setPairingCode(data.pairingCode || data.code);
+        setConnectLoading(false);
+      } else if (data.error) {
+        setConnectError(data.error);
+        setConnectLoading(false);
       }
 
-      // Ativa o polling para capturar se a engine gerar o código via socket status
+      // Ativa o polling em tempo real para escutar se o socket devolve o código via runtime status
       pollQrCode(connectInstance);
     } catch (err: any) {
       setConnectError(err.message || 'Erro ao gerar código de pareamento.');
-    } finally {
       setConnectLoading(false);
     }
   };
