@@ -98,10 +98,12 @@ export default function InstanceManagerStandalone() {
   const [connectInstance, setConnectInstance] = useState<WhatsAppInstance | null>(null);
   const [connectMode, setConnectMode] = useState<'qr' | 'pairing'>('qr');
   const [qrCodeData, setQrCodeData] = useState<string | null>(null);
+  const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [pairingPhone, setPairingPhone] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [connectLoading, setConnectLoading] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const pollIntervalRef = React.useRef<any>(null);
 
   // Modal de Exclusão
   const [deleteTarget, setDeleteTarget] = useState<WhatsAppInstance | null>(null);
@@ -259,32 +261,120 @@ export default function InstanceManagerStandalone() {
     }
   };
 
+  // Limpar polling ao fechar
+  const closeConnectModal = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    setConnectInstance(null);
+    setQrCodeData(null);
+    setQrBase64(null);
+    setPairingCode(null);
+  };
+
+  // Polling em tempo real do QR Code
+  const pollQrCode = (inst: WhatsAppInstance) => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+    }
+
+    let secondsElapsed = 0;
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        secondsElapsed += 2;
+        const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/status`, {
+          headers: {
+            'x-tenant-id': inst.tenant_id,
+            'apikey': inst.api_key || ''
+          }
+        });
+
+        if (!res.ok) return;
+
+        const respJson = await res.json();
+        const data = respJson.data || respJson;
+
+        // 1. Caso a instância já tenha se conectado
+        if (data && (data.status === 'connected' || data.status === 'connected_local' || data.status === 'open')) {
+          setConnectLoading(false);
+          closeConnectModal();
+          fetchInstances();
+          return;
+        }
+
+        // 2. Extrair QR Code (Base64 ou Texto) e Código de Pareamento
+        const qrImage = data?.qr_base64 || data?.whatsapp_instance_runtime?.[0]?.qr_base64;
+        const qrText = data?.qr_code || data?.qrCode || data?.whatsapp_instance_runtime?.[0]?.qr_code;
+        const pairing = data?.pairing_code || data?.pairingCode;
+
+        if (qrImage) {
+          setQrBase64((prev) => (prev !== qrImage ? qrImage : prev));
+          setConnectLoading(false);
+        } else if (qrText) {
+          setQrCodeData((prev) => (prev !== qrText ? qrText : prev));
+          setConnectLoading(false);
+        }
+
+        if (pairing) {
+          setPairingCode(pairing);
+          setConnectLoading(false);
+        }
+
+        // 3. Se passarem 30 segundos sem leitura, renova a ignição na engine
+        if (secondsElapsed >= 30) {
+          secondsElapsed = 0;
+          fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/connect`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-tenant-id': inst.tenant_id,
+              'apikey': inst.api_key || ''
+            },
+            body: JSON.stringify({ forceNew: true })
+          }).catch(() => null);
+        }
+      } catch (e) {
+        console.error('[QR Poll] Erro no polling:', e);
+      }
+    }, 2000);
+  };
+
   // Conectar Instância (QR Code ou Código)
   const handleConnectInstance = async (inst: WhatsAppInstance) => {
     setConnectInstance(inst);
     setConnectError(null);
     setQrCodeData(null);
+    setQrBase64(null);
     setPairingCode(null);
     setPairingPhone(inst.phone_number || '');
     setConnectLoading(true);
 
     try {
+      // 1. Iniciar ignição do motor Baileys com os headers corretos da instância
       const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/connect?force_new=true`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-id': inst.tenant_id
+          'x-tenant-id': inst.tenant_id,
+          'apikey': inst.api_key || ''
         },
         body: JSON.stringify({ forceNew: true })
       });
 
       const data = await res.json();
-      if (data.qrCode) {
-        setQrCodeData(data.qrCode);
+      if (data.qr_base64) {
+        setQrBase64(data.qr_base64);
+        setConnectLoading(false);
+      } else if (data.qrCode || data.qr_code) {
+        setQrCodeData(data.qrCode || data.qr_code);
+        setConnectLoading(false);
       }
+
+      // 2. Iniciar polling em tempo real para capturar o QR assim que o socket gerar
+      pollQrCode(inst);
     } catch (err: any) {
       setConnectError('Falha de conexão com o motor Node.js backend. Verifique se o servidor está ativo.');
-    } finally {
       setConnectLoading(false);
     }
   };
@@ -301,19 +391,19 @@ export default function InstanceManagerStandalone() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-id': connectInstance.tenant_id
+          'x-tenant-id': connectInstance.tenant_id,
+          'apikey': connectInstance.api_key || ''
         },
         body: JSON.stringify({ phoneNumber: cleanPhone })
       });
 
       const data = await res.json();
-      if (data.pairingCode) {
-        setPairingCode(data.pairingCode);
-      } else if (data.qrCode) {
-        setQrCodeData(data.qrCode);
-      } else {
-        setConnectError('Não foi possível obter o código de 8 dígitos. Utilize a leitura via QR Code.');
+      if (data.pairingCode || data.pairing_code) {
+        setPairingCode(data.pairingCode || data.pairing_code);
       }
+
+      // Ativa o polling para capturar se a engine gerar o código via socket status
+      pollQrCode(connectInstance);
     } catch (err: any) {
       setConnectError(err.message || 'Erro ao gerar código de pareamento.');
     } finally {
@@ -973,7 +1063,7 @@ export default function InstanceManagerStandalone() {
                 <p className="text-xs text-slate-400">{connectInstance.display_name}</p>
               </div>
               <button
-                onClick={() => setConnectInstance(null)}
+                onClick={closeConnectModal}
                 className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition"
               >
                 <X className="w-5 h-5" />
@@ -1004,10 +1094,10 @@ export default function InstanceManagerStandalone() {
               </button>
             </div>
 
-            {connectLoading ? (
+            {connectLoading && !qrBase64 && !qrCodeData ? (
               <div className="py-12 flex flex-col items-center justify-center gap-3">
                 <Loader2 className="w-9 h-9 animate-spin text-emerald-400" />
-                <p className="text-xs text-slate-400">Solicitando credenciais ao motor Baileys...</p>
+                <p className="text-xs text-slate-400 font-medium">Iniciando motor Baileys & gerando QR Code...</p>
               </div>
             ) : connectError ? (
               <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-rose-400 text-xs text-left">
@@ -1015,13 +1105,18 @@ export default function InstanceManagerStandalone() {
               </div>
             ) : connectMode === 'qr' ? (
               <div className="space-y-5 flex flex-col items-center">
-                {qrCodeData ? (
+                {qrBase64 ? (
+                  <div className="p-3 bg-white rounded-3xl shadow-2xl inline-block ring-8 ring-white/10">
+                    <img src={qrBase64} alt="QR Code WhatsApp" className="w-[220px] h-[220px] rounded-2xl object-contain" />
+                  </div>
+                ) : qrCodeData ? (
                   <div className="p-4 bg-white rounded-3xl shadow-2xl inline-block ring-8 ring-white/10">
                     <QRCode value={qrCodeData} size={220} />
                   </div>
                 ) : (
-                  <div className="py-8 text-xs text-slate-400">
-                    Clique no botão abaixo para gerar o QR Code.
+                  <div className="py-10 flex flex-col items-center justify-center gap-3 text-xs text-slate-400">
+                    <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+                    <span>Aguardando o motor disponibilizar o QR Code...</span>
                   </div>
                 )}
 
