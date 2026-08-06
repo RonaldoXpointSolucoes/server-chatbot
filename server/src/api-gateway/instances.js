@@ -755,9 +755,14 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
         const { instanceId } = req.params;
 
         const sock = sessionManager.getSocket(instanceId);
-        const isAuthInMemory = sessionManager.authenticatedSessions.has(instanceId) &&
-            Boolean(sock?.user?.id) &&
-            Boolean(sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
+        const { data: authCreds } = await supabase
+            .from('wa_auth_credentials')
+            .select('creds_data')
+            .eq('instance_id', instanceId)
+            .maybeSingle();
+
+        const hasValidCredsInDb = Boolean(authCreds?.creds_data?.me?.id || authCreds?.creds_data?.me?.jid);
+        const isAuthInMemory = sessionManager.authenticatedSessions.has(instanceId) || hasValidCredsInDb;
 
         const { data, error } = await supabase
             .from('whatsapp_instances')
@@ -779,7 +784,7 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
                         .eq('id', instanceId);
                 }
             } else {
-                // Se a sessão NÃO está autenticada em memória no servidor Node, o status NÃO pode ser 'connected' ou 'connected_local'
+                // Se a sessão NÃO possui credenciais nem autenticação em memória, o status não pode ser 'connected' ou 'connected_local'
                 if (finalStatus === 'connected' || finalStatus === 'connected_local') {
                     finalStatus = sessionManager.connectingState.has(instanceId) ? 'connecting' : 'offline';
                 }
