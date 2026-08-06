@@ -139,11 +139,11 @@ export default function InstanceManagerStandalone() {
   // Checar saúde do backend
   const checkEngineHealth = async () => {
     try {
-      const res = await fetch(`${ENGINE_URL}/health`, { method: 'GET' }).catch(() => null);
-      if (res && (res.ok || res.status === 200 || res.status === 404)) {
+      const res = await fetchEngineApi('/health', { method: 'GET' }).catch(() => null);
+      if (res) {
         setEngineOnline(true);
       } else {
-        setEngineOnline(true); // Engine backend está respondendo via proxy
+        setEngineOnline(true);
       }
     } catch (e) {
       setEngineOnline(true);
@@ -266,7 +266,7 @@ export default function InstanceManagerStandalone() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      fetch(`${ENGINE_URL}/api/v1/instances/${deleteTarget.id}/disconnect`, {
+      fetchEngineApi(`/api/v1/instances/${deleteTarget.id}/disconnect`, {
         method: 'POST',
         headers: { 'x-tenant-id': deleteTarget.tenant_id }
       }).catch(() => null);
@@ -309,7 +309,7 @@ export default function InstanceManagerStandalone() {
     pollIntervalRef.current = setInterval(async () => {
       try {
         secondsElapsed += 2;
-        const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/status`, {
+        const res = await fetchEngineApi(`/api/v1/instances/${inst.id}/status`, {
           headers: {
             'x-tenant-id': inst.tenant_id,
             'apikey': inst.api_key || ''
@@ -350,7 +350,7 @@ export default function InstanceManagerStandalone() {
         // 3. Se passarem 30 segundos sem leitura, renova a ignição na engine
         if (secondsElapsed >= 30) {
           secondsElapsed = 0;
-          fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/connect`, {
+          fetchEngineApi(`/api/v1/instances/${inst.id}/connect`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
