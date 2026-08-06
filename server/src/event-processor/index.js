@@ -1491,46 +1491,23 @@ class EventProcessor {
         if (!key || !key.remoteJid || key.remoteJid.endsWith('@g.us')) return;
 
         const rawJid = key.remoteJid;
-        const cleanPhone = rawJid.split('@')[0].replace(/\D/g, '');
-        if (!cleanPhone || !cleanPhone.startsWith('55')) return;
-
-        const ddd = cleanPhone.slice(2, 4);
-        const rest = cleanPhone.slice(4);
-        let altPhone = null;
-        if (rest.length === 9 && rest.startsWith('9')) {
-            altPhone = `55${ddd}${rest.slice(1)}`;
-        } else if (rest.length === 8) {
-            altPhone = `55${ddd}9${rest}`;
-        }
-
-        if (!altPhone) return;
-        const altJid = `${altPhone}@s.whatsapp.net`;
-
-        console.log(`[EventProcessor] Re-enviando mensagem ${key.id} para o JID corrigido do WhatsApp: ${altJid}...`);
+        console.log(`[EventProcessor] ACK 463: Re-tentando entrega da mensagem ${key.id} para ${rawJid}...`);
 
         const { data: dbMsg } = await supabase
             .from('messages')
             .select('*')
             .eq('instance_id', instanceId)
-            .eq('id', key.id)
+            .or(`whatsapp_message_id.eq.${key.id},id.eq.${key.id}`)
             .maybeSingle();
 
-        if (!dbMsg || !dbMsg.content) return;
+        if (!dbMsg || !dbMsg.text_content) return;
 
         const sendFn = sock.originalSendMessage || sock.sendMessage;
         try {
-            await sendFn(altJid, { text: dbMsg.content });
-            console.log(`[EventProcessor] Re-envio via ACK 463 retry para ${altJid} concluído com SUCESSO!`);
-
-            // Atualiza os registros do contato com o telefone/JID confirmado na rede Meta
-            await supabase
-                .from('contacts')
-                .update({ phone: altPhone })
-                .eq('tenant_id', tenantId)
-                .eq('phone', cleanPhone);
-
+            await sendFn(rawJid, { text: dbMsg.text_content });
+            console.log(`[EventProcessor] Re-envio via ACK 463 retry para ${rawJid} concluído!`);
         } catch (retryErr) {
-            console.error(`[EventProcessor] Falha no re-envio ACK 463 retry para ${altJid}:`, retryErr.message);
+            console.error(`[EventProcessor] Falha no re-envio ACK 463 retry para ${rawJid}:`, retryErr.message);
         }
     }
 
