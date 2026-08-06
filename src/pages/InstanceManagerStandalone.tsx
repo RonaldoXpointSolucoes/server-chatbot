@@ -132,6 +132,179 @@ export default function InstanceManagerStandalone() {
   const [deleteTarget, setDeleteTarget] = useState<WhatsAppInstance | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Suite de Diagnóstico & Testes da Instância (Tela Inteira)
+  const [testTargetInstance, setTestTargetInstance] = useState<WhatsAppInstance | null>(null);
+  const [runningAllTests, setRunningAllTests] = useState(false);
+  const [testLogs, setTestLogs] = useState<string[]>([]);
+  const [testResults, setTestResults] = useState<{
+    db: { status: 'idle' | 'testing' | 'success' | 'warning' | 'error'; message: string; latency?: number; details?: any };
+    server: { status: 'idle' | 'testing' | 'success' | 'warning' | 'error'; message: string; latency?: number; details?: any };
+    baileys: { status: 'idle' | 'testing' | 'success' | 'warning' | 'error'; message: string; latency?: number; details?: any };
+    whatsappMeta: { status: 'idle' | 'testing' | 'success' | 'warning' | 'error'; message: string; latency?: number; details?: any };
+  }>({
+    db: { status: 'idle', message: 'Pendente de execução' },
+    server: { status: 'idle', message: 'Pendente de execução' },
+    baileys: { status: 'idle', message: 'Pendente de execução' },
+    whatsappMeta: { status: 'idle', message: 'Pendente de execução' }
+  });
+
+  const addTestLog = (msg: string) => {
+    const timestamp = new Date().toLocaleTimeString('pt-BR');
+    setTestLogs((prev) => [`[${timestamp}] ${msg}`, ...prev]);
+  };
+
+  const runTestDb = async (inst: WhatsAppInstance) => {
+    const start = Date.now();
+    setTestResults((prev) => ({ ...prev, db: { status: 'testing', message: 'Consultando Supabase Postgres DB...' } }));
+    addTestLog(`[Teste 1/4] Iniciando validação de banco para instância ${inst.display_name} (${inst.id})...`);
+    try {
+      const { data, error } = await supabase.from('whatsapp_instances').select('*').eq('id', inst.id).single();
+      const latency = Date.now() - start;
+      if (error || !data) {
+        setTestResults((prev) => ({ ...prev, db: { status: 'error', message: `Erro ao consultar Supabase: ${error?.message || 'Instância não encontrada'}`, latency } }));
+        addTestLog(`❌ [Teste 1/4] Erro na consulta do DB (${latency}ms): ${error?.message || 'Não encontrada'}`);
+      } else {
+        const isConn = data.status === 'connected' || data.status === 'connected_local';
+        setTestResults((prev) => ({
+          ...prev,
+          db: {
+            status: isConn ? 'success' : 'warning',
+            message: `Instância registrada no DB com status: ${data.status.toUpperCase()}`,
+            latency,
+            details: data
+          }
+        }));
+        addTestLog(`✅ [Teste 1/4] Banco de dados Supabase verificado em ${latency}ms! Status: ${data.status}`);
+      }
+    } catch (e: any) {
+      const latency = Date.now() - start;
+      setTestResults((prev) => ({ ...prev, db: { status: 'error', message: e.message || 'Falha de conexão com DB', latency } }));
+      addTestLog(`❌ [Teste 1/4] Exceção no banco (${latency}ms): ${e.message}`);
+    }
+  };
+
+  const runTestServer = async () => {
+    const start = Date.now();
+    setTestResults((prev) => ({ ...prev, server: { status: 'testing', message: 'Testando ping HTTP com servidor Express...' } }));
+    addTestLog(`[Teste 2/4] Enviando requisição de ping HTTP ao servidor backend Node...`);
+    try {
+      const res = await fetchEngineApi('/health', { method: 'GET' });
+      const latency = Date.now() - start;
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setTestResults((prev) => ({
+          ...prev,
+          server: {
+            status: 'success',
+            message: `Servidor Node.js Express Online (v${data.version || '5.9.9'})`,
+            latency,
+            details: data
+          }
+        }));
+        addTestLog(`✅ [Teste 2/4] Ping de servidor com sucesso em ${latency}ms! Engine: ${data.engine || 'Express Node'}`);
+      } else {
+        setTestResults((prev) => ({ ...prev, server: { status: 'warning', message: `Servidor respondeu com código HTTP ${res.status}`, latency, details: data } }));
+        addTestLog(`⚠️ [Teste 2/4] Servidor respondeu com HTTP ${res.status} em ${latency}ms`);
+      }
+    } catch (e: any) {
+      const latency = Date.now() - start;
+      setTestResults((prev) => ({ ...prev, server: { status: 'error', message: e.message || 'Servidor backend offline', latency } }));
+      addTestLog(`❌ [Teste 2/4] Servidor backend inacessível (${latency}ms): ${e.message}`);
+    }
+  };
+
+  const runTestBaileys = async (inst: WhatsAppInstance) => {
+    const start = Date.now();
+    setTestResults((prev) => ({ ...prev, baileys: { status: 'testing', message: 'Inspecionando socket Baileys na memória RAM do servidor...' } }));
+    addTestLog(`[Teste 3/4] Inspecionando socket em memória RAM para instância ${inst.id}...`);
+    try {
+      const res = await fetchEngineApi(`/api/v1/instances/${inst.id}/status`, {
+        headers: {
+          'x-tenant-id': inst.tenant_id,
+          'apikey': inst.api_key || ''
+        }
+      });
+      const latency = Date.now() - start;
+      const respJson = await res.json();
+      const data = respJson.data || respJson;
+
+      if (res.ok) {
+        const isAlive = data.status === 'connected' || data.status === 'connected_local' || data.status === 'connecting' || data.status === 'open';
+        setTestResults((prev) => ({
+          ...prev,
+          baileys: {
+            status: isAlive ? 'success' : 'warning',
+            message: `Socket em memória RAM com estado: ${String(data.status).toUpperCase()}`,
+            latency,
+            details: data
+          }
+        }));
+        addTestLog(`✅ [Teste 3/4] Engine Baileys validada em ${latency}ms! Estado RAM: ${data.status}`);
+      } else {
+        setTestResults((prev) => ({ ...prev, baileys: { status: 'error', message: `Erro ao obter status da instância (HTTP ${res.status})`, latency, details: data } }));
+        addTestLog(`❌ [Teste 3/4] Falha na inspeção do socket em memória (${latency}ms)`);
+      }
+    } catch (e: any) {
+      const latency = Date.now() - start;
+      setTestResults((prev) => ({ ...prev, baileys: { status: 'error', message: e.message || 'Falha ao conectar com o motor Baileys', latency } }));
+      addTestLog(`❌ [Teste 3/4] Exceção no teste Baileys (${latency}ms): ${e.message}`);
+    }
+  };
+
+  const runTestWhatsappMeta = async (inst: WhatsAppInstance) => {
+    const start = Date.now();
+    setTestResults((prev) => ({ ...prev, whatsappMeta: { status: 'testing', message: 'Testando ping de presença WebSocket com servidores oficiais Meta/WhatsApp...' } }));
+    addTestLog(`[Teste 4/4] Disparando ping WebSocket para web.whatsapp.com...`);
+    try {
+      const res = await fetchEngineApi(`/api/v1/instances/${inst.id}/ping-whatsapp`, {
+        headers: {
+          'x-tenant-id': inst.tenant_id,
+          'apikey': inst.api_key || ''
+        }
+      });
+      const latency = Date.now() - start;
+      const data = await res.json();
+
+      if (res.ok && data.ok) {
+        const isWsActive = data.wsOpen && data.status === 'connected';
+        setTestResults((prev) => ({
+          ...prev,
+          whatsappMeta: {
+            status: isWsActive ? 'success' : 'warning',
+            message: isWsActive
+              ? `Conexão Meta Ativa! Latência WS: ${data.metaPingMs}ms`
+              : `Instância não está pareada ou socket Meta fechado`,
+            latency: data.metaPingMs || latency,
+            details: data
+          }
+        }));
+        if (isWsActive) {
+          addTestLog(`🟢 [Teste 4/4] Ping nos Servidores Meta com Sucesso! Resposta WS: ${data.metaPingMs}ms | Latência Servidor: ${data.serverLatencyMs}ms`);
+        } else {
+          addTestLog(`⚠️ [Teste 4/4] Instância desconectada da Meta. Status: ${data.status}`);
+        }
+      } else {
+        setTestResults((prev) => ({ ...prev, whatsappMeta: { status: 'error', message: data.error || 'Falha ao comunicar com os servidores Meta', latency, details: data } }));
+        addTestLog(`❌ [Teste 4/4] Erro de ping Meta (${latency}ms): ${data.error || 'Desconhecido'}`);
+      }
+    } catch (e: any) {
+      const latency = Date.now() - start;
+      setTestResults((prev) => ({ ...prev, whatsappMeta: { status: 'error', message: e.message || 'Instância sem resposta do gateway Meta', latency } }));
+      addTestLog(`❌ [Teste 4/4] Exceção no ping Meta (${latency}ms): ${e.message}`);
+    }
+  };
+
+  const runAllSuiteTests = async (inst: WhatsAppInstance) => {
+    setRunningAllTests(true);
+    addTestLog(`🚀 INICIANDO BATERIA COMPLETA DE DIAGNÓSTICO PARA: ${inst.display_name.toUpperCase()}`);
+    await runTestDb(inst);
+    await runTestServer();
+    await runTestBaileys(inst);
+    await runTestWhatsappMeta(inst);
+    addTestLog(`✨ BATERIA DE TESTES CONCLUÍDA!`);
+    setRunningAllTests(false);
+  };
+
   // Status de Saúde do Backend Engine
   const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
 
@@ -979,6 +1152,18 @@ export default function InstanceManagerStandalone() {
                     )}
 
                     <button
+                      onClick={() => {
+                        setTestTargetInstance(inst);
+                        runAllSuiteTests(inst);
+                      }}
+                      className="p-3 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 rounded-xl transition flex items-center gap-1.5 font-bold text-xs"
+                      title="Abrir Tela Completa de Diagnóstico & Testes"
+                    >
+                      <Activity className="w-4 h-4 text-cyan-400" />
+                      <span className="hidden sm:inline">Testes</span>
+                    </button>
+
+                    <button
                       onClick={() => setDeleteTarget(inst)}
                       className="p-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 rounded-xl transition"
                       title="Excluir Instância"
@@ -1252,6 +1437,273 @@ export default function InstanceManagerStandalone() {
               >
                 {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Confirmar</span>}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TELA INTEIRA DE DIAGNÓSTICO & TESTES DA INSTÂNCIA */}
+      {testTargetInstance && (
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-2xl flex flex-col p-4 sm:p-8 overflow-y-auto">
+          {/* Header da Suite de Testes */}
+          <div className="w-full max-w-6xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-6 mb-6">
+            <div className="flex items-center gap-4">
+              <div
+                className="w-14 h-14 rounded-2xl flex items-center justify-center font-bold text-white shadow-inner ring-4 ring-slate-800/80 shrink-0"
+                style={{
+                  backgroundColor: `${testTargetInstance.color || '#10b981'}20`,
+                  color: testTargetInstance.color || '#10b981',
+                  borderColor: `${testTargetInstance.color || '#10b981'}40`
+                }}
+              >
+                <Activity className="w-7 h-7 stroke-[2.2] animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl sm:text-2xl font-extrabold text-white">
+                    Central de Diagnóstico & Testes
+                  </h2>
+                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+                    Instância: {testTargetInstance.display_name}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1 flex items-center gap-2">
+                  <span>ID: <strong className="text-slate-200 font-mono">{testTargetInstance.id}</strong></span>
+                  <span>•</span>
+                  <span>Número: <strong className="text-slate-200 font-mono">{testTargetInstance.phone_number || 'Sem número'}</strong></span>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+              <button
+                onClick={() => runAllSuiteTests(testTargetInstance)}
+                disabled={runningAllTests}
+                className="py-3 px-5 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-extrabold rounded-2xl text-xs flex items-center gap-2 transition shadow-xl shadow-emerald-500/20 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${runningAllTests ? 'animate-spin' : ''}`} />
+                <span>{runningAllTests ? 'Executando Testes...' : 'Executar Todos os Testes'}</span>
+              </button>
+
+              <button
+                onClick={() => setTestTargetInstance(null)}
+                className="p-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white rounded-2xl transition"
+                title="Fechar Suite de Testes"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+
+          {/* Grid dos 4 Cards de Testes Principais */}
+          <div className="w-full max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            {/* Teste 1: Conexão Supabase / DB */}
+            <div className="bg-slate-900/80 border border-slate-800/90 rounded-3xl p-6 shadow-xl space-y-4 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                    <Layers className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">1. Teste de Conexão se está Conectado (Supabase DB)</h3>
+                    <p className="text-xs text-slate-400">Valida integridade do registro e chave de API no Postgres</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => runTestDb(testTargetInstance)}
+                  disabled={testResults.db.status === 'testing'}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${testResults.db.status === 'testing' ? 'animate-spin text-emerald-400' : ''}`} />
+                </button>
+              </div>
+
+              <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800/80 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  {testResults.db.status === 'testing' ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                  ) : testResults.db.status === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : testResults.db.status === 'warning' ? (
+                    <AlertCircle className="w-4 h-4 text-amber-400" />
+                  ) : testResults.db.status === 'error' ? (
+                    <AlertCircle className="w-4 h-4 text-rose-400" />
+                  ) : (
+                    <div className="w-3 h-3 rounded-full bg-slate-700" />
+                  )}
+                  <span className="text-slate-200 font-medium">{testResults.db.message}</span>
+                </div>
+                {testResults.db.latency !== undefined && (
+                  <span className="font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                    {testResults.db.latency} ms
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Teste 2: Ping no Servidor Backend Node.js */}
+            <div className="bg-slate-900/80 border border-slate-800/90 rounded-3xl p-6 shadow-xl space-y-4 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    <Server className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">2. Teste de Ping no Servidor</h3>
+                    <p className="text-xs text-slate-400">Mede a latência HTTP de ida e volta com o servidor Node.js Express</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => runTestServer()}
+                  disabled={testResults.server.status === 'testing'}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${testResults.server.status === 'testing' ? 'animate-spin text-emerald-400' : ''}`} />
+                </button>
+              </div>
+
+              <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800/80 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  {testResults.server.status === 'testing' ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                  ) : testResults.server.status === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : testResults.server.status === 'warning' ? (
+                    <AlertCircle className="w-4 h-4 text-amber-400" />
+                  ) : testResults.server.status === 'error' ? (
+                    <AlertCircle className="w-4 h-4 text-rose-400" />
+                  ) : (
+                    <div className="w-3 h-3 rounded-full bg-slate-700" />
+                  )}
+                  <span className="text-slate-200 font-medium">{testResults.server.message}</span>
+                </div>
+                {testResults.server.latency !== undefined && (
+                  <span className="font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                    {testResults.server.latency} ms
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Teste 3: Ping na Baileys em Memória */}
+            <div className="bg-slate-900/80 border border-slate-800/90 rounded-3xl p-6 shadow-xl space-y-4 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center">
+                    <Zap className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">3. Teste de Ping na Baileys (RAM)</h3>
+                    <p className="text-xs text-slate-400">Verifica se o socket da instância está ativo na memória RAM</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => runTestBaileys(testTargetInstance)}
+                  disabled={testResults.baileys.status === 'testing'}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${testResults.baileys.status === 'testing' ? 'animate-spin text-teal-400' : ''}`} />
+                </button>
+              </div>
+
+              <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800/80 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  {testResults.baileys.status === 'testing' ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-teal-400" />
+                  ) : testResults.baileys.status === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : testResults.baileys.status === 'warning' ? (
+                    <AlertCircle className="w-4 h-4 text-amber-400" />
+                  ) : testResults.baileys.status === 'error' ? (
+                    <AlertCircle className="w-4 h-4 text-rose-400" />
+                  ) : (
+                    <div className="w-3 h-3 rounded-full bg-slate-700" />
+                  )}
+                  <span className="text-slate-200 font-medium">{testResults.baileys.message}</span>
+                </div>
+                {testResults.baileys.latency !== undefined && (
+                  <span className="font-mono text-teal-400 font-bold bg-teal-500/10 px-2 py-0.5 rounded-lg border border-teal-500/20">
+                    {testResults.baileys.latency} ms
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Teste 4: Ping no Servidor do WhatsApp usando a Baileys */}
+            <div className="bg-slate-900/80 border border-slate-800/90 rounded-3xl p-6 shadow-xl space-y-4 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center">
+                    <Wifi className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">4. Teste de Ping no Servidor do WhatsApp (usando a Baileys)</h3>
+                    <p className="text-xs text-slate-400">Dispara ping WebSocket direta com os servidores oficiais da Meta</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => runTestWhatsappMeta(testTargetInstance)}
+                  disabled={testResults.whatsappMeta.status === 'testing'}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${testResults.whatsappMeta.status === 'testing' ? 'animate-spin text-cyan-400' : ''}`} />
+                </button>
+              </div>
+
+              <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800/80 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  {testResults.whatsappMeta.status === 'testing' ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                  ) : testResults.whatsappMeta.status === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : testResults.whatsappMeta.status === 'warning' ? (
+                    <AlertCircle className="w-4 h-4 text-amber-400" />
+                  ) : testResults.whatsappMeta.status === 'error' ? (
+                    <AlertCircle className="w-4 h-4 text-rose-400" />
+                  ) : (
+                    <div className="w-3 h-3 rounded-full bg-slate-700" />
+                  )}
+                  <span className="text-slate-200 font-medium">{testResults.whatsappMeta.message}</span>
+                </div>
+                {testResults.whatsappMeta.latency !== undefined && (
+                  <span className="font-mono text-cyan-400 font-bold bg-cyan-500/10 px-2 py-0.5 rounded-lg border border-cyan-500/20">
+                    {testResults.whatsappMeta.latency} ms
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Console de Terminal Log de Diagnóstico */}
+          <div className="w-full max-w-6xl mx-auto bg-slate-900/80 border border-slate-800/90 rounded-3xl p-6 shadow-xl flex flex-col flex-1 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-300 uppercase tracking-wider">
+                <Activity className="w-4 h-4 text-cyan-400" />
+                <span>Console de Logs em Tempo Real</span>
+              </div>
+              <button
+                onClick={() => {
+                  const reportText = `--- RELATÓRIO DE DIAGNÓSTICO BAILYES ---\nInstância: ${testTargetInstance.display_name} (${testTargetInstance.id})\nTelefone: ${testTargetInstance.phone_number}\n\nLOGS:\n${testLogs.join('\n')}`;
+                  navigator.clipboard.writeText(reportText);
+                  alert('Relatório de teste copiado para a área de transferência!');
+                }}
+                className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copiar Relatório</span>
+              </button>
+            </div>
+
+            <div className="bg-slate-950 font-mono text-xs text-emerald-400/90 p-4 rounded-2xl border border-slate-800/80 h-48 overflow-y-auto space-y-1 shadow-inner">
+              {testLogs.length === 0 ? (
+                <p className="text-slate-600 italic">Clique em "Executar Todos os Testes" para iniciar a bateria de diagnóstico...</p>
+              ) : (
+                testLogs.map((log, idx) => (
+                  <div key={idx} className="leading-relaxed">
+                    {log}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

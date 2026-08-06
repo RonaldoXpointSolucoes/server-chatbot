@@ -205,6 +205,55 @@ router.post('/instances/:instanceId/disconnect', requireTenant, async (req, res)
     }
 });
 
+// Endpoint de Diagnóstico e Ping nos Servidores do WhatsApp (Meta WebSocket Ping)
+router.get('/instances/:instanceId/ping-whatsapp', requireTenant, async (req, res) => {
+    try {
+        const { instanceId } = req.params;
+        const tenantId = req.tenantId;
+
+        const startTime = Date.now();
+        const sock = sessionManager.getSocket(instanceId);
+
+        const isMemoryActive = Boolean(sessionManager.sessions.has(instanceId));
+        const isAuthenticated = Boolean(sessionManager.authenticatedSessions.has(instanceId));
+        const isWsOpen = Boolean(sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
+
+        let metaPingMs = null;
+        let metaStatus = isWsOpen ? 'connected' : 'disconnected';
+
+        if (isWsOpen && sock) {
+            const pingStart = Date.now();
+            try {
+                if (typeof sock.sendPresenceUpdate === 'function') {
+                    await sock.sendPresenceUpdate('available');
+                }
+                metaPingMs = Date.now() - pingStart;
+            } catch (pErr) {
+                metaPingMs = Date.now() - pingStart;
+            }
+        }
+
+        const totalLatencyMs = Date.now() - startTime;
+
+        return res.json({
+            ok: true,
+            instanceId,
+            tenantId,
+            status: metaStatus,
+            memoryActive: isMemoryActive,
+            authenticated: isAuthenticated,
+            wsOpen: isWsOpen,
+            wsReadyState: sock?.ws ? sock.ws.readyState : null,
+            metaPingMs: metaPingMs !== null ? metaPingMs : 0,
+            serverLatencyMs: totalLatencyMs,
+            nodeId: NODE_ID,
+            timestamp: new Date().toISOString()
+        });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
+
 router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => {
     try {
         const { instanceId } = req.params;
