@@ -929,55 +929,15 @@ class SessionManager {
                                     }
                                     
                                     let targetJid = jid;
-                                    if (targetJid && typeof targetJid === 'string' && !targetJid.endsWith('@g.us') && typeof activeSock?.onWhatsApp === 'function') {
+                                    if (targetJid && typeof targetJid === 'string' && !targetJid.endsWith('@g.us')) {
                                         const cleanPhone = targetJid.split('@')[0].replace(/\D/g, '');
-                                        if (cleanPhone) {
-                                            try {
-                                                let verifiedJid = null;
-                                                let altPhone = null;
-
-                                                if (cleanPhone.startsWith('55') && (cleanPhone.length === 12 || cleanPhone.length === 13)) {
-                                                    const ddd = cleanPhone.slice(2, 4);
-                                                    const rest = cleanPhone.slice(4);
-                                                    if (rest.length === 9 && rest.startsWith('9')) {
-                                                        altPhone = `55${ddd}${rest.slice(1)}`;
-                                                    } else if (rest.length === 8) {
-                                                        altPhone = `55${ddd}9${rest}`;
-                                                    }
-                                                }
-
-                                                if (altPhone && cleanPhone.length === 13) {
-                                                    try {
-                                                        const altRes = await activeSock.onWhatsApp(altPhone);
-                                                        if (altRes && altRes.length > 0 && altRes[0].exists && altRes[0].jid) {
-                                                            verifiedJid = altRes[0].jid;
-                                                        }
-                                                    } catch (e) {}
-                                                }
-
-                                                if (!verifiedJid) {
-                                                    try {
-                                                        const origRes = await activeSock.onWhatsApp(cleanPhone);
-                                                        if (origRes && origRes.length > 0 && origRes[0].exists && origRes[0].jid) {
-                                                            verifiedJid = origRes[0].jid;
-                                                        }
-                                                    } catch (e) {}
-                                                }
-
-                                                if (!verifiedJid && altPhone && cleanPhone.length === 12) {
-                                                    try {
-                                                        const altRes2 = await activeSock.onWhatsApp(altPhone);
-                                                        if (altRes2 && altRes2.length > 0 && altRes2[0].exists && altRes2[0].jid) {
-                                                            verifiedJid = altRes2[0].jid;
-                                                        }
-                                                    } catch (e) {}
-                                                }
-
-                                                if (verifiedJid) {
-                                                    targetJid = verifiedJid;
-                                                    console.log(`[SessionManager] JID oficial resolvido no WhatsApp (${cleanPhone}): ${targetJid}`);
-                                                }
-                                            } catch (e) {}
+                                        if (cleanPhone && cleanPhone.startsWith('55') && cleanPhone.length === 13) {
+                                            const ddd = cleanPhone.slice(2, 4);
+                                            const rest = cleanPhone.slice(4);
+                                            if (rest.length === 9 && rest.startsWith('9')) {
+                                                targetJid = `55${ddd}${rest.slice(1)}@s.whatsapp.net`;
+                                                console.log(`[SessionManager] JID de 13 dígitos ajustado para o Signal de 8 dígitos no Brasil: ${cleanPhone} -> ${targetJid}`);
+                                            }
                                         }
                                     }
 
