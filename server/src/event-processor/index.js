@@ -1583,13 +1583,15 @@ class EventProcessor {
                 const isAlreadyConnected = currentInst && ['connected', 'connected_local'].includes(currentInst.status);
 
                 if (isTransient) {
-                    if (!isAlreadyConnected) {
-                        await supabase.from('whatsapp_instances')
-                            .update({ status: 'connecting', last_error: `Reconnecting (Code: ${reason})` })
-                            .eq('id', instanceId)
-                            .eq('assigned_node_id', NODE_ID);
-                        payload.status = 'connecting';
+                    if (isAlreadyConnected) {
+                        console.log(`[EventProcessor] Ignorando evento de status transiente (code: ${reason}) para instância ${instanceId} que já está ativa (${currentInst.status}).`);
+                        return;
                     }
+                    await supabase.from('whatsapp_instances')
+                        .update({ status: 'connecting', last_error: `Reconnecting (Code: ${reason})` })
+                        .eq('id', instanceId)
+                        .eq('assigned_node_id', NODE_ID);
+                    payload.status = 'connecting';
                     payload.reason = reason;
                 } else {
                     const errMsg = reason === 409
@@ -1611,13 +1613,16 @@ class EventProcessor {
                     .maybeSingle();
                 const isAlreadyConnected = currentInstForConn && ['connected', 'connected_local'].includes(currentInstForConn.status);
 
-                if (!isAlreadyConnected) {
-                    await supabase.from('whatsapp_instances')
-                        .update({ status: 'connecting', last_error: null })
-                        .eq('id', instanceId)
-                        .eq('assigned_node_id', NODE_ID);
-                    payload.status = 'connecting';
+                if (isAlreadyConnected) {
+                    console.log(`[EventProcessor] Ignorando evento de status connecting para instância ${instanceId} que já está ativa (${currentInstForConn.status}).`);
+                    return;
                 }
+
+                await supabase.from('whatsapp_instances')
+                    .update({ status: 'connecting', last_error: null })
+                    .eq('id', instanceId)
+                    .eq('assigned_node_id', NODE_ID);
+                payload.status = 'connecting';
                 if (update.pairingSuccess) {
                     payload.pairingSuccess = true;
                     payload.phone = update.phone;
