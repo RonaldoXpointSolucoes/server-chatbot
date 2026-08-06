@@ -1466,7 +1466,7 @@ class EventProcessor {
                 if (!key || !key.id || update.status === undefined || update.status === null) continue;
 
                 // WAMessageStatus enum: 
-                // 2 = SERVER_ACK, 3 = DELIVERY_ACK, 4 = READ, 5 = PLAYED
+                // 0 = ERROR, 2 = SERVER_ACK, 3 = DELIVERY_ACK, 4 = READ, 5 = PLAYED
                 let newStatus = null;
                 if (update.status === 2) newStatus = 'SERVER_ACK';
                 if (update.status === 3) newStatus = 'delivered';
@@ -1477,10 +1477,60 @@ class EventProcessor {
                     this.updatePendingStatus(key.id, newStatus);
                     // Enfileira p/ reconciliation assíncrona
                     this.queueStatusUpdate(tenantId, instanceId, key.id, newStatus);
+                } else if (update.status === 0 || (update.messageStubParameters && update.messageStubParameters[0] === '463')) {
+                    console.warn(`[EventProcessor] ACK error 463/0 detectado para mensagem ${key.id} (JID: ${key.remoteJid}). Iniciando retry automático...`);
+                    this.handleAckError463Retry(tenantId, instanceId, sock, key).catch(console.error);
                 }
             }
         } catch (e) {
              console.error(`[EventProcessor] Erro processando status (messages.update):`, e);
+        }
+    }
+
+    async handleAckError463Retry(tenantId, instanceId, sock, key) {
+        if (!key || !key.remoteJid || key.remoteJid.endsWith('@g.us')) return;
+
+        const rawJid = key.remoteJid;
+        const cleanPhone = rawJid.split('@')[0].replace(/\D/g, '');
+        if (!cleanPhone || !cleanPhone.startsWith('55')) return;
+
+        const ddd = cleanPhone.slice(2, 4);
+        const rest = cleanPhone.slice(4);
+        let altPhone = null;
+        if (rest.length === 9 && rest.startsWith('9')) {
+            altPhone = `55${ddd}${rest.slice(1)}`;
+        } else if (rest.length === 8) {
+            altPhone = `55${ddd}9${rest}`;
+        }
+
+        if (!altPhone) return;
+        const altJid = `${altPhone}@s.whatsapp.net`;
+
+        console.log(`[EventProcessor] Re-enviando mensagem ${key.id} para o JID corrigido do WhatsApp: ${altJid}...`);
+
+        const { data: dbMsg } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('instance_id', instanceId)
+            .eq('id', key.id)
+            .maybeSingle();
+
+        if (!dbMsg || !dbMsg.content) return;
+
+        const sendFn = sock.originalSendMessage || sock.sendMessage;
+        try {
+            await sendFn(altJid, { text: dbMsg.content });
+            console.log(`[EventProcessor] Re-envio via ACK 463 retry para ${altJid} concluído com SUCESSO!`);
+
+            // Atualiza os registros do contato com o telefone/JID confirmado na rede Meta
+            await supabase
+                .from('contacts')
+                .update({ phone: altPhone })
+                .eq('tenant_id', tenantId)
+                .eq('phone', cleanPhone);
+
+        } catch (retryErr) {
+            console.error(`[EventProcessor] Falha no re-envio ACK 463 retry para ${altJid}:`, retryErr.message);
         }
     }
 
