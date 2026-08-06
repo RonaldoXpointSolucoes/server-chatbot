@@ -1128,18 +1128,20 @@ export default function InstanceManagerStandalone() {
               </button>
             </div>
 
-            {connectLoading && !qrBase64 && !qrCodeData ? (
-              <div className="py-12 flex flex-col items-center justify-center gap-3">
-                <Loader2 className="w-9 h-9 animate-spin text-emerald-400" />
-                <p className="text-xs text-slate-400 font-medium">Iniciando motor Baileys & gerando QR Code...</p>
-              </div>
-            ) : connectError ? (
+            {connectError && (
               <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-rose-400 text-xs text-left">
                 {connectError}
               </div>
-            ) : connectMode === 'qr' ? (
+            )}
+
+            {connectMode === 'qr' ? (
               <div className="space-y-5 flex flex-col items-center">
-                {qrBase64 ? (
+                {connectLoading && !qrBase64 && !qrCodeData ? (
+                  <div className="py-10 flex flex-col items-center justify-center gap-3 text-xs text-slate-400">
+                    <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+                    <span>Iniciando motor Baileys & gerando QR Code...</span>
+                  </div>
+                ) : qrBase64 ? (
                   <div className="p-3 bg-white rounded-3xl shadow-2xl inline-block ring-8 ring-white/10">
                     <img src={qrBase64} alt="QR Code WhatsApp" className="w-[220px] h-[220px] rounded-2xl object-contain" />
                   </div>
@@ -1160,9 +1162,10 @@ export default function InstanceManagerStandalone() {
 
                 <button
                   onClick={() => handleConnectInstance(connectInstance)}
-                  className="py-3 px-5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-bold rounded-xl text-xs flex items-center gap-2 transition"
+                  disabled={connectLoading}
+                  className="py-3 px-5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-bold rounded-xl text-xs flex items-center gap-2 transition disabled:opacity-50"
                 >
-                  <RefreshCw className="w-4 h-4" />
+                  <RefreshCw className={`w-4 h-4 ${connectLoading ? 'animate-spin' : ''}`} />
                   <span>Gerar Novo QR Code</span>
                 </button>
               </div>
@@ -1183,9 +1186,17 @@ export default function InstanceManagerStandalone() {
 
                 {pairingCode && (
                   <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-3">
-                    <p className="text-xs text-emerald-400 font-bold uppercase tracking-wider">
-                      Código de 8 Dígitos Gerado
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-emerald-400 font-bold uppercase tracking-wider">
+                        Código de 8 Dígitos Gerado
+                      </p>
+                      <button
+                        onClick={() => copyToClipboard(pairingCode, 'pairing')}
+                        className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold"
+                      >
+                        {copiedId === 'pairing' ? 'Copiado!' : 'Copiar'}
+                      </button>
+                    </div>
                     <div className="grid grid-cols-8 gap-1 text-xl font-mono font-extrabold text-white bg-slate-950 py-3 px-2 rounded-xl border border-slate-800 tracking-wider">
                       {pairingCode.split('').map((char, idx) => (
                         <span key={idx} className="bg-slate-900 py-1 rounded border border-slate-800">
@@ -1198,9 +1209,17 @@ export default function InstanceManagerStandalone() {
 
                 <button
                   onClick={handleGeneratePairingCode}
-                  className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-extrabold rounded-xl text-xs transition shadow-lg shadow-emerald-500/20"
+                  disabled={connectLoading || !pairingPhone.replace(/\D/g, '')}
+                  className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-500/20 disabled:opacity-50 cursor-pointer"
                 >
-                  Solicitar Código de 8 Dígitos
+                  {connectLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                      <span>Gerando código de 8 dígitos...</span>
+                    </>
+                  ) : (
+                    <span>Solicitar Código de 8 Dígitos</span>
+                  )}
                 </button>
               </div>
             )}
