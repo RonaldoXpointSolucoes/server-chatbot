@@ -150,9 +150,9 @@ export default function InstanceManagerStandalone() {
     }
   };
 
-  // Carregar instâncias
-  const fetchInstances = async () => {
-    setLoading(true);
+  // Carregar instâncias de forma suave (sem piscar a tela)
+  const fetchInstances = async (isInitial = false) => {
+    if (isInitial) setLoading(true);
     try {
       const { data, error } = await supabase
         .from('whatsapp_instances')
@@ -160,27 +160,29 @@ export default function InstanceManagerStandalone() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setInstances(data || []);
+      if (data) {
+        setInstances(data);
+      }
     } catch (err: any) {
       console.error('Erro ao buscar instâncias:', err);
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   };
 
   useEffect(() => {
     if (isAuthenticated) {
-      fetchInstances();
+      fetchInstances(true);
       checkEngineHealth();
 
-      // Assinar alterações em tempo real via Supabase Realtime
+      // Assinar alterações em tempo real via Supabase Realtime (atualiza sem piscar a UI)
       const channel = supabase
         .channel('public:whatsapp_instances_master')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'whatsapp_instances' },
           () => {
-            fetchInstances();
+            fetchInstances(false);
           }
         )
         .subscribe();
@@ -779,7 +781,7 @@ export default function InstanceManagerStandalone() {
             ))}
 
             <button
-              onClick={fetchInstances}
+              onClick={() => fetchInstances(false)}
               disabled={loading}
               className="p-2.5 bg-slate-950/80 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl transition flex items-center justify-center"
               title="Atualizar lista"
