@@ -155,36 +155,53 @@ class QueueProcessor {
                     try {
                         const cleanPhone = targetJid.split('@')[0].replace(/\D/g, '');
                         if (typeof sock.onWhatsApp === 'function' && cleanPhone) {
-                            const queryNumbers = [cleanPhone];
+                            let verifiedJid = null;
                             let altPhone = null;
 
                             if (cleanPhone.startsWith('55') && (cleanPhone.length === 12 || cleanPhone.length === 13)) {
                                 const ddd = cleanPhone.slice(2, 4);
                                 const rest = cleanPhone.slice(4);
                                 if (rest.length === 9 && rest.startsWith('9')) {
-                                    altPhone = `55${ddd}${rest.slice(1)}`; // Variação sem o 9
+                                    altPhone = `55${ddd}${rest.slice(1)}`; // Variação de 8 dígitos sem o 9
                                 } else if (rest.length === 8) {
-                                    altPhone = `55${ddd}9${rest}`; // Variação com o 9
-                                }
-                                if (altPhone) {
-                                    queryNumbers.push(altPhone);
+                                    altPhone = `55${ddd}9${rest}`; // Variação de 9 dígitos com o 9
                                 }
                             }
 
-                            const results = await sock.onWhatsApp(...queryNumbers);
-                            if (Array.isArray(results) && results.length > 0) {
-                                const activeResults = results.filter(r => r && r.exists && r.jid);
-                                if (activeResults.length > 0) {
-                                    let bestMatch = activeResults[0];
-                                    if (altPhone && activeResults.length > 1) {
-                                        const altMatch = activeResults.find(r => r.jid.includes(altPhone));
-                                        if (altMatch) {
-                                            bestMatch = altMatch;
-                                        }
+                            // 1. Para números do Brasil com 9º dígito (13 dígitos), consulta primeiro a variação de 8 dígitos
+                            if (altPhone && cleanPhone.length === 13) {
+                                try {
+                                    const altRes = await sock.onWhatsApp(altPhone);
+                                    if (altRes && altRes.length > 0 && altRes[0].exists && altRes[0].jid) {
+                                        verifiedJid = altRes[0].jid;
+                                        console.log(`[QueueProcessor] JID de 8 dígitos resolvido com sucesso para ${cleanPhone} -> ${verifiedJid}`);
                                     }
-                                    targetJid = bestMatch.jid;
-                                    console.log(`[QueueProcessor] JID oficial verificado no WhatsApp para ${cleanPhone}: ${targetJid}`);
-                                }
+                                } catch (e) {}
+                            }
+
+                            // 2. Se a variação de 8 dígitos não retornou, consulta o número limpo original
+                            if (!verifiedJid) {
+                                try {
+                                    const origRes = await sock.onWhatsApp(cleanPhone);
+                                    if (origRes && origRes.length > 0 && origRes[0].exists && origRes[0].jid) {
+                                        verifiedJid = origRes[0].jid;
+                                    }
+                                } catch (e) {}
+                            }
+
+                            // 3. Se ainda não encontrou e altPhone era a versão com 9 (12 dígitos original), tenta a versão com 9
+                            if (!verifiedJid && altPhone && cleanPhone.length === 12) {
+                                try {
+                                    const altRes2 = await sock.onWhatsApp(altPhone);
+                                    if (altRes2 && altRes2.length > 0 && altRes2[0].exists && altRes2[0].jid) {
+                                        verifiedJid = altRes2[0].jid;
+                                    }
+                                } catch (e) {}
+                            }
+
+                            if (verifiedJid) {
+                                targetJid = verifiedJid;
+                                console.log(`[QueueProcessor] JID oficial final verificado no WhatsApp para ${cleanPhone}: ${targetJid}`);
                             }
                         }
                     } catch (err) {
