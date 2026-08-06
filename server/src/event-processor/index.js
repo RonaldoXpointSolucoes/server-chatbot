@@ -1509,7 +1509,7 @@ class EventProcessor {
                 return;
             }
 
-            // Verifica se a instância já possui credenciais salvas em wa_auth_credentials ou status conectado
+            // Verifica se a instância já possui credenciais salvas em wa_auth_credentials E status conectado
             const { data: currentInst } = await supabase.from('whatsapp_instances')
                 .select('status, phone_number')
                 .eq('id', instanceId)
@@ -1522,8 +1522,8 @@ class EventProcessor {
 
             const hasAuthCredsInDb = Boolean(authCreds && authCreds.session_id);
             const isConnStatus = currentInst && ['connected', 'connected_local'].includes(currentInst.status);
-            const isPhoneRegistered = Boolean(currentInst && currentInst.phone_number && currentInst.phone_number.length >= 7 && !['disconnected', 'offline'].includes(currentInst.status));
-            const isAlreadyConnected = isConnStatus || hasAuthCredsInDb || isPhoneRegistered;
+            // Só considera ativamente conectada se tiver o status conectado E possuir as chaves auth salvas no banco
+            const isAlreadyConnected = isConnStatus && hasAuthCredsInDb;
 
             if (qr) {
                 // Se a instância já possui autenticação válida, ignora a emissão de QR code para não poluir o frontend

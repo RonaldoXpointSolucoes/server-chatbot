@@ -141,7 +141,7 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
         await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
 
         await supabase.from('whatsapp_instances')
-            .update({ status: 'connecting', last_error: null })
+            .update({ status: 'connecting', phone_number: cleanPhone, last_error: null })
             .eq('id', instanceId)
             .eq('tenant_id', tenantId);
 
@@ -152,30 +152,28 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
             return res.status(500).json({ error: 'Não foi possível inicializar a conexão do WhatsApp para gerar o código.' });
         }
 
-        // Aguarda a inicialização do soquete (Websocket estar pronto)
+        // Aguarda a rápida abertura do Websocket e solicita o código de pareamento no início do handshake
+        let code = null;
         let attempts = 0;
-        let isReady = false;
-        while (attempts < 15) {
+        while (attempts < 24) {
             if (activeSock.ws && (activeSock.ws.isOpen || activeSock.ws.readyState === 1)) {
-                isReady = true;
-                break;
+                try {
+                    code = await activeSock.requestPairingCode(cleanPhone);
+                    if (code) {
+                        console.log(`[API] Pairing Code gerado com sucesso para ${cleanPhone}:`, code);
+                        break;
+                    }
+                } catch (err) {
+                    console.warn(`[API/pairing-code] Tentativa rápida ${attempts + 1}/24 ao gerar código (${cleanPhone}):`, err.message);
+                }
             }
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 250));
             attempts++;
         }
 
-        if (!isReady) {
-            return res.status(500).json({ error: 'A conexão com o WhatsApp foi criada, mas demorou a responder. Tente novamente.' });
-        }
-
-        console.log(`[API] Solicitando Pairing Code para o número ${cleanPhone}...`);
-        let code = await activeSock.requestPairingCode(cleanPhone);
-        
         if (!code && activeSock.authState?.creds?.pairingCode) {
             code = activeSock.authState.creds.pairingCode;
         }
-
-        console.log(`[API] Pairing Code gerado para ${cleanPhone}:`, code);
 
         if (!code) {
             return res.status(500).json({ error: 'O motor Baileys não devolveu o código de pareamento. Tente novamente.' });
