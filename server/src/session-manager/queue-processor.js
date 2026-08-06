@@ -153,15 +153,21 @@ class QueueProcessor {
                 const isGroup = targetJid.endsWith('@g.us');
                 if (!isGroup) {
                     try {
-                        const cleanPhone = targetJid.split('@')[0].replace(/\D/g, '');
-                        if (cleanPhone && cleanPhone.startsWith('55')) {
-                            if (cleanPhone.length === 13) {
+                        let cleanPhone = targetJid.split('@')[0].replace(/\D/g, '');
+                        if (cleanPhone) {
+                            if (!cleanPhone.startsWith('55') && (cleanPhone.length === 10 || cleanPhone.length === 11)) {
+                                cleanPhone = '55' + cleanPhone;
+                            }
+                            if (cleanPhone.startsWith('55') && (cleanPhone.length === 12 || cleanPhone.length === 13)) {
                                 const ddd = cleanPhone.slice(2, 4);
                                 const rest = cleanPhone.slice(4);
                                 if (rest.length === 9 && rest.startsWith('9')) {
                                     targetJid = `55${ddd}${rest.slice(1)}@s.whatsapp.net`;
-                                    console.log(`[QueueProcessor] JID de 13 dígitos formatado para o JID Signal de 8 dígitos no Brasil: ${cleanPhone} -> ${targetJid}`);
+                                } else if (rest.length === 8) {
+                                    targetJid = `55${ddd}${rest}@s.whatsapp.net`;
                                 }
+                            } else {
+                                targetJid = `${cleanPhone}@s.whatsapp.net`;
                             }
                         }
                     } catch (err) {

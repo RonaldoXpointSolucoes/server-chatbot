@@ -259,8 +259,87 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
         const { instanceId } = req.params;
         const { method, args } = req.body;
         
+        // Intercepta envio de mensagens de texto/mídia para enfileirar no outbox resiliente (wa_outgoing_messages)
+        if (method === 'sendMessage') {
+            const jid = args ? args[0] : null;
+            const content = args ? args[1] : null;
+            
+            // Se for uma edição de mensagem (contém a chave 'edit'), necessita do socket ativo
+            if (content && content.edit) {
+                const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
+                if (!sock) return res.status(400).json({ error: 'Socket offline' });
+                // Deixa seguir para invocar no socket diretamente
+            } else if (jid && content) {
+                let messageType = 'text';
+                let body = content.text || '';
+                let mediaUrl = null;
+
+                if (content.image || content.video || content.audio || content.document) {
+                    messageType = 'media';
+                    const mediaObj = content.image || content.video || content.audio || content.document;
+                    mediaUrl = mediaObj?.url || null;
+                    body = content.caption || '';
+                }
+
+                // Normalização defensiva do JID para o Brasil (+55) no formato Signal de 8 dígitos
+                let targetJid = jid;
+                if (targetJid && typeof targetJid === 'string' && !targetJid.endsWith('@g.us')) {
+                    let cleanPhone = targetJid.split('@')[0].replace(/\D/g, '');
+                    if (cleanPhone) {
+                        if (!cleanPhone.startsWith('55') && (cleanPhone.length === 10 || cleanPhone.length === 11)) {
+                            cleanPhone = '55' + cleanPhone;
+                        }
+                        if (cleanPhone.startsWith('55') && (cleanPhone.length === 12 || cleanPhone.length === 13)) {
+                            const ddd = cleanPhone.slice(2, 4);
+                            const rest = cleanPhone.slice(4);
+                            if (rest.length === 9 && rest.startsWith('9')) {
+                                targetJid = `55${ddd}${rest.slice(1)}@s.whatsapp.net`;
+                            } else if (rest.length === 8) {
+                                targetJid = `55${ddd}${rest}@s.whatsapp.net`;
+                            }
+                        } else {
+                            targetJid = `${cleanPhone}@s.whatsapp.net`;
+                        }
+                    }
+                }
+
+                const { data: newOutbox, error: outboxErr } = await supabase
+                    .from('wa_outgoing_messages')
+                    .insert({
+                        instance_id: instanceId,
+                        tenant_id: req.tenantId,
+                        chat_jid: targetJid,
+                        message_type: messageType,
+                        body: body,
+                        media_url: mediaUrl,
+                        status: 'pending',
+                        priority: 1
+                    })
+                    .select()
+                    .single();
+
+                if (outboxErr) throw outboxErr;
+
+                // Tenta acordar o socket em segundo plano e engatilha o QueueProcessor de imediato
+                sessionManager.getSocketOrWake(req.tenantId, instanceId).catch(() => {});
+                queueProcessor.trigger(req.tenantId, instanceId);
+
+                const mockId = `EDGE_${newOutbox.id.replace(/-/g, '')}`;
+                return res.json({ 
+                    ok: true, 
+                    result: {
+                        key: {
+                            remoteJid: targetJid,
+                            fromMe: true,
+                            id: mockId
+                        }
+                    }
+                });
+            }
+        }
+
         const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
-        if(!sock) return res.status(400).json({ error: 'Socket offline' });
+        if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
         // Intercept custom macros that don't exist directly on sock
         if (method === 'syncContacts') {
@@ -295,60 +374,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
             return res.json({ ok: true, message: 'A arquitetura atual não utiliza in-memory store global, RAM está otimizada automaticamente.' });
         }
 
-        if (method === 'sendMessage') {
-            const jid = args[0];
-            const content = args[1];
-            
-            // Se for uma edição de mensagem (contém a chave 'edit'), não insere na fila de saída (wa_outgoing_messages)
-            // e deixa passar direto para o socket do Baileys para evitar duplicar a mensagem
-            if (content && content.edit) {
-                // Passa direto
-            } else {
-                let messageType = 'text';
-            let body = content.text || '';
-            let mediaUrl = null;
 
-            if (content.image || content.video || content.audio || content.document) {
-                messageType = 'media';
-                const mediaObj = content.image || content.video || content.audio || content.document;
-                mediaUrl = mediaObj.url;
-                body = content.caption || '';
-            }
-
-            const { data: newOutbox, error: outboxErr } = await supabase
-                .from('wa_outgoing_messages')
-                .insert({
-                    instance_id: instanceId,
-                    tenant_id: req.tenantId,
-                    chat_jid: jid,
-                    message_type: messageType,
-                    body: body,
-                    media_url: mediaUrl,
-                    status: 'pending',
-                    priority: 1
-                })
-                .select()
-                .single();
-
-            if (outboxErr) throw outboxErr;
-
-            // Despacha a mensagem instantaneamente acordando o QueueProcessor
-            queueProcessor.trigger(req.tenantId, instanceId);
-
-            const mockId = `EDGE_${newOutbox.id.replace(/-/g, '')}`;
-            return res.json({ 
-                ok: true, 
-                result: {
-                    key: {
-                        remoteJid: jid,
-                        fromMe: true,
-                        id: mockId
-                    },
-                    messageTimestamp: Math.floor(Date.now() / 1000)
-                }
-            });
-            }
-        }
 
         if(typeof sock[method] !== 'function') return res.status(400).json({ error: `Method ${method} not found on Baileys socket` });
 

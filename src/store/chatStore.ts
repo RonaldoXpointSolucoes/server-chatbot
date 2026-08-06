@@ -1597,8 +1597,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
          console.warn(`[Security Guard] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
       }
       
-      // Verifica a conexão da instância específica da conversa
-      if (resolvedInstanceId && state.instancesStatus[resolvedInstanceId] && state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local') {
+      // Verifica a conexão da instância específica da conversa: bloqueia apenas se explicitamente offline
+      if (resolvedInstanceId && state.instancesStatus[resolvedInstanceId] === 'offline') {
          set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar mensagens.' });
          throw new Error('whatsapp_offline');
       }
