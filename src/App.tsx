@@ -41,6 +41,7 @@ import ChecklistTablet from './pages/checklist/ChecklistTablet';
 import ChecklistSettings from './pages/checklist/ChecklistSettings';
 import { NetworkStatusToast } from './components/NetworkStatusToast';
 import { GlobalToast } from './components/GlobalToast';
+import InstanceManagerStandalone from './pages/InstanceManagerStandalone';
 
 // Inicializa o tema globalmente no boot
 const savedTheme = localStorage.getItem('theme') || 'light';
@@ -126,6 +127,9 @@ export default function App() {
         <Route element={<ProtectedRoute role="admin" />}>
           <Route path="/admin/*" element={<AdminDashboard />} />
         </Route>
+
+        {/* Gerenciador Autônomo de Instâncias Master */}
+        <Route path="/instance-manager" element={<InstanceManagerStandalone />} />
 
         {/* Vitrine Baileys V6 */}
         <Route path="/features" element={<BaileysFeatures />} />
