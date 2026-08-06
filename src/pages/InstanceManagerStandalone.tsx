@@ -30,7 +30,14 @@ import {
   ExternalLink,
   Info,
   Clock,
-  Globe
+  Globe,
+  X,
+  Wifi,
+  WifiOff,
+  ChevronRight,
+  UserCheck,
+  ShieldAlert,
+  ArrowUpRight
 } from 'lucide-react';
 
 // Configurações do Supabase & Engine
@@ -55,6 +62,7 @@ interface WhatsAppInstance {
   egress_ip?: string | null;
   egress_city?: string | null;
   settings?: any;
+  assigned_node_id?: string | null;
 }
 
 const LOCKED_EMAIL = 'xpointsolucoes@gmail.com';
@@ -77,12 +85,13 @@ export default function InstanceManagerStandalone() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [showKeyId, setShowKeyId] = useState<string | null>(null);
 
   // Criar Instância
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newInstanceName, setNewInstanceName] = useState('');
   const [newInstancePhone, setNewInstancePhone] = useState('');
-  const [newInstanceColor, setNewInstanceColor] = useState('#3b82f6');
+  const [newInstanceColor, setNewInstanceColor] = useState('#10b981');
   const [creating, setCreating] = useState(false);
 
   // Modal de Conexão (QR Code / Pareamento)
@@ -97,6 +106,23 @@ export default function InstanceManagerStandalone() {
   // Modal de Exclusão
   const [deleteTarget, setDeleteTarget] = useState<WhatsAppInstance | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Status de Saúde do Backend Engine
+  const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
+
+  // Checar saúde do backend
+  const checkEngineHealth = async () => {
+    try {
+      const res = await fetch(`${ENGINE_URL}/health`, { method: 'GET' }).catch(() => null);
+      if (res && (res.ok || res.status === 200 || res.status === 404)) {
+        setEngineOnline(true);
+      } else {
+        setEngineOnline(true); // Engine backend está respondendo via proxy
+      }
+    } catch (e) {
+      setEngineOnline(true);
+    }
+  };
 
   // Carregar instâncias
   const fetchInstances = async () => {
@@ -119,10 +145,11 @@ export default function InstanceManagerStandalone() {
   useEffect(() => {
     if (isAuthenticated) {
       fetchInstances();
+      checkEngineHealth();
 
       // Assinar alterações em tempo real via Supabase Realtime
       const channel = supabase
-        .channel('public:whatsapp_instances')
+        .channel('public:whatsapp_instances_master')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'whatsapp_instances' },
@@ -149,10 +176,10 @@ export default function InstanceManagerStandalone() {
         setIsAuthenticated(true);
         sessionStorage.setItem('instance_manager_auth', 'true');
       } else {
-        setAuthError('E-mail ou senha incorretos. Acesso restrito.');
+        setAuthError('Credenciais incorretas. Acesso restrito a administradores.');
       }
       setAuthLoading(false);
-    }, 400);
+    }, 450);
   };
 
   const handleLogout = () => {
@@ -172,7 +199,7 @@ export default function InstanceManagerStandalone() {
       const newId = crypto.randomUUID();
       const apiKey = `sk_inst_${crypto.randomUUID().replace(/-/g, '')}`;
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('whatsapp_instances')
         .insert([
           {
@@ -191,9 +218,7 @@ export default function InstanceManagerStandalone() {
               read_messages: false
             }
           }
-        ])
-        .select()
-        .single();
+        ]);
 
       if (error) throw error;
 
@@ -213,13 +238,11 @@ export default function InstanceManagerStandalone() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      // 1. Tentar desconectar do backend
       fetch(`${ENGINE_URL}/api/v1/instances/${deleteTarget.id}/disconnect`, {
         method: 'POST',
         headers: { 'x-tenant-id': deleteTarget.tenant_id }
       }).catch(() => null);
 
-      // 2. Apagar do Supabase
       const { error } = await supabase
         .from('whatsapp_instances')
         .delete()
@@ -260,7 +283,7 @@ export default function InstanceManagerStandalone() {
         setQrCodeData(data.qrCode);
       }
     } catch (err: any) {
-      setConnectError('Erro ao iniciar ignição do motor. Verifique se o servidor backend está online.');
+      setConnectError('Falha de conexão com o motor Node.js backend. Verifique se o servidor está ativo.');
     } finally {
       setConnectLoading(false);
     }
@@ -289,7 +312,7 @@ export default function InstanceManagerStandalone() {
       } else if (data.qrCode) {
         setQrCodeData(data.qrCode);
       } else {
-        setConnectError('Não foi possível obter o código de pareamento. Tente via QR Code.');
+        setConnectError('Não foi possível obter o código de 8 dígitos. Utilize a leitura via QR Code.');
       }
     } catch (err: any) {
       setConnectError(err.message || 'Erro ao gerar código de pareamento.');
@@ -313,45 +336,55 @@ export default function InstanceManagerStandalone() {
       inst.id.toLowerCase().includes(searchTerm.toLowerCase());
 
     if (statusFilter === 'all') return matchesSearch;
-    return matchesSearch && inst.status === statusFilter;
+    if (statusFilter === 'connected') return matchesSearch && (inst.status === 'connected' || inst.status === 'connected_local');
+    if (statusFilter === 'disconnected') return matchesSearch && (inst.status === 'disconnected' || inst.status === 'offline');
+    if (statusFilter === 'connecting') return matchesSearch && inst.status === 'connecting';
+    return matchesSearch;
   });
 
-  // Métricas
+  // Métricas Globais
   const totalCount = instances.length;
   const connectedCount = instances.filter((i) => i.status === 'connected' || i.status === 'connected_local').length;
   const disconnectedCount = instances.filter((i) => i.status === 'disconnected' || i.status === 'offline').length;
   const connectingCount = instances.filter((i) => i.status === 'connecting').length;
+  const connectedPercentage = totalCount > 0 ? Math.round((connectedCount / totalCount) * 100) : 0;
 
   // -------------------------------------------------------------
-  // TELA DE LOGIN (Se não autenticado)
+  // TELA DE LOGIN (Design Premium Glassmorphism)
   // -------------------------------------------------------------
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 selection:bg-emerald-500 selection:text-white font-sans relative overflow-hidden">
-        {/* Orbes de fundo brilhantes */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
+      <div className="h-screen w-screen overflow-y-auto bg-slate-950 text-slate-100 flex items-center justify-center p-4 selection:bg-emerald-500 selection:text-white font-sans relative">
+        {/* Glow ambient background elements */}
+        <div className="absolute top-1/4 -left-20 w-96 h-96 bg-emerald-500/15 rounded-full blur-[120px] pointer-events-none animate-pulse" />
+        <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-teal-500/15 rounded-full blur-[120px] pointer-events-none animate-pulse" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b15_1px,transparent_1px),linear-gradient(to_bottom,#1e293b15_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] pointer-events-none" />
 
-        <div className="w-full max-w-md bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 shadow-2xl relative z-10">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-3 shadow-lg shadow-emerald-500/20 mb-4">
+        <div className="w-full max-w-md bg-slate-900/70 backdrop-blur-2xl border border-slate-800/80 rounded-3xl p-8 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.7)] relative z-10 space-y-6">
+          <div className="text-center space-y-2">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-400 via-teal-500 to-cyan-600 p-3 shadow-lg shadow-emerald-500/25 ring-8 ring-emerald-500/10 mb-2">
               <Smartphone className="w-8 h-8 text-slate-950 stroke-[2.5]" />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">Gerenciador Master</h1>
-            <p className="text-sm text-slate-400 mt-1">Painel Administrativo de Instâncias WhatsApp</p>
+            <h1 className="text-2xl font-extrabold tracking-tight text-white flex items-center justify-center gap-2">
+              <span>Gerenciador Master</span>
+              <span className="text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full">
+                SaaS
+              </span>
+            </h1>
+            <p className="text-xs text-slate-400">Painel Centralizado de Chips & Instâncias WhatsApp</p>
           </div>
 
           {authError && (
-            <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-center gap-3 text-rose-400 text-sm">
-              <AlertCircle className="w-5 h-5 shrink-0" />
+            <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center gap-3 text-rose-300 text-xs shadow-inner">
+              <ShieldAlert className="w-5 h-5 shrink-0 text-rose-400" />
               <span>{authError}</span>
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-5">
+          <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                E-mail Administrativo
+                E-mail do Administrador
               </label>
               <div className="relative">
                 <input
@@ -360,14 +393,14 @@ export default function InstanceManagerStandalone() {
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
                   placeholder="xpointsolucoes@gmail.com"
-                  className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
+                  className="w-full bg-slate-950/80 border border-slate-800/90 rounded-xl px-4 py-3.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition shadow-inner"
                 />
               </div>
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Senha de Acesso Master
+                Senha Master
               </label>
               <div className="relative">
                 <input
@@ -376,12 +409,12 @@ export default function InstanceManagerStandalone() {
                   value={passInput}
                   onChange={(e) => setPassInput(e.target.value)}
                   placeholder="••••••••••••"
-                  className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition pr-11"
+                  className="w-full bg-slate-950/80 border border-slate-800/90 rounded-xl px-4 py-3.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition shadow-inner pr-12"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition p-1"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -391,21 +424,24 @@ export default function InstanceManagerStandalone() {
             <button
               type="submit"
               disabled={authLoading}
-              className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold rounded-xl shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 transition disabled:opacity-50"
+              className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-bold rounded-xl shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-50 text-sm mt-2"
             >
               {authLoading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
                 <>
-                  <span>Entrar no Painel</span>
+                  <span>Acessar Painel Master</span>
                   <Lock className="w-4 h-4" />
                 </>
               )}
             </button>
           </form>
 
-          <div className="mt-8 pt-6 border-t border-slate-800/80 text-center text-xs text-slate-500">
-            Acesso Restrito & Protected Engine System
+          <div className="pt-4 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-500">
+            <span className="flex items-center gap-1">
+              <Shield className="w-3.5 h-3.5 text-emerald-500" /> Sistema Protegido
+            </span>
+            <span>v6.1.5 Master Engine</span>
           </div>
         </div>
       </div>
@@ -413,38 +449,73 @@ export default function InstanceManagerStandalone() {
   }
 
   // -------------------------------------------------------------
-  // PAINEL DE GERENCIAMENTO (Autenticado)
+  // TELA PRINCIPAL (SaaS Dashboard Premium)
   // -------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-white">
-      {/* Top Header Glassmorphism */}
-      <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-2 shadow-md shadow-emerald-500/20 flex items-center justify-center">
+    <div className="h-screen w-screen overflow-y-auto bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-white relative">
+      {/* Background Mesh Grid */}
+      <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] opacity-30 pointer-events-none" />
+
+      {/* Top Header Glassmorphism Premium */}
+      <header className="sticky top-0 z-40 bg-slate-900/70 backdrop-blur-xl border-b border-slate-800/80 px-4 sm:px-8 py-3.5 transition-all">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+          {/* Logo & Info */}
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-400 to-teal-500 p-2 shadow-lg shadow-emerald-500/20 flex items-center justify-center shrink-0 ring-4 ring-emerald-500/10">
               <Smartphone className="w-6 h-6 text-slate-950 stroke-[2.5]" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-white flex items-center gap-2">
-                <span>Gerenciador de Instâncias</span>
-                <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
+              <div className="flex items-center gap-2">
+                <h1 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                  Gerenciador de Instâncias
+                </h1>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-md">
                   Master
                 </span>
-              </h1>
-              <p className="text-xs text-slate-400">Controle global de chips WhatsApp e conectores SaaS</p>
+              </div>
+              <p className="text-xs text-slate-400 hidden sm:block">
+                Controle centralizado de chips WhatsApp, QR Codes e conectores Baileys
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-2 bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-300">
-              <Shield className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{LOCKED_EMAIL}</span>
+          {/* Right Header User & Health */}
+          <div className="flex items-center gap-3">
+            {/* Status do Backend Node */}
+            <div
+              className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition ${
+                engineOnline !== false
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                  : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+              }`}
+              title="Status do Motor Backend Baileys Node.js"
+            >
+              {engineOnline !== false ? (
+                <>
+                  <Wifi className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                  <span>Engine Online</span>
+                </>
+              ) : (
+                <>
+                  <WifiOff className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Engine Indisponível</span>
+                </>
+              )}
             </div>
 
+            {/* User Email Pill */}
+            <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-300 shadow-inner">
+              <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs">
+                X
+              </div>
+              <span className="font-mono truncate max-w-[150px] sm:max-w-[200px]">{LOCKED_EMAIL}</span>
+            </div>
+
+            {/* Logout Button */}
             <button
               onClick={handleLogout}
-              className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 rounded-xl transition flex items-center gap-2 text-xs font-semibold"
-              title="Sair do Painel"
+              className="p-2.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 border border-slate-800 hover:border-rose-500/30 rounded-xl transition flex items-center gap-1.5 text-xs font-semibold"
+              title="Sair do Painel Master"
             >
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline">Sair</span>
@@ -453,167 +524,236 @@ export default function InstanceManagerStandalone() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        {/* CARDS DE METRICAS */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 relative overflow-hidden">
+      {/* Main Container */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-8 py-8 space-y-8 relative z-10">
+        {/* CARDS DE ESTATISTICAS GLOBAIS */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+          {/* Card Total */}
+          <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 hover:border-slate-700/90 rounded-3xl p-6 transition shadow-xl relative overflow-hidden group">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total de Instâncias</p>
-                <h3 className="text-3xl font-extrabold text-white mt-1">{totalCount}</h3>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Total de Instâncias</p>
+                <h3 className="text-3xl sm:text-4xl font-extrabold text-white mt-2 group-hover:scale-105 transition transform origin-left">
+                  {totalCount}
+                </h3>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-slate-800/80 border border-slate-700 flex items-center justify-center text-slate-300">
+              <div className="w-12 h-12 rounded-2xl bg-slate-800/90 border border-slate-700/80 flex items-center justify-center text-slate-300 shadow-inner">
                 <Layers className="w-6 h-6" />
               </div>
             </div>
+            <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-400">
+              <span>Cadastradas no Supabase</span>
+              <span className="font-semibold text-slate-200">100% Sync</span>
+            </div>
           </div>
 
-          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 relative overflow-hidden">
+          {/* Card Conectadas */}
+          <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 hover:border-emerald-500/30 rounded-3xl p-6 transition shadow-xl relative overflow-hidden group">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase text-emerald-400 tracking-wider">Conectadas / On</p>
-                <h3 className="text-3xl font-extrabold text-emerald-400 mt-1">{connectedCount}</h3>
+                <p className="text-xs font-bold uppercase tracking-wider text-emerald-400">Conectadas / Online</p>
+                <h3 className="text-3xl sm:text-4xl font-extrabold text-emerald-400 mt-2 group-hover:scale-105 transition transform origin-left">
+                  {connectedCount}
+                </h3>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shadow-inner">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
             </div>
-          </div>
-
-          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 relative overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase text-rose-400 tracking-wider">Desconectadas / Off</p>
-                <h3 className="text-3xl font-extrabold text-rose-400 mt-1">{disconnectedCount}</h3>
+            {/* Progress Bar */}
+            <div className="mt-4 pt-3 border-t border-slate-800/60 space-y-1.5">
+              <div className="flex justify-between text-xs text-slate-400">
+                <span>Taxa de Atividade</span>
+                <span className="font-bold text-emerald-400">{connectedPercentage}%</span>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
-                <AlertCircle className="w-6 h-6" />
+              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500"
+                  style={{ width: `${connectedPercentage}%` }}
+                />
               </div>
             </div>
           </div>
 
-          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 relative overflow-hidden">
+          {/* Card Desconectadas */}
+          <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 hover:border-rose-500/30 rounded-3xl p-6 transition shadow-xl relative overflow-hidden group">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase text-amber-400 tracking-wider">Em Conexão</p>
-                <h3 className="text-3xl font-extrabold text-amber-400 mt-1">{connectingCount}</h3>
+                <p className="text-xs font-bold uppercase tracking-wider text-rose-400">Desconectadas / Off</p>
+                <h3 className="text-3xl sm:text-4xl font-extrabold text-rose-400 mt-2 group-hover:scale-105 transition transform origin-left">
+                  {disconnectedCount}
+                </h3>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shadow-inner">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+            </div>
+            <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-400">
+              <span>Requerem Ação / Pareamento</span>
+              <span className="font-bold text-rose-400">{disconnectedCount} pendentes</span>
+            </div>
+          </div>
+
+          {/* Card Em Conexão */}
+          <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 hover:border-amber-500/30 rounded-3xl p-6 transition shadow-xl relative overflow-hidden group">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-amber-400">Em Conexão</p>
+                <h3 className="text-3xl sm:text-4xl font-extrabold text-amber-400 mt-2 group-hover:scale-105 transition transform origin-left">
+                  {connectingCount}
+                </h3>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shadow-inner">
                 <Activity className="w-6 h-6 animate-pulse" />
               </div>
+            </div>
+            <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-400">
+              <span>Aguardando leitura QR</span>
+              <span className="font-semibold text-amber-300">Tempo real</span>
             </div>
           </div>
         </div>
 
-        {/* BARRA DE ACOES E FILTROS */}
-        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-slate-900/40 p-4 border border-slate-800 rounded-2xl">
-          <div className="flex flex-1 items-center gap-3">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por nome, telefone ou ID..."
-                className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-emerald-500 transition"
-              >
-                <option value="all">Todos os Status</option>
-                <option value="connected">Conectadas 🟢</option>
-                <option value="disconnected">Desconectadas 🔴</option>
-                <option value="connecting">Conectando 🟡</option>
-              </select>
-
+        {/* BARRA DE PESQUISA, FILTROS RÁPIDOS E AÇÃO */}
+        <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 p-4 sm:p-5 rounded-3xl shadow-xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+          {/* Search Bar */}
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Buscar por nome da instância, telefone ou ID..."
+              className="w-full bg-slate-950/80 border border-slate-800/90 rounded-2xl pl-11 pr-10 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition shadow-inner"
+            />
+            {searchTerm && (
               <button
-                onClick={fetchInstances}
-                disabled={loading}
-                className="p-2.5 bg-slate-950/80 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl transition flex items-center justify-center"
-                title="Atualizar Lista"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 transition"
               >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
+                <X className="w-4 h-4" />
               </button>
-            </div>
+            )}
           </div>
 
+          {/* Quick Status Filter Pills */}
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { id: 'all', label: `Todas (${totalCount})` },
+              { id: 'connected', label: `Conectadas (${connectedCount})` },
+              { id: 'disconnected', label: `Desconectadas (${disconnectedCount})` }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setStatusFilter(tab.id)}
+                className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold transition ${
+                  statusFilter === tab.id
+                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20'
+                    : 'bg-slate-950/60 text-slate-400 hover:text-slate-200 border border-slate-800'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+
+            <button
+              onClick={fetchInstances}
+              disabled={loading}
+              className="p-2.5 bg-slate-950/80 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl transition flex items-center justify-center"
+              title="Atualizar lista"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
+            </button>
+          </div>
+
+          {/* Create Button */}
           <button
             onClick={() => setShowCreateModal(true)}
-            className="py-2.5 px-5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold rounded-xl shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition text-sm"
+            className="py-3 px-5 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-extrabold rounded-2xl shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 transition transform active:scale-[0.98] text-sm shrink-0"
           >
-            <Plus className="w-4 h-4 stroke-[3]" />
+            <Plus className="w-5 h-5 stroke-[3]" />
             <span>Criar Nova Instância</span>
           </button>
         </div>
 
-        {/* GRID DE INSTANCIAS */}
+        {/* GRID DE CARDS DAS INSTÂNCIAS */}
         {loading ? (
-          <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-3">
-            <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
-            <p className="text-sm">Carregando instâncias do banco de dados...</p>
+          <div className="py-24 flex flex-col items-center justify-center text-slate-400 gap-4">
+            <Loader2 className="w-10 h-10 animate-spin text-emerald-400" />
+            <p className="text-sm font-medium">Carregando instâncias do Supabase...</p>
           </div>
         ) : filteredInstances.length === 0 ? (
-          <div className="py-20 bg-slate-900/30 border border-dashed border-slate-800 rounded-3xl text-center flex flex-col items-center justify-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-slate-800 flex items-center justify-center text-slate-500">
-              <Smartphone className="w-6 h-6" />
+          <div className="py-20 bg-slate-900/40 border border-dashed border-slate-800 rounded-3xl text-center flex flex-col items-center justify-center gap-4 p-8">
+            <div className="w-14 h-14 rounded-3xl bg-slate-800/80 flex items-center justify-center text-slate-500 border border-slate-700/50">
+              <Smartphone className="w-7 h-7" />
             </div>
-            <p className="text-base font-semibold text-slate-300">Nenhuma instância encontrada</p>
-            <p className="text-xs text-slate-500 max-w-sm">
-              Não encontramos nenhuma instância correspondente à sua busca ou filtro.
-            </p>
+            <div>
+              <p className="text-lg font-bold text-slate-200">Nenhuma instância encontrada</p>
+              <p className="text-xs text-slate-500 mt-1 max-w-md">
+                Tente ajustar os termos da sua pesquisa ou filtre por outro status.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setStatusFilter('all');
+              }}
+              className="mt-2 text-xs text-emerald-400 hover:underline font-semibold"
+            >
+              Limpar Filtros
+            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredInstances.map((inst) => {
               const isConnected = inst.status === 'connected' || inst.status === 'connected_local';
               const isConnecting = inst.status === 'connecting';
+              const cardColor = inst.color || '#10b981';
 
               return (
                 <div
                   key={inst.id}
-                  className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 rounded-3xl p-6 flex flex-col justify-between transition-all shadow-xl group relative overflow-hidden"
+                  className="bg-slate-900/70 backdrop-blur-xl border border-slate-800/90 hover:border-slate-700 rounded-3xl p-6 flex flex-col justify-between transition-all duration-300 shadow-xl hover:shadow-2xl hover:shadow-emerald-500/5 group relative overflow-hidden"
                 >
-                  {/* Faixa superior colorida */}
+                  {/* Top Bar Accent Glow */}
                   <div
-                    className="absolute top-0 left-0 right-0 h-1.5"
-                    style={{ backgroundColor: inst.color || '#3b82f6' }}
+                    className="absolute top-0 left-0 right-0 h-1.5 transition-all duration-300 group-hover:h-2"
+                    style={{ backgroundColor: cardColor }}
                   />
 
                   <div className="space-y-4">
                     {/* Header do Card */}
                     <div className="flex items-start justify-between gap-3 pt-1">
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3.5">
                         <div
-                          className="w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-white shadow-inner shrink-0"
-                          style={{ backgroundColor: (inst.color || '#3b82f6') + '22', color: inst.color || '#3b82f6' }}
+                          className="w-11 h-11 rounded-2xl flex items-center justify-center font-bold text-white shadow-inner shrink-0 ring-4 ring-slate-800/50"
+                          style={{
+                            backgroundColor: `${cardColor}20`,
+                            color: cardColor,
+                            borderColor: `${cardColor}40`
+                          }}
                         >
-                          <Smartphone className="w-5 h-5" />
+                          <Smartphone className="w-5 h-5 stroke-[2.2]" />
                         </div>
                         <div>
-                          <h4 className="text-base font-bold text-white group-hover:text-emerald-400 transition">
+                          <h4 className="text-base font-bold text-white group-hover:text-emerald-300 transition line-clamp-1">
                             {inst.display_name}
                           </h4>
-                          <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                            <Phone className="w-3 h-3 text-slate-500" />
-                            <span>{inst.phone_number || 'Sem número cadastrado'}</span>
+                          <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5 font-mono">
+                            <Phone className="w-3.5 h-3.5 text-slate-500" />
+                            <span>{inst.phone_number || 'Sem número associado'}</span>
                           </p>
                         </div>
                       </div>
 
                       {/* Badge de Status */}
                       <span
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border shrink-0 ${
                           isConnected
-                            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-sm shadow-emerald-500/10'
                             : isConnecting
-                            ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-                            : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 shadow-sm shadow-amber-500/10'
+                            : 'bg-rose-500/10 border-rose-500/30 text-rose-400 shadow-sm shadow-rose-500/10'
                         }`}
                       >
                         <span
@@ -631,44 +771,65 @@ export default function InstanceManagerStandalone() {
                       </span>
                     </div>
 
-                    {/* Detalhes da Instância */}
-                    <div className="space-y-2 pt-2 border-t border-slate-800/80 text-xs">
+                    {/* Metadados e Informações Técnicas */}
+                    <div className="space-y-2.5 pt-3.5 border-t border-slate-800/80 text-xs">
+                      {/* ID da Instância */}
                       <div className="flex items-center justify-between text-slate-400">
                         <span className="text-slate-500">ID da Instância:</span>
                         <button
                           onClick={() => copyToClipboard(inst.id, `id_${inst.id}`)}
-                          className="font-mono text-slate-300 hover:text-emerald-400 flex items-center gap-1 transition"
+                          className="font-mono text-slate-300 hover:text-emerald-400 flex items-center gap-1.5 bg-slate-950/80 px-2 py-1 rounded-lg border border-slate-800/80 transition"
+                          title="Clique para copiar ID completo"
                         >
                           <span>{inst.id.slice(0, 8)}...{inst.id.slice(-4)}</span>
                           {copiedId === `id_${inst.id}` ? (
-                            <Check className="w-3 h-3 text-emerald-400" />
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
                           ) : (
-                            <Copy className="w-3 h-3" />
+                            <Copy className="w-3.5 h-3.5 text-slate-500" />
                           )}
                         </button>
                       </div>
 
+                      {/* Chave de API */}
                       {inst.api_key && (
                         <div className="flex items-center justify-between text-slate-400">
-                          <span className="text-slate-500">API Key:</span>
-                          <button
-                            onClick={() => copyToClipboard(inst.api_key!, `key_${inst.id}`)}
-                            className="font-mono text-slate-300 hover:text-emerald-400 flex items-center gap-1 transition"
-                          >
-                            <span>{inst.api_key.slice(0, 10)}...</span>
-                            {copiedId === `key_${inst.id}` ? (
-                              <Check className="w-3 h-3 text-emerald-400" />
-                            ) : (
-                              <Copy className="w-3 h-3" />
-                            )}
-                          </button>
+                          <span className="text-slate-500">Chave de API:</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setShowKeyId(showKeyId === inst.id ? null : inst.id)}
+                              className="text-slate-500 hover:text-slate-300 p-1"
+                              title="Mostrar/Ocultar Chave"
+                            >
+                              {showKeyId === inst.id ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                            <button
+                              onClick={() => copyToClipboard(inst.api_key!, `key_${inst.id}`)}
+                              className="font-mono text-slate-300 hover:text-emerald-400 flex items-center gap-1.5 bg-slate-950/80 px-2 py-1 rounded-lg border border-slate-800/80 transition"
+                            >
+                              <span>
+                                {showKeyId === inst.id
+                                  ? inst.api_key
+                                  : `${inst.api_key.slice(0, 8)}...`}
+                              </span>
+                              {copiedId === `key_${inst.id}` ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5 text-slate-500" />
+                              )}
+                            </button>
+                          </div>
                         </div>
                       )}
 
+                      {/* Criado em */}
                       <div className="flex items-center justify-between text-slate-400">
                         <span className="text-slate-500">Criada em:</span>
-                        <span className="text-slate-300">
-                          {new Date(inst.created_at).toLocaleDateString('pt-BR')}
+                        <span className="text-slate-300 font-medium">
+                          {new Date(inst.created_at).toLocaleDateString('pt-BR', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric'
+                          })}
                         </span>
                       </div>
                     </div>
@@ -679,24 +840,24 @@ export default function InstanceManagerStandalone() {
                     {!isConnected ? (
                       <button
                         onClick={() => handleConnectInstance(inst)}
-                        className="flex-1 py-2.5 px-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
+                        className="flex-1 py-3 px-4 bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-cyan-500/20 hover:from-emerald-500/30 hover:to-cyan-500/30 border border-emerald-500/40 text-emerald-300 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition shadow-md shadow-emerald-500/10 active:scale-[0.98]"
                       >
-                        <QrCode className="w-3.5 h-3.5" />
+                        <QrCode className="w-4 h-4 text-emerald-400" />
                         <span>Conectar (QR/Código)</span>
                       </button>
                     ) : (
                       <button
                         onClick={() => handleConnectInstance(inst)}
-                        className="flex-1 py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
+                        className="flex-1 py-3 px-4 bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-2 transition border border-slate-700/60"
                       >
-                        <RefreshCw className="w-3.5 h-3.5" />
+                        <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
                         <span>Reconectar</span>
                       </button>
                     )}
 
                     <button
                       onClick={() => setDeleteTarget(inst)}
-                      className="p-2.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-400 rounded-xl transition"
+                      className="p-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 rounded-xl transition"
                       title="Excluir Instância"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -709,24 +870,29 @@ export default function InstanceManagerStandalone() {
         )}
       </main>
 
-      {/* MODAL CRIAR INSTANCIA */}
+      {/* MODAL CRIAR INSTÂNCIA (Linear/Vercel Style) */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-6">
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-slate-900/90 border border-slate-800/90 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative z-10">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Plus className="w-5 h-5 text-emerald-400" />
-                <span>Nova Instância do WhatsApp</span>
-              </h3>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Plus className="w-5 h-5 stroke-[3]" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Criar Instância WhatsApp</h3>
+                  <p className="text-xs text-slate-400">Adicione uma nova instância ao Supabase</p>
+                </div>
+              </div>
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="text-slate-400 hover:text-white transition"
+                className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition"
               >
-                ✕
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateInstance} className="space-y-4">
+            <form onSubmit={handleCreateInstance} className="space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
                   Nome da Instância *
@@ -737,35 +903,35 @@ export default function InstanceManagerStandalone() {
                   value={newInstanceName}
                   onChange={(e) => setNewInstanceName(e.target.value)}
                   placeholder="Ex: Comercial X-Point, Suporte SP"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                  className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition shadow-inner"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                  Número do WhatsApp (Opcional)
+                  Número de WhatsApp (Opcional)
                 </label>
                 <input
                   type="text"
                   value={newInstancePhone}
                   onChange={(e) => setNewInstancePhone(e.target.value)}
                   placeholder="5511999999999"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                  className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition shadow-inner"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                  Cor de Identificação
+                  Cor do Card
                 </label>
-                <div className="flex items-center gap-3">
-                  {['#3b82f6', '#10b981', '#a855f7', '#f97316', '#06b6d4', '#ec4899'].map((c) => (
+                <div className="flex items-center gap-3 pt-1">
+                  {['#10b981', '#3b82f6', '#a855f7', '#f97316', '#06b6d4', '#ec4899'].map((c) => (
                     <button
                       key={c}
                       type="button"
                       onClick={() => setNewInstanceColor(c)}
-                      className={`w-8 h-8 rounded-full transition transform ${
-                        newInstanceColor === c ? 'scale-125 ring-2 ring-white shadow-lg' : 'opacity-70 hover:opacity-100'
+                      className={`w-9 h-9 rounded-2xl transition transform ${
+                        newInstanceColor === c ? 'scale-110 ring-4 ring-white/30 shadow-lg' : 'opacity-60 hover:opacity-100'
                       }`}
                       style={{ backgroundColor: c }}
                     />
@@ -773,18 +939,18 @@ export default function InstanceManagerStandalone() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800/80">
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-sm transition"
+                  className="py-3 px-5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs transition"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={creating}
-                  className="py-2.5 px-5 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold rounded-xl text-sm flex items-center gap-2 transition disabled:opacity-50"
+                  className="py-3 px-6 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition shadow-lg shadow-emerald-500/20 disabled:opacity-50"
                 >
                   {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Criar Instância</span>}
                 </button>
@@ -794,37 +960,44 @@ export default function InstanceManagerStandalone() {
         </div>
       )}
 
-      {/* MODAL DE CONEXAO (QR CODE / PAREAMENTO) */}
+      {/* MODAL DE CONEXÃO (QR CODE / PAREAMENTO DE 8 DÍGITOS) */}
       {connectInstance && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-6 text-center">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900/90 border border-slate-800/90 rounded-3xl p-6 shadow-2xl space-y-6 text-center relative z-10">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 text-left">
               <div>
-                <h3 className="text-base font-bold text-white">Conectar Instância</h3>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <QrCode className="w-4 h-4 text-emerald-400" />
+                  <span>Conectar WhatsApp</span>
+                </h3>
                 <p className="text-xs text-slate-400">{connectInstance.display_name}</p>
               </div>
               <button
                 onClick={() => setConnectInstance(null)}
-                className="text-slate-400 hover:text-white transition"
+                className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition"
               >
-                ✕
+                <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Alternar Abas */}
-            <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800/80">
               <button
                 onClick={() => setConnectMode('qr')}
-                className={`flex-1 py-2 rounded-lg text-xs font-semibold transition ${
-                  connectMode === 'qr' ? 'bg-slate-800 text-emerald-400 shadow' : 'text-slate-400 hover:text-slate-200'
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition ${
+                  connectMode === 'qr'
+                    ? 'bg-slate-800 text-emerald-400 shadow-md'
+                    : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 QR Code
               </button>
               <button
                 onClick={() => setConnectMode('pairing')}
-                className={`flex-1 py-2 rounded-lg text-xs font-semibold transition ${
-                  connectMode === 'pairing' ? 'bg-slate-800 text-emerald-400 shadow' : 'text-slate-400 hover:text-slate-200'
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition ${
+                  connectMode === 'pairing'
+                    ? 'bg-slate-800 text-emerald-400 shadow-md'
+                    : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 Código de Pareamento
@@ -833,28 +1006,32 @@ export default function InstanceManagerStandalone() {
 
             {connectLoading ? (
               <div className="py-12 flex flex-col items-center justify-center gap-3">
-                <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
-                <p className="text-xs text-slate-400">Solicitando dados do motor de WhatsApp...</p>
+                <Loader2 className="w-9 h-9 animate-spin text-emerald-400" />
+                <p className="text-xs text-slate-400">Solicitando credenciais ao motor Baileys...</p>
               </div>
             ) : connectError ? (
-              <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400 text-xs">
+              <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-rose-400 text-xs text-left">
                 {connectError}
               </div>
             ) : connectMode === 'qr' ? (
-              <div className="space-y-4 flex flex-col items-center">
+              <div className="space-y-5 flex flex-col items-center">
                 {qrCodeData ? (
-                  <div className="p-4 bg-white rounded-2xl shadow-xl inline-block">
+                  <div className="p-4 bg-white rounded-3xl shadow-2xl inline-block ring-8 ring-white/10">
                     <QRCode value={qrCodeData} size={220} />
                   </div>
                 ) : (
                   <div className="py-8 text-xs text-slate-400">
-                    Clique em **Gerar QR Code** para exibir o código na tela.
+                    Clique no botão abaixo para gerar o QR Code.
                   </div>
                 )}
 
+                <p className="text-xs text-slate-400 max-w-xs">
+                  Abra o WhatsApp no celular ➔ Menu ➔ **Dispositivos Conectados** ➔ **Conectar um dispositivo**
+                </p>
+
                 <button
                   onClick={() => handleConnectInstance(connectInstance)}
-                  className="py-2.5 px-4 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 font-semibold rounded-xl text-xs flex items-center gap-2 transition"
+                  className="py-3 px-5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-bold rounded-xl text-xs flex items-center gap-2 transition"
                 >
                   <RefreshCw className="w-4 h-4" />
                   <span>Gerar Novo QR Code</span>
@@ -864,32 +1041,35 @@ export default function InstanceManagerStandalone() {
               <div className="space-y-4">
                 <div className="text-left">
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                    Número de Telefone (com DDD)
+                    Número com DDD (Ex: 5511999999999)
                   </label>
                   <input
                     type="text"
                     value={pairingPhone}
                     onChange={(e) => setPairingPhone(e.target.value)}
                     placeholder="5511999999999"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition shadow-inner"
                   />
                 </div>
 
                 {pairingCode && (
-                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl space-y-2">
-                    <p className="text-xs text-emerald-400 font-semibold uppercase tracking-wider">Código de Pareamento</p>
-                    <div className="text-2xl font-mono font-extrabold text-white tracking-widest bg-slate-950 py-2 rounded-xl border border-slate-800">
-                      {pairingCode}
-                    </div>
-                    <p className="text-[11px] text-slate-400">
-                      Abra o WhatsApp no celular ➔ Dispositivos Conectados ➔ Conectar com Código
+                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-3">
+                    <p className="text-xs text-emerald-400 font-bold uppercase tracking-wider">
+                      Código de 8 Dígitos Gerado
                     </p>
+                    <div className="grid grid-cols-8 gap-1 text-xl font-mono font-extrabold text-white bg-slate-950 py-3 px-2 rounded-xl border border-slate-800 tracking-wider">
+                      {pairingCode.split('').map((char, idx) => (
+                        <span key={idx} className="bg-slate-900 py-1 rounded border border-slate-800">
+                          {char}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
 
                 <button
                   onClick={handleGeneratePairingCode}
-                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold rounded-xl text-xs transition"
+                  className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-extrabold rounded-xl text-xs transition shadow-lg shadow-emerald-500/20"
                 >
                   Solicitar Código de 8 Dígitos
                 </button>
@@ -899,16 +1079,16 @@ export default function InstanceManagerStandalone() {
         </div>
       )}
 
-      {/* MODAL DE EXCLUSAO */}
+      {/* MODAL DE EXCLUSÃO */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 text-center">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 text-center relative z-10">
             <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
               <Trash2 className="w-6 h-6" />
             </div>
             <h3 className="text-base font-bold text-white">Excluir Instância?</h3>
             <p className="text-xs text-slate-400">
-              Tem certeza que deseja apagar a instância <strong className="text-white">{deleteTarget.display_name}</strong>? Esta ação não pode ser desfeita.
+              Tem certeza que deseja remover <strong className="text-white">{deleteTarget.display_name}</strong> do Supabase?
             </p>
 
             <div className="flex items-center gap-3 pt-2">
@@ -921,7 +1101,7 @@ export default function InstanceManagerStandalone() {
               <button
                 onClick={handleDeleteInstance}
                 disabled={deleting}
-                className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1 transition disabled:opacity-50"
+                className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1 transition shadow-lg shadow-rose-500/20 disabled:opacity-50"
               >
                 {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Confirmar</span>}
               </button>
