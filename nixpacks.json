@@ -1,0 +1,17 @@
+{
+  "providers": ["node"],
+  "phases": {
+    "setup": {
+      "nixPkgs": ["nodejs_22", "npm-9_x"]
+    },
+    "install": {
+      "cmds": ["npm install"]
+    },
+    "build": {
+      "cmds": ["npm run build"]
+    }
+  },
+  "start": {
+    "cmd": "npx --yes serve -s dist -p 80"
+  }
+}
