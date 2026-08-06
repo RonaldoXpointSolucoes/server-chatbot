@@ -46,9 +46,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 const ENGINE_CANDIDATES = [
   import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim(),
-  'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io',
-  'https://serverchat.xpointsolucoes.com.br',
-  'http://localhost:9000'
+  'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io'
 ].filter(Boolean) as string[];
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -56,16 +54,17 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // Helper resiliente com auto-fallback de servidor backend
 const fetchEngineApi = async (path: string, options: RequestInit = {}) => {
   let lastError: any = null;
-  for (const baseUrl of ENGINE_CANDIDATES) {
+  const uniqueCandidates = Array.from(new Set(ENGINE_CANDIDATES));
+
+  for (const baseUrl of uniqueCandidates) {
     try {
       const url = `${baseUrl}${path}`;
       const res = await fetch(url, options);
-      if (res.ok || res.status === 400 || res.status === 401 || res.status === 404 || res.status === 409) {
+      if (res) {
         return res;
       }
     } catch (e) {
       lastError = e;
-      console.warn(`[Engine API] Falha de rota em ${baseUrl}${path}, tentando próximo servidor...`);
     }
   }
   throw lastError || new Error('Não foi possível conectar ao motor backend do WhatsApp.');

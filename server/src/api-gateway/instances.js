@@ -176,7 +176,7 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
         }
 
         if (!code) {
-            return res.status(500).json({ error: 'O motor Baileys não devolveu o código de pareamento. Tente novamente.' });
+            return res.status(400).json({ error: 'O motor Baileys está inicializando a ignição do WhatsApp. Clique em "Solicitar Código de 8 Dígitos" novamente em 2 segundos.' });
         }
 
         res.json({ ok: true, code, instanceId });

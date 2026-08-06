@@ -89,6 +89,11 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use(morgan('dev'));
 
+// Endpoint de Saúde do Servidor
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', engine: 'Node.js Baileys Engine', version: ENGINE_VERSION, time: new Date().toISOString() });
+});
+
 // Metadata da Versão do Baileys rodando no servidor
 let baileysVersion = '7.0.0-rc.9';
 let baileysDate = '29/07/2026';
