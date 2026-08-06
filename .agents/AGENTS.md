@@ -26,14 +26,14 @@ Sempre que o usuário solicitar a correção de um problema persistente ou que j
 
 ## Regras de Deploy e Versionamento (Sem Deploy Automático e Sem Push Automático)
 
-O deploy NUNCA deve ser executado de forma automática após alterações de código. O agente só poderá iniciar um deploy ou enviar commits para a branch principal (`git push origin main`) se o usuário explicitamente solicitar.
+O deploy NUNCA deve ser executado de forma automática após alterações de código. O agente só poderá iniciar um deploy ou enviar commits para a branch principal (`git push origin main`) se o usuário explicitamente solicitar através de um dos 4 comandos de deploy.
 
 1. **Sugestão Proativa de Deploy**:
-   - Após concluir e verificar qualquer alteração de código ou correção de bug, a IA **PODE e DEVE SUGERIR** o deploy ao usuário, recomendando a homologação prévia no ambiente de Staging (ex: "As alterações foram testadas localmente. Deseja publicar primeiro na branch `staging` para testar em `chat-boot-staging.vercel.app` ou prefere enviar direto para produção via `Deploy` / `Deploy Server`?").
-   - A IA **NÃO DEVE** realizar o deploy nem executar `git push origin main` automaticamente sem a solicitação do usuário. Enquanto o usuário estiver desenvolvendo e testando várias soluções no ambiente local, o envio para produção/GitHub fica suspenso para evitar que webhooks do Coolify ou Vercel ativem builds indesejados.
+   - Após concluir e verificar qualquer alteração de código ou correção de bug, a IA **PODE e DEVE SUGERIR** o deploy ao usuário, recomendando a homologação prévia no ambiente de Staging quando aplicável.
+   - A IA **NÃO DEVE** realizar o deploy nem executar `git push origin main` automaticamente sem a solicitação explícita do usuário.
 
 2. **Se o usuário digitar `Deploy`**:
-   - Recomenda a verificação prévia em Staging. Caso confirmado para produção:
+   - **Alvo**: Frontend na **Vercel** (`chat-boot-theta.vercel.app`).
    - Realiza o deploy do frontend na Vercel e atualiza a versão no `package.json` (apenas no frontend).
    - O incremento da versão deve seguir a regra de dígito único `X.Y.Z` (0 a 9 em cada componente, ex: de `4.9.4` para `4.9.5`). O valor máximo de cada componente é `9`.
    - Atualiza a variável `VITE_PACKAGE_BUILD_DATE` no `.env` para a data/hora atual.
@@ -41,13 +41,29 @@ O deploy NUNCA deve ser executado de forma automática após alterações de có
    - Relata a versão gerada e o status da publicação no chat.
 
 3. **Se o usuário digitar `Deploy Server`**:
-   - Recomenda a verificação prévia em Staging. Caso confirmado para produção:
+   - **Alvo**: Servidor Backend Node no **1º Coolify** (`coolify.xpointsolucoes.com` -> `https://owckk0k8w8soo40w40owc4ss...`).
    - Realiza o deploy do servidor de backend Node.js.
    - Incrementa a versão no arquivo `server/package.json` seguindo a regra de dígito único `X.Y.Z`.
-   - Executa o commit e o push das alterações do servidor Node para o repositório GitHub, que por sua vez dispara o deploy automático no Coolify em nuvem.
+   - Executa o commit e o push das alterações do servidor Node para o repositório GitHub (`main`), que por sua vez dispara o deploy automático no 1º Coolify.
    - Relata o status do deploy no chat.
 
-4. **Caso o usuário NÃO digite estes comandos, o agente NÃO deve realizar git push nem deploy de nenhum tipo (nem Vercel, nem Coolify).**
+4. **Se o usuário digitar `Deploy1`**:
+   - **Alvo**: Site Frontend Web no **2º Coolify** (`coolify.xpointsolucoes.com.br` -> `https://foodnext.xpointsolucoes.com.br` / `SiteFrontend-Web-V2` - UUID: `fqjnl7aw5bxgzf5ph7nblvsa`).
+   - Incrementa a versão no `package.json` da raiz seguindo a regra de dígito único `X.Y.Z`.
+   - Atualiza a variável `VITE_PACKAGE_BUILD_DATE` no `.env`.
+   - Executa o commit/push no GitHub e aciona o disparo da API do Coolify 2:
+     `POST https://coolify.xpointsolucoes.com.br/api/v1/deploy?uuid=fqjnl7aw5bxgzf5ph7nblvsa` (com Token Bearer do `.env`).
+   - Relata o status da fila de deploy do Coolify 2 no chat.
+
+5. **Se o usuário digitar `Deploy Server1`**:
+   - **Alvo**: Servidor Backend Node no **2º Coolify** (`coolify.xpointsolucoes.com.br` -> `https://serverchat.xpointsolucoes.com.br` / `ServerChatBaileys-V2` - UUID: `fq2ailrq1q4smlsir1ackw5u`).
+   - Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z`.
+   - Executa o commit e push para a branch `main` no GitHub.
+   - Aciona o disparo via API do Coolify 2:
+     `POST https://coolify.xpointsolucoes.com.br/api/v1/deploy?uuid=fq2ailrq1q4smlsir1ackw5u` (com Token Bearer do `.env`).
+   - Relata o status da fila de deploy do Coolify 2 no chat.
+
+6. **Caso o usuário NÃO digite um destes comandos, o agente NÃO deve realizar git push nem deploy de nenhum tipo.**
 
 ## Regras de Execução e Testes do Servidor (Evitando Conflitos Concorrentes)
 

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useChatStore } from "../store/chatStore";
 import { useWaCallsStore } from "../store/useWaCallsStore";
 import { useDevStore } from "../store/devStore";
+import { cn } from "../lib/utils";
 import {
   Smartphone,
   CheckCircle,

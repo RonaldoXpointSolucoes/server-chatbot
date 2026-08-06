@@ -99,17 +99,25 @@ Essas regras são imutáveis e devem ser seguidas sem exceções para evitar que
 Ao concluir e verificar qualquer desenvolvimento ou correção localmente, a IA **PODE e DEVE SUGERIR** o deploy ao usuário. Porém, nenhum deploy ou `git push origin main` deve ser executado automaticamente, evitando que os webhooks do GitHub disparem builds indesejados no Coolify ou Vercel enquanto o usuário estiver testando localmente.
 
 1. **Sugestão de Deploy**:
-   - Ao finalizar a tarefa, a IA deve orientar: *"As alterações foram testadas localmente. Quando desejar enviar para produção, digite `Deploy` para Vercel ou `Deploy Server` para Coolify."*
+   - Ao finalizar a tarefa, a IA deve orientar: *"As alterações foram testadas localmente. Você pode escolher onde publicar: `Deploy` (Vercel Frontend), `Deploy Server` (Coolify 1 Backend), `Deploy1` (Coolify 2 Frontend - foodnext) ou `Deploy Server1` (Coolify 2 Backend - serverchat)."*
 
 2. **Comando `Deploy`**:
-   - **Objetivo**: Deploy do frontend na Vercel.
+   - **Alvo**: Frontend na **Vercel** (`chat-boot-theta.vercel.app`).
    - **Ação**: Incrementa o `patch` no `package.json` da raiz seguindo a regra de dígito único `X.Y.Z` (máximo `9`). Atualiza `VITE_PACKAGE_BUILD_DATE` no `.env` e roda `npm run deploy` (Vercel). Relata a nova versão no chat.
 
 3. **Comando `Deploy Server`**:
-   - **Objetivo**: Deploy do backend no Coolify via Git.
-   - **Ação**: Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z` (máximo `9`), realiza o commit e o push das alterações do servidor para o GitHub, que dispara o build automático do Coolify. Relata o status no chat.
+   - **Alvo**: Backend Node no **1º Coolify** (`coolify.xpointsolucoes.com`).
+   - **Ação**: Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z` (máximo `9`), realiza o commit e o push das alterações do servidor para o GitHub (`main`), disparando o build no 1º Coolify. Relata o status no chat.
 
-4. **Se nenhum comando for fornecido pelo usuário, nenhum git push ou deploy será efetuado.**
+4. **Comando `Deploy1`**:
+   - **Alvo**: Site Frontend no **2º Coolify** (`foodnext.xpointsolucoes.com.br` / `SiteFrontend-Web-V2` - UUID: `fqjnl7aw5bxgzf5ph7nblvsa`).
+   - **Ação**: Incrementa a versão no `package.json` da raiz seguindo a regra de dígito único `X.Y.Z`, atualiza `VITE_PACKAGE_BUILD_DATE` no `.env`, faz `git push` no GitHub e aciona o deploy via API no Coolify 2 (`POST /api/v1/deploy?uuid=fqjnl7aw5bxgzf5ph7nblvsa`). Relata a confirmação no chat.
+
+5. **Comando `Deploy Server1`**:
+   - **Alvo**: Servidor Backend Node no **2º Coolify** (`serverchat.xpointsolucoes.com.br` / `ServerChatBaileys-V2` - UUID: `fq2ailrq1q4smlsir1ackw5u`).
+   - **Ação**: Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z`, realiza o commit/push no GitHub (`main`) e dispara o deploy via API no Coolify 2 (`POST /api/v1/deploy?uuid=fq2ailrq1q4smlsir1ackw5u`). Relata o status no chat.
+
+6. **Se nenhum destes comandos for fornecido pelo usuário, nenhum git push ou deploy será efetuado.**
 
 ---
 
