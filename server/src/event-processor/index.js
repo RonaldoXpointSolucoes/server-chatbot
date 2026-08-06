@@ -1509,15 +1509,26 @@ class EventProcessor {
                 return;
             }
 
-            if (qr) {
-                // Se a instância já estiver conectada, ignora a emissão de QR code para não poluir o frontend
-                const { data: currentInstForQr } = await supabase.from('whatsapp_instances')
-                    .select('status')
-                    .eq('id', instanceId)
-                    .maybeSingle();
+            // Verifica se a instância já possui credenciais salvas em wa_auth_credentials ou status conectado
+            const { data: currentInst } = await supabase.from('whatsapp_instances')
+                .select('status, phone_number')
+                .eq('id', instanceId)
+                .maybeSingle();
 
-                if (currentInstForQr && ['connected', 'connected_local'].includes(currentInstForQr.status)) {
-                    console.log(`[EventProcessor] Ignorando evento de QR Code parasita para instância ${instanceId} que já está ativa (${currentInstForQr.status}).`);
+            const { data: authCreds } = await supabase.from('wa_auth_credentials')
+                .select('session_id')
+                .eq('session_id', instanceId)
+                .maybeSingle();
+
+            const hasAuthCredsInDb = Boolean(authCreds && authCreds.session_id);
+            const isConnStatus = currentInst && ['connected', 'connected_local'].includes(currentInst.status);
+            const isPhoneRegistered = Boolean(currentInst && currentInst.phone_number && currentInst.phone_number.length >= 7 && !['disconnected', 'offline'].includes(currentInst.status));
+            const isAlreadyConnected = isConnStatus || hasAuthCredsInDb || isPhoneRegistered;
+
+            if (qr) {
+                // Se a instância já possui autenticação válida, ignora a emissão de QR code para não poluir o frontend
+                if (isAlreadyConnected) {
+                    console.log(`[EventProcessor] Ignorando evento de QR Code parasita para instância ${instanceId} que já possui credenciais de autenticação salvas.`);
                     return;
                 }
 
@@ -1554,12 +1565,6 @@ class EventProcessor {
                 const reason = lastDisconnect?.error?.output?.statusCode;
                 const loggedOut = reason === 401;
 
-                // Primeiro verifica o estado atual no banco para não sobrescrever status persistentes/finais
-                const { data: currentInst } = await supabase.from('whatsapp_instances')
-                    .select('status')
-                    .eq('id', instanceId)
-                    .maybeSingle();
-
                 const isPausedOrBlocked = currentInst && ['paused', 'blocked_12h', 'forbidden', 'bad_session'].includes(currentInst.status);
 
                 if (isPausedOrBlocked) {
@@ -1580,11 +1585,10 @@ class EventProcessor {
 
                 // Trata como transiente qualquer erro que não seja um encerramento definitivo/manual ou logout
                 const isTransient = ![401, 403, 409, 410].includes(reason) || !reason || isPairingPendingSync;
-                const isAlreadyConnected = currentInst && ['connected', 'connected_local'].includes(currentInst.status);
 
                 if (isTransient) {
                     if (isAlreadyConnected) {
-                        console.log(`[EventProcessor] Ignorando evento de status transiente (code: ${reason}) para instância ${instanceId} que já está ativa (${currentInst.status}).`);
+                        console.log(`[EventProcessor] Ignorando evento de status transiente (code: ${reason}) para instância ${instanceId} que já está autenticada.`);
                         return;
                     }
                     await supabase.from('whatsapp_instances')
@@ -1607,14 +1611,8 @@ class EventProcessor {
                 }
             }
             if (connection === 'connecting') {
-                const { data: currentInstForConn } = await supabase.from('whatsapp_instances')
-                    .select('status')
-                    .eq('id', instanceId)
-                    .maybeSingle();
-                const isAlreadyConnected = currentInstForConn && ['connected', 'connected_local'].includes(currentInstForConn.status);
-
                 if (isAlreadyConnected) {
-                    console.log(`[EventProcessor] Ignorando evento de status connecting para instância ${instanceId} que já está ativa (${currentInstForConn.status}).`);
+                    console.log(`[EventProcessor] Ignorando evento de status connecting para instância ${instanceId} que já está autenticada.`);
                     return;
                 }
 
