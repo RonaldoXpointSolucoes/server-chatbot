@@ -928,13 +928,52 @@ class SessionManager {
                                         throw new Error('Connection Closed (WebSocket not open, unhealthy or not authenticated)');
                                     }
                                     
+                                    let targetJid = jid;
+                                    if (targetJid && typeof targetJid === 'string' && !targetJid.endsWith('@g.us') && typeof activeSock?.onWhatsApp === 'function') {
+                                        const cleanPhone = targetJid.split('@')[0].replace(/\D/g, '');
+                                        if (cleanPhone) {
+                                            let verifiedJid = null;
+                                            try {
+                                                const resOnWa = await activeSock.onWhatsApp(cleanPhone);
+                                                if (resOnWa && resOnWa.length > 0 && resOnWa[0].exists && resOnWa[0].jid) {
+                                                    verifiedJid = resOnWa[0].jid;
+                                                }
+                                            } catch (e) {}
+
+                                            if (!verifiedJid && cleanPhone.startsWith('55') && (cleanPhone.length === 12 || cleanPhone.length === 13)) {
+                                                const ddd = cleanPhone.slice(2, 4);
+                                                const rest = cleanPhone.slice(4);
+                                                let altPhone = null;
+                                                if (rest.length === 9 && rest.startsWith('9')) {
+                                                    altPhone = `55${ddd}${rest.slice(1)}`;
+                                                } else if (rest.length === 8) {
+                                                    altPhone = `55${ddd}9${rest}`;
+                                                }
+
+                                                if (altPhone) {
+                                                    try {
+                                                        const altResOnWa = await activeSock.onWhatsApp(altPhone);
+                                                        if (altResOnWa && altResOnWa.length > 0 && altResOnWa[0].exists && altResOnWa[0].jid) {
+                                                            verifiedJid = altResOnWa[0].jid;
+                                                            console.log(`[SessionManager] JID corrigido via variação 9º dígito (${cleanPhone} -> ${altPhone}): ${verifiedJid}`);
+                                                        }
+                                                    } catch (e) {}
+                                                }
+                                            }
+
+                                            if (verifiedJid) {
+                                                targetJid = verifiedJid;
+                                            }
+                                        }
+                                    }
+
                                     if (attempts > 0) {
-                                        console.log(`[SessionManager - Antiban] Retentando envio para ${jid} via instância ${instanceId} com socket atualizado. Tentativa ${attempts + 1}/${maxAttempts}`);
+                                        console.log(`[SessionManager - Antiban] Retentando envio para ${targetJid} via instância ${instanceId} com socket atualizado. Tentativa ${attempts + 1}/${maxAttempts}`);
                                     } else {
-                                        console.log(`[SessionManager - Antiban] Enviando mensagem na fila para ${jid} via instância ${instanceId} com delay de ${delay}ms`);
+                                        console.log(`[SessionManager - Antiban] Enviando mensagem na fila para ${targetJid} via instância ${instanceId} com delay de ${delay}ms`);
                                     }
                                     
-                                    const result = await sendFn(jid, content, options);
+                                    const result = await sendFn(targetJid, content, options);
                                     resolve(result);
                                     return; // Sucesso, interrompe o loop
                                 } catch (error) {

@@ -155,48 +155,46 @@ class QueueProcessor {
                     try {
                         const { sessionCaches } = await import('./auth.js');
                         const memCache = sessionCaches.get(instanceId);
-                        const cleanJid = targetJid.split('@')[0];
+                        const cleanPhone = targetJid.split('@')[0].replace(/\D/g, '');
                         
-                        // 1. O JID de destino para envio de mensagens DEVE ser mantido como @s.whatsapp.net (ou @g.us) para entrega no WhatsApp do destinatário.
-                        // LID (@lid) é apenas identidade interna do protocolo e não deve ser usado como destino primário de mensagens ativas.
-                        
-                        // 2. Garante o tctoken no cache
-                        if (typeof sock.onWhatsApp === 'function') {
-                            const finalCleanJid = targetJid.split('@')[0];
-                            const isLid = targetJid.endsWith('@lid');
-                            const hasLidToken = memCache && memCache.has(`tctoken-${finalCleanJid}@lid`);
-                            const hasPhoneToken = memCache && memCache.has(`tctoken-${finalCleanJid}@s.whatsapp.net`);
-                            
-                            if (!hasLidToken && !hasPhoneToken) {
-                                let queryJid = msg.chat_jid;
-                                if (queryJid.endsWith('@lid') && memCache) {
-                                    const cleanLid = queryJid.split('@')[0];
-                                    const mappedPhone = memCache.get(`lid-mapping-${cleanLid}_reverse`);
-                                    if (mappedPhone) {
-                                        queryJid = `${mappedPhone}@s.whatsapp.net`;
-                                    }
+                        if (typeof sock.onWhatsApp === 'function' && cleanPhone) {
+                            let verifiedJid = null;
+                            try {
+                                const results = await sock.onWhatsApp(cleanPhone);
+                                if (results && results.length > 0 && results[0].exists && results[0].jid) {
+                                    verifiedJid = results[0].jid;
+                                }
+                            } catch (e) {}
+
+                            // Se a consulta inicial falhou e é número do Brasil (+55), tenta a variação do 9º dígito
+                            if (!verifiedJid && cleanPhone.startsWith('55') && (cleanPhone.length === 12 || cleanPhone.length === 13)) {
+                                const ddd = cleanPhone.slice(2, 4);
+                                const rest = cleanPhone.slice(4);
+                                let altPhone = null;
+                                if (rest.length === 9 && rest.startsWith('9')) {
+                                    altPhone = `55${ddd}${rest.slice(1)}`; // Remove 9
+                                } else if (rest.length === 8) {
+                                    altPhone = `55${ddd}9${rest}`; // Adiciona 9
                                 }
 
-                                const cleanPhone = queryJid.split('@')[0];
-                                const { data: contactExists } = await supabase
-                                    .from('contacts')
-                                    .select('id')
-                                    .eq('tenant_id', tenantId)
-                                    .eq('phone', cleanPhone)
-                                    .maybeSingle();
-
-                                if (!contactExists) {
-                                    console.log(`[QueueProcessor] Token de segurança não encontrado e contato novo para ${targetJid}. Sincronizando via onWhatsApp utilizando o JID de telefone ${queryJid}...`);
-                                    await sock.onWhatsApp(queryJid);
-                                    // Pequeno delay de 300ms para garantir o handshake E2E e a persistência dos tokens na RAM
-                                    await new Promise(resolve => setTimeout(resolve, 300));
-                                } else {
-                                    console.log(`[QueueProcessor] Token não encontrado no cache para ${targetJid}, mas contato já cadastrado. Enviando diretamente.`);
+                                if (altPhone) {
+                                    try {
+                                        const altResults = await sock.onWhatsApp(altPhone);
+                                        if (altResults && altResults.length > 0 && altResults[0].exists && altResults[0].jid) {
+                                            verifiedJid = altResults[0].jid;
+                                            console.log(`[QueueProcessor] JID verificado no WhatsApp via variação do 9º dígito (${cleanPhone} -> ${altPhone}): ${verifiedJid}`);
+                                        }
+                                    } catch (e) {}
                                 }
+                            }
+
+                            if (verifiedJid) {
+                                targetJid = verifiedJid;
+                                console.log(`[QueueProcessor] JID de envio verificado e corrigido via onWhatsApp: ${targetJid}`);
                             }
                         }
                     } catch (err) {
-                        console.warn(`[QueueProcessor] Erro na resolução de LID/Tokens para ${targetJid}:`, err.message);
+                        console.warn(`[QueueProcessor] Erro na resolução de JID para ${targetJid}:`, err.message);
                     }
                 }
 
