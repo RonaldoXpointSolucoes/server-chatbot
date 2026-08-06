@@ -109,6 +109,7 @@ export default function EvolutionModal({
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connectMode, setConnectMode] = useState<'qr' | 'pairing'>('qr');
+  const [copiedCode, setCopiedCode] = useState(false);
   const [pairingPhone, setPairingPhone] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [codeEntered, setCodeEntered] = useState(false);
@@ -2668,122 +2669,218 @@ export default function EvolutionModal({
                 <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center w-full pb-2 max-w-md mx-auto">
                   <div className="flex flex-col items-center w-full">
                     {/* Header customizado SaaS Premium */}
-                    <div className="w-full flex flex-col items-center text-center mb-5">
-                      <div className="flex items-center gap-2 mb-1.5 bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/25 px-3.5 py-1 rounded-full shadow-sm">
+                    <div className="w-full flex flex-col items-center text-center mb-4">
+                      <div className="flex items-center gap-2 mb-2 bg-[#00a884]/10 dark:bg-[#00a884]/15 border border-[#00a884]/30 px-4 py-1 rounded-full shadow-sm">
                         <QrCode className="text-[#00a884] animate-pulse" size={15} />
-                        <span className="text-[11px] font-extrabold text-emerald-600 dark:text-[#00a884] tracking-wider uppercase">Conexão Oficial WhatsApp</span>
+                        <span className="text-[11px] font-extrabold text-[#00a884] tracking-wider uppercase">Conexão Oficial WhatsApp</span>
                       </div>
-                      <h3 className="text-xl font-extrabold text-gray-900 dark:text-white flex items-center justify-center gap-2 mt-1 tracking-tight">
+                      <h3 className="text-2xl font-black text-gray-900 dark:text-white flex items-center justify-center gap-2 tracking-tight">
                         Conectar Instância
                       </h3>
                       <p className="text-xs text-gray-500 dark:text-[#8696a0] px-3 leading-relaxed mt-1">
-                        Escaneie o QR Code abaixo com seu celular para ativar <span className="inline-block mt-0.5 px-2.5 py-0.5 rounded-lg bg-[#00a884]/10 dark:bg-[#00a884]/20 border border-[#00a884]/30 text-[#00a884] font-mono font-bold text-xs shadow-sm">{displayNameToUse}</span>
+                        Vincule a conta de WhatsApp da instância <span className="inline-block px-2.5 py-0.5 rounded-lg bg-[#00a884]/10 dark:bg-[#00a884]/20 border border-[#00a884]/30 text-[#00a884] font-mono font-bold text-xs shadow-sm">{displayNameToUse}</span>
                       </p>
                     </div>
 
-                    {/* Slot superior: QR Code com Glow ou Card de Sucesso */}
-                    <div className="w-full flex justify-center items-center mb-5">
-                      {codeEntered ? (
-                        <div className="w-full max-w-sm flex flex-col items-center py-5 px-5 bg-emerald-500/10 border border-emerald-500/30 rounded-3xl shadow-[0_0_30px_rgba(0,168,132,0.18)] animate-in zoom-in duration-300 backdrop-blur-md">
-                          <div className="w-14 h-14 bg-emerald-500/20 rounded-full border-2 border-emerald-500/40 flex items-center justify-center mb-3 shadow-inner">
-                            <CheckCircle size={30} className="text-[#00a884] animate-bounce" />
-                          </div>
-                          <h4 className="text-base font-extrabold text-gray-900 dark:text-white text-center mb-1">
-                            Código Digitado no Celular!
-                          </h4>
-                          <p className="text-xs text-gray-500 dark:text-[#8696a0] text-center mb-4 px-2 leading-relaxed">
-                            O celular confirmou a vinculação. Clique abaixo para liberar o painel:
-                          </p>
-                          <button
-                            onClick={() => {
-                              handleSuccess();
-                            }}
-                            className="w-full py-3 bg-gradient-to-r from-[#00a884] to-teal-600 hover:from-[#008f6f] hover:to-teal-700 text-white rounded-2xl font-bold transition-all text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer animate-pulse"
-                          >
-                            <CheckCircle size={16} /> Confirmar e Liberar Conexão
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="relative p-4 bg-white dark:bg-[#0b141a] rounded-3xl shadow-[0_20px_40px_rgba(0,0,0,0.25),0_0_30px_rgba(0,168,132,0.15)] border border-gray-200 dark:border-[#202c33] flex justify-center items-center transition-all duration-300 group">
-                          {/* Glow sutil ao redor do QR Code */}
-                          <div className="absolute -inset-1 bg-gradient-to-r from-[#00a884]/30 to-teal-500/30 rounded-3xl blur-md opacity-75 group-hover:opacity-100 transition duration-500"></div>
-
-                          <div className="relative bg-white p-3 rounded-2xl z-10 shadow-inner">
-                            {qrBase64 ? (
-                              <div className="relative overflow-hidden rounded-xl">
-                                <img
-                                  src={qrBase64}
-                                  alt="QR Code WhatsApp"
-                                  className="w-[200px] h-[200px] sm:w-[220px] sm:h-[220px] rounded-xl object-contain"
-                                />
-                              </div>
-                            ) : (
-                              <div className="w-[200px] h-[200px] sm:w-[220px] sm:h-[220px] rounded-xl bg-gray-50 dark:bg-[#111b21] flex flex-col items-center justify-center gap-3 border border-dashed border-gray-300 dark:border-white/10">
-                                <div className="p-3.5 rounded-full bg-[#00a884]/10 dark:bg-[#00a884]/20 animate-pulse">
-                                  <Loader2 className="animate-spin text-[#00a884]" size={30} />
-                                </div>
-                                <span className="text-xs font-semibold text-gray-500 dark:text-[#8696a0]">
-                                  Gerando QR Code oficial...
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
+                    {/* Abas Segmentadas de Modo de Conexão: QR Code vs Código de Pareamento */}
+                    <div className="w-full max-w-sm bg-gray-100 dark:bg-[#111b21] p-1.5 rounded-2xl flex items-center mb-5 border border-gray-200 dark:border-[#202c33] shadow-inner">
+                      <button
+                        onClick={() => setConnectMode('qr')}
+                        className={cn(
+                          "flex-1 py-2.5 px-3 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-2 cursor-pointer",
+                          connectMode === 'qr'
+                            ? "bg-white dark:bg-[#202c33] text-[#00a884] dark:text-[#00a884] shadow-md border border-gray-200/50 dark:border-emerald-500/30"
+                            : "text-gray-500 dark:text-[#8696a0] hover:text-gray-800 dark:hover:text-white"
+                        )}
+                      >
+                        <QrCode size={16} /> QR Code
+                      </button>
+                      <button
+                        onClick={() => setConnectMode('pairing')}
+                        className={cn(
+                          "flex-1 py-2.5 px-3 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-2 cursor-pointer relative",
+                          connectMode === 'pairing'
+                            ? "bg-white dark:bg-[#202c33] text-[#00a884] dark:text-[#00a884] shadow-md border border-gray-200/50 dark:border-emerald-500/30"
+                            : "text-gray-500 dark:text-[#8696a0] hover:text-gray-800 dark:hover:text-white"
+                        )}
+                      >
+                        <Smartphone size={16} /> Código de Pareamento
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping absolute top-2 right-2"></span>
+                      </button>
                     </div>
 
-                    {/* Caixa de Código de Pareamento */}
-                    <div className="w-full max-w-sm bg-white/80 dark:bg-[#202c33]/90 backdrop-blur-md border border-gray-200/80 dark:border-[#2c3943]/60 p-4 rounded-2xl text-center mb-4 shadow-sm transition-all hover:border-[#00a884]/40">
-                      <div className="flex items-center justify-center gap-1.5 mb-2">
-                        <Smartphone size={14} className="text-[#00a884]" />
-                        <p className="text-[11px] text-gray-600 dark:text-[#8696a0] font-extrabold uppercase tracking-wider">
-                          Ou Conecte via Código de Pareamento
-                        </p>
-                      </div>
-                      {pairingLoading ? (
-                        <div className="flex items-center justify-center py-2.5 gap-2 text-xs text-gray-500 dark:text-[#8696a0]">
-                          <Loader2 className="animate-spin text-[#00a884]" size={16} /> Solicitando código ao WhatsApp...
-                        </div>
-                      ) : pairingCode ? (
-                        <div 
-                          onClick={() => {
-                            navigator.clipboard.writeText(pairingCode.replace(/[^a-zA-Z0-9]/g, ''));
-                            alert("Código copiado para a área de transferência!");
-                          }}
-                          className="py-2.5 px-4 bg-emerald-500/10 dark:bg-[#111b21] rounded-xl border border-emerald-500/40 text-xl font-mono font-black tracking-widest text-[#00a884] dark:text-[#e9edef] hover:bg-emerald-500/15 transition-all cursor-pointer shadow-inner flex items-center justify-center gap-2"
-                          title="Clique para copiar o código"
-                        >
-                          <span>{pairingCode.toUpperCase().slice(0, 4)} - {pairingCode.toUpperCase().slice(4)}</span>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col items-center gap-2 mt-1">
-                          {targetInstObj?.phone_number ? (
-                            <button
-                              onClick={() => handleRequestPairingCode(activePollingId, targetInstObj?.api_key)}
-                              className="w-full py-2 bg-[#00a884]/10 hover:bg-[#00a884]/20 text-[#00a884] rounded-xl text-xs font-bold transition-all cursor-pointer border border-[#00a884]/30 flex items-center justify-center gap-2 shadow-sm active:scale-98"
-                            >
-                              <Smartphone size={14} /> Gerar código para {targetInstObj.phone_number}
-                            </button>
-                          ) : (
-                            <div className="flex gap-2 w-full">
-                              <input
-                                type="text"
-                                placeholder="DDD + Número (ex: 5511991649959)"
-                                value={pairingPhone}
-                                onChange={(e) => setPairingPhone(e.target.value)}
-                                className="flex-1 bg-white dark:bg-[#111b21] border border-gray-300 dark:border-[#2c3943]/60 rounded-xl px-3.5 py-2 text-xs text-gray-900 dark:text-white focus:outline-none focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] shadow-inner"
-                              />
+                    {/* Conteúdo Principal baseado na Aba Selecionada */}
+                    {connectMode === 'qr' ? (
+                      <div className="w-full flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
+                        {/* Slot superior: QR Code com Glow ou Card de Sucesso */}
+                        <div className="w-full flex justify-center items-center mb-5">
+                          {codeEntered ? (
+                            <div className="w-full max-w-sm flex flex-col items-center py-5 px-5 bg-emerald-500/10 border border-emerald-500/30 rounded-3xl shadow-[0_0_30px_rgba(0,168,132,0.18)] animate-in zoom-in duration-300 backdrop-blur-md">
+                              <div className="w-14 h-14 bg-emerald-500/20 rounded-full border-2 border-emerald-500/40 flex items-center justify-center mb-3 shadow-inner">
+                                <CheckCircle size={30} className="text-[#00a884] animate-bounce" />
+                              </div>
+                              <h4 className="text-base font-extrabold text-gray-900 dark:text-white text-center mb-1">
+                                QR Code Lido com Sucesso!
+                              </h4>
+                              <p className="text-xs text-gray-500 dark:text-[#8696a0] text-center mb-4 px-2 leading-relaxed">
+                                O WhatsApp iniciou o vínculo com seu celular. Clique abaixo para prosseguir:
+                              </p>
                               <button
-                                onClick={() => handleRequestPairingCode(activePollingId, targetInstObj?.api_key)}
-                                className="px-4 py-2 bg-[#00a884] hover:bg-[#008f6f] text-white rounded-xl font-bold text-xs transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1"
+                                onClick={() => handleSuccess()}
+                                className="w-full py-3 bg-gradient-to-r from-[#00a884] to-teal-600 hover:from-[#008f6f] hover:to-teal-700 text-white rounded-2xl font-bold transition-all text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer animate-pulse"
                               >
-                                Gerar
+                                <CheckCircle size={16} /> Confirmar e Liberar Conexão
                               </button>
+                            </div>
+                          ) : (
+                            <div className="relative p-4 bg-white dark:bg-[#0b141a] rounded-3xl shadow-[0_20px_40px_rgba(0,0,0,0.25),0_0_30px_rgba(0,168,132,0.15)] border border-gray-200 dark:border-[#202c33] flex justify-center items-center transition-all duration-300 group">
+                              <div className="absolute -inset-1 bg-gradient-to-r from-[#00a884]/30 to-teal-500/30 rounded-3xl blur-md opacity-75 group-hover:opacity-100 transition duration-500"></div>
+                              <div className="relative bg-white p-3 rounded-2xl z-10 shadow-inner">
+                                {qrBase64 ? (
+                                  <div className="relative overflow-hidden rounded-xl">
+                                    <img
+                                      src={qrBase64}
+                                      alt="QR Code WhatsApp"
+                                      className="w-[200px] h-[200px] sm:w-[220px] sm:h-[220px] rounded-xl object-contain"
+                                    />
+                                  </div>
+                                ) : (
+                                  <div className="w-[200px] h-[200px] sm:w-[220px] sm:h-[220px] rounded-xl bg-gray-50 dark:bg-[#111b21] flex flex-col items-center justify-center gap-3 border border-dashed border-gray-300 dark:border-white/10">
+                                    <div className="p-3.5 rounded-full bg-[#00a884]/10 dark:bg-[#00a884]/20 animate-pulse">
+                                      <Loader2 className="animate-spin text-[#00a884]" size={30} />
+                                    </div>
+                                    <span className="text-xs font-semibold text-gray-500 dark:text-[#8696a0]">
+                                      Gerando QR Code oficial...
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    ) : (
+                      /* Modo Código de Pareamento Premium VIP */
+                      <div className="w-full max-w-sm flex flex-col items-center animate-in fade-in zoom-in-95 duration-300 mb-4">
+                        {pairingLoading ? (
+                          <div className="w-full p-8 bg-white/80 dark:bg-[#202c33]/90 backdrop-blur-md border border-gray-200/80 dark:border-[#2c3943]/60 rounded-3xl text-center shadow-lg flex flex-col items-center gap-3">
+                            <div className="p-4 rounded-full bg-[#00a884]/15 text-[#00a884] animate-pulse">
+                              <Loader2 className="animate-spin" size={32} />
+                            </div>
+                            <h4 className="text-sm font-extrabold text-gray-900 dark:text-white">Gerando Código VIP de Pareamento...</h4>
+                            <p className="text-xs text-gray-500 dark:text-[#8696a0] max-w-xs leading-relaxed">
+                              Estabelecendo handshake direto com os servidores oficiais do WhatsApp. Aguarde alguns instantes...
+                            </p>
+                          </div>
+                        ) : pairingCode ? (
+                          /* Cartão VIP do Código Gerado */
+                          <div className="w-full p-5 bg-gradient-to-b from-white/90 to-emerald-50/50 dark:from-[#202c33] dark:to-[#111b21] backdrop-blur-xl border-2 border-[#00a884]/40 rounded-3xl text-center shadow-[0_20px_50px_rgba(0,168,132,0.18)] flex flex-col items-center relative overflow-hidden">
+                            <div className="absolute top-0 right-0 px-3 py-1 bg-[#00a884] text-white text-[9px] font-mono font-black uppercase rounded-bl-xl tracking-widest shadow-sm">
+                              Código Válido
+                            </div>
+
+                            <div className="flex items-center gap-2 mb-2 text-[#00a884]">
+                              <Smartphone size={18} className="animate-bounce" />
+                              <span className="text-xs font-extrabold uppercase tracking-wider">Código de Pareamento de 8 Dígitos</span>
+                            </div>
+
+                            {/* Mostrador Digital VIP em Blocos */}
+                            <div className="my-4 w-full flex items-center justify-center gap-2 sm:gap-3">
+                              {/* Primeiro Bloco (4 Dígitos) */}
+                              <div className="flex gap-1.5 bg-gray-100 dark:bg-[#0b141a] p-2 sm:p-2.5 rounded-2xl border border-gray-200 dark:border-emerald-500/30 shadow-inner">
+                                {pairingCode.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).split('').map((char, idx) => (
+                                  <div key={idx} className="w-8 h-10 sm:w-9 sm:h-12 bg-white dark:bg-[#111b21] border border-gray-300 dark:border-[#202c33] rounded-xl flex items-center justify-center text-lg sm:text-2xl font-mono font-black text-[#00a884] dark:text-[#e9edef] shadow-sm">
+                                    {char.toUpperCase()}
+                                  </div>
+                                ))}
+                              </div>
+
+                              <span className="text-xl font-bold text-[#00a884] px-0.5">-</span>
+
+                              {/* Segundo Bloco (4 Dígitos) */}
+                              <div className="flex gap-1.5 bg-gray-100 dark:bg-[#0b141a] p-2 sm:p-2.5 rounded-2xl border border-gray-200 dark:border-emerald-500/30 shadow-inner">
+                                {pairingCode.replace(/[^a-zA-Z0-9]/g, '').slice(4, 8).split('').map((char, idx) => (
+                                  <div key={idx} className="w-8 h-10 sm:w-9 sm:h-12 bg-white dark:bg-[#111b21] border border-gray-300 dark:border-[#202c33] rounded-xl flex items-center justify-center text-lg sm:text-2xl font-mono font-black text-[#00a884] dark:text-[#e9edef] shadow-sm">
+                                    {char.toUpperCase()}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Botão de Cópia Rápida com Feedback */}
+                            <button
+                              onClick={() => {
+                                const cleanCode = pairingCode.replace(/[^a-zA-Z0-9]/g, '');
+                                navigator.clipboard.writeText(cleanCode);
+                                setCopiedCode(true);
+                                setTimeout(() => setCopiedCode(false), 2500);
+                              }}
+                              className={cn(
+                                "w-full py-3 px-4 rounded-2xl font-extrabold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-95",
+                                copiedCode
+                                  ? "bg-emerald-600 text-white ring-2 ring-emerald-400"
+                                  : "bg-[#00a884] hover:bg-[#008f6f] text-white"
+                              )}
+                            >
+                              {copiedCode ? (
+                                <>
+                                  <CheckCircle size={16} className="animate-bounce" /> Código Copiado com Sucesso!
+                                </>
+                              ) : (
+                                <>
+                                  <Smartphone size={16} /> Copiar Código ({pairingCode.toUpperCase().slice(0, 4)}-{pairingCode.toUpperCase().slice(4)})
+                                </>
+                              )}
+                            </button>
+
+                            <p className="text-[11px] text-gray-500 dark:text-[#8696a0] mt-3 flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                              Aguardando você digitar este código no WhatsApp do seu celular...
+                            </p>
+                          </div>
+                        ) : (
+                          /* Formulário de Ignição do Código */
+                          <div className="w-full p-5 bg-white/90 dark:bg-[#202c33]/90 backdrop-blur-md border border-gray-200/80 dark:border-[#2c3943]/60 rounded-3xl text-center shadow-lg flex flex-col items-center">
+                            <div className="w-12 h-12 rounded-2xl bg-[#00a884]/15 text-[#00a884] flex items-center justify-center mb-3 border border-[#00a884]/30 shadow-inner">
+                              <Smartphone size={24} />
+                            </div>
+                            <h4 className="text-sm font-extrabold text-gray-900 dark:text-white mb-1">
+                              Conectar por Número de Telefone
+                            </h4>
+                            <p className="text-xs text-gray-500 dark:text-[#8696a0] text-center mb-4 leading-relaxed">
+                              Receba um código de 8 dígitos na tela para digitar diretamente no aplicativo do WhatsApp.
+                            </p>
+
+                            {targetInstObj?.phone_number ? (
+                              <button
+                                onClick={() => handleRequestPairingCode(activePollingId, targetInstObj?.api_key)}
+                                className="w-full py-3.5 px-4 bg-gradient-to-r from-[#00a884] to-teal-600 hover:from-[#008f6f] hover:to-teal-700 text-white rounded-2xl text-xs font-extrabold transition-all cursor-pointer shadow-lg active:scale-95 flex items-center justify-center gap-2"
+                              >
+                                <Smartphone size={16} /> Gerar Código para {formatPhoneNumber(targetInstObj.phone_number)}
+                              </button>
+                            ) : (
+                              <div className="flex flex-col gap-2.5 w-full">
+                                <div className="relative">
+                                  <input
+                                    type="text"
+                                    placeholder="DDD + Telefone (ex: 5511991649959)"
+                                    value={pairingPhone}
+                                    onChange={(e) => setPairingPhone(e.target.value)}
+                                    className="w-full bg-white dark:bg-[#111b21] border border-gray-300 dark:border-[#2c3943]/60 rounded-2xl px-4 py-3 text-xs font-mono text-gray-900 dark:text-white focus:outline-none focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] shadow-inner tracking-wide"
+                                  />
+                                </div>
+                                <button
+                                  onClick={() => handleRequestPairingCode(activePollingId, targetInstObj?.api_key)}
+                                  className="w-full py-3.5 bg-gradient-to-r from-[#00a884] to-teal-600 hover:from-[#008f6f] hover:to-teal-700 text-white rounded-2xl font-extrabold text-xs transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+                                >
+                                  <Smartphone size={16} /> Solicitar Código de 8 Dígitos
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Console da Trilha de Migalhas (Live Stream DevLogger) */}
                     <div className="w-full max-w-sm bg-[#0b141a] dark:bg-[#0b141a] backdrop-blur-xl border border-emerald-500/30 p-4 rounded-2xl text-left mb-4 shadow-[0_10px_30px_rgba(0,168,132,0.12)] relative overflow-hidden transition-all duration-300">
@@ -2827,33 +2924,54 @@ export default function EvolutionModal({
                       </div>
                     </div>
 
-                    {/* Caixa de Instruções "Como conectar:" */}
+                    {/* Caixa de Instruções Dinâmicas "Como Conectar" */}
                     <div className="w-full max-w-sm bg-white/80 dark:bg-[#202c33]/90 backdrop-blur-md border border-gray-200/80 dark:border-[#2c3943]/60 p-4 rounded-2xl text-left mb-4 shadow-sm">
                       <h4 className="text-xs font-bold text-gray-900 dark:text-[#e9edef] mb-3 flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#00a884] shadow-sm"></span> Como conectar:
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#00a884] shadow-sm"></span> Como conectar ({connectMode === 'qr' ? 'via QR Code' : 'via Código de Pareamento'}):
                       </h4>
-                      <ol className="text-xs text-gray-600 dark:text-[#8696a0] space-y-2.5 leading-relaxed">
-                        <li className="flex items-center gap-2.5">
-                          <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">1</span>
-                          <span>Abra o WhatsApp no seu celular</span>
-                        </li>
-                        <li className="flex items-center gap-2.5">
-                          <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">2</span>
-                          <span>Toque em <strong>Menu (⋮)</strong> ou <strong>Configurações (⚙)</strong></span>
-                        </li>
-                        <li className="flex items-center gap-2.5">
-                          <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">3</span>
-                          <span>Toque em <strong>Dispositivos conectados</strong></span>
-                        </li>
-                        <li className="flex items-center gap-2.5">
-                          <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">4</span>
-                          <span>Toque em <strong>Conectar um dispositivo</strong></span>
-                        </li>
-                        <li className="flex items-center gap-2.5">
-                          <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">5</span>
-                          <span>Aponte a câmera para esta tela</span>
-                        </li>
-                      </ol>
+                      {connectMode === 'qr' ? (
+                        <ol className="text-xs text-gray-600 dark:text-[#8696a0] space-y-2.5 leading-relaxed">
+                          <li className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">1</span>
+                            <span>Abra o <strong>WhatsApp</strong> no seu celular</span>
+                          </li>
+                          <li className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">2</span>
+                            <span>Toque em <strong>Menu (⋮)</strong> ou <strong>Configurações (⚙)</strong></span>
+                          </li>
+                          <li className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">3</span>
+                            <span>Toque em <strong>Dispositivos conectados</strong></span>
+                          </li>
+                          <li className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">4</span>
+                            <span>Toque em <strong>Conectar um dispositivo</strong></span>
+                          </li>
+                          <li className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">5</span>
+                            <span>Aponte a câmera para esta tela</span>
+                          </li>
+                        </ol>
+                      ) : (
+                        <ol className="text-xs text-gray-600 dark:text-[#8696a0] space-y-2.5 leading-relaxed">
+                          <li className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">1</span>
+                            <span>Abra o <strong>WhatsApp</strong> no celular ➔ <strong>Dispositivos conectados</strong></span>
+                          </li>
+                          <li className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">2</span>
+                            <span>Toque em <strong>Conectar um dispositivo</strong></span>
+                          </li>
+                          <li className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">3</span>
+                            <span>Na tela da câmera, toque em <strong>"Conectar com número de telefone"</strong> no rodapé</span>
+                          </li>
+                          <li className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">4</span>
+                            <span>Digite o <strong>código de 8 dígitos</strong> exibido nesta tela</span>
+                          </li>
+                        </ol>
+                      )}
                     </div>
 
                     {/* Botões de Ação na base */}
@@ -2868,7 +2986,7 @@ export default function EvolutionModal({
                         }}
                         className="flex-1 py-3 px-4 bg-gradient-to-r from-[#00a884] to-teal-600 hover:from-[#008f6f] hover:to-teal-700 text-white rounded-xl transition-all font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-95"
                       >
-                        <RefreshCcw size={14} className="animate-spin-once" /> Atualizar QR Code
+                        <RefreshCcw size={14} className="animate-spin-once" /> Atualizar QR / Código
                       </button>
                       <button
                         onClick={() => {
