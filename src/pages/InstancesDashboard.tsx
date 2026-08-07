@@ -1449,6 +1449,16 @@ export default function InstancesDashboard() {
                            </button>
                        </>
                     )}
+
+                    {/* Botão Associar a Empresa */}
+                    <button 
+                      onClick={() => { setEditingTenantInstance(inst); setNewTenantForInstance(inst.tenant_id || ''); }}
+                      className="px-4 py-3.5 bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-400 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-emerald-500/20 hover:border-emerald-500 cursor-pointer"
+                      title="Associar ou Trocar a Empresa Proprietária desta Instância"
+                    >
+                      <Building2 size={18} /> Associar a Empresa
+                    </button>
+
                   {/* Botão Usar Esta Instância */}
                   {activeInstanceId === inst.id ? (
                       <button disabled className="px-5 py-3.5 bg-blue-500/20 text-blue-500 font-bold rounded-[14px] flex justify-center items-center gap-2 cursor-default border border-blue-500/30">
