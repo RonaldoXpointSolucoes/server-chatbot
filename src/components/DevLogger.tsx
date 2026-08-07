@@ -964,6 +964,8 @@ export default function DevLogger() {
               data.errors.forEach((err: any) => {
                  const msg = err.message || '';
                  const isRoutineNoise = 
+                    msg.includes('gastrofood') ||
+                    msg.includes('Gastrofood') ||
                     msg.includes('socket zumbi') ||
                     msg.includes('Connection Terminated') ||
                     msg.includes('connection errored') ||
