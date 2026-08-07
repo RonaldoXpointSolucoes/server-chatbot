@@ -1049,8 +1049,10 @@ class SessionManager {
 
         const data = this.sessions.get(instanceId);
         this.authenticatedSessions.delete(instanceId);
+        this.pairingPendingSync.delete(instanceId);
         this.pendingHistorySyncs.delete(instanceId);
         if (data && data.sock) {
+            try { data.sock.ev.removeAllListeners(); } catch(e){}
             try { data.sock.ws.close(); } catch(e){}
             this.sessions.delete(instanceId);
             
