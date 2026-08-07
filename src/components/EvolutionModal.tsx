@@ -131,7 +131,9 @@ export default function EvolutionModal({
     : null;
 
   const liveStatus = targetInstanceName ? instancesStatus[targetInstanceName] : null;
-  const isTargetConnected = modalReason === 'reconnect' ? false : (targetInstanceName
+  const isPairingTabActive = connectMode === 'pairing' || connectTab === 'pairing' || pairingLoading || Boolean(pairingCode) || modalReason === 'reconnect';
+
+  const isTargetConnected = isPairingTabActive ? false : (targetInstanceName
     ? ((targetInstObj
         ? targetInstObj.status === "connected" ||
           targetInstObj.connection_status === "connected" ||
@@ -720,6 +722,8 @@ export default function EvolutionModal({
     });
     
     setPairingLoading(true);
+    setConnectMode("pairing");
+    setConnectTab("pairing");
     setPairingCode(null);
     setCodeEntered(false);
     setHasSeenAwaitingState(false);
