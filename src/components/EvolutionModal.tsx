@@ -790,7 +790,14 @@ export default function EvolutionModal({
           source: 'WhatsApp Pairing',
           details: data
         });
-        setError(errMsg);
+        if (res.status === 400 && errMsg.includes('inicializando a ignição')) {
+          setConnectionStatusMessage("Sincronizando ignição com WhatsApp... Obtendo código em instantes...");
+          setTimeout(() => {
+            handleRequestPairingCode();
+          }, 1500);
+        } else {
+          setError(errMsg);
+        }
       }
     } catch (err: any) {
       logger.addLog({
