@@ -119,19 +119,6 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
 
         const forceNew = req.query.force === 'true' || req.query.force_new === 'true' || req.body?.force === true || req.body?.force_new === true;
 
-        const sock = sessionManager.getSocket(instanceId);
-        const isAuthReal = sessionManager.authenticatedSessions.has(instanceId) && Boolean(sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
-
-        if (isAuthReal && !forceNew) {
-            console.log(`[API] /pairing-code ignorado pois a instância ${instanceId} já está conectada legitimamente.`);
-            return res.json({ 
-                ok: true, 
-                alreadyConnected: true, 
-                message: 'A instância já está conectada ao WhatsApp.', 
-                instanceId 
-            });
-        }
-
         // Marca que o pareamento está em progresso para que /connect não feche o socket prematuramente
         sessionManager.pairingInProgress.add(instanceId);
         setTimeout(() => sessionManager.pairingInProgress.delete(instanceId), 45000);
