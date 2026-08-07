@@ -156,7 +156,7 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
         // Aguarda a rápida abertura do Websocket e solicita o código de pareamento no início do handshake
         let code = null;
         let attempts = 0;
-        while (attempts < 24) {
+        while (attempts < 50) {
             if (activeSock.ws && (activeSock.ws.isOpen || activeSock.ws.readyState === 1)) {
                 try {
                     code = await activeSock.requestPairingCode(cleanPhone);
@@ -165,10 +165,10 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
                         break;
                     }
                 } catch (err) {
-                    console.warn(`[API/pairing-code] Tentativa rápida ${attempts + 1}/24 ao gerar código (${cleanPhone}):`, err.message);
+                    console.warn(`[API/pairing-code] Tentativa rápida ${attempts + 1}/50 ao gerar código (${cleanPhone}):`, err.message);
                 }
             }
-            await new Promise(resolve => setTimeout(resolve, 250));
+            await new Promise(resolve => setTimeout(resolve, 300));
             attempts++;
         }
 
