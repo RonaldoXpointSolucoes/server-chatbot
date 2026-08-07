@@ -39,22 +39,29 @@ export async function flushAllPendingWrites() {
     return;
 }
 
-export async function useSupabaseAuthState(tenantId, instanceId) {
+export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState = false) {
+    if (forceCleanState && sessionCaches.has(instanceId)) {
+        sessionCaches.get(instanceId).clear();
+    }
     if (!sessionCaches.has(instanceId)) {
         sessionCaches.set(instanceId, new Map());
     }
     const memCache = sessionCaches.get(instanceId);
 
-    const { data: credsData } = await retryWithBackoff(() =>
-        supabase
-            .from('wa_auth_credentials')
-            .select('creds_data')
-            .eq('instance_id', instanceId)
-            .single()
-    );
+    let credsData = null;
+    if (!forceCleanState) {
+        const res = await retryWithBackoff(() =>
+            supabase
+                .from('wa_auth_credentials')
+                .select('creds_data')
+                .eq('instance_id', instanceId)
+                .single()
+        );
+        credsData = res.data;
+    }
     
     let creds;
-    if (credsData && credsData.creds_data) {
+    if (credsData && credsData.creds_data && !forceCleanState) {
         creds = JSON.parse(JSON.stringify(credsData.creds_data), BufferJSON.reviver);
     } else {
         const init = initAuthCreds.default ? initAuthCreds.default : initAuthCreds;
