@@ -86,6 +86,7 @@ interface WhatsAppInstance {
   egress_city?: string | null;
   settings?: any;
   assigned_node_id?: string | null;
+  profile_picture_url?: string | null;
 }
 
 const LOCKED_EMAIL = 'xpointsolucoes@gmail.com';
@@ -456,6 +457,17 @@ export default function InstanceManagerStandalone() {
       alert(`Erro ao criar instância: ${err.message || 'Erro desconhecido'}`);
     } finally {
       setCreating(false);
+    }
+  };
+
+  // Gerar Chave de API se ausente
+  const handleGenerateApiKey = async (instId: string) => {
+    try {
+      const newKey = `sk_inst_${crypto.randomUUID().replace(/-/g, '')}`;
+      await supabase.from('whatsapp_instances').update({ api_key: newKey }).eq('id', instId);
+      fetchInstances();
+    } catch (err) {
+      console.error('Erro ao gerar chave de API:', err);
     }
   };
 
@@ -1047,20 +1059,44 @@ export default function InstanceManagerStandalone() {
                     {/* Header do Card */}
                     <div className="flex items-start justify-between gap-3 pt-1">
                       <div className="flex items-center gap-3.5">
-                        <div
-                          className="w-11 h-11 rounded-2xl flex items-center justify-center font-bold text-white shadow-inner shrink-0 ring-4 ring-slate-800/50"
-                          style={{
-                            backgroundColor: `${cardColor}20`,
-                            color: cardColor,
-                            borderColor: `${cardColor}40`
-                          }}
-                        >
-                          <Smartphone className="w-5 h-5 stroke-[2.2]" />
-                        </div>
+                        {inst.profile_picture_url ? (
+                          <img
+                            src={inst.profile_picture_url}
+                            alt={inst.display_name}
+                            className="w-11 h-11 rounded-2xl object-cover ring-4 ring-slate-800/50 shrink-0 border border-slate-700/50 shadow-md"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <div
+                            className="w-11 h-11 rounded-2xl flex items-center justify-center font-bold text-white shadow-inner shrink-0 ring-4 ring-slate-800/50"
+                            style={{
+                              backgroundColor: `${cardColor}20`,
+                              color: cardColor,
+                              borderColor: `${cardColor}40`
+                            }}
+                          >
+                            <Smartphone className="w-5 h-5 stroke-[2.2]" />
+                          </div>
+                        )}
                         <div>
-                          <h4 className="text-base font-bold text-white group-hover:text-emerald-300 transition line-clamp-1">
-                            {inst.display_name}
-                          </h4>
+                          <div className="flex items-center gap-1.5">
+                            <h4 className="text-base font-bold text-white group-hover:text-emerald-300 transition line-clamp-1">
+                              {inst.display_name}
+                            </h4>
+                            <button
+                              onClick={() => copyToClipboard(inst.display_name, `name_${inst.id}`)}
+                              className="p-1 text-slate-400 hover:text-emerald-400 rounded-lg hover:bg-slate-800/80 transition flex items-center shrink-0"
+                              title="Copiar Nome da Instância"
+                            >
+                              {copiedId === `name_${inst.id}` ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
                           <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5 font-mono">
                             <Phone className="w-3.5 h-3.5 text-slate-500" />
                             <span>{inst.phone_number || 'Sem número associado'}</span>
@@ -1113,9 +1149,9 @@ export default function InstanceManagerStandalone() {
                       </div>
 
                       {/* Chave de API */}
-                      {inst.api_key && (
-                        <div className="flex items-center justify-between text-slate-400">
-                          <span className="text-slate-500">Chave de API:</span>
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span className="text-slate-500">Chave de API:</span>
+                        {inst.api_key ? (
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => setShowKeyId(showKeyId === inst.id ? null : inst.id)}
@@ -1140,8 +1176,17 @@ export default function InstanceManagerStandalone() {
                               )}
                             </button>
                           </div>
-                        </div>
-                      )}
+                        ) : (
+                          <button
+                            onClick={() => handleGenerateApiKey(inst.id)}
+                            className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-1 rounded-lg border border-emerald-500/30 transition flex items-center gap-1"
+                            title="Gerar Chave de API única para esta instância"
+                          >
+                            <Sparkles className="w-3 h-3" />
+                            <span>Gerar Chave</span>
+                          </button>
+                        )}
+                      </div>
 
                       {/* Criado em */}
                       <div className="flex items-center justify-between text-slate-400">

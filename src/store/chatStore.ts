@@ -3993,7 +3993,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 console.error("[loadHistoricalMessages] Erro ao buscar mensagens por conversation_id:", msgErr);
             }
             rawFetchedMsgs = data || [];
-        } else if (targetContactUuid) {
+        }
+        
+        // Fallback defensivo: Se a busca por conversation_id trouxer 0 mensagens, busca pelo contact_id UUID para não sumir mensagens com o rascunho de preview
+        if (rawFetchedMsgs.length === 0 && targetContactUuid) {
             const { data, error: msgErr } = await supabase.from('messages')
                    .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                    .eq('tenant_id', tenant.id)
@@ -4002,8 +4005,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                    .limit(500);
             if (msgErr) {
                 console.error("[loadHistoricalMessages] Erro ao buscar mensagens por contact_id:", msgErr);
+            } else if (data && data.length > 0) {
+                rawFetchedMsgs = data;
             }
-            rawFetchedMsgs = data || [];
         }
 
         const msgs = rawFetchedMsgs ? [...rawFetchedMsgs].reverse() : [];
