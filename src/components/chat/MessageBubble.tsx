@@ -70,7 +70,7 @@ export const MessageBubble = memo(({
   const toggleChecklistItem = useChatStore(state => state.toggleChecklistItem);
   const contacts = useChatStore(state => state.contacts);
   
-  const isMe = msg.sender === 'human' || msg.sender === 'bot' || msg.sender === 'me';
+  const isMe = msg.sender === 'human' || msg.sender === 'bot' || msg.sender === 'me' || msg.sender === 'automation';
   
   // Usado pra saber se a bolha precisa exibir menu pra cima ou baixo
   const [dropdownDirection, setDropdownDirection] = useState<'up' | 'down'>('down');
@@ -553,9 +553,9 @@ export const MessageBubble = memo(({
            </div>
          )}
 
-         {msg.sender === 'bot' && (
+         {(msg.sender === 'bot' || msg.sender === 'automation') && (
           <div className="flex items-center gap-1 mb-1 text-[10px] text-[#005c4b] dark:text-[#1d9782] opacity-80 font-bold uppercase tracking-wider">
-            <Bot size={10} /> {msg.payload?.bot_name || 'IA ChatBoot'}
+            <Bot size={10} /> {msg.payload?.bot_name || (msg.sender === 'automation' ? 'Automação / Pedido' : 'IA ChatBoot')}
           </div>
         )}
         {msg.sender === 'human' && (

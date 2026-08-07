@@ -3895,7 +3895,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }));
 
         const handleMapping = (messagesArray: any[]) => {
-            const filteredArray = messagesArray.filter(m => m.sender_type !== 'automation');
+            // Inclui mensagens de automação/pedidos para exibir "Segue seu pedido" e recibos
+            const filteredArray = messagesArray;
             const mappedMsgs = filteredArray.map(m => {
                 const advanced = parseAdvancedMsgMetadata(m);
                 const realTimestamp = new Date(m.timestamp);
@@ -4960,7 +4961,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const m = payload.new as any;
         console.log('[Realtime] Message INSERT:', m);
 
-        if (m.sender_type === 'system' || m.sender_type === 'automation') return; // Ignore echoes that don't need realtime sync
+        if (m.sender_type === 'system') return; // Ignore system echoes that don't need realtime sync
 
         let targetContactId = null;
         let convInstanceId = m.instance_id || null;
