@@ -131,7 +131,7 @@ export default function EvolutionModal({
     : null;
 
   const liveStatus = targetInstanceName ? instancesStatus[targetInstanceName] : null;
-  const isTargetConnected = targetInstanceName
+  const isTargetConnected = modalReason === 'reconnect' ? false : (targetInstanceName
     ? ((targetInstObj
         ? targetInstObj.status === "connected" ||
           targetInstObj.connection_status === "connected" ||
@@ -143,7 +143,7 @@ export default function EvolutionModal({
         liveStatus === "connected" ||
         liveStatus === "connected_local" ||
         liveStatus === "open")
-    : evolutionConnected;
+    : evolutionConnected);
   const [customApiKey, setCustomApiKey] = useState<string>("");
   const [customColor, setCustomColor] = useState<string>("#10b981");
   const [customSound, setCustomSound] = useState<string>("default");
@@ -251,8 +251,10 @@ export default function EvolutionModal({
   ];
 
   useEffect(() => {
-    fetchExistingInstances();
-  }, []);
+    if (isOpen) {
+      fetchExistingInstances();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen && targetInstanceName && !activePollingId) {
@@ -644,8 +646,8 @@ export default function EvolutionModal({
               }
 
               const isAuth = st?.data?.is_authenticated === true || st?.data?.authenticated === true;
-              const isPendingPairingCode = Boolean(pairingCodeRef.current) && st?.data?.whatsapp_instance_runtime?.pairing_code !== 'CONNECTED_PENDING_SYNC';
-              if ((st?.data?.status === "connected" || st?.data?.status === "connected_local") && isAuth && !runtimeQr && !isPendingPairingCode) {
+              const isPairingModeActive = pairingLoadingRef.current || Boolean(pairingCodeRef.current);
+              if ((st?.data?.status === "connected" || st?.data?.status === "connected_local") && isAuth && !runtimeQr && !isPairingModeActive) {
                 useDevStore.getState().addBreadcrumb(6, 7, `Conexão efetuada no celular! Finalizando vínculo...`, 'EvolutionModal');
                 useDevStore.getState().addBreadcrumb(7, 7, `Instância autenticada e operacional (${st?.data?.status})`, 'EvolutionModal');
                 handleSuccess();
@@ -655,6 +657,10 @@ export default function EvolutionModal({
                   if (pairingCodeRef.current && !pairingLoadingRef.current) {
                     if (st?.data?.whatsapp_instance_runtime?.pairing_code === 'CONNECTED_PENDING_SYNC') {
                       setConnectionStatusMessage("Código digitado no celular! Vinculando dispositivo...");
+                      pairingLoadingRef.current = false;
+                      pairingCodeRef.current = null;
+                      handleSuccess();
+                      clearInterval(pollInterval);
                     } else {
                       setConnectionStatusMessage("Aguardando pareamento no celular...");
                     }

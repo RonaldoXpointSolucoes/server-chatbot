@@ -125,28 +125,33 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
         sessionManager.pairingPendingSync.delete(instanceId);
         setTimeout(() => sessionManager.pairingInProgress.delete(instanceId), 45000);
 
-        console.log(`[API] /pairing-code: Encerrando e limpando sessão antiga para instância ${instanceId}...`);
-        await sessionManager.closeSession(instanceId);
-        if (sessionManager.connectingState.has(instanceId)) {
-             sessionManager.connectingState.delete(instanceId);
+        let activeSock = sessionManager.sessions.get(instanceId);
+        const isSocketReadyForPairing = activeSock && activeSock.ws && (activeSock.ws.isOpen || activeSock.ws.readyState === 1) && !activeSock.authState?.creds?.me?.id;
+
+        if (!isSocketReadyForPairing) {
+            console.log(`[API] /pairing-code: Encerrando e limpando sessão antiga para instância ${instanceId}...`);
+            await sessionManager.closeSession(instanceId);
+            if (sessionManager.connectingState.has(instanceId)) {
+                 sessionManager.connectingState.delete(instanceId);
+            }
+
+            console.log(`[API] Limpando credenciais antigas para Pairing Code na instância ${instanceId}...`);
+            const { sessionCaches } = await import('../session-manager/auth.js');
+            if (sessionCaches && sessionCaches.has(instanceId)) {
+                sessionCaches.delete(instanceId);
+            }
+            await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
+            await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
+            await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
+
+            await supabase.from('whatsapp_instances')
+                .update({ status: 'connecting', phone_number: cleanPhone, last_error: null })
+                .eq('id', instanceId)
+                .eq('tenant_id', tenantId);
+
+            console.log(`[API] Criando sessão Baileys para Pairing Code...`);
+            activeSock = await sessionManager.createSession(tenantId, instanceId);
         }
-
-        console.log(`[API] Limpando credenciais antigas para Pairing Code na instância ${instanceId}...`);
-        const { sessionCaches } = await import('../session-manager/auth.js');
-        if (sessionCaches && sessionCaches.has(instanceId)) {
-            sessionCaches.delete(instanceId);
-        }
-        await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
-        await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
-        await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
-
-        await supabase.from('whatsapp_instances')
-            .update({ status: 'connecting', phone_number: cleanPhone, last_error: null })
-            .eq('id', instanceId)
-            .eq('tenant_id', tenantId);
-
-        console.log(`[API] Criando sessão Baileys para Pairing Code...`);
-        const activeSock = await sessionManager.createSession(tenantId, instanceId);
 
         if (!activeSock) {
             sessionManager.pairingInProgress.delete(instanceId);

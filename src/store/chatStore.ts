@@ -1465,7 +1465,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  openQRModal: (instanceId) => set({ isQRModalOpen: true, qrModalTargetInstance: instanceId || null }),
+  openQRModal: (instanceId) => set({ isQRModalOpen: true, qrModalTargetInstance: instanceId || null, evolutionConnected: false, modalReason: 'reconnect' }),
   closeQRModal: () => set({ isQRModalOpen: false, qrModalTargetInstance: null }),
 
   setActiveChannelFilter: (id, name) => {
