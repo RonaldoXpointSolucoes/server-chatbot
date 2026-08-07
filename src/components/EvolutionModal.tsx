@@ -763,6 +763,7 @@ export default function EvolutionModal({
             source: 'WhatsApp Pairing',
             details: data
           });
+          pairingCodeRef.current = data.code;
           setPairingCode(data.code);
           // Salva o número associado no banco apenas se tiver um número válido
           const cleanPhone = pairingPhone ? pairingPhone.replace(/\D/g, '') : '';
