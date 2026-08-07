@@ -121,6 +121,8 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
 
         // Marca que o pareamento está em progresso para que /connect não feche o socket prematuramente
         sessionManager.pairingInProgress.add(instanceId);
+        sessionManager.authenticatedSessions.delete(instanceId);
+        sessionManager.pairingPendingSync.delete(instanceId);
         setTimeout(() => sessionManager.pairingInProgress.delete(instanceId), 45000);
 
         console.log(`[API] /pairing-code: Encerrando e limpando sessão antiga para instância ${instanceId}...`);

@@ -644,7 +644,8 @@ export default function EvolutionModal({
               }
 
               const isAuth = st?.data?.is_authenticated === true || st?.data?.authenticated === true;
-              if ((st?.data?.status === "connected" || st?.data?.status === "connected_local") && isAuth && !runtimeQr) {
+              const isPendingPairingCode = Boolean(pairingCodeRef.current) && st?.data?.whatsapp_instance_runtime?.pairing_code !== 'CONNECTED_PENDING_SYNC';
+              if ((st?.data?.status === "connected" || st?.data?.status === "connected_local") && isAuth && !runtimeQr && !isPendingPairingCode) {
                 useDevStore.getState().addBreadcrumb(6, 7, `Conexão efetuada no celular! Finalizando vínculo...`, 'EvolutionModal');
                 useDevStore.getState().addBreadcrumb(7, 7, `Instância autenticada e operacional (${st?.data?.status})`, 'EvolutionModal');
                 handleSuccess();
