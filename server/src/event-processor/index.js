@@ -598,6 +598,9 @@ class EventProcessor {
                          phone: b.phone,
                          name: b.pushName,
                          whatsapp_jid: b.jid
+                     });
+                 }
+             }
                   // Helper para variação de telefones brasileiros (8 vs 9 dígitos em DDDs BR 55+11..29)
              const getBrPhoneVariations = (phoneStr) => {
                  if (!phoneStr) return [];
