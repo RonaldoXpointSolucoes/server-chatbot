@@ -252,4 +252,45 @@ Para evitar que confirmações de entrega (ACKs) ou eventos de recebimento gerad
 3. Verifique se `isRealAuthConnection` avalia `update.connection === 'open' && hasValidMeId && !isPairingPending`.
 4. Garanta que o incremento de versão no `server/package.json` respeite a regra de dígito único (`0` a `9` por campo) antes de enviar para o Coolify via `Deploy Server`.
 
+---
+
+## 8. As Duas Caixas de Testes Oficiais (FoodNext ↔ Ronaldo-Web)
+
+### A. Conceito Fundamental de Caixa / Inbox
+No ChatBoot, uma **Caixa de Atendimento** (ou Inbox) **não é apenas um receptor passivo de mensagens**. Cada caixa é uma conta viva de WhatsApp vinculada a um chip real com número próprio, capaz de:
+- Enviar mensagens ativas para qualquer contato ou outra caixa da plataforma;
+- Receber mensagens de entrada via conexão de socket real da Baileys;
+- Gerar eventos no Supabase e acionar fluxos de IA ou agentes humanos.
+
+### B. Mapeamento das Caixas de Teste Oficiais
+
+Estas duas caixas são os pontos de teste estáticos para validação bidirecional do motor Baileys em produção:
+
+```mermaid
+graph LR
+    SubFoodNext["Instância FoodNext<br/>(11) 94775-8860"] -->|Baileys sendMessage| Net[Rede WhatsApp Meta]
+    Net -->|Socket Inbound| SubRonaldo["Instância Ronaldo-Web<br/>(11) 97596-0999"]
+    SubRonaldo -->|Baileys sendMessage| Net
+    Net -->|Socket Inbound| SubFoodNext
+```
+
+1. **Caixa FoodNext**:
+   - **Nome**: `FoodNext`
+   - **Telefone**: `(11) 94775-8860` (`5511947758860`)
+   - **JID WhatsApp**: `5511947758860@s.whatsapp.net`
+   - **Instance ID**: `cc4efe36-f391-4b3d-a24c-ddcd8a293cf6`
+   - **Contact ID Mapeado**: `01f5b7d9-a846-4a9b-92ab-33a8d748b3d7`
+   - **Conversation ID Mapeada**: `eb8b5ab9-4dd6-4ebd-8fb0-2c4e16f893fd`
+
+2. **Caixa Ronaldo-Web**:
+   - **Nome**: `Ronaldo-Web`
+   - **Telefone**: `(11) 97596-0999` (`5511975960999`)
+   - **JID WhatsApp**: `5511975960999@s.whatsapp.net`
+   - **Instance ID**: `5c78d358-d449-41c4-b396-a04ab20a39e4`
+   - **Contact ID Mapeado**: `9a003825-b2ca-4973-a52b-f55b912e9dbe`
+   - **Conversation ID Mapeada**: `bc5c1fe7-a4de-4707-bbb1-176f52894c18`
+
+> 💡 Para executar testes E2E completos e monitorar os retornos reais da Baileys entre essas duas caixas, utilize a skill `baileys-e2e-testing`.
+
+
 

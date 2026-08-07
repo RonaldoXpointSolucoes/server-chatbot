@@ -1505,7 +1505,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sendHumanMessage: async (contactId, text, instanceName) => {
     console.log("[sendHumanMessage] Called with:", { contactId, text, instanceName });
     const state = get();
-    const contact = state.contacts.find(c => c.id === contactId);
+    const realContactId = getRealContactId(contactId);
+    const contact = state.contacts.find(c => c.id === contactId || c.conv_id === contactId || (c.id && getRealContactId(c.id) === realContactId));
     if (!contact) {
        console.warn("[sendHumanMessage] Contact not found in store!", contactId);
        return;
