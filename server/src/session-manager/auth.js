@@ -66,6 +66,10 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
     } else {
         const init = initAuthCreds.default ? initAuthCreds.default : initAuthCreds;
         creds = init();
+        delete creds.me;
+        delete creds.account;
+        delete creds.signalIdentities;
+        delete creds.pairingCode;
 
         // Anti-violação de chave estrangeira: verifica se a instância ainda existe antes do upsert
         const { data: instanceExists } = await retryWithBackoff(() =>

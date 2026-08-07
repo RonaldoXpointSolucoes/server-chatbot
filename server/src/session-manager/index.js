@@ -342,8 +342,9 @@ class SessionManager {
                     }
                 }
                 // Só dispara a atualização de pareamento se a sessão NÃO estava autenticada no boot
-                // e concluiu a autenticação no celular (tem meId válido agora)
-                if (!wasAuthenticatedOnBoot && hasValidMeId) {
+                // e concluiu a autenticação no celular (tem meId válido agora) e NÃO está em fase inicial de geração de código
+                const isCurrentlyPairing = this.pairingInProgress.has(instanceId);
+                if (!wasAuthenticatedOnBoot && hasValidMeId && !isCurrentlyPairing) {
                     const phone = String(meId).split('@')[0].split(':')[0];
                     console.log(`[SessionManager] Credenciais de pareamento registradas no celular com telefone: ${phone}. Sincronizando com o banco e o frontend.`);
                     await retryWithBackoff(() => 
