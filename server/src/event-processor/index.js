@@ -598,15 +598,24 @@ class EventProcessor {
                          phone: b.phone,
                          name: b.pushName,
                          whatsapp_jid: b.jid
-                     });
+                  // Helper para variação de telefones brasileiros (8 vs 9 dígitos em DDDs BR 55+11..29)
+             const getBrPhoneVariations = (phoneStr) => {
+                 if (!phoneStr) return [];
+                 const clean = String(phoneStr).replace(/\D/g, '');
+                 const res = [clean];
+                 if (clean.startsWith('55') && clean.length === 13 && clean.charAt(4) === '9') {
+                     res.push(clean.substring(0, 4) + clean.substring(5));
+                 } else if (clean.startsWith('55') && clean.length === 12) {
+                     res.push(clean.substring(0, 4) + '9' + clean.substring(4));
                  }
-             }
-             
-            // BULK UPSERT CONTACTS
+                 return res;
+             };
+
+             // BULK UPSERT CONTACTS
              const contactsArray = Array.from(contactsMap.values());
              
-             // Proteger contra overwrite de nomes e custom_names
-             const phonesToSeek = contactsArray.map(c => c.phone);
+             // Busca variações com 8 e 9 dígitos para evitar duplicatas fantasma
+             const phonesToSeek = Array.from(new Set(contactsArray.flatMap(c => getBrPhoneVariations(c.phone))));
              const tenantIdTarget = contactsArray[0]?.tenant_id;
              
              let existingMap = new Map();
@@ -620,6 +629,12 @@ class EventProcessor {
                  if (existingDbContacts) {
                      for (const e of existingDbContacts) {
                          existingMap.set(e.phone, e);
+                         const vars = getBrPhoneVariations(e.phone);
+                         for (const v of vars) {
+                             if (!existingMap.has(v)) {
+                                 existingMap.set(v, e);
+                             }
+                         }
                          const isTempPaused = e.bot_paused_until && new Date(e.bot_paused_until) > new Date();
                          contactBotStatusMap.set(e.id, (e.bot_status === 'paused' || isTempPaused) ? 'paused' : 'active');
                      }
@@ -627,18 +642,20 @@ class EventProcessor {
              }
 
              const safeContactsArray = contactsArray.map(c => {
-                 const ex = existingMap.get(c.phone) || {};
+                 const ex = existingMap.get(c.phone);
+                 const targetPhone = ex?.phone || c.phone;
                  // Respeita o custom_name ou o nome antigo se válido frente ao fallback bruto
-                 const hasValidOldName = ex && ex.name && ex.name !== ex.phone && ex.name !== c.phone;
+                 const hasValidOldName = ex && ex.name && ex.name !== ex.phone && ex.name !== targetPhone;
                  const finalName = ex?.custom_name ? ex.custom_name : (hasValidOldName ? ex.name : c.name);
                  let finalJid = c.whatsapp_jid;
                  if (!finalJid || finalJid.endsWith('@lid')) {
-                     finalJid = `${c.phone}@s.whatsapp.net`;
+                     finalJid = `${targetPhone}@s.whatsapp.net`;
                  }
                  
                  return {
+                     ...(ex?.id ? { id: ex.id } : {}),
                      tenant_id: c.tenant_id,
-                     phone: c.phone,
+                     phone: targetPhone,
                      name: finalName,
                      whatsapp_jid: finalJid,
                      instance_id: c.instance_id
@@ -650,9 +667,13 @@ class EventProcessor {
                   .select('id, tenant_id, phone, whatsapp_jid');
              if(contactErr) throw new Error("Contact Upsert Error: " + contactErr.message);
              
-             const contactIdMap = new Map(); // phone+tenant -> contact_id
+             const contactIdMap = new Map(); // phone+tenant -> contact_id (mapeia variações 8 e 9 dígitos)
              for(const c of upsertedContacts) {
                  contactIdMap.set(`${c.tenant_id}_${c.phone}`, c.id);
+                 const vars = getBrPhoneVariations(c.phone);
+                 for (const v of vars) {
+                     contactIdMap.set(`${c.tenant_id}_${v}`, c.id);
+                 }
              }
              
               const convMap = new Map();
