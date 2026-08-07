@@ -46,7 +46,14 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
         const { instanceId } = req.params;
         const tenantId = req.tenantId;
 
-        const forceNewQR = req.query.force_new === 'true' || req.body?.forceNew === true;
+        const forceNewQR = req.query.force_new === 'true' || req.body?.forceNew === true;        // Se /pairing-code estiver gerando o código ativamente para esta instância, não destrua a sessão!
+        if (sessionManager.pairingInProgress.has(instanceId)) {
+            console.log(`[API] /connect ignorado para instância ${instanceId} pois a geração de código de pareamento está em andamento.`);
+            return res.json({
+                status: 'connecting',
+                message: 'Geração de código de pareamento em andamento.'
+            });
+        }
 
         // Se a sessão já estiver ativa/autenticada e não houver pedido explícito de force_new, mantém a conexão
         const isAlreadyConnected = sessionManager.authenticatedSessions.has(instanceId) && sessionManager.sessions.has(instanceId);
@@ -125,6 +132,10 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
             });
         }
 
+        // Marca que o pareamento está em progresso para que /connect não feche o socket prematuramente
+        sessionManager.pairingInProgress.add(instanceId);
+        setTimeout(() => sessionManager.pairingInProgress.delete(instanceId), 45000);
+
         console.log(`[API] /pairing-code: Encerrando e limpando sessão antiga para instância ${instanceId}...`);
         await sessionManager.closeSession(instanceId);
         if (sessionManager.connectingState.has(instanceId)) {
@@ -149,6 +160,7 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
         const activeSock = await sessionManager.createSession(tenantId, instanceId);
 
         if (!activeSock) {
+            sessionManager.pairingInProgress.delete(instanceId);
             return res.status(500).json({ error: 'Não foi possível inicializar a conexão do WhatsApp para gerar o código.' });
         }
 
@@ -178,6 +190,10 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
         if (!code) {
             return res.status(400).json({ error: 'O motor Baileys está inicializando a ignição do WhatsApp. Clique em "Solicitar Código de 8 Dígitos" novamente em 2 segundos.' });
         }
+
+        // Salva pairing_code no runtime do Supabase para escuta via Realtime
+        await supabase.from('whatsapp_instance_runtime')
+            .upsert({ instance_id: instanceId, tenant_id: tenantId, pairing_code: code }, { onConflict: 'instance_id' });
 
         res.json({ ok: true, code, instanceId });
     } catch (e) {

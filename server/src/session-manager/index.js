@@ -57,6 +57,7 @@ class SessionManager {
         this.watchdogs = new Map();
         this.authenticatedSessions = new Set();
         this.pairingPendingSync = new Map();
+        this.pairingInProgress = new Set();
         this.closingSessions = new Set();
         this.pendingHistorySyncs = new Map();
         this.consecutiveForbiddenAttempts = new Map();
