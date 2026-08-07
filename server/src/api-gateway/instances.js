@@ -158,11 +158,17 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
             return res.status(500).json({ error: 'Não foi possível inicializar a conexão do WhatsApp para gerar o código.' });
         }
 
-        // Aguarda a rápida abertura do Websocket e solicita o código de pareamento no início do handshake
+        // Aguarda a rápida abertura do Websocket e a conclusão da ignição criptográfica (Noise Handshake)
         let code = null;
         let attempts = 0;
+        let wsWasOpen = false;
         while (attempts < 60) {
             if (activeSock.ws && (activeSock.ws.isOpen || activeSock.ws.readyState === 1)) {
+                if (!wsWasOpen) {
+                    wsWasOpen = true;
+                    // Aguarda 1 segundo para o Noise Handshake se estabilizar na rede da Meta
+                    await new Promise(r => setTimeout(r, 1000));
+                }
                 try {
                     code = await activeSock.requestPairingCode(cleanPhone);
                     if (code) {
