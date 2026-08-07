@@ -13,9 +13,15 @@ interface WhatsAppInstance {
   profile_picture_url: string | null;
   whatsapp_name?: string | null;
   api_key?: string;
+  tenant_id?: string | null;
   settings?: Record<string, boolean>;
   created_at: string;
   updated_at: string;
+}
+
+interface TenantItem {
+  id: string;
+  name: string;
 }
 
 import { supabase } from '../services/supabase';
@@ -36,6 +42,13 @@ export default function InstancesDashboard() {
   const [pairingPhone, setPairingPhone] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [pairingLoading, setPairingLoading] = useState(false);
+
+  // Multi-Tenant Company States
+  const [tenants, setTenants] = useState<TenantItem[]>([]);
+  const [selectedTenantFilter, setSelectedTenantFilter] = useState<string>('all');
+  const [createTenantId, setCreateTenantId] = useState<string>('');
+  const [editingTenantInstance, setEditingTenantInstance] = useState<WhatsAppInstance | null>(null);
+  const [newTenantForInstance, setNewTenantForInstance] = useState<string>('');
   
   // UI states
   const [deletingInstance, setDeletingInstance] = useState<WhatsAppInstance | null>(null);
@@ -246,6 +259,7 @@ export default function InstancesDashboard() {
   };
 
   useEffect(() => {
+    fetchTenants();
     fetchInstances();
     fetchWacallsSessions().catch(console.error);
 
@@ -263,6 +277,27 @@ export default function InstancesDashboard() {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  useEffect(() => {
+    fetchInstances();
+  }, [selectedTenantFilter]);
+
+  const fetchTenants = async () => {
+    try {
+      const { data } = await supabase.from('tenants').select('id, name').order('name');
+      if (data && data.length > 0) {
+        setTenants(data);
+        const currentT = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+        if (currentT && data.some(t => t.id === currentT)) {
+          setCreateTenantId(currentT);
+        } else {
+          setCreateTenantId(data[0].id);
+        }
+      }
+    } catch (e) {
+      console.error('Erro ao buscar empresas:', e);
+    }
+  };
 
   // Limpa o estado de pareamento quando a sessão do WaCalls é conectada com sucesso
   useEffect(() => {
@@ -287,12 +322,15 @@ export default function InstancesDashboard() {
 
   const fetchInstances = async () => {
     try {
-      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-      const { data, error } = await supabase
-        .from('whatsapp_instances')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false });
+      setLoading(true);
+      const activeTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      let query = supabase.from('whatsapp_instances').select('*').order('created_at', { ascending: false });
+
+      if (selectedTenantFilter && selectedTenantFilter !== 'all') {
+        query = query.eq('tenant_id', selectedTenantFilter);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       
@@ -302,9 +340,10 @@ export default function InstancesDashboard() {
       const liveInstances = await Promise.all(instancesData.map(async (inst) => {
           // Sempre checa na Engine para limpar falsos positivos de online/offline do banco de dados.
           try {
+              const targetTenantHeader = inst.tenant_id || activeTenantId || '';
               const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/status`, {
                   headers: { 
-                    'x-tenant-id': tenantId!,
+                    'x-tenant-id': targetTenantHeader,
                     'apikey': inst.api_key || '' 
                   }
               });
@@ -332,6 +371,31 @@ export default function InstancesDashboard() {
       }
     } catch (e) {
       console.error('Error fetching instances:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReassignTenant = async (instanceId: string, targetTenantId: string) => {
+    if (!targetTenantId) return;
+    try {
+      setLoading(true);
+      const instBefore = instances.find(i => i.id === instanceId);
+      const { error } = await supabase
+        .from('whatsapp_instances')
+        .update({ tenant_id: targetTenantId })
+        .eq('id', instanceId);
+
+      if (error) throw error;
+
+      const instAfter = instBefore ? { ...instBefore, tenant_id: targetTenantId } : null;
+      await useChatStore.getState().logOperation('UPDATE', 'whatsapp_instances', instanceId, instBefore || null, instAfter);
+
+      setEditingTenantInstance(null);
+      await fetchInstances();
+      alert('Empresa da instância atualizada com sucesso!');
+    } catch (e: any) {
+      alert('Erro ao reatribuir empresa da instância: ' + (e.message || e));
     } finally {
       setLoading(false);
     }
@@ -365,7 +429,9 @@ export default function InstancesDashboard() {
     try {
       const defaultSettings = { reject_calls: false, ignore_groups: false, always_online: true, sync_history: false, read_messages: false };
       
-      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      const activeTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      const targetTenantId = createTenantId || activeTenantId;
+
       const { v4: uuidv4 } = await import('uuid');
       const newEngineId = uuidv4(); 
       const finalApiKey = 'sk_' + uuidv4().replace(/-/g, '');
@@ -375,7 +441,7 @@ export default function InstancesDashboard() {
         display_name: nameStr,
         status: 'offline',
         settings: defaultSettings,
-        tenant_id: tenantId,
+        tenant_id: targetTenantId,
         api_key: finalApiKey
       };
       const { error } = await supabase.from('whatsapp_instances').insert([newInstObj]);
@@ -385,7 +451,7 @@ export default function InstancesDashboard() {
       
       if (error) throw error;
       
-      await createInstance(tenantId!, newEngineId, finalApiKey);
+      await createInstance(targetTenantId!, newEngineId, finalApiKey);
       
       setIsCreating(false);
       setNewInstanceName('');
@@ -741,18 +807,38 @@ export default function InstancesDashboard() {
     <div className="h-full w-full overflow-y-auto overflow-x-hidden bg-[#f3f4f6] dark:bg-[#0b141a] p-4 sm:p-8 transition-colors custom-scrollbar">
       <div className="max-w-7xl mx-auto space-y-8">
         
-        <div className="flex justify-between items-center bg-[#111b21] p-6 sm:p-8 border-b border-[#2a3942] rounded-t-[20px]">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-[#111b21] p-6 sm:p-8 border-b border-[#2a3942] rounded-t-[20px] gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-white flex items-center gap-3">
               <Smartphone className="text-emerald-500" size={32} />
               Minhas Conexões
             </h1>
-            <p className="text-gray-400 mt-2">Olá <span className="text-white font-semibold">{userName || 'Usuário'}</span>, gerencie o pareamento de suas instâncias do engine.</p>
+            <p className="text-gray-400 mt-2">Olá <span className="text-white font-semibold">{userName || 'Usuário'}</span>, gerencie o pareamento de suas instâncias por Empresa (Tenant).</p>
           </div>
-          <button onClick={() => setIsCreating(true)} className="bg-emerald-500 hover:bg-emerald-400 text-white px-5 py-3 rounded-[1.2rem] flex items-center gap-2 font-bold transition-all shadow-[0_5px_15px_-5px_rgba(16,185,129,0.5)] active:scale-95">
-            <Plus size={20} />
-            Nova Instância
-          </button>
+          
+          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+            {/* Filtro por Empresa */}
+            <div className="flex items-center gap-2 bg-[#202c33] border border-[#2a3942] rounded-[1.2rem] px-3 py-2 text-xs font-semibold text-white">
+              <Building2 size={16} className="text-emerald-400" />
+              <select 
+                value={selectedTenantFilter} 
+                onChange={e => setSelectedTenantFilter(e.target.value)}
+                className="bg-transparent text-white font-medium focus:outline-none cursor-pointer"
+              >
+                <option value="all" className="bg-[#111b21] text-white">Todas as Empresas ({instances.length})</option>
+                {tenants.map(t => (
+                  <option key={t.id} value={t.id} className="bg-[#111b21] text-white">
+                    🏢 {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button onClick={() => setIsCreating(true)} className="bg-emerald-500 hover:bg-emerald-400 text-white px-5 py-3 rounded-[1.2rem] flex items-center gap-2 font-bold transition-all shadow-[0_5px_15px_-5px_rgba(16,185,129,0.5)] active:scale-95">
+              <Plus size={20} />
+              Nova Instância
+            </button>
+          </div>
         </div>
 
          {/* Modal de Criação */}
@@ -766,12 +852,68 @@ export default function InstancesDashboard() {
                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nome da Instância</label>
                      <input required autoFocus value={newInstanceName} onChange={e => setNewInstanceName(e.target.value)} type="text" placeholder="Ex: Comercial 1" className="w-full bg-gray-100 dark:bg-black/20 border border-gray-200 dark:border-white/10 rounded-2xl p-3 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"/>
                    </div>
-                      <div className="flex gap-3 mt-6">
+
+                   <div>
+                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-1.5">
+                       <Building2 size={14} className="text-emerald-500" />
+                       Empresa (Tenant) Responsável
+                     </label>
+                     <select 
+                       value={createTenantId} 
+                       onChange={e => setCreateTenantId(e.target.value)}
+                       className="w-full bg-gray-100 dark:bg-black/20 border border-gray-200 dark:border-white/10 rounded-2xl p-3 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                     >
+                       {tenants.map(t => (
+                         <option key={t.id} value={t.id} className="bg-slate-900 text-white">
+                           {t.name}
+                         </option>
+                       ))}
+                     </select>
+                   </div>
+
+                   <div className="flex gap-3 mt-6">
                      <button type="button" onClick={() => setIsCreating(false)} className="flex-1 bg-gray-100 dark:bg-black/30 hover:bg-gray-200 dark:hover:bg-black/50 text-gray-800 dark:text-white font-semibold py-3 rounded-2xl transition-all">Cancelar</button>
                      <button type="submit" className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-3 rounded-2xl transition-all shadow-md">Criar</button>
                    </div>
                  </div>
                </form>
+             </div>
+          </div>
+        )}
+
+        {/* Modal de Reatribuição de Empresa */}
+        {editingTenantInstance && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xl animate-in fade-in duration-200">
+             <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-3xl shadow-2xl p-8 max-w-sm w-full animate-in zoom-in-95">
+               <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center mb-4 border border-emerald-500/20">
+                 <Building2 size={24} className="text-emerald-500" />
+               </div>
+               <h2 className="text-xl font-bold dark:text-white mb-2">Associar Empresa</h2>
+               <p className="text-xs text-gray-400 mb-4">
+                 Selecione qual Empresa (Tenant) será proprietária da caixa <strong className="text-white">"{editingTenantInstance.display_name}"</strong>.
+               </p>
+
+               <div className="space-y-4">
+                 <div>
+                   <label className="block text-xs font-semibold text-gray-300 mb-1.5">Nova Empresa Proprietária</label>
+                   <select 
+                     value={newTenantForInstance} 
+                     onChange={e => setNewTenantForInstance(e.target.value)}
+                     className="w-full bg-gray-100 dark:bg-black/30 border border-gray-200 dark:border-white/10 rounded-2xl p-3 text-gray-800 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                   >
+                     {tenants.map(t => (
+                       <option key={t.id} value={t.id} className="bg-slate-900 text-white">
+                         {t.name}
+                       </option>
+                     ))}
+                   </select>
+                 </div>
+
+                 <div className="flex gap-3 pt-2">
+                   <button type="button" onClick={() => setEditingTenantInstance(null)} className="flex-1 bg-gray-100 dark:bg-black/30 hover:bg-gray-200 dark:hover:bg-black/50 text-gray-800 dark:text-white font-semibold py-3 rounded-2xl text-xs transition-all">Cancelar</button>
+                   <button type="button" onClick={() => handleReassignTenant(editingTenantInstance.id, newTenantForInstance)} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-3 rounded-2xl text-xs transition-all shadow-md">Salvar</button>
+                 </div>
+               </div>
              </div>
           </div>
         )}
@@ -836,9 +978,16 @@ export default function InstancesDashboard() {
                     </div>
                     <div className="flex flex-col">
                       <h3 className="text-xl font-bold text-gray-900 dark:text-white truncate pr-2 max-w-[200px]">{inst.display_name}</h3>
-                      <div className="flex items-center gap-1.5 mt-1 text-xs text-emerald-600 dark:text-emerald-500/80 font-bold tracking-wide uppercase bg-emerald-500/10 px-2 py-0.5 rounded-md w-max">
-                         <Building2 size={12} />
-                         {userName || 'Sua Empresa'}
+                      <div className="flex items-center gap-1.5 mt-1 text-xs text-emerald-600 dark:text-emerald-400 font-bold tracking-wide bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-md w-max">
+                         <Building2 size={12} className="text-emerald-400 shrink-0" />
+                         <span className="truncate max-w-[140px]">{tenants.find(t => t.id === inst.tenant_id)?.name || 'Empresa Geral'}</span>
+                         <button 
+                           onClick={() => { setEditingTenantInstance(inst); setNewTenantForInstance(inst.tenant_id || ''); }}
+                           className="text-gray-400 hover:text-white ml-1 p-0.5 rounded hover:bg-emerald-500/20 transition-all"
+                           title="Trocar Empresa Proprietária"
+                         >
+                           <Edit3 size={11} />
+                         </button>
                       </div>
                     </div>
                   </div>
