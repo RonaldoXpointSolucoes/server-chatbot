@@ -1,4 +1,4 @@
-import { supabase, NODE_ID, retryWithBackoff } from '../supabase.js';
+import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
 
 class QueueProcessor {
     constructor() {
@@ -153,13 +153,7 @@ class QueueProcessor {
                 const isGroup = targetJid.endsWith('@g.us');
                 if (!isGroup) {
                     try {
-                        let cleanPhone = targetJid.split('@')[0].replace(/\D/g, '');
-                        if (cleanPhone) {
-                            if (!cleanPhone.startsWith('55') && (cleanPhone.length === 10 || cleanPhone.length === 11)) {
-                                cleanPhone = '55' + cleanPhone;
-                            }
-                            targetJid = `${cleanPhone}@s.whatsapp.net`;
-                        }
+                        targetJid = await resolveTargetJid(sock, targetJid, msg.tenant_id);
                     } catch (err) {
                         console.warn(`[QueueProcessor] Erro na formatação do JID para ${targetJid}:`, err.message);
                     }

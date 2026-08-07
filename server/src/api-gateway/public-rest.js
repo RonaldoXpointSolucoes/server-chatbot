@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabase } from '../supabase.js';
+import { supabase, resolveTargetJid } from '../supabase.js';
 import sessionManager from '../session-manager/index.js';
 import multer from 'multer';
 import crypto from 'crypto';
@@ -323,7 +323,7 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
         const sock = await sessionManager.getSocketOrWake(tenant_id, id);
         if (!sock) return res.status(400).json({ error: 'WhatsApp socket offline for this instance.' });
         
-        const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+        const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         const msgResult = await sock.sendMessage(remoteJid, { text });
 
         try {
@@ -403,7 +403,7 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
         const sock = await sessionManager.getSocketOrWake(tenant_id, id);
         if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
-        const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+        const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         const timestamp = Date.now();
         
         // Conversão WEBM p/ AudioNativo se for Audio
@@ -535,7 +535,7 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
         const sock = await sessionManager.getSocketOrWake(tenant_id, id);
         if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
-        const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+        const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         const msgResult = await sock.sendMessage(remoteJid, {
             location: { degreesLatitude: latitude, degreesLongitude: longitude, name, address }
         });
@@ -594,7 +594,7 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
         const sock = await sessionManager.getSocketOrWake(tenant_id, id);
         if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
-        const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+        const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         
         // Formatar o vCard no padrão WhatsApp
         const formattedNumber = contactNumber.replace(/\\D/g, '');
@@ -667,7 +667,7 @@ router.post('/message/sendReaction', requireApiKey, async (req, res) => {
         const sock = await sessionManager.getSocketOrWake(tenant_id, id);
         if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
-        const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+        const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         
         const msgResult = await sock.sendMessage(remoteJid, {
             react: {

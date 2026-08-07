@@ -304,7 +304,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     const fetchInstances = async () => {
         try {
           const { data, error } = await supabase.from('whatsapp_instances')
-            .select('id, display_name, status, color, phone_number')
+            .select('id, display_name, status, color, phone_number, settings')
             .eq('tenant_id', tenantId)
             .order('created_at', { ascending: false });
             
@@ -314,6 +314,18 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           }
           if (data) {
              let finalData = data;
+
+             // Filtrar instâncias de API Gateway que não foram explicitamente habilitadas para o Chat
+             finalData = finalData.filter(d => {
+               const settings = d.settings || {};
+               const isApiOnly = settings.is_api_only === true;
+               const isChatEnabled = settings.chat_enabled === true;
+               if (isApiOnly && !isChatEnabled) {
+                 return false;
+               }
+               return true;
+             });
+
              const storage = getActiveStorage();
              const loggedEmail = storage ? storage.getItem('current_user_email') : null;
              const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';

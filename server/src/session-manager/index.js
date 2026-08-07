@@ -3,7 +3,7 @@ import { useSupabaseAuthState, flushPendingWrites, sessionCaches } from './auth.
 import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
 import pino from 'pino';
-import { supabase, NODE_ID, retryWithBackoff } from '../supabase.js';
+import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
 
 const waitForSocketOpen = (sock, timeoutMs = 20000) => {
     return new Promise((resolve, reject) => {
@@ -225,7 +225,7 @@ class SessionManager {
             const { data: currentInstance } = await retryWithBackoff(() =>
                 supabase
                     .from('whatsapp_instances')
-                    .select('assigned_node_id, lease_until, status, monitoring_until')
+                    .select('assigned_node_id, lease_until, status, monitoring_until, settings')
                     .eq('id', instanceId)
                     .single()
             );
@@ -309,6 +309,10 @@ class SessionManager {
                 maxMsgRetryCount: 0, // Desativado para evitar loops de retry em grupos que causam BAN
                 msgRetryCounterCache,
                 shouldSyncHistoryMessage: (histNotification) => {
+                    const instSettings = currentInstance?.settings || {};
+                    if (instSettings.sync_history === false || instSettings.is_api_only === true) {
+                        return false;
+                    }
                     // Mantém apenas os syncs essenciais de chaves LID/mídia e ignora dumps pesados (FULL/RECENT)
                     const syncType = histNotification?.syncType;
                     if (syncType === 0 || syncType === 'INITIAL_BOOT' || syncType === 4 || syncType === 'PUSH_NAME') {
@@ -933,13 +937,7 @@ class SessionManager {
                                     
                                     let targetJid = jid;
                                     if (targetJid && typeof targetJid === 'string' && !targetJid.endsWith('@g.us')) {
-                                        let cleanPhone = targetJid.split('@')[0].replace(/\D/g, '');
-                                        if (cleanPhone) {
-                                            if (!cleanPhone.startsWith('55') && (cleanPhone.length === 10 || cleanPhone.length === 11)) {
-                                                cleanPhone = '55' + cleanPhone;
-                                            }
-                                            targetJid = `${cleanPhone}@s.whatsapp.net`;
-                                        }
+                                        targetJid = await resolveTargetJid(activeSock || sock, jid, tenantId);
                                     }
 
                                     if (attempts > 0) {

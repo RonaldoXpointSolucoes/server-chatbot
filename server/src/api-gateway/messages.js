@@ -1,6 +1,6 @@
 import express from 'express';
 import sessionManager from '../session-manager/index.js';
-import { supabase } from '../supabase.js';
+import { supabase, resolveTargetJid } from '../supabase.js';
 import realtime from '../realtime-publisher/index.js';
 import AutomationWorker from '../automation-worker/agent.js';
 
@@ -41,7 +41,7 @@ router.post('/messages/send', requireTenant, async (req, res) => {
              }
         }
         
-        const remoteJid = contactPhone.includes('@') ? contactPhone : `${contactPhone}@s.whatsapp.net`;
+        const remoteJid = await resolveTargetJid(sock, contactPhone, tenantId);
 
         const msgResult = await sock.sendMessage(remoteJid, { text });
 

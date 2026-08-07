@@ -1,7 +1,7 @@
 import express from 'express';
 import sessionManager from '../session-manager/index.js';
 import queueProcessor from '../session-manager/queue-processor.js';
-import { supabase, NODE_ID } from '../supabase.js';
+import { supabase, NODE_ID, resolveTargetJid } from '../supabase.js';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
@@ -297,16 +297,10 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     body = content.caption || '';
                 }
 
-                // Normalização defensiva do JID para o Brasil (+55) no formato Signal de 8 dígitos
+                // Normalização defensiva do JID para o Brasil (+55) com suporte a 8 e 9 dígitos (DDD 34, 31, etc)
                 let targetJid = jid;
                 if (targetJid && typeof targetJid === 'string' && !targetJid.endsWith('@g.us')) {
-                    let cleanPhone = targetJid.split('@')[0].replace(/\D/g, '');
-                    if (cleanPhone) {
-                        if (!cleanPhone.startsWith('55') && (cleanPhone.length === 10 || cleanPhone.length === 11)) {
-                            cleanPhone = '55' + cleanPhone;
-                        }
-                        targetJid = `${cleanPhone}@s.whatsapp.net`;
-                    }
+                    targetJid = await resolveTargetJid(null, jid, req.tenantId);
                 }
 
                 const { data: newOutbox, error: outboxErr } = await supabase

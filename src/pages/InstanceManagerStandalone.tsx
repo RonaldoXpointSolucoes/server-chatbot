@@ -442,7 +442,10 @@ export default function InstanceManagerStandalone() {
               bot_delay: 10,
               bot_active: true,
               always_online: true,
-              read_messages: false
+              read_messages: false,
+              sync_history: false,
+              is_api_only: true,
+              chat_enabled: false
             }
           }
         ]);
@@ -457,6 +460,27 @@ export default function InstanceManagerStandalone() {
       alert(`Erro ao criar instância: ${err.message || 'Erro desconhecido'}`);
     } finally {
       setCreating(false);
+    }
+  };
+
+  // Alternar permissão de exibição no Chat UI (chat_enabled)
+  const handleToggleChatEnabled = async (inst: WhatsAppInstance) => {
+    try {
+      const currentSettings = inst.settings || {};
+      const newChatEnabled = !currentSettings.chat_enabled;
+      const updatedSettings = {
+        ...currentSettings,
+        chat_enabled: newChatEnabled
+      };
+      const { error } = await supabase
+        .from('whatsapp_instances')
+        .update({ settings: updatedSettings })
+        .eq('id', inst.id);
+
+      if (error) throw error;
+      fetchInstances(false);
+    } catch (err: any) {
+      alert(`Erro ao atualizar modo da instância: ${err.message}`);
     }
   };
 
@@ -1186,6 +1210,32 @@ export default function InstanceManagerStandalone() {
                             <span>Gerar Chave</span>
                           </button>
                         )}
+                      </div>
+
+                      {/* Modo de Operação / Chat UI */}
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span className="text-slate-500">Modo de Operação:</span>
+                        <button
+                          onClick={() => handleToggleChatEnabled(inst)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition flex items-center gap-1.5 ${
+                            inst.settings?.chat_enabled
+                              ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20'
+                              : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+                          }`}
+                          title={inst.settings?.chat_enabled ? 'Clique para alternar para Apenas API' : 'Clique para habilitar exibição no Chat'}
+                        >
+                          {inst.settings?.chat_enabled ? (
+                            <>
+                              <UserCheck className="w-3 h-3 text-blue-400" />
+                              <span>Habilitado no Chat</span>
+                            </>
+                          ) : (
+                            <>
+                              <Key className="w-3 h-3 text-amber-400" />
+                              <span>API Gateway (Apenas API)</span>
+                            </>
+                          )}
+                        </button>
                       </div>
 
                       {/* Criado em */}

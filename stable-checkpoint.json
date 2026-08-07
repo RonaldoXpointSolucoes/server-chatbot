@@ -1,0 +1,26 @@
+{
+  "checkpointName": "Baseline Homologada Estável v6.3.9 / v6.1.9",
+  "timestamp": "2026-08-07T10:38:00-03:00",
+  "approvedBy": "Usuário & Antigravity QA",
+  "git": {
+    "commitHash": "fa15d09f6eefc40510aa1faae5bc1fca3f9ae0ce",
+    "tag": "stable-v6.3.9-s6.1.9",
+    "backupBranch": "backup/stable-v6.3.9"
+  },
+  "frontend": {
+    "version": "6.3.9",
+    "url": "https://chat-boot-theta.vercel.app",
+    "secondaryUrl": "https://foodnext.xpointsolucoes.com.br",
+    "provider": "Vercel / Coolify 2"
+  },
+  "server": {
+    "version": "6.1.9",
+    "url": "https://serverchat.xpointsolucoes.com.br",
+    "provider": "Coolify 1 / Coolify 2"
+  },
+  "restoreInstructions": {
+    "frontendVercelRollback": "npx vercel rollback https://chat-boot-theta.vercel.app",
+    "gitRollbackCommand": "git checkout stable-v6.3.9-s6.1.9",
+    "npmRestoreCommand": "npm run restore:all"
+  }
+}
