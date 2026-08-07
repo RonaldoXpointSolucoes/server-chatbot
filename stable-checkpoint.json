@@ -1,26 +1,32 @@
 {
-  "checkpointName": "Baseline Homologada Estável v6.3.9 / v6.1.9",
-  "timestamp": "2026-08-07T10:38:00-03:00",
-  "approvedBy": "Usuário & Antigravity QA",
+  "checkpointName": "Baseline Homologada Estável v6.4.0 / v6.2.0 (DDD 34 Fix + API Gateway Mode)",
+  "timestamp": "2026-08-07T19:35:00-03:00",
+  "approvedBy": "Usuário & Antigravity QA (Validação Real WhatsApp 100%)",
   "git": {
-    "commitHash": "fa15d09f6eefc40510aa1faae5bc1fca3f9ae0ce",
-    "tag": "stable-v6.3.9-s6.1.9",
-    "backupBranch": "backup/stable-v6.3.9"
+    "commitHash": "5e237ea0b57e7f1d4f29a0083e956bc5ca198c25",
+    "tag": "stable-v6.4.0-s6.2.0",
+    "backupBranch": "backup/stable-v6.4.0"
   },
   "frontend": {
-    "version": "6.3.9",
+    "version": "6.4.0",
+    "buildDate": "07/08 19:16",
     "url": "https://chat-boot-theta.vercel.app",
     "secondaryUrl": "https://foodnext.xpointsolucoes.com.br",
     "provider": "Vercel / Coolify 2"
   },
   "server": {
-    "version": "6.1.9",
+    "version": "6.2.0",
     "url": "https://serverchat.xpointsolucoes.com.br",
     "provider": "Coolify 1 / Coolify 2"
   },
+  "featuresValidated": [
+    "Resolução dinâmica de JID para DDDs de fora de SP (ex: DDD 34, 31) com 8 e 9 dígitos",
+    "Modo Instância API Gateway (sem sync de mensagens antigas e oculta do Chat UI por padrão)",
+    "Fila de envio antiban e retry com backoff resiliente no socket Baileys"
+  ],
   "restoreInstructions": {
     "frontendVercelRollback": "npx vercel rollback https://chat-boot-theta.vercel.app",
-    "gitRollbackCommand": "git checkout stable-v6.3.9-s6.1.9",
-    "npmRestoreCommand": "npm run restore:all"
+    "gitRollbackCommand": "git checkout stable-v6.4.0-s6.2.0",
+    "npmRestoreCommand": "npm run restore:info"
   }
 }
