@@ -825,11 +825,12 @@ export default function DevLogger() {
             ...parsed
           };
         } catch (e) {
+          const isErrorMsg = messageText.includes('"direction":"error"') || messageText.includes('FAILED') || messageText.includes(' 500 ') || messageText.includes(' 400 ');
           return {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: timestamp || new Date().toISOString(),
             type: 'gastrofood_api',
-            direction: messageText.toLowerCase().includes('error') ? 'error' : 'info',
+            direction: isErrorMsg ? 'error' : 'info',
             action: 'Gastrofood Call',
             error: messageText
           };
@@ -868,21 +869,33 @@ export default function DevLogger() {
               if (next.length > 200) return next.slice(next.length - 200);
               return next;
             });
-          }
-          
-          const isRoutineNoise = 
-            data.message?.includes('Connection Terminated') ||
-            data.message?.includes('connection errored') ||
-            data.message?.includes('socket zumbi') ||
-            data.message?.includes('[History Sync]');
 
-          if (!isRoutineNoise && (data.level === 'error' || data.level === 'warn' || (data.level !== 'info' && data.message && (data.message.toLowerCase().includes('error') || data.message.toLowerCase().includes('falha') || data.message.toLowerCase().includes('loop'))))) {
-            addLog({
-              type: data.level === 'warn' ? 'warn' : 'error',
-              message: data.message || 'Exceção/Falha no Servidor Node.js',
-              source: `Servidor Node.js`,
-              details: { timestamp: data.timestamp, id: data.id, level: data.level }
-            });
+            if (parsed.direction === 'error') {
+              addLog({
+                type: 'error',
+                message: `[Gastrofood API] Falha: ${parsed.action || 'Call'} (${parsed.status || 'Erro'})`,
+                source: 'Servidor Node.js',
+                details: { timestamp: data.timestamp, id: data.id, level: data.level }
+              });
+            }
+          } else {
+            const isRoutineNoise = 
+              data.message?.includes('Connection Terminated') ||
+              data.message?.includes('connection errored') ||
+              data.message?.includes('socket zumbi') ||
+              data.message?.includes('[History Sync]') ||
+              data.message?.includes('gastrofood') ||
+              data.message?.includes('Gastrofood') ||
+              data.message?.includes('GetCardapioCompleto');
+
+            if (!isRoutineNoise && (data.level === 'error' || data.level === 'warn' || (data.level !== 'info' && data.message && (data.message.toLowerCase().includes('error') || data.message.toLowerCase().includes('falha') || data.message.toLowerCase().includes('loop'))))) {
+              addLog({
+                type: data.level === 'warn' ? 'warn' : 'error',
+                message: data.message || 'Exceção/Falha no Servidor Node.js',
+                source: `Servidor Node.js`,
+                details: { timestamp: data.timestamp, id: data.id, level: data.level }
+              });
+            }
           }
         }
       } catch (err) {

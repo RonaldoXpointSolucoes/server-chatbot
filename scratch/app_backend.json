@@ -1,0 +1,10 @@
+{
+  "project_uuid": "a1lo10exs35d0g9m8yz8cw68",
+  "server_uuid": "fp5pbt4xs1ywn8f4e8dbn7bp",
+  "environment_name": "production",
+  "git_repository": "git@github.com:RonaldoXpointSolucoes/server-chatbot.git",
+  "git_branch": "main",
+  "private_key_uuid": "q1dlzezip3hl9x4jekpztd6y",
+  "build_pack": "nixpacks",
+  "ports_exposes": "3000"
+}

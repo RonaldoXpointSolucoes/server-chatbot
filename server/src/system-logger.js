@@ -102,11 +102,12 @@ function interceptConsole() {
           gastrofoodBuffer.shift();
         }
       } catch (e) {
+        const isErrorMsg = text.includes('"direction":"error"') || text.includes('FAILED') || text.includes(' 500 ') || text.includes(' 400 ');
         const gastroEntry = {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: logEntry.timestamp,
           type: 'gastrofood_api',
-          direction: text.toLowerCase().includes('error') ? 'error' : 'info',
+          direction: isErrorMsg ? 'error' : 'info',
           action: 'Gastrofood Call',
           error: text
         };

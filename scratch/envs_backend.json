@@ -1,0 +1,3 @@
+{
+  "envs": "PORT=3000\nSUPABASE_URL=https://yzbxsxabzncdzuxvlppt.supabase.co\nSUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k\nDATABASE_URL=postgresql://postgres:Xx%40gh03360102@db.yzbxsxabzncdzuxvlppt.supabase.co:5432/postgres\nDISABLE_AUTO_START_SESSIONS=false\nIS_LOCAL_DEV=false"
+}

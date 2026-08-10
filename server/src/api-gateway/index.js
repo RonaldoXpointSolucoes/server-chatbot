@@ -82,6 +82,15 @@ router.post('/v1/utils/test-cardapio', async (req, res) => {
                     parsedResponse.error
                 );
 
+                let responseForLog = parsedResponse;
+                if (action === 'Consultar Cardápio' && parsedResponse && (parsedResponse.grupos || parsedResponse.produtos)) {
+                    responseForLog = {
+                        summary: `Cardápio consultado com sucesso: ${parsedResponse.grupos?.length || 0} grupos, ${parsedResponse.produtos?.length || 0} produtos.`,
+                        gruposCount: parsedResponse.grupos?.length || 0,
+                        produtosCount: parsedResponse.produtos?.length || 0
+                    };
+                }
+
                 const entry = {
                     type: 'gastrofood_api',
                     direction: hasLogicalError ? 'error' : direction,
@@ -90,7 +99,7 @@ router.post('/v1/utils/test-cardapio', async (req, res) => {
                     url,
                     payload: bodyObj,
                     status: hasLogicalError ? `${statusVal} FAILED` : (statusVal || ''),
-                    response: parsedResponse,
+                    response: responseForLog,
                     error: errDetail || (hasLogicalError ? parsedResponse : null)
                 };
                 console.log(`[Gastrofood API] ${JSON.stringify(entry)}`);

@@ -214,6 +214,15 @@ function logGastrofoodCall({ direction, action, method, url, payload, status, re
             parsedResponse.error
         );
 
+        let responseForLog = parsedResponse;
+        if (action === 'Consultar Cardápio' && parsedResponse && (parsedResponse.grupos || parsedResponse.produtos)) {
+            responseForLog = {
+                summary: `Cardápio consultado com sucesso: ${parsedResponse.grupos?.length || 0} grupos, ${parsedResponse.produtos?.length || 0} produtos.`,
+                gruposCount: parsedResponse.grupos?.length || 0,
+                produtosCount: parsedResponse.produtos?.length || 0
+            };
+        }
+
         const entry = {
             type: 'gastrofood_api',
             direction: hasLogicalError ? 'error' : direction,
@@ -223,7 +232,7 @@ function logGastrofoodCall({ direction, action, method, url, payload, status, re
             tenant_id: finalTenantId,
             payload: typeof payload === 'object' ? payload : (payload ? JSON.parse(payload) : null),
             status: hasLogicalError ? `${status} FAILED` : status,
-            response: parsedResponse,
+            response: responseForLog,
             error: error || (hasLogicalError ? parsedResponse : null)
         };
         console.log(`[Gastrofood API] ${JSON.stringify(entry)}`);

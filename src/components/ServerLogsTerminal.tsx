@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Terminal as TerminalIcon, X, Trash2, Pause, Play, Maximize2, Minimize2, Copy, Check, Bug, AlertCircle, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { Terminal as TerminalIcon, X, Trash2, Pause, Play, Maximize2, Minimize2, Copy, Check, Bug, AlertCircle, AlertTriangle, CheckCircle2, Info, Clock, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
 
 interface LogEntry {
@@ -14,6 +14,13 @@ interface ServerLogsTerminalProps {
   isOpen: boolean;
 }
 
+const isSpamLog = (msg: string) => {
+  if (!msg) return false;
+  if (msg.includes('Mídia expirada/inacessível para JID') && msg.includes('Normal em History Sync')) return true;
+  if (msg.includes('stream errored out') && msg.includes('"reasonNode":{"tag":"conflict","attrs":{"type":"replaced"}}')) return true;
+  return false;
+};
+
 export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose, isOpen }) => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isPaused, setIsPaused] = useState(false);
@@ -22,6 +29,37 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   const [isCopied, setIsCopied] = useState(false);
   const [showCopyOptions, setShowCopyOptions] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
+
+  const [clearCutoffTimestamp, setClearCutoffTimestamp] = useState<number | null>(() => {
+    const saved = localStorage.getItem('server_console_log_cutoff');
+    return saved ? parseInt(saved, 10) : null;
+  });
+
+  const clearCutoffRef = useRef(clearCutoffTimestamp);
+  useEffect(() => {
+    clearCutoffRef.current = clearCutoffTimestamp;
+  }, [clearCutoffTimestamp]);
+
+  const handleClearLogs = () => {
+    const now = Date.now();
+    setClearCutoffTimestamp(now);
+    localStorage.setItem('server_console_log_cutoff', now.toString());
+    setLogs([]);
+  };
+
+  const handleResetCutoff = () => {
+    setClearCutoffTimestamp(null);
+    localStorage.removeItem('server_console_log_cutoff');
+    const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+    fetch(`${url}/api/v1/system/logs/all`)
+      .then(res => res.json())
+      .then(json => {
+        if (json.success && Array.isArray(json.logs)) {
+          setLogs(json.logs.filter((log: LogEntry) => !isSpamLog(log.message)));
+        }
+      })
+      .catch(() => {});
+  };
   
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -73,11 +111,9 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
     let textToCopy = '';
 
     if (mode === 'errors') {
-      // Detecta apenas erros reais, avisos críticos, falhas de lógica e loops de falhas para diagnóstico do servidor
       const isErrorOrLoopOrLogicFailure = (log: LogEntry, countInLogs: number) => {
         const msgLower = (log.message || '').toLowerCase();
         
-        // Ignora logs normais de operação, rotinas de sucesso e eventos informativos do Baileys
         const normalOperationalLogs = [
           'ip de saída',
           'usando wa v2',
@@ -110,12 +146,10 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           'batchprocessor'
         ];
 
-        // Se for requisição Gastrofood com Sucesso (Status 200) ou sem erro, ignora
         if (msgLower.includes('gastrofood api') && (msgLower.includes('"status":200') || msgLower.includes('"status": 200') || (msgLower.includes('"error":null') && !msgLower.includes('error:')))) {
           return false;
         }
 
-        // Descarta avisos puramente informativos do Baileys
         if (msgLower.includes('history sync is disabled') || msgLower.includes('identity changed') || msgLower.includes('mex newsletter notification')) {
           return false;
         }
@@ -125,16 +159,13 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           return false;
         }
 
-        // Se for nível ERROR genuíno
         if (log.level === 'error') return true;
 
-        // Se for nível WARN
         if (log.level === 'warn') {
           if (isNormalOp) return false;
           return true;
         }
         
-        // Se for Nível INFO ou LOG, inclui apenas se contiver palavra-chave explícita de erro ou falha REAL
         const errorKeywords = [
           'error', 'erro', 'falha', 'failed', 'fail', 'timeout',
           'reconnecting', 'connection_lost', 'connection errored', 'connection terminated',
@@ -145,13 +176,11 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
         
         const hasKeyword = errorKeywords.some(kw => msgLower.includes(kw));
 
-        // Apenas inclui se tiver palavra-chave de erro e não for operação normal
         if (hasKeyword && !isNormalOp) return true;
 
         return false;
       };
 
-      // Conta frequência global de cada log no buffer para detectar loops
       const messageCounts = new Map<string, number>();
       logs.forEach(log => {
         const key = `${log.level}:${log.message}`;
@@ -169,7 +198,6 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
         return;
       }
 
-      // Agrupa ocorrências repetidas de erros e loops com timestamp e contagem
       const groupedMap = new Map<string, { count: number; firstTime: string; lastTime: string; log: LogEntry }>();
       relevantLogs.forEach(log => {
         const key = `[${log.level.toUpperCase()}] ${log.message}`;
@@ -219,7 +247,6 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
       });
 
     } else {
-      // Log Completo com agregação sequencial
       const aggregatedLogs: { count: number; log: LogEntry }[] = [];
       for (const log of logs) {
         if (aggregatedLogs.length > 0) {
@@ -263,20 +290,21 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
     const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
     let isSubscribed = true;
 
-    const isSpamLog = (msg: string) => {
-      if (!msg) return false;
-      if (msg.includes('Mídia expirada/inacessível para JID') && msg.includes('Normal em History Sync')) return true;
-      if (msg.includes('stream errored out') && msg.includes('"reasonNode":{"tag":"conflict","attrs":{"type":"replaced"}}')) return true;
-      return false;
-    };
-
     const fetchLogsRest = async () => {
       try {
         const res = await fetch(`${url}/api/v1/system/logs/all`);
         if (res.ok) {
           const json = await res.json();
           if (json.success && Array.isArray(json.logs) && isSubscribed) {
-            const filteredLogs = json.logs.filter((log: LogEntry) => !isSpamLog(log.message));
+            const cutoff = clearCutoffRef.current;
+            const filteredLogs = json.logs.filter((log: LogEntry) => {
+              if (isSpamLog(log.message)) return false;
+              if (cutoff) {
+                const logTime = new Date(log.timestamp).getTime();
+                if (!isNaN(logTime) && logTime < cutoff) return false;
+              }
+              return true;
+            });
             setLogs(filteredLogs);
             setIsConnected(true);
           }
@@ -286,7 +314,6 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
       }
     };
 
-    // Fetch immediately on open
     fetchLogsRest();
 
     let sse: EventSource | null = null;
@@ -312,15 +339,29 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           const data = JSON.parse(event.data);
 
           if (data.type === 'init') {
-            const filteredLogs = (data.logs || []).filter((log: LogEntry) => !isSpamLog(log.message));
+            const cutoff = clearCutoffRef.current;
+            const filteredLogs = (data.logs || []).filter((log: LogEntry) => {
+              if (isSpamLog(log.message)) return false;
+              if (cutoff) {
+                const logTime = new Date(log.timestamp).getTime();
+                if (!isNaN(logTime) && logTime < cutoff) return false;
+              }
+              return true;
+            });
             setLogs(filteredLogs);
             setIsConnected(true);
           } else if (data.message) {
             if (isSpamLog(data.message)) return;
 
+            const cutoff = clearCutoffRef.current;
+            if (cutoff) {
+              const logTime = new Date(data.timestamp || Date.now()).getTime();
+              if (!isNaN(logTime) && logTime < cutoff) return;
+            }
+
             setLogs(prev => {
               const next = [...prev, data];
-              if (next.length > 200) return next.slice(next.length - 200);
+              if (next.length > 300) return next.slice(next.length - 300);
               return next;
             });
             setIsConnected(true);
@@ -372,7 +413,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
             <h3 className="text-xs font-bold text-white tracking-wider font-mono uppercase">
               Server Console
             </h3>
-            <div className="flex items-center gap-1.5 mt-0.5">
+            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               <span className="relative flex h-2 w-2">
                 <span className={clsx(
                   "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
@@ -386,6 +427,20 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
               <span className="text-[8px] text-gray-400 font-semibold font-mono tracking-widest uppercase">
                 {isConnected ? "online" : "offline"}
               </span>
+
+              {clearCutoffTimestamp && (
+                <div className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded-md text-amber-300 text-[9px] font-mono select-none animate-in fade-in">
+                  <Clock className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                  <span>A partir das {new Date(clearCutoffTimestamp).toLocaleTimeString()}</span>
+                  <button 
+                    onClick={handleResetCutoff}
+                    className="ml-1 text-[8px] text-amber-400 hover:text-amber-200 underline font-bold cursor-pointer border-0 bg-transparent"
+                    title="Restaurar histórico completo de logs"
+                  >
+                    Mostrar todos
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -442,9 +497,9 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           </div>
           
           <button 
-            onClick={() => setLogs([])}
+            onClick={handleClearLogs}
             className="p-2 bg-white/5 border border-white/5 hover:border-white/10 rounded-lg text-gray-400 hover:text-white transition-all hover:scale-105 active:scale-95 duration-150 cursor-pointer"
-            title="Limpar Logs"
+            title="Limpar Logs (Grava horário de corte)"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -476,7 +531,11 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
             <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-center text-gray-400 animate-pulse">
               <TerminalIcon className="w-6 h-6" />
             </div>
-            <p className="font-semibold text-xs tracking-wider uppercase">Aguardando logs do servidor...</p>
+            <p className="font-semibold text-xs tracking-wider uppercase">
+              {clearCutoffTimestamp 
+                ? `Aguardando novos logs a partir das ${new Date(clearCutoffTimestamp).toLocaleTimeString()}...`
+                : 'Aguardando logs do servidor...'}
+            </p>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
