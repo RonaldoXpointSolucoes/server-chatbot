@@ -5311,15 +5311,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
         console.log('[Realtime] Message UPDATE:', m);
         set((s) => {
            const updatedContacts = [...s.contacts];
+           const normalizeTextForCompare = (txt: any) => {
+               if (!txt) return '';
+               return String(txt).replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
+           };
+           const normUpdateText = normalizeTextForCompare(m.text_content);
+
            // Tenta achar com fallback iterando as mensagens para bypassar conversa ausente no state.
            for (let i = 0; i < updatedContacts.length; i++) {
               if (!updatedContacts[i].messages) continue;
-              const msgIndex = updatedContacts[i].messages.findIndex(msg => msg.id === m.id || (m.whatsapp_message_id && msg.whatsapp_id === m.whatsapp_message_id));
+              const msgIndex = updatedContacts[i].messages.findIndex(msg => {
+                  if (msg.id === m.id) return true;
+                  if (m.whatsapp_message_id && msg.whatsapp_id === m.whatsapp_message_id) return true;
+                  if (String(msg.id).startsWith('optimistic-')) {
+                      const normMsgText = normalizeTextForCompare(msg.text);
+                      if (normUpdateText && normMsgText && (normUpdateText === normMsgText || normUpdateText.includes(normMsgText) || normMsgText.includes(normUpdateText))) {
+                          return true;
+                      }
+                  }
+                  return false;
+              });
               if (msgIndex !== -1) {
                   const newMessages = [...updatedContacts[i].messages];
                   const advanced = parseAdvancedMsgMetadata(m);
                   newMessages[msgIndex] = { 
                     ...newMessages[msgIndex], 
+                    id: m.id,
+                    whatsapp_id: m.whatsapp_message_id || newMessages[msgIndex].whatsapp_id,
                     status: m.status,
                     ...(m.text_content !== undefined && { text: advanced.text || m.text_content }),
                     ...(m.media_url !== undefined && { media_url: m.media_url }),

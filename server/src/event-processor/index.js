@@ -1033,7 +1033,7 @@ class EventProcessor {
              // 4. INSERE TODAS AS MENSAGENS NUM CHUTE SÓ (BULK INSERT)
              const messagesToInsert = activeBatch.map(b => {
                  const pendingStatus = this.pendingStatuses?.get(b.rawMsg.key.id)?.status;
-                 const defaultStatus = b.direction === 'inbound' ? 'received' : 'delivered';
+                 const defaultStatus = b.direction === 'inbound' ? 'received' : 'SERVER_ACK';
                  
                  return {
                      tenant_id: b.tenantId,

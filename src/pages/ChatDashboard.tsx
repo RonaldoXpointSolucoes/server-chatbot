@@ -6332,9 +6332,9 @@ export default function ChatDashboard() {
                       <p className="text-[13px] text-gray-500 dark:text-[#8696a0] truncate flex-1 pr-2 flex items-center">
                         {isMe && (
                           <span className="inline-flex mr-1 align-middle text-[#00a884] dark:text-[#53bdeb] shrink-0">
-                            {lastMsg.status === 'read' ? (
+                            {lastMsg.status === 'read' || lastMsg.status === 'READ' || lastMsg.status === 'PLAYED' || lastMsg.status === 'played' ? (
                               <CheckCheck size={15} className="text-[#00a884] dark:text-[#53bdeb]" />
-                            ) : lastMsg.status === 'delivered' ? (
+                            ) : lastMsg.status === 'delivered' || lastMsg.status === 'DELIVERY_ACK' ? (
                               <CheckCheck size={15} className="text-[#8696a0]" />
                             ) : (
                               <Check size={15} className="text-[#8696a0]" />

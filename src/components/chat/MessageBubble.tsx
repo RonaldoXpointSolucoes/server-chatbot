@@ -934,8 +934,8 @@ export const MessageBubble = memo(({
         <div className="absolute right-2 bottom-1 flex items-center gap-1 text-[9px] text-[#54656f] dark:text-gray-400 bg-white/40 dark:bg-[#202c33]/40 px-1.5 py-0.5 rounded-full backdrop-blur-sm">
           {isToday(new Date(msg.timestamp)) ? format(new Date(msg.timestamp), "HH:mm'h'") : isYesterday(new Date(msg.timestamp)) ? `Ontem ${format(new Date(msg.timestamp), "HH:mm'h'")}` : format(new Date(msg.timestamp), "dd/MM HH:mm'h'")}
           {isMe && (
-             msg.status === 'READ' || msg.status === 'read' ? <CheckCheck size={12} className="text-[#53bdeb] ml-0.5" /> : 
-             msg.status === 'DELIVERY_ACK' || msg.status === 'SERVER_ACK' || msg.status === 'delivered' ? <CheckCheck size={12} className="text-gray-400 ml-0.5" /> :
+             msg.status === 'READ' || msg.status === 'read' || msg.status === 'PLAYED' || msg.status === 'played' ? <CheckCheck size={12} className="text-[#53bdeb] ml-0.5" /> : 
+             msg.status === 'DELIVERY_ACK' || msg.status === 'delivered' ? <CheckCheck size={12} className="text-gray-400 ml-0.5" /> :
              <Check size={12} className="text-gray-400 ml-0.5" />
           )}
         </div>
