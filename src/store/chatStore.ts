@@ -4,6 +4,29 @@ import { playNotificationSound } from '../utils/AudioEngine';
 import { useDevStore } from './devStore';
 import { shouldNotifyForEvent, NotificationEventType } from '../services/notificationPreferences';
 
+export const getBrPhoneVariations = (phoneStr: string | null | undefined): string[] => {
+  if (!phoneStr) return [];
+  const clean = String(phoneStr).replace(/\D/g, '');
+  if (!clean) return [];
+  const res = [clean];
+  if (clean.startsWith('55') && clean.length === 13 && clean.charAt(4) === '9') {
+    res.push(clean.substring(0, 4) + clean.substring(5));
+  } else if (clean.startsWith('55') && clean.length === 12) {
+    res.push(clean.substring(0, 4) + '9' + clean.substring(4));
+  }
+  return res;
+};
+
+export const isSameBrPhone = (phoneA: string | null | undefined, phoneB: string | null | undefined): boolean => {
+  if (!phoneA || !phoneB) return false;
+  const cleanA = String(phoneA).replace(/\D/g, '');
+  const cleanB = String(phoneB).replace(/\D/g, '');
+  if (!cleanA || !cleanB) return false;
+  if (cleanA === cleanB) return true;
+  const varsA = getBrPhoneVariations(cleanA);
+  return varsA.includes(cleanB);
+};
+
 
 export type MessageType = {
   id: string;
@@ -2510,7 +2533,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
          const isMatch = sameInst && (
                          cRealId === realContactId ||
                          (c.whatsapp_jid && contact.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) ||
-                         (c.phone && contactPhoneMatch && c.phone === contactPhoneMatch)
+                         (c.phone && contactPhoneMatch && isSameBrPhone(c.phone, contactPhoneMatch)) ||
+                         (c.whatsapp_jid && contact.whatsapp_jid && isSameBrPhone(c.whatsapp_jid.split('@')[0], contact.whatsapp_jid.split('@')[0]))
          );
                          
          if (isMatch) {
@@ -3358,7 +3382,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
            const resolvedChannelUuid = instanceCache.getId(activeChannel) || (await resolveInstanceUuid(tenant.id, activeChannel)) || activeChannel;
            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedChannelUuid);
            if (isUuid) {
-              convQuery = convQuery.or(`instance_id.eq.${resolvedChannelUuid},instance_id.is.null,unread_count.gt.0`);
+              convQuery = convQuery.eq('instance_id', resolvedChannelUuid);
            }
         }
 
@@ -3494,7 +3518,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                        if (cInst && effectiveInst && cInst !== 'default' && effectiveInst !== 'default' && cInst !== effectiveInst) {
                            return false;
                        }
-                       return getRealContactId(c.id) === dbC.id || (c.phone && phoneMatch && c.phone === phoneMatch);
+                       return getRealContactId(c.id) === dbC.id || (c.phone && phoneMatch && isSameBrPhone(c.phone, phoneMatch));
                    });
                   
                   const tname = tenant?.name || '';
@@ -3995,18 +4019,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
             rawFetchedMsgs = data || [];
         }
         
-        // Fallback defensivo: Se a busca por conversation_id trouxer 0 mensagens, busca pelo contact_id UUID para não sumir mensagens com o rascunho de preview
+        // Fallback defensivo: Se a busca por conversation_id trouxer 0 mensagens, busca as conversas do contato pelo contact_id UUID
         if (rawFetchedMsgs.length === 0 && targetContactUuid) {
-            const { data, error: msgErr } = await supabase.from('messages')
-                   .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+            const { data: contactConvs } = await supabase.from('conversations')
+                   .select('id')
                    .eq('tenant_id', tenant.id)
-                   .eq('contact_id', targetContactUuid)
-                   .order('timestamp', { ascending: false })
-                   .limit(500);
-            if (msgErr) {
-                console.error("[loadHistoricalMessages] Erro ao buscar mensagens por contact_id:", msgErr);
-            } else if (data && data.length > 0) {
-                rawFetchedMsgs = data;
+                   .eq('contact_id', targetContactUuid);
+                   
+            const allContactConvIds = (contactConvs || []).map(c => c.id);
+            if (allContactConvIds.length > 0) {
+                const { data, error: msgErr } = await supabase.from('messages')
+                       .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+                       .eq('tenant_id', tenant.id)
+                       .in('conversation_id', allContactConvIds)
+                       .order('timestamp', { ascending: false })
+                       .limit(500);
+                if (msgErr) {
+                    console.error("[loadHistoricalMessages] Erro ao buscar mensagens do contato:", msgErr);
+                } else if (data && data.length > 0) {
+                    rawFetchedMsgs = data;
+                }
             }
         }
 

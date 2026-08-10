@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../../services/supabase';
+import { supabase, masterSupabase } from '../../services/supabase';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Settings2, Trash2, Smartphone, Inbox, MessageSquare } from 'lucide-react';
+import { Plus, Search, Settings2, Trash2, Smartphone, Inbox, MessageSquare, Building2, X, Loader2 } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
@@ -12,10 +12,17 @@ interface WhatsAppInstance {
   status: string;
   created_at: string;
   api_key?: string;
+  tenant_id?: string;
+}
+
+interface Company {
+  id: string;
+  name: string;
 }
 
 export default function InboxesList() {
   const [instances, setInstances] = useState<WhatsAppInstance[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
@@ -25,7 +32,90 @@ export default function InboxesList() {
   const [isCreating, setIsCreating] = useState(false);
   const [newInstanceName, setNewInstanceName] = useState('');
 
+  // Re-vincular empresa de caixa existente
+  const [reassignTarget, setReassignTarget] = useState<WhatsAppInstance | null>(null);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
+  const [isCreatingNewCompany, setIsCreatingNewCompany] = useState<boolean>(false);
+  const [newCompanyName, setNewCompanyName] = useState<string>('');
+  const [reassigning, setReassigning] = useState<boolean>(false);
+
+  const STANDALONE_TENANT_ID = '00000000-0000-0000-0000-000000000000';
+
+  const fetchCompanies = async () => {
+    try {
+      const { data, error } = await masterSupabase
+        .from('companies')
+        .select('id, name, trade_name')
+        .order('name', { ascending: true });
+
+      if (!error && data) {
+        const formatted = data
+          .filter(c => c.id !== STANDALONE_TENANT_ID)
+          .map(c => ({
+            id: c.id,
+            name: c.name || c.trade_name || 'Empresa Sem Nome'
+          }));
+        setCompanies(formatted);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar empresas:', err);
+    }
+  };
+
+  const handleReassignCompany = async () => {
+    if (!reassignTarget) return;
+    setReassigning(true);
+    try {
+      let targetCompanyId: string = (selectedCompanyId === 'none' || !selectedCompanyId || selectedCompanyId === STANDALONE_TENANT_ID)
+        ? STANDALONE_TENANT_ID
+        : selectedCompanyId;
+
+      if (isCreatingNewCompany) {
+        if (!newCompanyName.trim()) {
+          alert('Por favor, informe o nome da nova empresa.');
+          setReassigning(false);
+          return;
+        }
+        const { data: newComp, error: compErr } = await supabase
+          .from('companies')
+          .insert([{ name: newCompanyName.trim() }])
+          .select('id, name')
+          .single();
+
+        if (compErr || !newComp) {
+          throw new Error(`Erro ao criar empresa: ${compErr?.message || 'Falha no servidor'}`);
+        }
+        targetCompanyId = newComp.id;
+        await fetchCompanies();
+      }
+
+      const { error } = await supabase
+        .from('whatsapp_instances')
+        .update({ tenant_id: targetCompanyId })
+        .eq('id', reassignTarget.id);
+
+      if (error) throw error;
+
+      alert(
+        targetCompanyId !== STANDALONE_TENANT_ID
+          ? `Caixa "${reassignTarget.display_name}" vinculada com sucesso!`
+          : `Vínculo de empresa removido da caixa "${reassignTarget.display_name}" com sucesso!`
+      );
+      setReassignTarget(null);
+      setIsCreatingNewCompany(false);
+      setNewCompanyName('');
+
+      // Remove a caixa da lista atual caso tenha sido movida para outra empresa ou desassociada
+      setInstances(prev => prev.filter(i => i.id !== reassignTarget.id));
+    } catch (err: any) {
+      alert(`Erro ao vincular empresa: ${err.message || 'Erro desconhecido'}`);
+    } finally {
+      setReassigning(false);
+    }
+  };
+
   useEffect(() => {
+    fetchCompanies();
     if (!tenantId) return;
     
     const fetchInstances = async () => {
@@ -144,7 +234,12 @@ export default function InboxesList() {
          console.warn('Erro ao chamar api de delete da engine:', err);
       });
       
-      // 2. Apagar no Supabase
+      // 2. Limpar mensagens, conversas e runtime para evitar erros de FK / chave única no Supabase
+      await supabase.from('messages').delete().eq('instance_id', inst.id);
+      await supabase.from('conversations').delete().eq('instance_id', inst.id);
+      await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', inst.id);
+
+      // 3. Apagar no Supabase
       const { error } = await supabase.from('whatsapp_instances').delete().eq('id', inst.id);
       if (error) throw error;
 
@@ -219,7 +314,21 @@ export default function InboxesList() {
                         </div>
                      </div>
                      <div className="flex items-center gap-3">
-                        <button onClick={() => navigate(`/settings/inboxes/${inst.id}`)} className="p-3 bg-[#202c33] hover:bg-emerald-500 hover:text-white text-gray-400 rounded-xl transition-all border border-white/5 hover:border-emerald-500 hover:shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                        <button
+                           onClick={(e) => {
+                              e.stopPropagation();
+                              setReassignTarget(inst);
+                              setSelectedCompanyId(inst.tenant_id || tenantId || '');
+                              setIsCreatingNewCompany(false);
+                              fetchCompanies();
+                           }}
+                           className="p-3 bg-[#202c33] hover:bg-cyan-500 hover:text-white text-cyan-400 rounded-xl transition-all border border-white/5 hover:border-cyan-500 hover:shadow-[0_0_15px_rgba(6,182,212,0.3)] flex items-center gap-1.5 font-semibold text-xs"
+                           title="Alterar/Desassociar Empresa da Caixa"
+                        >
+                           <Building2 size={18} />
+                           <span className="hidden sm:inline">Alterar Empresa</span>
+                        </button>
+                        <button onClick={() => navigate(`/settings/inboxes/${inst.id}`)} className="p-3 bg-[#202c33] hover:bg-emerald-500 hover:text-white text-gray-400 rounded-xl transition-all border border-white/5 hover:border-emerald-500 hover:shadow-[0_0_15px_rgba(16,185,129,0.3)]" title="Configurações da Caixa">
                            <Settings2 size={18} />
                         </button>
                         <button 
@@ -228,6 +337,7 @@ export default function InboxesList() {
                               handleDeleteInstance(inst);
                            }}
                            className="p-3 bg-[#202c33] hover:bg-red-500 hover:text-white text-gray-400 rounded-xl transition-all border border-white/5 hover:border-red-500"
+                           title="Excluir Caixa"
                         >
                            <Trash2 size={18} />
                         </button>
@@ -270,6 +380,102 @@ export default function InboxesList() {
                    </div>
                  </div>
                </form>
+             </div>
+          </div>
+       )}
+
+       {/* MODAL ALTERAR / DESASSOCIAR EMPRESA DA CAIXA */}
+       {reassignTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xl animate-in fade-in duration-200">
+             <div className="bg-[#111b21] border border-white/10 rounded-3xl shadow-2xl p-6 sm:p-8 max-w-md w-full animate-in zoom-in-95 space-y-6 text-left">
+               <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                  <div className="flex items-center gap-3">
+                     <div className="w-10 h-10 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center">
+                        <Building2 size={22} />
+                     </div>
+                     <div>
+                        <h3 className="text-lg font-bold text-white">Alterar Empresa da Caixa</h3>
+                        <p className="text-xs text-gray-400">{reassignTarget.display_name}</p>
+                     </div>
+                  </div>
+                  <button
+                     onClick={() => setReassignTarget(null)}
+                     className="text-gray-400 hover:text-white p-2 rounded-xl hover:bg-white/5 transition"
+                  >
+                     <X size={20} />
+                  </button>
+               </div>
+
+               <div className="space-y-4">
+                  <div>
+                     <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-2">
+                        Selecione a Empresa / Tenant Destino *
+                     </label>
+                     {!isCreatingNewCompany ? (
+                        <div className="space-y-2">
+                           <select
+                              value={selectedCompanyId || 'none'}
+                              onChange={(e) => setSelectedCompanyId(e.target.value)}
+                              className="w-full bg-[#182229] border border-white/10 rounded-2xl p-3.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all shadow-inner"
+                           >
+                              <option value="none">🚫 Nenhuma (Remover Vínculo / Desassociar)</option>
+                              {companies.map((c) => (
+                                 <option key={c.id} value={c.id}>
+                                    🏢 {c.name}
+                                 </option>
+                              ))}
+                           </select>
+                           <button
+                              type="button"
+                              onClick={() => setIsCreatingNewCompany(true)}
+                              className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 pt-1"
+                           >
+                              <Plus size={14} /> + Criar nova empresa para esta caixa...
+                           </button>
+                        </div>
+                     ) : (
+                        <div className="space-y-2">
+                           <input
+                              type="text"
+                              required
+                              value={newCompanyName}
+                              onChange={(e) => setNewCompanyName(e.target.value)}
+                              placeholder="Nome da Nova Empresa (Ex: Pizzaria Oliveira, HBI...)"
+                              className="w-full bg-[#182229] border border-cyan-500/50 rounded-2xl p-3.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all shadow-inner"
+                           />
+                           <button
+                              type="button"
+                              onClick={() => setIsCreatingNewCompany(false)}
+                              className="text-xs text-gray-400 hover:text-gray-200 underline pt-1"
+                           >
+                              Voltar para seleção de empresas existentes
+                           </button>
+                        </div>
+                     )}
+                  </div>
+
+                  <p className="text-xs text-gray-400 leading-relaxed bg-[#182229] p-3 rounded-xl border border-white/5">
+                     💡 Ao desassociar (🚫 Nenhuma) ou selecionar uma nova empresa, a caixa <strong>{reassignTarget.display_name}</strong> deixará de pertencer à empresa atual.
+                  </p>
+
+                  <div className="flex gap-3 pt-4 border-t border-white/10">
+                     <button
+                        type="button"
+                        onClick={() => setReassignTarget(null)}
+                        className="flex-1 bg-[#202c33] hover:bg-[#2a3942] text-gray-300 font-semibold py-3 rounded-2xl transition-all border border-transparent"
+                     >
+                        Cancelar
+                     </button>
+                     <button
+                        type="button"
+                        onClick={handleReassignCompany}
+                        disabled={reassigning}
+                        className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-extrabold py-3 rounded-2xl transition-all shadow-[0_5px_15px_-5px_rgba(6,182,212,0.4)] flex items-center justify-center gap-2 disabled:opacity-50"
+                     >
+                        {reassigning ? <Loader2 size={18} className="animate-spin" /> : <span>Salvar Alterações</span>}
+                     </button>
+                  </div>
+               </div>
              </div>
           </div>
        )}

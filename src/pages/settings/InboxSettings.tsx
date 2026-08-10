@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { supabase } from '../../services/supabase';
+import { supabase, masterSupabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
-import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X, QrCode, RefreshCcw, LogOut, CheckCircle, Sparkles, Bell, BellOff, Volume2, VolumeX, Smartphone, PhoneCall, AtSign, Ticket, CheckCircle2 } from 'lucide-react';
+import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X, QrCode, RefreshCcw, LogOut, CheckCircle, Sparkles, Bell, BellOff, Volume2, VolumeX, Smartphone, PhoneCall, AtSign, Ticket, CheckCircle2, Building2 } from 'lucide-react';
 import { NOTIFICATION_SOUNDS, playNotificationSound } from '../../utils/AudioEngine';
 import { fetchUserInboxNotificationPreferences, toggleInboxNotification, updateInboxEventTypePreference, NotificationEventType, UserInboxNotificationPreference } from '../../services/notificationPreferences';
 interface InstanceData {
@@ -26,6 +26,8 @@ export default function InboxSettings() {
   const companyUsers = users || [];
   
   const [instance, setInstance] = useState<InstanceData | null>(null);
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [engineStatus, setEngineStatus] = useState<string>('offline');
@@ -86,14 +88,22 @@ export default function InboxSettings() {
   };
 
   useEffect(() => {
-    if (!id || !tenantId) return;
+    if (!id) return;
 
     const fetchInstance = async () => {
       try {
+        const { data: compData } = await masterSupabase.from('companies').select('id, name, trade_name').order('name', { ascending: true });
+        if (compData) {
+          const formatted = compData.map(c => ({
+            id: c.id,
+            name: c.name || c.trade_name || 'Empresa Sem Nome'
+          }));
+          setCompanies(formatted);
+        }
+
         const { data, error } = await supabase.from('whatsapp_instances')
           .select('*')
           .eq('id', id)
-          .eq('tenant_id', tenantId)
           .single();
 
         if (error) throw error;
@@ -105,6 +115,7 @@ export default function InboxSettings() {
               return;
           }
           setInstance(data);
+          setSelectedCompanyId(data.tenant_id || tenantId || '');
           setDisplayName(data.display_name);
           setPhoneNumber(data.phone_number || '');
           setEngineUrl(data.settings?.engine_url || import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || '');
@@ -205,11 +216,12 @@ export default function InboxSettings() {
            color: instanceColor,
            notification_sound: notificationSound,
            phone_number: cleanPhone,
+           tenant_id: selectedCompanyId,
            settings: updatedSettings
         })
         .eq('id', instance.id);
       if (!error) {
-         const instAfter = { ...instance, display_name: displayName, api_key: apiKey, color: instanceColor, notification_sound: notificationSound, phone_number: cleanPhone, settings: updatedSettings };
+         const instAfter = { ...instance, tenant_id: selectedCompanyId, display_name: displayName, api_key: apiKey, color: instanceColor, notification_sound: notificationSound, phone_number: cleanPhone, settings: updatedSettings };
          await useChatStore.getState().logOperation('UPDATE', 'whatsapp_instances', instance.id, instBefore, instAfter);
       }
 
@@ -573,9 +585,29 @@ export default function InboxSettings() {
                        </div>
 
                        <div className="flex flex-col gap-2">
-                         <label className="text-sm font-bold text-gray-300">Provedor de API</label>
-                         <input type="text" disabled value={engineProvider} className="w-full bg-[#182229]/50 border border-white/5 rounded-xl p-3 text-gray-500 cursor-not-allowed font-medium" />
-                       </div>
+                          <label className="text-sm font-bold text-gray-300">Provedor de API</label>
+                          <input type="text" disabled value={engineProvider} className="w-full bg-[#182229]/50 border border-white/5 rounded-xl p-3 text-gray-500 cursor-not-allowed font-medium" />
+                        </div>
+
+                        <div className="flex flex-col gap-2 mt-4 bg-[#182229] border border-cyan-500/30 p-4 rounded-2xl shadow-lg">
+                          <label className="text-sm font-bold text-cyan-400 flex items-center gap-2">
+                             <Building2 size={18} /> Empresa Responsável (Tenant)
+                          </label>
+                          <select
+                            value={selectedCompanyId}
+                            onChange={e => setSelectedCompanyId(e.target.value)}
+                            className="w-full bg-[#111b21] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all font-semibold"
+                          >
+                            {companies.map(c => (
+                              <option key={c.id} value={c.id}>
+                                 🏢 {c.name} {c.id === '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21' ? '(X-Point Soluções)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-xs text-gray-400">
+                             💡 Ao alterar a empresa vinculada, esta caixa de entrada deixará de aparecer no painel da empresa anterior e passará a pertencer exclusivamente à empresa selecionada.
+                          </p>
+                        </div>
 
                        <div className="flex flex-col gap-2 mt-4">
                          <label className="text-sm font-bold text-gray-300">Cor da Instância</label>

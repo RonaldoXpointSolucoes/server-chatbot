@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2, Smartphone, Trash2, FolderTree, AlertTriangle } from 'lucide-react';
+import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2, Smartphone, Trash2, FolderTree, AlertTriangle, Pencil, Mail } from 'lucide-react';
 import { cn } from './ChatDashboard';
 import { Navigate } from 'react-router-dom';
-import { supabase } from '../services/supabase';
+import { supabase, masterSupabase } from '../services/supabase';
 import ThemeToggle from '../components/ThemeToggle';
 
 type TabType = 'overview' | 'companies' | 'economic_groups' | 'plans' | 'billing' | 'instances';
@@ -13,12 +13,22 @@ export default function AdminDashboard() {
   const [companies, setCompanies] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
   const [economicGroups, setEconomicGroups] = useState<any[]>([]);
+  const [instances, setInstances] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewCompany, setShowNewCompany] = useState(false);
   const [newCompany, setNewCompany] = useState({ name: '', plan_id: '', instance: '', email: '', password: '', economic_group_id: '' });
   
   const [showNewGroup, setShowNewGroup] = useState(false);
+  const [showEditGroup, setShowEditGroup] = useState<any>(null);
   const [newGroup, setNewGroup] = useState({ name: '', owner_email: '' });
+  const [editGroupCompanyIds, setEditGroupCompanyIds] = useState<string[]>([]);
+  const [newGroupCompanyIds, setNewGroupCompanyIds] = useState<string[]>([]);
+
+  const openEditGroup = (group: any) => {
+    setShowEditGroup(group);
+    const linked = companies.filter(c => c.economic_group_id === group.id).map(c => c.id);
+    setEditGroupCompanyIds(linked);
+  };
   
   const [showDeleteModal, setShowDeleteModal] = useState<{type: 'company'|'group', id: string, name: string} | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -42,10 +52,11 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [compRes, plansRes, groupsRes] = await Promise.all([
+      const [compRes, plansRes, groupsRes, instRes] = await Promise.all([
         fetch(`${apiUrl}/api/v1/admin/companies`).catch(() => null),
         fetch(`${apiUrl}/api/v1/admin/plans`).catch(() => null),
-        fetch(`${apiUrl}/api/v1/admin/economic-groups`).catch(() => null)
+        fetch(`${apiUrl}/api/v1/admin/economic-groups`).catch(() => null),
+        masterSupabase.from('whatsapp_instances').select('id, display_name, phone_number, status, tenant_id').order('display_name', { ascending: true })
       ]);
       
       const companiesData = compRes && compRes.ok ? await compRes.json() : null;
@@ -55,27 +66,31 @@ export default function AdminDashboard() {
       if (companiesData && Array.isArray(companiesData)) {
         setCompanies(companiesData);
       } else {
-        const { data: sbCompanies } = await supabase.from('companies').select('*').order('created_at', { ascending: false });
+        const { data: sbCompanies } = await masterSupabase.from('companies').select('*').order('created_at', { ascending: false });
         if (sbCompanies) setCompanies(sbCompanies);
       }
 
       if (plansData && Array.isArray(plansData)) {
         setPlans(plansData);
       } else {
-        const { data: sbPlans } = await supabase.from('plans').select('*');
+        const { data: sbPlans } = await masterSupabase.from('plans').select('*');
         if (sbPlans) setPlans(sbPlans);
       }
 
       if (groupsData && Array.isArray(groupsData)) {
         setEconomicGroups(groupsData);
       } else {
-        const { data: sbGroups } = await supabase.from('economic_groups').select('*');
+        const { data: sbGroups } = await masterSupabase.from('economic_groups').select('*');
         if (sbGroups) setEconomicGroups(sbGroups);
+      }
+
+      if (instRes && instRes.data) {
+        setInstances(instRes.data);
       }
     } catch (e) {
       console.error('Error fetching admin data:', e);
       // Supabase fallback
-      const { data: sbCompanies } = await supabase.from('companies').select('*').order('created_at', { ascending: false });
+      const { data: sbCompanies } = await masterSupabase.from('companies').select('*').order('created_at', { ascending: false });
       if (sbCompanies) setCompanies(sbCompanies);
     }
     setLoading(false);
@@ -84,17 +99,76 @@ export default function AdminDashboard() {
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    let groupId: string | null = null;
     try {
-      await fetch(`${apiUrl}/api/v1/admin/economic-groups`, {
+      const res = await fetch(`${apiUrl}/api/v1/admin/economic-groups`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newGroup)
       });
+      if (res.ok) {
+        const resData = await res.json().catch(() => null);
+        if (Array.isArray(resData) && resData[0]?.id) groupId = resData[0].id;
+        else if (resData && resData.id) groupId = resData.id;
+      }
     } catch (err) {
-      await supabase.from('economic_groups').insert(newGroup);
+      console.warn('API error creating group:', err);
     }
+
+    if (!groupId) {
+      const { data: created } = await masterSupabase.from('economic_groups').insert(newGroup).select().single();
+      if (created) groupId = created.id;
+    }
+
+    if (groupId && newGroupCompanyIds.length > 0) {
+      await masterSupabase.from('companies').update({ economic_group_id: groupId }).in('id', newGroupCompanyIds);
+    }
+
     setShowNewGroup(false);
     setNewGroup({ name: '', owner_email: '' });
+    setNewGroupCompanyIds([]);
+    fetchData();
+  };
+
+  const handleUpdateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!showEditGroup) return;
+    setLoading(true);
+    const groupId = showEditGroup.id;
+
+    try {
+      await fetch(`${apiUrl}/api/v1/admin/economic-groups/${groupId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: showEditGroup.name,
+          owner_email: showEditGroup.owner_email
+        })
+      }).catch(() => null);
+
+      await masterSupabase.from('economic_groups').update({
+        name: showEditGroup.name,
+        owner_email: showEditGroup.owner_email
+      }).eq('id', groupId);
+
+      // Sincronizar as empresas do grupo
+      const currentLinkedIds = companies.filter(c => c.economic_group_id === groupId).map(c => c.id);
+      
+      // 1. Remover empresas desmarcadas
+      const toUnlink = currentLinkedIds.filter(id => !editGroupCompanyIds.includes(id));
+      if (toUnlink.length > 0) {
+        await masterSupabase.from('companies').update({ economic_group_id: null }).in('id', toUnlink);
+      }
+
+      // 2. Vincular empresas marcadas
+      const toLink = editGroupCompanyIds.filter(id => !currentLinkedIds.includes(id));
+      if (toLink.length > 0) {
+        await masterSupabase.from('companies').update({ economic_group_id: groupId }).in('id', toLink);
+      }
+    } catch (err: any) {
+      console.error('Erro ao atualizar grupo:', err);
+    }
+    setShowEditGroup(null);
     fetchData();
   };
 
@@ -122,54 +196,63 @@ export default function AdminDashboard() {
     e.preventDefault();
     setLoading(true);
     
+    let createdCompanyId: string | null = null;
     let success = false;
+
+    const payload = {
+      name: newCompany.name,
+      plan_id: newCompany.plan_id || null,
+      evolution_api_instance: newCompany.instance || null,
+      email: newCompany.email,
+      password: newCompany.password,
+      economic_group_id: newCompany.economic_group_id || null,
+      status: 'active',
+      current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+    };
+
     try {
       const res = await fetch(`${apiUrl}/api/v1/admin/companies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newCompany.name,
-          plan_id: newCompany.plan_id || null,
-          evolution_api_instance: newCompany.instance || null,
-          email: newCompany.email,
-          password: newCompany.password,
-          economic_group_id: newCompany.economic_group_id || null,
-          status: 'active',
-          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-        })
+        body: JSON.stringify(payload)
       });
-      if (res.ok) success = true;
+      if (res.ok) {
+        const resData = await res.json().catch(() => null);
+        if (resData && resData.id) createdCompanyId = resData.id;
+        success = true;
+      }
     } catch (err) {
       console.warn('API error, using Supabase fallback', err);
     }
 
-    if (!success) {
-      const { data: compData, error: compErr } = await supabase
+    if (!success || !createdCompanyId) {
+      const { data: compData, error: compErr } = await masterSupabase
         .from('companies')
-        .insert({
-          name: newCompany.name,
-          plan_id: newCompany.plan_id || null,
-          evolution_api_instance: newCompany.instance || null,
-          email: newCompany.email,
-          password: newCompany.password,
-          economic_group_id: newCompany.economic_group_id || null,
-          status: 'active',
-          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-        })
+        .insert(payload)
         .select()
         .single();
 
       if (compErr) {
         alert(`Erro ao criar empresa: ${compErr.message}`);
-      } else if (compData && newCompany.email) {
-        await supabase.from('tenant_users').insert({
-          tenant_id: compData.id,
-          email: newCompany.email,
-          password: newCompany.password,
-          full_name: `Admin - ${newCompany.name}`,
-          role: 'admin'
-        });
+      } else if (compData) {
+        createdCompanyId = compData.id;
+        if (newCompany.email) {
+          await masterSupabase.from('tenant_users').insert({
+            tenant_id: compData.id,
+            email: newCompany.email,
+            password: newCompany.password,
+            full_name: `Admin - ${newCompany.name}`,
+            role: 'admin'
+          });
+        }
       }
+    }
+
+    // Se uma instância foi selecionada, vincular seu tenant_id no Supabase
+    if (createdCompanyId && newCompany.instance) {
+      await masterSupabase.from('whatsapp_instances')
+        .update({ tenant_id: createdCompanyId })
+        .or(`id.eq.${newCompany.instance},display_name.eq.${newCompany.instance}`);
     }
     
     setShowNewCompany(false);
@@ -187,20 +270,60 @@ export default function AdminDashboard() {
     e.preventDefault();
     setLoading(true);
     
-    await fetch(`${apiUrl}/api/v1/admin/companies/${showEditCompany.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const companyId = showEditCompany.id;
+    const selectedInst = showEditCompany.evolution_api_instance || null;
+
+    try {
+      await fetch(`${apiUrl}/api/v1/admin/companies/${companyId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: showEditCompany.name,
+          plan_id: showEditCompany.plan_id,
+          evolution_api_instance: selectedInst,
+          email: showEditCompany.email,
+          password: showEditCompany.password,
+          status: showEditCompany.status,
+          economic_group_id: showEditCompany.economic_group_id || null,
+          current_period_end: new Date(showEditCompany.current_period_end)
+        })
+      }).catch(() => null);
+
+      await masterSupabase.from('companies').update({
         name: showEditCompany.name,
         plan_id: showEditCompany.plan_id,
-        evolution_api_instance: showEditCompany.evolution_api_instance,
+        evolution_api_instance: selectedInst,
         email: showEditCompany.email,
         password: showEditCompany.password,
         status: showEditCompany.status,
         economic_group_id: showEditCompany.economic_group_id || null,
         current_period_end: new Date(showEditCompany.current_period_end)
-      })
-    });
+      }).eq('id', companyId);
+
+      // Sincronizar o vinculo na tabela whatsapp_instances, conversations e messages
+      if (selectedInst) {
+        const { data: instData } = await masterSupabase.from('whatsapp_instances')
+          .select('id')
+          .or(`id.eq.${selectedInst},display_name.eq.${selectedInst}`)
+          .maybeSingle();
+
+        const instUuid = instData?.id || selectedInst;
+
+        await masterSupabase.from('whatsapp_instances')
+          .update({ tenant_id: companyId })
+          .eq('id', instUuid);
+
+        await masterSupabase.from('conversations')
+          .update({ tenant_id: companyId })
+          .eq('instance_id', instUuid);
+
+        await masterSupabase.from('messages')
+          .update({ tenant_id: companyId })
+          .eq('instance_id', instUuid);
+      }
+    } catch (err: any) {
+      console.error('Erro ao atualizar empresa:', err);
+    }
 
     setShowEditCompany(null);
     fetchData();
@@ -371,16 +494,28 @@ export default function AdminDashboard() {
                          {comp.current_period_end ? new Date(comp.current_period_end).toLocaleDateString() : 'N/A'}
                        </td>
                        <td className="p-3">
-                         <span className="text-xs bg-black/5 dark:bg-white/10 px-2 py-1 rounded font-mono text-[#54656f] dark:text-[#aebac1]">{comp.evolution_api_instance || 'N/A'}</span>
-                       </td>
-                       <td className="p-3 text-right flex justify-end gap-2">
-                         <button onClick={() => setShowEditCompany(comp)} className="text-blue-500 hover:text-blue-600 font-semibold text-xs px-3 py-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 transition-colors">
-                           Editar
-                         </button>
-                         <button onClick={() => setShowDeleteModal({type: 'company', id: comp.id, name: comp.name})} className="text-red-500 hover:text-red-600 font-semibold text-xs px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 transition-colors">
-                           <Trash2 size={16}/>
-                         </button>
-                       </td>
+                          {(() => {
+                            const rawVal = comp.evolution_api_instance;
+                            const matchedInst = instances.find(i => i.id === rawVal || i.display_name === rawVal || i.tenant_id === comp.id);
+                            const label = matchedInst ? matchedInst.display_name : (rawVal || 'N/A');
+                            const phone = matchedInst?.phone_number;
+                            return (
+                              <span className="inline-flex items-center gap-1.5 text-xs bg-black/5 dark:bg-white/10 px-2.5 py-1 rounded-lg font-medium text-[#54656f] dark:text-[#aebac1]">
+                                <Smartphone size={13} className="text-[#00a884]" />
+                                <span className="font-semibold">{label}</span>
+                                {phone && <span className="text-[11px] opacity-75 font-mono">({phone})</span>}
+                              </span>
+                            );
+                          })()}
+                        </td>
+                        <td className="p-3 text-right flex justify-end gap-2">
+                          <button onClick={() => setShowEditCompany(comp)} className="text-blue-500 hover:text-blue-600 font-semibold text-xs px-3 py-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 transition-colors">
+                            Editar
+                          </button>
+                          <button onClick={() => setShowDeleteModal({type: 'company', id: comp.id, name: comp.name})} className="text-red-500 hover:text-red-600 font-semibold text-xs px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 transition-colors">
+                            <Trash2 size={16}/>
+                          </button>
+                        </td>
                      </tr>
                    ))}
                  </tbody>
@@ -391,38 +526,88 @@ export default function AdminDashboard() {
          )}
          
          {activeTab === 'economic_groups' && (
-           <div className="bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-xl border border-black/5 dark:border-white/5 rounded-3xl p-6 shadow-xl relative overflow-hidden">
-             <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-[#00a884]/20 to-transparent rounded-full blur-3xl -z-10 pointer-events-none" />
-             <div className="flex justify-between items-center mb-6">
-                <div>
-                   <h3 className="text-lg font-bold">Grupos Econômicos (Holdings)</h3>
-                   <p className="text-sm text-[#54656f]">Agrupe empresas de um mesmo conglomerado.</p>
-                </div>
-                <button 
-                  onClick={() => setShowNewGroup(true)}
-                  className="bg-[#00a884] hover:bg-[#018b6e] text-white px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 shadow-lg shadow-[#00a884]/30 transition-all hover:shadow-[#00a884]/40 hover:-translate-y-0.5"
-                >
-                  <Plus size={16} /> Novo Grupo
-                </button>
-             </div>
-             
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {economicGroups.map(group => (
-                  <div key={group.id} className="bg-white/60 dark:bg-[#111b21]/60 backdrop-blur-md border border-black/10 dark:border-white/10 rounded-2xl p-6 flex flex-col justify-between group hover:border-[#00a884]/50 transition-all relative">
-                     <button onClick={() => setShowDeleteModal({type: 'group', id: group.id, name: group.name})} className="absolute top-4 right-4 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={18}/></button>
-                     <div>
-                       <div className="w-10 h-10 rounded-xl bg-[#00a884]/10 text-[#00a884] flex items-center justify-center mb-4"><FolderTree size={20}/></div>
-                       <h4 className="font-bold text-lg">{group.name}</h4>
-                       <p className="text-sm text-[#54656f] mt-1">{group.owner_email || 'Sem e-mail cadastrado'}</p>
-                       <p className="text-xs font-medium text-slate-500 mt-4 pt-4 border-t border-black/5 dark:border-white/5">Criado em: {new Date(group.created_at).toLocaleDateString()}</p>
+            <div className="bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-xl border border-black/5 dark:border-white/5 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-[#00a884]/20 to-transparent rounded-full blur-3xl -z-10 pointer-events-none" />
+              <div className="flex justify-between items-center mb-6">
+                 <div>
+                    <h3 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                      <FolderTree className="text-[#00a884]" size={22} /> Grupos Econômicos (Holdings)
+                    </h3>
+                    <p className="text-sm text-[#54656f] dark:text-[#aebac1] mt-0.5">Agrupe empresas do mesmo conglomerado para gestão unificada.</p>
+                 </div>
+                 <button 
+                   onClick={() => setShowNewGroup(true)}
+                   className="bg-[#00a884] hover:bg-[#018b6e] text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 shadow-lg shadow-[#00a884]/30 transition-all hover:shadow-[#00a884]/40 hover:-translate-y-0.5 cursor-pointer"
+                 >
+                   <Plus size={18} /> Novo Grupo
+                 </button>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                 {economicGroups.map(group => {
+                   const linkedCompanies = companies.filter(c => c.economic_group_id === group.id);
+                   return (
+                     <div key={group.id} className="bg-white/70 dark:bg-[#111b21]/80 backdrop-blur-xl border border-black/10 dark:border-white/10 rounded-2xl p-6 flex flex-col justify-between hover:border-[#00a884]/60 transition-all duration-300 shadow-md hover:shadow-xl group relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-[#00a884]/10 to-transparent rounded-full blur-2xl pointer-events-none group-hover:bg-[#00a884]/20 transition-all" />
+                        
+                        <div>
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#00a884]/20 to-[#00a884]/5 border border-[#00a884]/20 text-[#00a884] flex items-center justify-center shadow-inner">
+                              <FolderTree size={22} />
+                            </div>
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#00a884]/10 text-[#00a884] rounded-full text-xs font-bold uppercase tracking-wider">
+                              <Building size={12} /> {linkedCompanies.length} {linkedCompanies.length === 1 ? 'Empresa' : 'Empresas'}
+                            </span>
+                          </div>
+
+                          <h4 className="font-bold text-xl text-slate-900 dark:text-white tracking-tight">{group.name}</h4>
+                          
+                          <div className="flex items-center gap-2 mt-2 text-sm text-[#54656f] dark:text-[#aebac1]">
+                            <Mail size={14} className="text-[#00a884] shrink-0" />
+                            <span className="truncate font-medium">{group.owner_email || 'Sem e-mail cadastrado'}</span>
+                          </div>
+
+                          {linkedCompanies.length > 0 && (
+                            <div className="mt-4 pt-3 border-t border-black/5 dark:border-white/5 flex flex-wrap gap-1.5">
+                              {linkedCompanies.map(c => (
+                                <span key={c.id} className="text-[11px] bg-black/5 dark:bg-white/5 px-2 py-0.5 rounded-md font-medium text-slate-700 dark:text-slate-300">
+                                  🏢 {c.name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-5 pt-4 border-t border-black/5 dark:border-white/5 flex items-center justify-between text-xs">
+                          <span className="text-[#54656f] dark:text-[#aebac1] font-medium">
+                            {group.created_at ? new Date(group.created_at).toLocaleDateString() : 'N/A'}
+                          </span>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => openEditGroup(group)}
+                              className="flex items-center gap-1.5 text-blue-500 hover:text-blue-600 font-semibold text-xs px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 transition-all cursor-pointer"
+                            >
+                              <Pencil size={13} /> Editar
+                            </button>
+                            <button
+                              onClick={() => setShowDeleteModal({ type: 'group', id: group.id, name: group.name })}
+                              className="flex items-center gap-1.5 text-red-500 hover:text-red-600 font-semibold text-xs px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 transition-all cursor-pointer"
+                            >
+                              <Trash2 size={13} /> Excluir
+                            </button>
+                          </div>
+                        </div>
                      </div>
-                  </div>
-                ))}
-                {economicGroups.length === 0 && (
-                  <div className="col-span-full py-10 text-center text-[#54656f]">Nenhum grupo econômico encontrado.</div>
-                )}
-             </div>
-           </div>
+                   );
+                 })}
+                 {economicGroups.length === 0 && (
+                   <div className="col-span-full py-12 text-center text-[#54656f] dark:text-[#aebac1] font-medium bg-black/5 dark:bg-white/5 rounded-2xl border border-dashed border-black/10 dark:border-white/10">
+                     Nenhum grupo econômico cadastrado. Clique em "Novo Grupo" para começar.
+                   </div>
+                 )}
+              </div>
+            </div>
          )}
 
          {activeTab === 'plans' && (
@@ -488,8 +673,15 @@ export default function AdminDashboard() {
                      </select>
                   </div>
                   <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Nome da Instância Base (Evolution)</label>
-                     <input type="text" required value={newCompany.instance} onChange={e => setNewCompany({...newCompany, instance: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="InstanciaXpto"/>
+                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Instância Base (Evolution / WhatsApp)</label>
+                     <select value={newCompany.instance} onChange={e => setNewCompany({...newCompany, instance: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-[#aebac1] border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]">
+                        <option value="">🚫 Nenhuma (Sem Instância)</option>
+                        {instances.map(inst => (
+                          <option key={inst.id} value={inst.id}>
+                            📱 {inst.display_name} {inst.phone_number ? `(${inst.phone_number})` : ''}
+                          </option>
+                        ))}
+                     </select>
                   </div>
                </form>
              </div>
@@ -547,8 +739,15 @@ export default function AdminDashboard() {
                       />
                   </div>
                   <div>
-                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Instância Base (Evolution)</label>
-                     <input type="text" value={showEditCompany.evolution_api_instance || ''} onChange={e => setShowEditCompany({...showEditCompany, evolution_api_instance: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]"/>
+                     <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">Instância Base (Evolution / WhatsApp)</label>
+                     <select value={showEditCompany.evolution_api_instance || ''} onChange={e => setShowEditCompany({...showEditCompany, evolution_api_instance: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]">
+                        <option value="">🚫 Nenhuma (Desassociar / Sem Instância)</option>
+                        {instances.map(inst => (
+                          <option key={inst.id} value={inst.id}>
+                            📱 {inst.display_name} {inst.phone_number ? `(${inst.phone_number})` : ''}
+                          </option>
+                        ))}
+                     </select>
                   </div>
                </form>
              </div>
@@ -626,7 +825,7 @@ export default function AdminDashboard() {
           <div className="bg-white dark:bg-[#202c33] rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200">
              <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-bold flex items-center gap-2"><FolderTree className="text-[#00a884]"/> Novo Grupo Econômico</h3>
-                <button onClick={() => setShowNewGroup(false)} className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full"><X size={20} /></button>
+                <button onClick={() => setShowNewGroup(false)} className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full text-slate-500 dark:text-slate-300"><X size={20} /></button>
              </div>
              <form onSubmit={handleCreateGroup} className="space-y-4">
                 <div>
@@ -637,8 +836,111 @@ export default function AdminDashboard() {
                    <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider">E-mail de Contato (Proprietário)</label>
                    <input type="email" required value={newGroup.owner_email} onChange={e => setNewGroup({...newGroup, owner_email: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884]" placeholder="ceo@grupomaster.com"/>
                 </div>
+
+                <div>
+                   <label className="text-xs font-semibold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider mb-2 block">Empresas Pertencentes a este Grupo</label>
+                   <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1 border border-black/10 dark:border-white/10 rounded-xl p-2.5 bg-[#f0f2f5]/50 dark:bg-[#111b21]/50">
+                      {companies.map(c => {
+                         const isChecked = newGroupCompanyIds.includes(c.id);
+                         const isOtherGroup = c.economic_group_id;
+                         const otherGroupObj = isOtherGroup ? economicGroups.find(g => g.id === c.economic_group_id) : null;
+                         return (
+                            <label key={c.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer text-xs">
+                               <div className="flex items-center gap-2.5">
+                                  <input
+                                     type="checkbox"
+                                     checked={isChecked}
+                                     onChange={(e) => {
+                                        if (e.target.checked) {
+                                           setNewGroupCompanyIds(prev => [...prev, c.id]);
+                                        } else {
+                                           setNewGroupCompanyIds(prev => prev.filter(id => id !== c.id));
+                                        }
+                                     }}
+                                     className="w-4 h-4 rounded text-[#00a884] focus:ring-[#00a884] accent-[#00a884]"
+                                  />
+                                  <span className="font-semibold text-slate-800 dark:text-slate-200">{c.name}</span>
+                               </div>
+                               {isOtherGroup && (
+                                  <span className="text-[10px] bg-orange-500/10 text-orange-500 px-1.5 py-0.5 rounded font-medium">
+                                     Em: {otherGroupObj?.name || 'Outro Grupo'}
+                                  </span>
+                               )}
+                            </label>
+                         );
+                      })}
+                      {companies.length === 0 && <p className="text-xs text-slate-400 p-1">Nenhuma empresa cadastrada.</p>}
+                   </div>
+                </div>
+
                 <button type="submit" disabled={loading} className="w-full mt-4 bg-[#00a884] hover:bg-[#018b6e] text-white font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center">{loading ? <Loader2 className="animate-spin" /> : 'Criar Grupo'}</button>
              </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Editar Grupo Econômico */}
+      {showEditGroup && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#202c33] rounded-[2rem] w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col overflow-hidden" style={{ maxHeight: 'calc(100vh - 2rem)' }}>
+             <div className="flex justify-between items-center p-6 border-b border-black/5 dark:border-white/5 shrink-0">
+                <h3 className="text-xl font-bold flex items-center gap-2 text-slate-900 dark:text-white">
+                  <FolderTree size={22} className="text-[#00a884]" /> Editar Grupo Econômico
+                </h3>
+                <button onClick={() => setShowEditGroup(null)} className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full text-slate-500 dark:text-slate-300"><X size={20} /></button>
+             </div>
+             <div className="p-6 overflow-y-auto styled-scrollbar-none">
+               <form id="form-editar-grupo" onSubmit={handleUpdateGroup} className="space-y-4">
+                  <div>
+                     <label className="text-xs font-semibold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider">Nome do Grupo (Holding)</label>
+                     <input type="text" required value={showEditGroup.name} onChange={e => setShowEditGroup({...showEditGroup, name: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884] font-medium" placeholder="Ex: Grupo X-Point Holding"/>
+                  </div>
+                  <div>
+                     <label className="text-xs font-semibold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider">E-mail do Proprietário / Responsável</label>
+                     <input type="email" value={showEditGroup.owner_email || ''} onChange={e => setShowEditGroup({...showEditGroup, owner_email: e.target.value})} className="w-full mt-1 bg-[#f0f2f5] dark:bg-[#111b21] dark:text-white border border-transparent rounded-xl px-4 py-3 outline-none focus:border-[#00a884] font-medium" placeholder="responsavel@holding.com"/>
+                  </div>
+
+                  <div>
+                     <label className="text-xs font-semibold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider mb-2 block">Empresas Pertencentes a este Grupo</label>
+                     <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1 border border-black/10 dark:border-white/10 rounded-xl p-2.5 bg-[#f0f2f5]/50 dark:bg-[#111b21]/50">
+                        {companies.map(c => {
+                           const isChecked = editGroupCompanyIds.includes(c.id);
+                           const isOtherGroup = c.economic_group_id && c.economic_group_id !== showEditGroup.id;
+                           const otherGroupObj = isOtherGroup ? economicGroups.find(g => g.id === c.economic_group_id) : null;
+                           return (
+                              <label key={c.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer text-xs">
+                                 <div className="flex items-center gap-2.5">
+                                    <input
+                                       type="checkbox"
+                                       checked={isChecked}
+                                       onChange={(e) => {
+                                          if (e.target.checked) {
+                                             setEditGroupCompanyIds(prev => [...prev, c.id]);
+                                          } else {
+                                             setEditGroupCompanyIds(prev => prev.filter(id => id !== c.id));
+                                          }
+                                       }}
+                                       className="w-4 h-4 rounded text-[#00a884] focus:ring-[#00a884] accent-[#00a884]"
+                                    />
+                                    <span className="font-semibold text-slate-800 dark:text-slate-200">{c.name}</span>
+                                 </div>
+                                 {isOtherGroup && (
+                                    <span className="text-[10px] bg-orange-500/10 text-orange-500 px-1.5 py-0.5 rounded font-medium">
+                                       Em: {otherGroupObj?.name || 'Outro Grupo'}
+                                    </span>
+                                 )}
+                              </label>
+                           );
+                        })}
+                        {companies.length === 0 && <p className="text-xs text-slate-400 p-1">Nenhuma empresa cadastrada.</p>}
+                     </div>
+                  </div>
+               </form>
+             </div>
+             <div className="p-6 border-t border-black/5 dark:border-white/5 shrink-0 bg-white/50 dark:bg-[#202c33]/50 flex gap-3">
+               <button type="button" onClick={() => setShowEditGroup(null)} className="w-1/2 py-3 rounded-xl font-bold border border-black/10 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">Cancelar</button>
+               <button type="submit" form="form-editar-grupo" disabled={loading} className="w-1/2 bg-[#00a884] hover:bg-[#018b6e] text-white font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center items-center gap-2 transition-all shadow-lg shadow-[#00a884]/30">{loading ? <Loader2 className="animate-spin" size={18} /> : 'Salvar Alterações'}</button>
+             </div>
           </div>
         </div>
       )}

@@ -114,6 +114,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 });
 
+const MASTER_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k';
+export const masterSupabase = createClient(supabaseUrl, MASTER_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false },
+  global: { fetch: customFetch }
+});
+
 // Interceptador global de ciclo de vida de autenticação para evitar sessões zumbis
 supabase.auth.onAuthStateChange((event, session) => {
   if (event === 'SIGNED_OUT') {

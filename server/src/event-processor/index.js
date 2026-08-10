@@ -318,6 +318,14 @@ class EventProcessor {
                 // permitindo que o retry natural do WhatsApp/Baileys seja processado com sucesso.
                 const isDecryptionFailureStub = msg.messageStubType && !msg.message;
                 const isHistorySync = m.type === 'append' || m.type === 'reconcile';
+
+                const instanceConfig = await this.getInstanceConfig(instanceId);
+
+                // Se a instância tiver sync_history === false ou is_api_only === true, ignora cargas de histórico antigo
+                if ((instanceConfig.sync_history === false || instanceConfig.is_api_only === true) && isHistorySync) {
+                    console.log(`[EventProcessor] Ignorando payload de histórico antigo/legado para instância API Gateway (${instanceId}).`);
+                    continue;
+                }
                 
                 if (!isDecryptionFailureStub && !isHistorySync && this.processedMessagesCache.has(cacheKey)) {
                     console.log(`[EventProcessor] Mensagem Duplicada Detectada em Cache de Memória (Ignorando). ID: ${msgId}`);
@@ -644,26 +652,44 @@ class EventProcessor {
                  }
              }
 
-             const safeContactsArray = contactsArray.map(c => {
-                 const ex = existingMap.get(c.phone);
-                 const targetPhone = ex?.phone || c.phone;
-                 // Respeita o custom_name ou o nome antigo se válido frente ao fallback bruto
-                 const hasValidOldName = ex && ex.name && ex.name !== ex.phone && ex.name !== targetPhone;
-                 const finalName = ex?.custom_name ? ex.custom_name : (hasValidOldName ? ex.name : c.name);
-                 let finalJid = c.whatsapp_jid;
-                 if (!finalJid || finalJid.endsWith('@lid')) {
-                     finalJid = `${targetPhone}@s.whatsapp.net`;
-                 }
-                 
-                 return {
-                     ...(ex?.id ? { id: ex.id } : {}),
-                     tenant_id: c.tenant_id,
-                     phone: targetPhone,
-                     name: finalName,
-                     whatsapp_jid: finalJid,
-                     instance_id: c.instance_id
-                 };
-             });
+              const uniqueContactsMap = new Map();
+              for (const c of contactsArray) {
+                  if (!c.phone && !c.whatsapp_jid) continue;
+                  const rawPhone = c.phone || (c.whatsapp_jid ? c.whatsapp_jid.split('@')[0] : null);
+                  if (!rawPhone) continue;
+
+                  const ex = existingMap.get(rawPhone);
+                  const targetPhone = ex?.phone || rawPhone;
+                  const key = `${c.tenant_id}_${targetPhone}`;
+
+                  if (!uniqueContactsMap.has(key)) {
+                      const hasValidOldName = ex && ex.name && ex.name !== ex.phone && ex.name !== targetPhone;
+                      const finalName = ex?.custom_name ? ex.custom_name : (hasValidOldName ? ex.name : (c.name || targetPhone));
+                      let finalJid = c.whatsapp_jid;
+                      if (!finalJid || finalJid.endsWith('@lid')) {
+                          finalJid = `${targetPhone}@s.whatsapp.net`;
+                      }
+
+                      const validUuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                      const rawId = ex?.id || (c.id && typeof c.id === 'string' && !c.id.includes('_') && c.id.length > 20 ? c.id : null);
+                      const strId = rawId ? String(rawId).trim() : '';
+                      const contactId = (strId && strId !== 'null' && strId !== 'undefined' && validUuidRegex.test(strId)) ? strId : crypto.randomUUID();
+
+                      uniqueContactsMap.set(key, {
+                          id: contactId,
+                          tenant_id: c.tenant_id || '00000000-0000-0000-0000-000000000000',
+                          phone: targetPhone,
+                          name: finalName,
+                          whatsapp_jid: finalJid,
+                          instance_id: c.instance_id || null
+                      });
+                  }
+              }
+
+              const safeContactsArray = Array.from(uniqueContactsMap.values()).map(item => ({
+                  ...item,
+                  id: (item.id && typeof item.id === 'string' && item.id.length > 20 && item.id !== 'null') ? item.id : crypto.randomUUID()
+              }));
              
              const { data: upsertedContacts, error: contactErr } = await supabase.from('contacts')
                   .upsert(safeContactsArray, { onConflict: 'tenant_id, phone' })
@@ -681,12 +707,16 @@ class EventProcessor {
              
               const convMap = new Map();
               for(const b of batch) {
-                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
-                  if(!cid) continue; 
-                  
-                  const instanceKey = b.instanceId || 'null_instance';
-                  const key = `${b.tenantId}_${instanceKey}_${cid}`;
-                  if(!convMap.has(key)) {
+                  let cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
+                  if (!cid) {
+                      const targetPhone = getCanonicalBrPhone(b.phone) || b.phone;
+                      const fallbackContact = safeContactsArray.find(sc => sc.tenant_id === b.tenantId && (sc.phone === targetPhone || sc.phone === b.phone));
+                      cid = fallbackContact?.id || crypto.randomUUID();
+                      contactIdMap.set(`${b.tenantId}_${b.phone}`, cid);
+                  }
+
+                  const key = `${b.tenantId}_${b.instanceId || 'null_instance'}_${cid}`;
+                  if (!convMap.has(key)) {
                       convMap.set(key, {
                           tenant_id: b.tenantId,
                           instance_id: b.instanceId,
@@ -727,10 +757,13 @@ class EventProcessor {
              if(existError) throw new Error("Conversation Select Error: " + existError.message);
              
              const existingConvMap = new Map();
+             const existingConvByContactMap = new Map();
              for(const e of existingConvs) {
-                 // Usa tenant + instance + contact como chave de unicidade da conversa por caixa
                  const instanceKey = e.instance_id || 'null_instance';
                  existingConvMap.set(`${e.tenant_id}_${instanceKey}_${e.contact_id}`, e);
+                 if (!existingConvByContactMap.has(`${e.tenant_id}_${e.contact_id}`)) {
+                     existingConvByContactMap.set(`${e.tenant_id}_${e.contact_id}`, e);
+                 }
              }
              
              const toInsertConvs = [];
@@ -740,7 +773,7 @@ class EventProcessor {
              const updatedAiPausedMap = new Map();
              
              for(const [key, data] of convMap.entries()) {
-                 const exist = existingConvMap.get(key);
+                 const exist = existingConvMap.get(key) || existingConvByContactMap.get(`${data.tenant_id}_${data.contact_id}`);
                  let finalStatus = 'bot';
                  let finalAiPaused = false;
                  
@@ -804,6 +837,7 @@ class EventProcessor {
                      finalAiPaused = initialAiPaused;
                      
                      toInsertConvs.push({
+                         id: crypto.randomUUID(),
                          tenant_id: data.tenant_id,
                          instance_id: data.instance_id,
                          contact_id: data.contact_id,
@@ -826,7 +860,17 @@ class EventProcessor {
                       .select('id, tenant_id, contact_id, instance_id');
                       
                   if(errInst) {
-                        console.error('[BatchProcessor] Falha no upsert de conversas:', errInst.message);
+                        console.warn('[BatchProcessor] Upsert lote falhou, processando conversas individualmente:', errInst.message);
+                        for (const item of toInsertConvs) {
+                            try {
+                                const { data: itemRes } = await supabase.from('conversations')
+                                    .upsert(item, { onConflict: 'tenant_id, contact_id' })
+                                    .select('id, tenant_id, contact_id, instance_id');
+                                if (itemRes && itemRes.length > 0) insertedConvs.push(...itemRes);
+                            } catch (sErr) {
+                                console.error('[BatchProcessor] Erro na inserção individual de conversa:', sErr);
+                            }
+                        }
                   } else if (res) {
                         insertedConvs.push(...res);
                   }
@@ -881,8 +925,24 @@ class EventProcessor {
 
              // 3. Processa Mídias em Paralelo Segura (evitando Memory leaks)
              await Promise.all(activeBatch.map(async b => {
-                 const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
+                 let cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
+                 if (!cid) {
+                     const targetPhone = getCanonicalBrPhone(b.phone) || b.phone;
+                     const fallbackContact = safeContactsArray.find(sc => sc.tenant_id === b.tenantId && (sc.phone === targetPhone || sc.phone === b.phone));
+                     cid = fallbackContact?.id || crypto.randomUUID();
+                     contactIdMap.set(`${b.tenantId}_${b.phone}`, cid);
+                 }
                  b.conversationId = finalConvIdMap.get(`${b.tenantId}_${b.instanceId}_${cid}`) || finalConvIdMap.get(`${b.tenantId}_null_instance_${cid}`);
+
+                 if (!b.conversationId) {
+                     for (const [mapKey, convId] of finalConvIdMap.entries()) {
+                         if (mapKey.endsWith(`_${cid}`)) {
+                             b.conversationId = convId;
+                             break;
+                         }
+                     }
+                 }
+
                  const mapKey = `${b.tenantId}_${b.instanceId || 'null_instance'}_${cid}`;
                  b.convStatus = updatedStatusMap.get(mapKey) || existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.status || existingConvMap.get(`${b.tenantId}_null_instance_${cid}`)?.status || 'bot';
                  const isConvPaused = updatedAiPausedMap.has(mapKey) ? updatedAiPausedMap.get(mapKey) : (existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.ai_paused || false);

@@ -309,14 +309,14 @@ class SessionManager {
                 maxMsgRetryCount: 0, // Desativado para evitar loops de retry em grupos que causam BAN
                 msgRetryCounterCache,
                 shouldSyncHistoryMessage: (histNotification) => {
+                    // Sempre permite boot inicial e mapeamentos LID essenciais para estabilidade da sessão
+                    const syncType = histNotification?.syncType;
+                    if (syncType === 0 || syncType === 'INITIAL_BOOT' || syncType === 4 || syncType === 'PUSH_NAME' || syncType === 'ON_DEMAND') {
+                        return true;
+                    }
                     const instSettings = currentInstance?.settings || {};
                     if (instSettings.sync_history === false || instSettings.is_api_only === true) {
                         return false;
-                    }
-                    // Mantém apenas os syncs essenciais de chaves LID/mídia e ignora dumps pesados (FULL/RECENT)
-                    const syncType = histNotification?.syncType;
-                    if (syncType === 0 || syncType === 'INITIAL_BOOT' || syncType === 4 || syncType === 'PUSH_NAME') {
-                        return true;
                     }
                     return false;
                 },

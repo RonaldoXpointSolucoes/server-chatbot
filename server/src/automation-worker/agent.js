@@ -1405,13 +1405,19 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             try {
                 const { data: companyData } = await supabase
                     .from('companies')
-                    .select('name, settings')
+                    .select('name, settings, global_ai_enabled')
                     .eq('id', tenantId)
                     .single();
 
                 if (companyData) {
                     companyName = companyData.name || '';
                     companySettings = companyData.settings || {};
+
+                    // Se o Robô I.A estiver desativado globalmente para a empresa e NÃO for o simulador admin, aborta a geração
+                    if (companyData.global_ai_enabled === false && instanceId !== 'simulador' && !botSettings?.is_simulation) {
+                        console.log(`[AutomationWorker] Robô I.A desativado globalmente para a empresa (tenant ${tenantId}). Silenciando robô.`);
+                        return null;
+                    }
                 }
             } catch (err) {
                 console.error(`[AutomationWorker] Erro ao carregar variáveis globais do tenant ${tenantId}:`, err);

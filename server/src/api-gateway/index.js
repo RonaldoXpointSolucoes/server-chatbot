@@ -229,8 +229,24 @@ router.post('/v1/admin/companies', async (req, res) => {
 
 router.put('/v1/admin/companies/:id', async (req, res) => {
     try {
-        const { data, error } = await supabase.from('companies').update(req.body).eq('id', req.params.id).select();
+        const companyId = req.params.id;
+        const { data, error } = await supabase.from('companies').update(req.body).eq('id', companyId).select();
         if (error) throw error;
+
+        if (req.body && req.body.evolution_api_instance) {
+            const selectedInst = req.body.evolution_api_instance;
+            const { data: instData } = await supabase.from('whatsapp_instances')
+                .select('id')
+                .or(`id.eq.${selectedInst},display_name.eq.${selectedInst}`)
+                .maybeSingle();
+
+            const instUuid = instData?.id || selectedInst;
+
+            await supabase.from('whatsapp_instances').update({ tenant_id: companyId }).eq('id', instUuid).catch(() => null);
+            await supabase.from('conversations').update({ tenant_id: companyId }).eq('instance_id', instUuid).catch(() => null);
+            await supabase.from('messages').update({ tenant_id: companyId }).eq('instance_id', instUuid).catch(() => null);
+        }
+
         res.json(data);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -254,19 +270,29 @@ router.post('/v1/admin/plans', async (req, res) => {
 router.delete('/v1/admin/companies/:id', async (req, res) => {
     const companyId = req.params.id;
     try {
-        // 1. Delete messages referencing this tenant to avoid foreign key violations
+        // 1. Desassociar whatsapp_instances que pertenciam a este tenant
+        await supabase.from('whatsapp_instances')
+            .update({ tenant_id: '00000000-0000-0000-0000-000000000000' })
+            .eq('tenant_id', companyId)
+            .catch(() => null);
+
+        // 2. Deletar usuarios do tenant
+        const { error: errUsers } = await supabase.from('tenant_users').delete().eq('tenant_id', companyId);
+        if (errUsers) console.warn('Aviso deletando tenant_users:', errUsers.message);
+
+        // 3. Deletar mensagens do tenant
         const { error: errMessages } = await supabase.from('messages').delete().eq('tenant_id', companyId);
-        if (errMessages) console.error('Erro ao deletar mensagens do tenant:', errMessages);
+        if (errMessages) console.warn('Aviso deletando mensagens:', errMessages.message);
 
-        // 2. Delete conversations referencing this tenant to avoid foreign key violations
+        // 4. Deletar conversas do tenant
         const { error: errConvs } = await supabase.from('conversations').delete().eq('tenant_id', companyId);
-        if (errConvs) console.error('Erro ao deletar conversas do tenant:', errConvs);
+        if (errConvs) console.warn('Aviso deletando conversas:', errConvs.message);
 
-        // 3. Delete contacts referencing this tenant to avoid foreign key violations
+        // 5. Deletar contatos do tenant
         const { error: errContacts } = await supabase.from('contacts').delete().eq('tenant_id', companyId);
-        if (errContacts) console.error('Erro ao deletar contatos do tenant:', errContacts);
+        if (errContacts) console.warn('Aviso deletando contatos:', errContacts.message);
 
-        // 4. Finally delete the company itself
+        // 6. Deletar a empresa
         const { error } = await supabase.from('companies').delete().eq('id', companyId);
         if (error) throw error;
 

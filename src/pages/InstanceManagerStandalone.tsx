@@ -37,8 +37,11 @@ import {
   ChevronRight,
   UserCheck,
   ShieldAlert,
-  ArrowUpRight
+  ArrowUpRight,
+  Building2
 } from 'lucide-react';
+
+import { masterSupabase } from '../services/supabase';
 
 // Configurações do Supabase & Engines com Fallback Automático
 const SUPABASE_URL = 'https://yzbxsxabzncdzuxvlppt.supabase.co';
@@ -89,6 +92,11 @@ interface WhatsAppInstance {
   profile_picture_url?: string | null;
 }
 
+interface Company {
+  id: string;
+  name: string;
+}
+
 const LOCKED_EMAIL = 'xpointsolucoes@gmail.com';
 const LOCKED_PASS = 'Xx@gh03360102';
 
@@ -103,20 +111,30 @@ export default function InstanceManagerStandalone() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
 
-  // Instâncias
+  // Instâncias & Empresas
   const [instances, setInstances] = useState<WhatsAppInstance[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [companyFilter, setCompanyFilter] = useState<string>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showKeyId, setShowKeyId] = useState<string | null>(null);
 
-  // Criar Instância
+  // Criar Instância & Empresa
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newInstanceName, setNewInstanceName] = useState('');
   const [newInstancePhone, setNewInstancePhone] = useState('');
   const [newInstanceColor, setNewInstanceColor] = useState('#10b981');
+  const [newInstanceCompanyId, setNewInstanceCompanyId] = useState<string>('');
+  const [isCreatingNewCompany, setIsCreatingNewCompany] = useState<boolean>(false);
+  const [newCompanyName, setNewCompanyName] = useState<string>('');
   const [creating, setCreating] = useState(false);
+
+  // Re-vincular Empresa de Instância Existente
+  const [reassignTargetInstance, setReassignTargetInstance] = useState<WhatsAppInstance | null>(null);
+  const [reassignCompanyId, setReassignCompanyId] = useState<string>('');
+  const [reassigning, setReassigning] = useState<boolean>(false);
 
   // Modal de Conexão (QR Code / Pareamento)
   const [connectInstance, setConnectInstance] = useState<WhatsAppInstance | null>(null);
@@ -349,6 +367,99 @@ export default function InstanceManagerStandalone() {
     }
   };
 
+  const STANDALONE_TENANT_ID = '00000000-0000-0000-0000-000000000000';
+
+  // Carregar lista de empresas (tenants)
+  const fetchCompanies = async () => {
+    try {
+      let rawCompanies: any[] = [];
+
+      // 1. Tentar buscar direto do Supabase Master Client (service_role)
+      const { data: sbData, error: sbError } = await masterSupabase
+        .from('companies')
+        .select('id, name, trade_name')
+        .order('name', { ascending: true });
+
+      if (!sbError && sbData && sbData.length > 0) {
+        rawCompanies = sbData;
+      } else {
+        // 2. Fallback para client local
+        const { data: localData } = await supabase
+          .from('companies')
+          .select('id, name, trade_name')
+          .order('name', { ascending: true });
+        if (localData) rawCompanies = localData;
+      }
+
+      if (rawCompanies.length > 0) {
+        const formatted = rawCompanies
+          .filter(c => c.id !== STANDALONE_TENANT_ID)
+          .map(c => ({
+            id: c.id,
+            name: c.name || c.trade_name || 'Empresa Sem Nome'
+          }));
+
+        const uniqueCompanies = Array.from(
+          new Map(formatted.map(item => [item.id, item])).values()
+        );
+        setCompanies(uniqueCompanies);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar empresas:', err);
+    }
+  };
+
+  // Re-vincular Empresa de Instância Existente
+  const handleReassignCompany = async () => {
+    if (!reassignTargetInstance) return;
+    setReassigning(true);
+    try {
+      let targetCompanyId: string = (reassignCompanyId === 'none' || !reassignCompanyId || reassignCompanyId === STANDALONE_TENANT_ID)
+        ? STANDALONE_TENANT_ID
+        : reassignCompanyId;
+
+      if (isCreatingNewCompany) {
+        if (!newCompanyName.trim()) {
+          alert('Por favor, informe o nome da nova empresa.');
+          setReassigning(false);
+          return;
+        }
+        const { data: newComp, error: compErr } = await supabase
+          .from('companies')
+          .insert([{ name: newCompanyName.trim() }])
+          .select('id, name')
+          .single();
+
+        if (compErr || !newComp) {
+          throw new Error(`Erro ao criar empresa: ${compErr?.message || 'Falha no servidor'}`);
+        }
+        targetCompanyId = newComp.id;
+        await fetchCompanies();
+      }
+
+      const { error } = await supabase
+        .from('whatsapp_instances')
+        .update({ tenant_id: targetCompanyId })
+        .eq('id', reassignTargetInstance.id);
+
+      if (error) throw error;
+
+      alert(
+        targetCompanyId !== STANDALONE_TENANT_ID
+          ? `Caixa "${reassignTargetInstance.display_name}" vinculada com sucesso!`
+          : `Vínculo de empresa removido da caixa "${reassignTargetInstance.display_name}" com sucesso!`
+      );
+      setReassignTargetInstance(null);
+      setIsCreatingNewCompany(false);
+      setNewCompanyName('');
+      fetchInstances();
+    } catch (err: any) {
+      alert(`Erro ao vincular empresa: ${err.message || 'Falha na atualização'}`);
+    } finally {
+      setReassigning(false);
+    }
+  };
+
   // Carregar instâncias de forma suave (sem piscar a tela)
   const fetchInstances = async (isInitial = false) => {
     if (isInitial) setLoading(true);
@@ -372,6 +483,7 @@ export default function InstanceManagerStandalone() {
   useEffect(() => {
     if (isAuthenticated) {
       fetchInstances(true);
+      fetchCompanies();
       checkEngineHealth();
 
       // Assinar alterações em tempo real via Supabase Realtime (atualiza sem piscar a UI)
@@ -416,13 +528,54 @@ export default function InstanceManagerStandalone() {
     setPassInput('');
   };
 
-  // Criar Nova Instância
+  // Abrir Modal de Criação garantindo a lista de empresas
+  const openCreateModal = () => {
+    fetchCompanies();
+    setIsCreatingNewCompany(false);
+    setNewCompanyName('');
+    if (companies.length > 0) {
+      const nonXpointComp = companies.find(c => c.id !== '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21') || companies[0];
+      setNewInstanceCompanyId(nonXpointComp.id);
+    } else {
+      setNewInstanceCompanyId('');
+    }
+    setShowCreateModal(true);
+  };
+
+  // Criar Nova Instância (Com Vínculo a Empresa Selecionada ou Nova Empresa)
   const handleCreateInstance = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newInstanceName.trim()) return;
 
     setCreating(true);
     try {
+      let targetCompanyId = newInstanceCompanyId;
+
+      if (isCreatingNewCompany) {
+        if (!newCompanyName.trim()) {
+          alert('Por favor, informe o nome da nova empresa.');
+          setCreating(false);
+          return;
+        }
+        const { data: newCompData, error: compErr } = await supabase
+          .from('companies')
+          .insert([{ name: newCompanyName.trim() }])
+          .select('id, name')
+          .single();
+
+        if (compErr || !newCompData) {
+          throw new Error(`Erro ao criar nova empresa: ${compErr?.message || 'Falha ao salvar no banco'}`);
+        }
+        targetCompanyId = newCompData.id;
+        await fetchCompanies();
+      }
+
+      if (!targetCompanyId) {
+        alert('Por favor, selecione ou crie uma empresa para vincular esta instância.');
+        setCreating(false);
+        return;
+      }
+
       const newId = crypto.randomUUID();
       const apiKey = `sk_inst_${crypto.randomUUID().replace(/-/g, '')}`;
 
@@ -431,7 +584,7 @@ export default function InstanceManagerStandalone() {
         .insert([
           {
             id: newId,
-            tenant_id: '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21',
+            tenant_id: targetCompanyId,
             display_name: newInstanceName.trim(),
             phone_number: newInstancePhone.replace(/\D/g, '') || null,
             status: 'disconnected',
@@ -455,6 +608,8 @@ export default function InstanceManagerStandalone() {
       setShowCreateModal(false);
       setNewInstanceName('');
       setNewInstancePhone('');
+      setNewCompanyName('');
+      setIsCreatingNewCompany(false);
       fetchInstances();
     } catch (err: any) {
       alert(`Erro ao criar instância: ${err.message || 'Erro desconhecido'}`);
@@ -462,6 +617,7 @@ export default function InstanceManagerStandalone() {
       setCreating(false);
     }
   };
+
 
   // Alternar permissão de exibição no Chat UI (chat_enabled)
   const handleToggleChatEnabled = async (inst: WhatsAppInstance) => {
@@ -505,6 +661,12 @@ export default function InstanceManagerStandalone() {
         headers: { 'x-tenant-id': deleteTarget.tenant_id }
       }).catch(() => null);
 
+      // 1. Limpar mensagens e conversas filhas da instância para evitar conflito de chave única ou FK
+      await supabase.from('messages').delete().eq('instance_id', deleteTarget.id);
+      await supabase.from('conversations').delete().eq('instance_id', deleteTarget.id);
+      await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', deleteTarget.id);
+
+      // 2. Excluir a instância
       const { error } = await supabase
         .from('whatsapp_instances')
         .delete()
@@ -686,6 +848,14 @@ export default function InstanceManagerStandalone() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const getCompanyName = (tenantId: string | null | undefined) => {
+    if (!tenantId) return '🚫 Nenhuma (Sem Empresa / Standalone)';
+    const found = companies.find(c => c.id === tenantId);
+    if (found) return found.name;
+    if (tenantId === '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21') return 'X-Point Soluções';
+    return tenantId;
+  };
+
   // Filtros
   const filteredInstances = instances.filter((inst) => {
     const matchesSearch =
@@ -693,11 +863,18 @@ export default function InstanceManagerStandalone() {
       (inst.phone_number && inst.phone_number.includes(searchTerm)) ||
       inst.id.toLowerCase().includes(searchTerm.toLowerCase());
 
-    if (statusFilter === 'all') return matchesSearch;
-    if (statusFilter === 'connected') return matchesSearch && (inst.status === 'connected' || inst.status === 'connected_local');
-    if (statusFilter === 'disconnected') return matchesSearch && (inst.status === 'disconnected' || inst.status === 'offline');
-    if (statusFilter === 'connecting') return matchesSearch && inst.status === 'connecting';
-    return matchesSearch;
+    let matchesStatus = true;
+    if (statusFilter === 'connected') matchesStatus = (inst.status === 'connected' || inst.status === 'connected_local');
+    if (statusFilter === 'disconnected') matchesStatus = (inst.status === 'disconnected' || inst.status === 'offline');
+    if (statusFilter === 'connecting') matchesStatus = inst.status === 'connecting';
+
+    const matchesCompany = companyFilter === 'all' 
+      ? true 
+      : companyFilter === 'none' 
+      ? (!inst.tenant_id || inst.tenant_id === '') 
+      : inst.tenant_id === companyFilter;
+
+    return matchesSearch && matchesStatus && matchesCompany;
   });
 
   // Métricas Globais
@@ -996,6 +1173,21 @@ export default function InstanceManagerStandalone() {
 
           {/* Quick Status Filter Pills */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* Filtro por Empresa */}
+            <select
+              value={companyFilter}
+              onChange={(e) => setCompanyFilter(e.target.value)}
+              className="bg-slate-950/80 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-200 focus:outline-none focus:border-emerald-500 transition shadow-inner"
+            >
+              <option value="all">🌐 Todas as Empresas ({companies.length})</option>
+              <option value="none">🚫 Nenhuma (Sem Empresa / Standalone)</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  🏢 {c.name}
+                </option>
+              ))}
+            </select>
+
             {[
               { id: 'all', label: `Todas (${totalCount})` },
               { id: 'connected', label: `Conectadas (${connectedCount})` },
@@ -1015,7 +1207,10 @@ export default function InstanceManagerStandalone() {
             ))}
 
             <button
-              onClick={() => fetchInstances(false)}
+              onClick={() => {
+                fetchInstances(false);
+                fetchCompanies();
+              }}
               disabled={loading}
               className="p-2.5 bg-slate-950/80 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl transition flex items-center justify-center"
               title="Atualizar lista"
@@ -1026,7 +1221,7 @@ export default function InstanceManagerStandalone() {
 
           {/* Create Button */}
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={openCreateModal}
             className="py-3 px-5 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-extrabold rounded-2xl shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 transition transform active:scale-[0.98] text-sm shrink-0"
           >
             <Plus className="w-5 h-5 stroke-[3]" />
@@ -1155,6 +1350,26 @@ export default function InstanceManagerStandalone() {
 
                     {/* Metadados e Informações Técnicas */}
                     <div className="space-y-2.5 pt-3.5 border-t border-slate-800/80 text-xs">
+                      {/* Empresa / Tenant da Instância */}
+                      <div className="flex items-center justify-between text-slate-400 bg-slate-950/60 p-2 rounded-xl border border-slate-800/80">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Building2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span className="text-slate-500 shrink-0">Empresa:</span>
+                          <span className="font-semibold text-slate-200 truncate" title={getCompanyName(inst.tenant_id)}>
+                            {getCompanyName(inst.tenant_id)}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setReassignTargetInstance(inst);
+                            setReassignCompanyId(inst.tenant_id);
+                            fetchCompanies();
+                          }}
+                          className="text-[11px] text-cyan-400 hover:text-cyan-300 font-bold hover:underline shrink-0 ml-1"
+                        >
+                          Vincular
+                        </button>
+                      </div>
                       {/* ID da Instância */}
                       <div className="flex items-center justify-between text-slate-400">
                         <span className="text-slate-500">ID da Instância:</span>
@@ -1324,6 +1539,54 @@ export default function InstanceManagerStandalone() {
             <form onSubmit={handleCreateInstance} className="space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                  Empresa / Tenant Vincular *
+                </label>
+                {!isCreatingNewCompany ? (
+                  <div className="space-y-2">
+                    <select
+                      value={newInstanceCompanyId}
+                      onChange={(e) => setNewInstanceCompanyId(e.target.value)}
+                      className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition shadow-inner"
+                    >
+                      <option value="" disabled>Selecione uma empresa...</option>
+                      {companies.map((comp) => (
+                        <option key={comp.id} value={comp.id}>
+                          🏢 {comp.name} {comp.id === '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21' ? '(X-Point Soluções)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingNewCompany(true)}
+                      className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1.5 pt-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Criar uma nova empresa...</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      required
+                      value={newCompanyName}
+                      onChange={(e) => setNewCompanyName(e.target.value)}
+                      placeholder="Nome da Nova Empresa (Ex: HBI Pizza, Pizzaria Frigideira...)"
+                      className="w-full bg-slate-950/80 border border-emerald-500/50 rounded-xl px-4 py-3.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition shadow-inner"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingNewCompany(false)}
+                      className="text-xs text-slate-400 hover:text-slate-200 font-medium underline pt-1"
+                    >
+                      Voltar para seleção de empresas existentes
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
                   Nome da Instância *
                 </label>
                 <input
@@ -1385,6 +1648,99 @@ export default function InstanceManagerStandalone() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL RE-VINCULAR EMPRESA (TENANT) DA INSTÂNCIA */}
+      {reassignTargetInstance && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5 text-left relative z-10">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center">
+                  <Building2 className="w-5 h-5 stroke-[2.2]" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Vincular Empresa</h3>
+                  <p className="text-xs text-slate-400">{reassignTargetInstance.display_name}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setReassignTargetInstance(null)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                Selecione a Empresa / Tenant Destino *
+              </label>
+              {!isCreatingNewCompany ? (
+                <div className="space-y-2">
+                  <select
+                    value={reassignCompanyId || 'none'}
+                    onChange={(e) => setReassignCompanyId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-white focus:outline-none focus:border-cyan-500 transition shadow-inner"
+                  >
+                    <option value="none">🚫 Nenhuma (Remover Vínculo / Desassociar)</option>
+                    {companies.map((comp) => (
+                      <option key={comp.id} value={comp.id}>
+                        🏢 {comp.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingNewCompany(true)}
+                    className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 pt-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Criar uma nova empresa para esta caixa...</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    required
+                    value={newCompanyName}
+                    onChange={(e) => setNewCompanyName(e.target.value)}
+                    placeholder="Nome da Nova Empresa (Ex: Pizzaria Oliveira, HBI...)"
+                    className="w-full bg-slate-950 border border-cyan-500/50 rounded-xl px-4 py-3.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition shadow-inner"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingNewCompany(false)}
+                    className="text-xs text-slate-400 hover:text-slate-200 font-medium underline pt-1"
+                  >
+                    Voltar para seleção de empresas existentes
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed bg-slate-950/80 p-3 rounded-xl border border-slate-800/80">
+              💡 Ao desassociar e selecionar uma nova empresa, a caixa <strong>{reassignTargetInstance.display_name}</strong> deixará de aparecer para a empresa <strong>X-Point Soluções</strong> e pertencerá exclusivamente à nova empresa selecionada.
+            </p>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={() => setReassignTargetInstance(null)}
+                className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleReassignCompany}
+                disabled={reassigning || !reassignCompanyId}
+                className="flex-1 py-3 bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1 transition shadow-lg shadow-cyan-500/20 disabled:opacity-50"
+              >
+                {reassigning ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Salvar Vínculo</span>}
+              </button>
+            </div>
           </div>
         </div>
       )}
