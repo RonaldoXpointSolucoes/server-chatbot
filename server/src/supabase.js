@@ -87,34 +87,47 @@ export async function resolveTargetJid(sock, jid, tenantId) {
     const ddd = parseInt(clean.substring(2, 4), 10);
     const numberPart = clean.substring(4);
     
+    // Identifica se é Telefone Fixo (números iniciados por 2, 3, 4, 5)
+    const firstDigit = numberPart.charAt(0);
+    const isLandline = ['2', '3', '4', '5'].includes(firstDigit);
+
     let phone9 = clean;
     let phone8 = clean;
-    if (numberPart.length === 9 && numberPart.startsWith('9')) {
-      phone9 = clean;
-      phone8 = '55' + clean.substring(2, 4) + numberPart.substring(1);
-    } else if (numberPart.length === 8) {
-      phone8 = clean;
-      phone9 = '55' + clean.substring(2, 4) + '9' + numberPart;
+
+    if (!isLandline) {
+      if (numberPart.length === 9 && numberPart.startsWith('9')) {
+        phone9 = clean;
+        phone8 = '55' + clean.substring(2, 4) + numberPart.substring(1);
+      } else if (numberPart.length === 8) {
+        phone8 = clean;
+        phone9 = '55' + clean.substring(2, 4) + '9' + numberPart;
+      }
     }
 
-    // 1. Tentar consultar via socket Baileys onWhatsApp (Fonte Primária de Verdade da Meta)
+    // A) SE FOR TELEFONE FIXO (ex: 551141351987): Retorna imediatamente sem adicionar 9!
+    if (isLandline) {
+      return `${phone8}@s.whatsapp.net`;
+    }
+
+    // B) SE FOR CELULAR:
+    // 1. Tentar consultar via socket Baileys onWhatsApp (Fonte Primária de Verdade Nível Meta)
     if (sock && typeof sock.onWhatsApp === 'function') {
       try {
-        const results = await sock.onWhatsApp(phone9, phone8);
+        const queryList = Array.from(new Set([phone9, phone8]));
+        const results = await sock.onWhatsApp(...queryList);
         if (Array.isArray(results)) {
-          // Prioriza o registro com exists: true dando preferência ao phone9 se ambos responderem
-          const valid9 = results.find(r => r && r.exists && r.jid && r.jid.includes(phone9.substring(2)));
-          if (valid9 && valid9.jid) return valid9.jid;
-
-          const validAny = results.find(r => r && r.exists && r.jid);
-          if (validAny && validAny.jid) return validAny.jid;
+          // Se a Meta informar que existe um JID ativo no servidor (seja de 12 ou 13 dígitos), retorna o JID validado!
+          const valid = results.find(r => r && r.exists && r.jid);
+          if (valid && valid.jid) {
+            return valid.jid;
+          }
         }
       } catch (e) {
         // Silenciado
       }
     }
 
-    // 2. Tentar consultar na tabela 'contacts' do Supabase se já existe whatsapp_jid válido
+    // 2. Tentar consultar na tabela 'contacts' do Supabase se já existe whatsapp_jid validado no passado
     if (tenantId) {
       try {
         const { data: contact } = await supabase
@@ -126,30 +139,20 @@ export async function resolveTargetJid(sock, jid, tenantId) {
           .maybeSingle();
 
         if (contact && contact.whatsapp_jid && contact.whatsapp_jid.includes('@s.whatsapp.net')) {
-          // Se o whatsapp_jid salvo tiver 12 dígitos sem o 9º dígito em celular brasileiro, atualiza defensivamente para 13 dígitos
-          const cJidClean = contact.whatsapp_jid.split('@')[0];
-          if (cJidClean.startsWith('55') && cJidClean.length === 12) {
-            const cDdd = cJidClean.substring(2, 4);
-            const cNum = cJidClean.substring(4);
-            return `55${cDdd}9${cNum}@s.whatsapp.net`;
-          }
           return contact.whatsapp_jid;
-        }
-        if (contact && contact.phone) {
-          const cPhoneClean = String(contact.phone).replace(/\D/g, '');
-          if (cPhoneClean.startsWith('55') && cPhoneClean.length === 12) {
-            const cDdd = cPhoneClean.substring(2, 4);
-            const cNum = cPhoneClean.substring(4);
-            return `55${cDdd}9${cNum}@s.whatsapp.net`;
-          }
-          return `${cPhoneClean}@s.whatsapp.net`;
         }
       } catch (e) {
         // Silenciado
       }
     }
 
-    // 3. Fallback Padrão Nacional Brasil (13 dígitos: 55 + DDD + 9 + 8d) para todos os DDDs (11 a 99)
+    // 3. FALLBACK INTELIGENTE (Sem Socket / Sem Registro Prévio):
+    // Se a entrada original do usuário tiver 12 dígitos (ex: 556692545851 - sem o 9º dígito digitado)
+    // E o DDD for >= 31 (ex: DDD 66 - Mato Grosso, MG, etc), mantém phone8 (12 dígitos).
+    // Caso contrário (ex: DDD 11 a 28, ou se veio com 13 dígitos), utiliza phone9 (13 dígitos).
+    if (clean.length === 12 && ddd >= 31) {
+      return `${phone8}@s.whatsapp.net`;
+    }
     return `${phone9}@s.whatsapp.net`;
   }
 
