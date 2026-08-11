@@ -593,6 +593,81 @@ class EventProcessor {
             this.isFlushing = false;
             return;
         }
+
+        // Helper para variação de telefones brasileiros (8 vs 9 dígitos em DDDs BR 55+11..29)
+        const getBrPhoneVariations = (phoneStr) => {
+            if (!phoneStr) return [];
+            const clean = String(phoneStr).replace(/\D/g, '');
+            if (!clean) return [];
+            const res = [clean];
+            if (clean.startsWith('55') && clean.length === 13 && clean.charAt(4) === '9') {
+                res.push(clean.substring(0, 4) + clean.substring(5));
+            } else if (clean.startsWith('55') && clean.length === 12) {
+                res.push(clean.substring(0, 4) + '9' + clean.substring(4));
+            } else if (!clean.startsWith('55')) {
+                res.push('55' + clean);
+                if (clean.length === 11 && clean.charAt(2) === '9') {
+                    res.push('55' + clean.substring(0, 2) + clean.substring(3));
+                } else if (clean.length === 10) {
+                    res.push('55' + clean.substring(0, 2) + '9' + clean.substring(2));
+                }
+            }
+            return Array.from(new Set(res));
+        };
+
+        // DUAL-ROUTING MULTI-INSTÂNCIA INTERNA
+        // Se a mensagem for outbound e o destinatário b.phone corresponder a uma outra instância ativa do mesmo tenant,
+        // gera a mensagem espelhada de inbound para a instância destinatária caso ela não conste no lote.
+        try {
+            const tenantIds = Array.from(new Set(batch.map(b => b.tenantId).filter(Boolean)));
+            if (tenantIds.length > 0) {
+                const { data: allTenantInstances } = await supabase
+                    .from('whatsapp_instances')
+                    .select('id, tenant_id, phone_number, display_name')
+                    .in('tenant_id', tenantIds);
+
+                if (allTenantInstances && allTenantInstances.length > 1) {
+                    const instByPhone = new Map();
+                    for (const inst of allTenantInstances) {
+                        if (inst.phone_number) {
+                            for (const v of getBrPhoneVariations(inst.phone_number)) {
+                                instByPhone.set(`${inst.tenant_id}_${v}`, inst);
+                            }
+                        }
+                    }
+
+                    const extraClones = [];
+                    for (const b of batch) {
+                        if (b.direction === 'outbound' && b.tenantId && b.instanceId) {
+                            const targetInst = instByPhone.get(`${b.tenantId}_${b.phone}`);
+                            if (targetInst && targetInst.id !== b.instanceId) {
+                                const senderInst = allTenantInstances.find(i => i.id === b.instanceId);
+                                const senderPhone = senderInst?.phone_number || 'desconhecido';
+                                
+                                const alreadyInBatch = batch.some(x => x.instanceId === targetInst.id && x.direction === 'inbound' && (x.phone === senderPhone || x.textMessage === b.textMessage));
+                                if (!alreadyInBatch) {
+                                    extraClones.push({
+                                        ...b,
+                                        instanceId: targetInst.id,
+                                        phone: senderPhone,
+                                        jid: `${senderPhone}@s.whatsapp.net`,
+                                        pushName: senderInst?.display_name || senderPhone,
+                                        direction: 'inbound',
+                                        senderType: 'client'
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    if (extraClones.length > 0) {
+                        console.log(`[BatchProcessor] Dual-Routing: Adicionadas ${extraClones.length} mensagens de inbound espelhadas entre instâncias internas.`);
+                        batch.push(...extraClones);
+                    }
+                }
+            }
+        } catch (dualErr) {
+            console.warn('[BatchProcessor] Aviso no Dual-Routing de instâncias internas:', dualErr.message);
+        }
         
         try {
              // 1. Processa e Dedulplica Contatos
@@ -609,26 +684,6 @@ class EventProcessor {
                      });
                  }
              }
-              // Helper para variação de telefones brasileiros (8 vs 9 dígitos em DDDs BR 55+11..29)
-              const getBrPhoneVariations = (phoneStr) => {
-                  if (!phoneStr) return [];
-                  const clean = String(phoneStr).replace(/\D/g, '');
-                  if (!clean) return [];
-                  const res = [clean];
-                  if (clean.startsWith('55') && clean.length === 13 && clean.charAt(4) === '9') {
-                      res.push(clean.substring(0, 4) + clean.substring(5));
-                  } else if (clean.startsWith('55') && clean.length === 12) {
-                      res.push(clean.substring(0, 4) + '9' + clean.substring(4));
-                  } else if (!clean.startsWith('55')) {
-                      res.push('55' + clean);
-                      if (clean.length === 11 && clean.charAt(2) === '9') {
-                          res.push('55' + clean.substring(0, 2) + clean.substring(3));
-                      } else if (clean.length === 10) {
-                          res.push('55' + clean.substring(0, 2) + '9' + clean.substring(2));
-                      }
-                  }
-                  return Array.from(new Set(res));
-              };
 
               // BULK UPSERT CONTACTS
               const contactsArray = Array.from(contactsMap.values());

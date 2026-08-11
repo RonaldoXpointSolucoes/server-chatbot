@@ -28,24 +28,26 @@ export const formatPhoneNumber = (phone: string | undefined | null): string => {
   
   if (cleanPhone.startsWith('55') && (cleanPhone.length === 12 || cleanPhone.length === 13)) {
     const ddd = cleanPhone.substring(2, 4);
-    const num = cleanPhone.substring(4);
+    let num = cleanPhone.substring(4);
+    if (num.length === 8) {
+      num = '9' + num;
+    }
     if (num.length === 9) {
       return `(${ddd}) ${num.substring(0, 5)}-${num.substring(5)}`;
-    } else if (num.length === 8) {
-      return `(${ddd}) ${num.substring(0, 4)}-${num.substring(4)}`;
     }
   } else if (cleanPhone.length === 10 || cleanPhone.length === 11) {
     const ddd = cleanPhone.substring(0, 2);
-    const num = cleanPhone.substring(2);
+    let num = cleanPhone.substring(2);
+    if (num.length === 8) {
+      num = '9' + num;
+    }
     if (num.length === 9) {
       return `(${ddd}) ${num.substring(0, 5)}-${num.substring(5)}`;
-    } else if (num.length === 8) {
-      return `(${ddd}) ${num.substring(0, 4)}-${num.substring(4)}`;
     }
   } else if (cleanPhone.length === 9) {
     return `${cleanPhone.substring(0, 5)}-${cleanPhone.substring(5)}`;
   } else if (cleanPhone.length === 8) {
-    return `${cleanPhone.substring(0, 4)}-${cleanPhone.substring(4)}`;
+    return `9${cleanPhone.substring(0, 4)}-${cleanPhone.substring(4)}`;
   }
   return cleaned;
 };
