@@ -1679,9 +1679,17 @@ class EventProcessor {
                     this.updatePendingStatus(key.id, newStatus);
                     // Enfileira p/ reconciliation assíncrona
                     this.queueStatusUpdate(tenantId, instanceId, key.id, newStatus);
-                } else if (update.status === 0 || (update.messageStubParameters && update.messageStubParameters[0] === '463')) {
-                    console.warn(`[EventProcessor] ACK error 463/0 detectado para mensagem ${key.id} (JID: ${key.remoteJid}). Iniciando retry automático...`);
-                    this.handleAckError463Retry(tenantId, instanceId, sock, key).catch(console.error);
+                } else {
+                    const is463Error = (update.messageStubParameters && update.messageStubParameters[0] === '463') || (update.error === '463') || (update.error && String(update.error).includes('463'));
+                    if (is463Error && key?.id) {
+                        if (!this.ack463RetriedIds) this.ack463RetriedIds = new Set();
+                        if (!this.ack463RetriedIds.has(key.id)) {
+                            this.ack463RetriedIds.add(key.id);
+                            setTimeout(() => this.ack463RetriedIds.delete(key.id), 60000);
+                            console.warn(`[EventProcessor] ACK error 463 detectado para mensagem ${key.id} (JID: ${key.remoteJid}). Iniciando retry único...`);
+                            this.handleAckError463Retry(tenantId, instanceId, sock, key).catch(console.error);
+                        }
+                    }
                 }
             }
         } catch (e) {
@@ -1690,10 +1698,21 @@ class EventProcessor {
     }
 
     async handleAckError463Retry(tenantId, instanceId, sock, key) {
-        if (!key || !key.remoteJid || key.remoteJid.endsWith('@g.us')) return;
+        if (!key || !key.id || !key.remoteJid || key.remoteJid.endsWith('@g.us')) return;
 
         const rawJid = key.remoteJid;
         const phone = rawJid.split('@')[0].split(':')[0];
+
+        // Cooldown defensivo por telefone para evitar tempestade de expurgo de chaves
+        if (!this.ack463PhoneCooldown) this.ack463PhoneCooldown = new Map();
+        const now = Date.now();
+        const lastPurge = this.ack463PhoneCooldown.get(phone) || 0;
+        if (now - lastPurge < 30000) {
+            console.log(`[EventProcessor] Cooldown ativo para expurgo de sessão 463 do número ${phone}. Ignorando expurgo redundante.`);
+            return;
+        }
+        this.ack463PhoneCooldown.set(phone, now);
+
         console.log(`[EventProcessor] ACK 463 detectado para ${phone} (Msg ID: ${key.id}). Purgando sessão Signal obsoleta...`);
 
         // 1. Purga as chaves de sessão Signal com problema do memCache e do Supabase (wa_auth_keys)
