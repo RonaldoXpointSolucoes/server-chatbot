@@ -295,7 +295,7 @@ class QueueProcessor {
                     if (eventProcessor && result && result.key) {
                         const mockUpsert = {
                             messages: [result],
-                            type: 'append'
+                            type: 'notify'
                         };
                         await eventProcessor.handleMessageUpsert(tenantId, instanceId, sock, mockUpsert);
                     }
