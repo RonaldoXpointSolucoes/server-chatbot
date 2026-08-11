@@ -609,48 +609,58 @@ class EventProcessor {
                      });
                  }
              }
-                  // Helper para variação de telefones brasileiros (8 vs 9 dígitos em DDDs BR 55+11..29)
-             const getBrPhoneVariations = (phoneStr) => {
-                 if (!phoneStr) return [];
-                 const clean = String(phoneStr).replace(/\D/g, '');
-                 const res = [clean];
-                 if (clean.startsWith('55') && clean.length === 13 && clean.charAt(4) === '9') {
-                     res.push(clean.substring(0, 4) + clean.substring(5));
-                 } else if (clean.startsWith('55') && clean.length === 12) {
-                     res.push(clean.substring(0, 4) + '9' + clean.substring(4));
-                 }
-                 return res;
-             };
+              // Helper para variação de telefones brasileiros (8 vs 9 dígitos em DDDs BR 55+11..29)
+              const getBrPhoneVariations = (phoneStr) => {
+                  if (!phoneStr) return [];
+                  const clean = String(phoneStr).replace(/\D/g, '');
+                  if (!clean) return [];
+                  const res = [clean];
+                  if (clean.startsWith('55') && clean.length === 13 && clean.charAt(4) === '9') {
+                      res.push(clean.substring(0, 4) + clean.substring(5));
+                  } else if (clean.startsWith('55') && clean.length === 12) {
+                      res.push(clean.substring(0, 4) + '9' + clean.substring(4));
+                  } else if (!clean.startsWith('55')) {
+                      res.push('55' + clean);
+                      if (clean.length === 11 && clean.charAt(2) === '9') {
+                          res.push('55' + clean.substring(0, 2) + clean.substring(3));
+                      } else if (clean.length === 10) {
+                          res.push('55' + clean.substring(0, 2) + '9' + clean.substring(2));
+                      }
+                  }
+                  return Array.from(new Set(res));
+              };
 
-             // BULK UPSERT CONTACTS
-             const contactsArray = Array.from(contactsMap.values());
-             
-             // Busca variações com 8 e 9 dígitos para evitar duplicatas fantasma
-             const phonesToSeek = Array.from(new Set(contactsArray.flatMap(c => getBrPhoneVariations(c.phone))));
-             const tenantIdTarget = contactsArray[0]?.tenant_id;
-             
-             let existingMap = new Map();
-             const contactBotStatusMap = new Map();
-             if (tenantIdTarget && phonesToSeek.length > 0) {
-                 const { data: existingDbContacts } = await supabase.from('contacts')
-                     .select('*')
-                     .eq('tenant_id', tenantIdTarget)
-                     .in('phone', phonesToSeek);
-                     
-                 if (existingDbContacts) {
-                     for (const e of existingDbContacts) {
-                         existingMap.set(e.phone, e);
-                         const vars = getBrPhoneVariations(e.phone);
-                         for (const v of vars) {
-                             if (!existingMap.has(v)) {
-                                 existingMap.set(v, e);
-                             }
-                         }
-                         const isTempPaused = e.bot_paused_until && new Date(e.bot_paused_until) > new Date();
-                         contactBotStatusMap.set(e.id, (e.bot_status === 'paused' || isTempPaused) ? 'paused' : 'active');
-                     }
-                 }
-             }
+              // BULK UPSERT CONTACTS
+              const contactsArray = Array.from(contactsMap.values());
+              
+              // Busca variações com 8 e 9 dígitos para evitar duplicatas fantasma em TODOS os tenants do lote
+              const phonesToSeek = Array.from(new Set(contactsArray.flatMap(c => getBrPhoneVariations(c.phone))));
+              const tenantIdsToSeek = Array.from(new Set(contactsArray.map(c => c.tenant_id).filter(Boolean)));
+              
+              let existingMap = new Map();
+              const contactBotStatusMap = new Map();
+              if (tenantIdsToSeek.length > 0 && phonesToSeek.length > 0) {
+                  const { data: existingDbContacts } = await supabase.from('contacts')
+                      .select('*')
+                      .in('tenant_id', tenantIdsToSeek)
+                      .in('phone', phonesToSeek);
+                      
+                  if (existingDbContacts) {
+                      for (const e of existingDbContacts) {
+                          const mainKey = `${e.tenant_id}_${e.phone}`;
+                          existingMap.set(mainKey, e);
+                          const vars = getBrPhoneVariations(e.phone);
+                          for (const v of vars) {
+                              const varKey = `${e.tenant_id}_${v}`;
+                              if (!existingMap.has(varKey)) {
+                                  existingMap.set(varKey, e);
+                              }
+                          }
+                          const isTempPaused = e.bot_paused_until && new Date(e.bot_paused_until) > new Date();
+                          contactBotStatusMap.set(e.id, (e.bot_status === 'paused' || isTempPaused) ? 'paused' : 'active');
+                      }
+                  }
+              }
 
               const uniqueContactsMap = new Map();
               for (const c of contactsArray) {
@@ -658,9 +668,18 @@ class EventProcessor {
                   const rawPhone = c.phone || (c.whatsapp_jid ? c.whatsapp_jid.split('@')[0] : null);
                   if (!rawPhone) continue;
 
-                  const ex = existingMap.get(rawPhone);
+                  const currentTenant = c.tenant_id || '00000000-0000-0000-0000-000000000000';
+                  let ex = existingMap.get(`${currentTenant}_${rawPhone}`);
+                  if (!ex) {
+                      const vars = getBrPhoneVariations(rawPhone);
+                      for (const v of vars) {
+                          ex = existingMap.get(`${currentTenant}_${v}`);
+                          if (ex) break;
+                      }
+                  }
+
                   const targetPhone = ex?.phone || rawPhone;
-                  const key = `${c.tenant_id}_${targetPhone}`;
+                  const key = `${currentTenant}_${targetPhone}`;
 
                   if (!uniqueContactsMap.has(key)) {
                       const hasValidOldName = ex && ex.name && ex.name !== ex.phone && ex.name !== targetPhone;
@@ -677,7 +696,7 @@ class EventProcessor {
 
                       uniqueContactsMap.set(key, {
                           id: contactId,
-                          tenant_id: c.tenant_id || '00000000-0000-0000-0000-000000000000',
+                          tenant_id: currentTenant,
                           phone: targetPhone,
                           name: finalName,
                           whatsapp_jid: finalJid,
@@ -691,19 +710,63 @@ class EventProcessor {
                   id: (item.id && typeof item.id === 'string' && item.id.length > 20 && item.id !== 'null') ? item.id : crypto.randomUUID()
               }));
              
-             const { data: upsertedContacts, error: contactErr } = await supabase.from('contacts')
-                  .upsert(safeContactsArray, { onConflict: 'tenant_id, phone' })
-                  .select('id, tenant_id, phone, whatsapp_jid');
-             if(contactErr) throw new Error("Contact Upsert Error: " + contactErr.message);
-             
-             const contactIdMap = new Map(); // phone+tenant -> contact_id (mapeia variações 8 e 9 dígitos)
-             for(const c of upsertedContacts) {
-                 contactIdMap.set(`${c.tenant_id}_${c.phone}`, c.id);
-                 const vars = getBrPhoneVariations(c.phone);
-                 for (const v of vars) {
-                     contactIdMap.set(`${c.tenant_id}_${v}`, c.id);
-                 }
-             }
+              let upsertedContacts = [];
+              const { data: resContacts, error: contactErr } = await supabase.from('contacts')
+                   .upsert(safeContactsArray, { onConflict: 'tenant_id, phone' })
+                   .select('id, tenant_id, phone, whatsapp_jid');
+              
+              if (contactErr) {
+                  console.warn('[BatchProcessor] Upsert de contatos em lote falhou (código ' + contactErr.code + '): ' + contactErr.message + '. Aplicando resolução de IDs e fallback resiliente...');
+                  
+                  // Busca contatos no DB para garantir recuperação de IDs reais em caso de conflito de chave
+                  const { data: fallbackContacts } = await supabase.from('contacts')
+                      .select('id, tenant_id, phone, whatsapp_jid')
+                      .in('tenant_id', tenantIdsToSeek.length > 0 ? tenantIdsToSeek : ['00000000-0000-0000-0000-000000000000']);
+
+                  const fallbackIdMap = new Map();
+                  if (fallbackContacts) {
+                      for (const fb of fallbackContacts) {
+                          fallbackIdMap.set(`${fb.tenant_id}_${fb.phone}`, fb);
+                          for (const v of getBrPhoneVariations(fb.phone)) {
+                              fallbackIdMap.set(`${fb.tenant_id}_${v}`, fb);
+                          }
+                      }
+                  }
+
+                  upsertedContacts = [];
+                  for (const item of safeContactsArray) {
+                      const existingFb = fallbackIdMap.get(`${item.tenant_id}_${item.phone}`);
+                      const safeItem = {
+                          ...item,
+                          id: existingFb ? existingFb.id : item.id
+                      };
+                      try {
+                          const { data: singleRes, error: singleErr } = await supabase.from('contacts')
+                              .upsert(safeItem, { onConflict: 'tenant_id, phone' })
+                              .select('id, tenant_id, phone, whatsapp_jid');
+                          
+                          if (singleRes && singleRes.length > 0) {
+                              upsertedContacts.push(...singleRes);
+                          } else if (existingFb) {
+                              upsertedContacts.push(existingFb);
+                          }
+                      } catch (sErr) {
+                          console.error('[BatchProcessor] Erro na inserção individual de contato:', sErr.message);
+                          if (existingFb) upsertedContacts.push(existingFb);
+                      }
+                  }
+              } else if (resContacts) {
+                  upsertedContacts = resContacts;
+              }
+              
+              const contactIdMap = new Map(); // phone+tenant -> contact_id (mapeia variações 8 e 9 dígitos)
+              for (const c of upsertedContacts) {
+                  contactIdMap.set(`${c.tenant_id}_${c.phone}`, c.id);
+                  const vars = getBrPhoneVariations(c.phone);
+                  for (const v of vars) {
+                      contactIdMap.set(`${c.tenant_id}_${v}`, c.id);
+                  }
+              }
              
               const convMap = new Map();
               for(const b of batch) {
