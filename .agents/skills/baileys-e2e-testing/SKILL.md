@@ -1,9 +1,11 @@
 ---
 name: baileys-e2e-testing
-description: Protocolo autônomo de teste e validação de envio e recebimento real de mensagens WhatsApp via Baileys entre as caixas FoodNext (11 94775-8860) e Ronaldo-Web (11 97596-0999) com escuta direta do servidor Node.js. Ative esta skill para executar e monitorar o teste E2E bidirecional até a confirmação das chaves da Baileys.
+description: Protocolo autônomo de teste e validação de envio e recebimento real de mensagens WhatsApp via Baileys entre as caixas FoodNext (11 94775-8860) e Ronaldo-Web (11 97596-0999). Ativado automaticamente pelo comando "teste envios".
 ---
 
 # Skill: Protocolo de Testes Bidirecionais Baileys E2E (FoodNext ↔ Ronaldo-Web)
+
+> ⚡ **GATILHO DE ATIVAÇÃO**: Digite `teste envios` (ou `teste envios.`) no chat para executar este protocolo de testes E2E automaticamente.
 
 Esta skill estabelece a metodologia de teste contínuo e validação de socket em tempo real entre as duas caixas oficiais do projeto **ChatBoot**:
 

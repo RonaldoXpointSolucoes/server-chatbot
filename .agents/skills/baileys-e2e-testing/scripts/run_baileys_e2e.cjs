@@ -36,7 +36,40 @@ function patchSupabase(path, body) {
   });
 }
 
-function invokeSendMessage(instanceId, targetJid, text) {
+function getInstanceApiKey(instanceId) {
+  return new Promise((resolve) => {
+    const url = new URL(`/rest/v1/whatsapp_instances?id=eq.${instanceId}&select=api_key`, SUPABASE_URL);
+    const req = https.request(url, {
+      method: 'GET',
+      headers: {
+        'apikey': SERVICE_KEY,
+        'Authorization': `Bearer ${SERVICE_KEY}`
+      }
+    }, res => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          resolve(parsed[0]?.api_key || null);
+        } catch (e) { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
+async function invokeSendMessage(instanceId, targetJid, text) {
+  const instanceApiKey = await getInstanceApiKey(instanceId);
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-tenant-id': TENANT_ID
+  };
+  if (instanceApiKey) {
+    headers['apikey'] = instanceApiKey;
+  }
+
   return new Promise((resolve, reject) => {
     const url = new URL(`/api/v1/instances/${instanceId}/invoke`, ENGINE_URL);
     const bodyData = JSON.stringify({
@@ -45,11 +78,7 @@ function invokeSendMessage(instanceId, targetJid, text) {
     });
     const req = https.request(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tenant-id': TENANT_ID,
-        'apikey': '356c087d9-4073-4ceb-986a-09083992518c'
-      }
+      headers
     }, res => {
       let data = '';
       res.on('data', chunk => data += chunk);

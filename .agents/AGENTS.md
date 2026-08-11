@@ -90,6 +90,14 @@ O deploy NUNCA deve ser executado de forma automática após alterações de có
 1. **PROIBIDO CANCELAR OU INTERROMPER PROCESSOS DE DEPLOY EM MEIO À EXECUÇÃO**: Nunca force o cancelamento, interrupção ou concorrência de comandos de deploy ativos (ex: `npm run deploy` que invoca `vercel --prod`) ou chamadas sensíveis de infraestrutura. Interromper prematuramente processos de upload da CLI da Vercel ou Coolify bloqueia o estado do deploy remoto, resultando em builds parciais, arquivos de assets corrompidos ou perda de variáveis de ambiente ativas.
 2. **AGUARDAR SEMPRE A CONCLUSÃO TOTAL**: Todo e qualquer comando de deploy iniciado deve ter seu ciclo completo acompanhado através dos logs até que o resultado final de sucesso ou falha real seja devolvido.
 
+## Regra do Comando de Testes "teste envios"
+
+Sempre que o usuário digitar `teste envios` (ou variações como `teste envios.`, `Teste envios`, `teste de envios` ou `/teste-envios`):
+1. **Acionamento Automático**: A IA deve imediatamente invocar a skill `baileys-e2e-testing`.
+2. **Execução do Script**: Executar via `run_command` o script oficial de testes E2E:
+   `node .agents/skills/baileys-e2e-testing/scripts/run_baileys_e2e.cjs`
+3. **Acompanhamento e Relatório**: Acompanhar a execução dos 3 ciclos bidirecionais de envio e recebimento de mensagens entre as caixas **FoodNext** (`11 94775-8860`) e **Ronaldo-Web** (`11 97596-0999`) e apresentar a tabela de evidências e o resultado final ao usuário.
+
 ## Credenciais para Testes de Automação no Chrome
 
 Sempre que o agente precisar realizar login de forma automatizada e testar as funcionalidades e fluxos no Chrome, deve utilizar as seguintes credenciais:

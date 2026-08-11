@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "deploy": "npx vercel --prod --force --yes",
+    "test:envios": "node .agents/skills/baileys-e2e-testing/scripts/run_baileys_e2e.cjs",
     "restore:info": "node scripts/restore-cli.js"
   },
   "dependencies": {
