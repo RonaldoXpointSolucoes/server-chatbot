@@ -1,4 +1,4 @@
-import { supabase, NODE_ID, retryWithBackoff } from '../supabase.js';
+import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
 import realtime from '../realtime-publisher/index.js';
 import qrcode from 'qrcode';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
