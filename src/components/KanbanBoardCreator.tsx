@@ -134,15 +134,24 @@ export default function KanbanBoardCreator({ isOpen, onClose, onCreated }: Creat
       if (userData?.user?.id) {
         const { data: tu } = await supabase
           .from('tenant_users')
-          .select('tenant_id')
+          .select('tenant_id, allowed_companies')
           .eq('user_id', userData.user.id)
           .limit(1)
           .maybeSingle();
 
-        if (tu?.tenant_id) {
-          activeTenantId = tu.tenant_id;
-          localStorage.setItem('current_tenant_id', tu.tenant_id);
-          sessionStorage.setItem('current_tenant_id', tu.tenant_id);
+        if (tu) {
+          const allowedCompanies = Array.isArray(tu.allowed_companies) ? tu.allowed_companies : [];
+          const allAllowed = Array.from(new Set([tu.tenant_id, ...allowedCompanies].filter(Boolean)));
+
+          if (activeTenantId && allAllowed.includes(activeTenantId)) {
+             // Mantém o tenantId selecionado
+          } else if (allAllowed.length > 0) {
+             activeTenantId = (tu.tenant_id && allAllowed.includes(tu.tenant_id)) ? tu.tenant_id : allAllowed[0];
+             localStorage.setItem('current_tenant_id', activeTenantId);
+             if (sessionStorage.getItem('current_tenant_id')) {
+                sessionStorage.setItem('current_tenant_id', activeTenantId);
+             }
+          }
         }
       }
 
