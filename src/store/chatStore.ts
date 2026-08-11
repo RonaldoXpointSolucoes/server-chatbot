@@ -3694,7 +3694,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   fetchTenantConfig: async () => {
     try {
-      const currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      let currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData?.user?.id) {
+        const { data: tu } = await supabase
+          .from('tenant_users')
+          .select('tenant_id')
+          .eq('user_id', userData.user.id)
+          .limit(1)
+          .maybeSingle();
+
+        if (tu?.tenant_id) {
+          currentTenantId = tu.tenant_id;
+          localStorage.setItem('current_tenant_id', tu.tenant_id);
+          sessionStorage.setItem('current_tenant_id', tu.tenant_id);
+        }
+      }
+
       if (!currentTenantId) return;
 
       const { data: tenantData } = await supabase.from('companies').select('*').eq('id', currentTenantId).maybeSingle();

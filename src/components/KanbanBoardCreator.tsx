@@ -129,8 +129,25 @@ export default function KanbanBoardCreator({ isOpen, onClose, onCreated }: Creat
     try {
       setLoading(true);
 
+      let activeTenantId = tenantId;
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData?.user?.id) {
+        const { data: tu } = await supabase
+          .from('tenant_users')
+          .select('tenant_id')
+          .eq('user_id', userData.user.id)
+          .limit(1)
+          .maybeSingle();
+
+        if (tu?.tenant_id) {
+          activeTenantId = tu.tenant_id;
+          localStorage.setItem('current_tenant_id', tu.tenant_id);
+          sessionStorage.setItem('current_tenant_id', tu.tenant_id);
+        }
+      }
+
       const newBoard = {
-        tenant_id: tenantId,
+        tenant_id: activeTenantId,
         name: finalName,
         config: {
           description: finalDesc,
@@ -151,9 +168,9 @@ export default function KanbanBoardCreator({ isOpen, onClose, onCreated }: Creat
 
       if (error) throw error;
       onCreated();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao criar quadro de CRM:', err);
-      alert('Ocorreu um erro ao salvar o novo quadro de CRM.');
+      alert('Ocorreu um erro ao salvar o novo quadro de CRM: ' + (err?.message || 'Falha de permissão RLS'));
     } finally {
       setLoading(false);
     }
