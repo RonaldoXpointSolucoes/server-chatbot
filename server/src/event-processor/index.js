@@ -1385,7 +1385,7 @@ class EventProcessor {
                           const botsData = allBotsData || [];
 
                           // Filtra os bots ativos e habilitados para a instância atual
-                          const eligibleBots = botsData.filter(bot => bot.status === 'active' && bot.autoReply === true && bot.channels && bot.channels.includes(b.instanceId));
+                          const eligibleBots = botsData.filter(bot => bot.status === 'active' && bot.autoReply !== false && bot.channels && bot.channels.includes(b.instanceId));
 
                           let botData = null;
                           if (eligibleBots.length > 0) {
