@@ -24,6 +24,7 @@ import {
   Bot,
   MoreVertical,
   RotateCcw,
+  RefreshCw,
   Network,
   ScrollText,
   MessageSquareReply,
@@ -1271,6 +1272,30 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
             >
               <Settings size={14} />
               Configurar Notificações
+            </button>
+            <button 
+              className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2"
+              onClick={async (e) => {
+                 e.stopPropagation();
+                 const instName = instanceContextMenu.name;
+                 setInstanceContextMenu(null);
+                 window.dispatchEvent(new CustomEvent('toast', { 
+                   detail: { message: `Sincronizando conversas da caixa ${instName}...`, type: 'info' } 
+                 }));
+                 try {
+                   await useChatStore.getState().syncMissedMessages();
+                   window.dispatchEvent(new CustomEvent('toast', { 
+                     detail: { message: `Conversas da caixa ${instName} sincronizadas com sucesso!`, type: 'success' } 
+                   }));
+                 } catch (err: any) {
+                   window.dispatchEvent(new CustomEvent('toast', { 
+                     detail: { message: `Erro ao sincronizar conversas: ${err?.message || 'Falha de conexão'}`, type: 'error' } 
+                   }));
+                 }
+              }}
+            >
+              <RefreshCw size={14} className="text-cyan-400" />
+              Sincronizar Conversas
             </button>
             <button 
               className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2 border-t border-[#2a3942] mt-1 pt-2"
