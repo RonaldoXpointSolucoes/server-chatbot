@@ -97,7 +97,24 @@ export async function resolveTargetJid(sock, jid, tenantId) {
       phone9 = '55' + clean.substring(2, 4) + '9' + numberPart;
     }
 
-    // 1. Tentar consultar na tabela 'contacts' do Supabase se já existe whatsapp_jid válido
+    // 1. Tentar consultar via socket Baileys onWhatsApp (Fonte Primária de Verdade da Meta)
+    if (sock && typeof sock.onWhatsApp === 'function') {
+      try {
+        const results = await sock.onWhatsApp(phone9, phone8);
+        if (Array.isArray(results)) {
+          // Prioriza o registro com exists: true dando preferência ao phone9 se ambos responderem
+          const valid9 = results.find(r => r && r.exists && r.jid && r.jid.includes(phone9.substring(2)));
+          if (valid9 && valid9.jid) return valid9.jid;
+
+          const validAny = results.find(r => r && r.exists && r.jid);
+          if (validAny && validAny.jid) return validAny.jid;
+        }
+      } catch (e) {
+        // Silenciado
+      }
+    }
+
+    // 2. Tentar consultar na tabela 'contacts' do Supabase se já existe whatsapp_jid válido
     if (tenantId) {
       try {
         const { data: contact } = await supabase
@@ -109,38 +126,30 @@ export async function resolveTargetJid(sock, jid, tenantId) {
           .maybeSingle();
 
         if (contact && contact.whatsapp_jid && contact.whatsapp_jid.includes('@s.whatsapp.net')) {
+          // Se o whatsapp_jid salvo tiver 12 dígitos sem o 9º dígito em celular brasileiro, atualiza defensivamente para 13 dígitos
+          const cJidClean = contact.whatsapp_jid.split('@')[0];
+          if (cJidClean.startsWith('55') && cJidClean.length === 12) {
+            const cDdd = cJidClean.substring(2, 4);
+            const cNum = cJidClean.substring(4);
+            return `55${cDdd}9${cNum}@s.whatsapp.net`;
+          }
           return contact.whatsapp_jid;
         }
         if (contact && contact.phone) {
-          return `${contact.phone}@s.whatsapp.net`;
-        }
-      } catch (e) {
-        // Silenciado
-      }
-    }
-
-    // 2. Tentar consultar via socket Baileys onWhatsApp (se socket ativo)
-    if (sock && typeof sock.onWhatsApp === 'function') {
-      try {
-        const results = await sock.onWhatsApp(phone9, phone8);
-        if (Array.isArray(results)) {
-          const valid = results.find(r => r && r.exists && r.jid);
-          if (valid && valid.jid) {
-            return valid.jid;
+          const cPhoneClean = String(contact.phone).replace(/\D/g, '');
+          if (cPhoneClean.startsWith('55') && cPhoneClean.length === 12) {
+            const cDdd = cPhoneClean.substring(2, 4);
+            const cNum = cPhoneClean.substring(4);
+            return `55${cDdd}9${cNum}@s.whatsapp.net`;
           }
+          return `${cPhoneClean}@s.whatsapp.net`;
         }
       } catch (e) {
         // Silenciado
       }
     }
 
-    // 3. Regra de negócio por DDD para fallback quando nem DB nem socket responderem:
-    // DDDs 11 a 28 (SP/RJ/ES) usam 9 dígitos (13 caracteres: 55 + DDD + 9 + 8d)
-    // DDDs 31 a 99 (Minas Gerais DDD 34, 31, 32, 35, 37, 38, etc e demais estados)
-    // usam frequentemente 8 dígitos (12 caracteres) no servidor da Meta
-    if (ddd >= 31 && ddd <= 99) {
-      return `${phone8}@s.whatsapp.net`;
-    }
+    // 3. Fallback Padrão Nacional Brasil (13 dígitos: 55 + DDD + 9 + 8d) para todos os DDDs (11 a 99)
     return `${phone9}@s.whatsapp.net`;
   }
 
