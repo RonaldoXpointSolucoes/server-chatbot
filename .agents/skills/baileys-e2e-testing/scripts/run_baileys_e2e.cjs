@@ -126,88 +126,81 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function runCycle(cycleNumber) {
+async function runFullE2ETest() {
   const ts = new Date().toISOString().replace(/[-:T.]/g, '').substring(0, 14);
   const nowMs = Date.now().toString().slice(-4);
   
-  console.log(`\n======================================================`);
-  console.log(`>>> INICIANDO CICLO ${cycleNumber} DE 3 (BAILEYS E2E TEST) <<<`);
-  console.log(`======================================================`);
-
-  // STEP 1: FoodNext -> Ronaldo-Web
-  const fnText = `TESTE-BAILEYS-FN-RW-CICLO${cycleNumber}-${ts}-${nowMs}`;
-  console.log(`[ETAPA 1] Enviando da caixa FoodNext para Ronaldo-Web (${RONALDO_WEB_JID})...`);
-  console.log(`Texto: "${fnText}"`);
-
-  const fnResult = await invokeSendMessage(FOODNEXT_INSTANCE_ID, RONALDO_WEB_JID, fnText);
-  console.log(`[ETAPA 1] Retorno da Baileys Engine API:`, JSON.stringify(fnResult, null, 2));
-
-  if (!fnResult.body || !fnResult.body.ok || !fnResult.body.result?.key?.id) {
-    throw new Error(`Falha no envio da Etapa 1 do Ciclo ${cycleNumber}!`);
-  }
-
-  await delay(4000);
-
-  // Checa status de entrega real no Supabase
-  const fnDbVerification = await verifyDeliveryInDb(FOODNEXT_INSTANCE_ID, fnText);
-  console.log(`[ETAPA 1] Verificação no Banco (wa_outgoing_messages):`, JSON.stringify(fnDbVerification, null, 2));
-
-  // STEP 2: Ronaldo-Web -> FoodNext
-  const rwText = `RESPOSTA-BAILEYS-RW-FN-CICLO${cycleNumber}-${ts}-${nowMs}`;
-  console.log(`\n[ETAPA 2] Respondendo da caixa Ronaldo-Web para FoodNext (${FOODNEXT_JID})...`);
-  console.log(`Texto: "${rwText}"`);
-
-  const rwResult = await invokeSendMessage(RONALDO_WEB_INSTANCE_ID, FOODNEXT_JID, rwText);
-  console.log(`[ETAPA 2] Retorno da Baileys Engine API:`, JSON.stringify(rwResult, null, 2));
-
-  if (!rwResult.body || !rwResult.body.ok || !rwResult.body.result?.key?.id) {
-    throw new Error(`Falha no envio da Etapa 2 do Ciclo ${cycleNumber}!`);
-  }
-
-  await delay(4000);
-
-  // Checa status de entrega real no Supabase
-  const rwDbVerification = await verifyDeliveryInDb(RONALDO_WEB_INSTANCE_ID, rwText);
-  console.log(`[ETAPA 2] Verificação no Banco (wa_outgoing_messages):`, JSON.stringify(rwDbVerification, null, 2));
-
-  console.log(`\n✅ CICLO ${cycleNumber} CONCLUÍDO!`);
-  return {
-    cycleNumber,
-    fnSent: {
-      text: fnText,
-      messageId: fnResult.body.result.key.id,
-      remoteJid: fnResult.body.result.key.remoteJid,
-      dbStatus: fnDbVerification?.status || 'unknown',
-      sentAt: fnDbVerification?.sent_at || null
-    },
-    rwReply: {
-      text: rwText,
-      messageId: rwResult.body.result.key.id,
-      remoteJid: rwResult.body.result.key.remoteJid,
-      dbStatus: rwDbVerification?.status || 'unknown',
-      sentAt: rwDbVerification?.sent_at || null
-    }
-  };
-}
-
-async function main() {
   console.log("=== LIMPEZA DE LEASES DE CONCORRÊNCIA EM WHATSAPP_INSTANCES ===");
   await patchSupabase(`/rest/v1/whatsapp_instances?tenant_id=eq.${TENANT_ID}`, {
     assigned_node_id: null,
     lease_until: null
   });
 
-  const summary = [];
-  for (let c = 1; c <= 3; c++) {
-    const res = await runCycle(c);
-    summary.push(res);
-    if (c < 3) await delay(3000);
+  const fnSent = [];
+  const rwReply = [];
+
+  // FASE 1: FoodNext envia 3 mensagens em sequência para Ronaldo-Web
+  console.log(`\n======================================================`);
+  console.log(`>>> FASE 1: CAIXA FoodNext ENVIA 3 MENSAGENS PARA Ronaldo-Web <<<`);
+  console.log(`======================================================`);
+
+  for (let i = 1; i <= 3; i++) {
+    const text = `[FoodNext ➔ Ronaldo-Web] Mensagem ${i} de 3 (${ts}-${nowMs})`;
+    console.log(`\n[ENVIANDO ${i}/3] FoodNext ➔ Ronaldo-Web (${RONALDO_WEB_JID})...`);
+    console.log(`Texto: "${text}"`);
+
+    const result = await invokeSendMessage(FOODNEXT_INSTANCE_ID, RONALDO_WEB_JID, text);
+    console.log(`[ENVIANDO ${i}/3] Retorno API Baileys:`, JSON.stringify(result, null, 2));
+
+    await delay(3000);
+
+    const dbVerif = await verifyDeliveryInDb(FOODNEXT_INSTANCE_ID, text);
+    console.log(`[ENVIANDO ${i}/3] Verificação no Banco (wa_outgoing_messages):`, JSON.stringify(dbVerif, null, 2));
+
+    fnSent.push({
+      step: i,
+      text,
+      messageId: result.body?.result?.key?.id || 'unknown',
+      remoteJid: RONALDO_WEB_JID,
+      dbStatus: dbVerif?.status || 'unknown',
+      sentAt: dbVerif?.sent_at || null
+    });
+  }
+
+  await delay(4000);
+
+  // FASE 2: Ronaldo-Web responde 3 mensagens em sequência para FoodNext
+  console.log(`\n======================================================`);
+  console.log(`>>> FASE 2: CAIXA Ronaldo-Web RESPONDE 3 MENSAGENS PARA FoodNext <<<`);
+  console.log(`======================================================`);
+
+  for (let i = 1; i <= 3; i++) {
+    const text = `[Ronaldo-Web ➔ FoodNext] Resposta ${i} de 3 (${ts}-${nowMs})`;
+    console.log(`\n[RESPONDENDO ${i}/3] Ronaldo-Web ➔ FoodNext (${FOODNEXT_JID})...`);
+    console.log(`Texto: "${text}"`);
+
+    const result = await invokeSendMessage(RONALDO_WEB_INSTANCE_ID, FOODNEXT_JID, text);
+    console.log(`[RESPONDENDO ${i}/3] Retorno API Baileys:`, JSON.stringify(result, null, 2));
+
+    await delay(3000);
+
+    const dbVerif = await verifyDeliveryInDb(RONALDO_WEB_INSTANCE_ID, text);
+    console.log(`[RESPONDENDO ${i}/3] Verificação no Banco (wa_outgoing_messages):`, JSON.stringify(dbVerif, null, 2));
+
+    rwReply.push({
+      step: i,
+      text,
+      messageId: result.body?.result?.key?.id || 'unknown',
+      remoteJid: FOODNEXT_JID,
+      dbStatus: dbVerif?.status || 'unknown',
+      sentAt: dbVerif?.sent_at || null
+    });
   }
 
   console.log("\n\n======================================================");
-  console.log("=== RESUMO DOS 3 CICLOS E2E VALIDADOS NA BAILEYS ===");
+  console.log("=== RESUMO DO HISTÓRICO DE 6 MENSAGENS (3 ENVIADAS / 3 RECEBIDAS) ===");
   console.log("======================================================");
-  console.log(JSON.stringify(summary, null, 2));
+  console.log(JSON.stringify({ fnSent, rwReply }, null, 2));
 }
 
-main().catch(console.error);
+runFullE2ETest().catch(console.error);
