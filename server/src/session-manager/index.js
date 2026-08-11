@@ -1,5 +1,5 @@
 import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, Browsers } from '@whiskeysockets/baileys';
-import { useSupabaseAuthState, flushPendingWrites, sessionCaches } from './auth.js';
+import { useSupabaseAuthState, flushPendingWrites, sessionCaches, clearInstanceMemoryCache } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
 import pino from 'pino';
@@ -305,8 +305,8 @@ class SessionManager {
                 connectTimeoutMs: 90000,
                 keepAliveIntervalMs: 15000,
                 defaultQueryTimeoutMs: 90000,
-                retryRequestDelayMs: 10000,
-                maxMsgRetryCount: 0, // Desativado para evitar loops de retry em grupos que causam BAN
+                retryRequestDelayMs: 3000,
+                maxMsgRetryCount: 5, // Ativado (5 retentativas) com busca no DB e controle de cache para garantir 100% das entregas
                 msgRetryCounterCache,
                 shouldSyncHistoryMessage: (histNotification) => {
                     // Sempre permite boot inicial e mapeamentos LID essenciais para estabilidade da sessão
@@ -321,7 +321,37 @@ class SessionManager {
                     return false;
                 },
                 getMessage: async (key) => {
-                    return { conversation: 'MENSAGEM_RECUPEERADA_COM_FALHA' };
+                    if (!key || !key.id) return undefined;
+                    try {
+                        // 1. Tenta buscar no wa_incoming_messages do Supabase
+                        const { data: incMsg } = await supabase
+                            .from('wa_incoming_messages')
+                            .select('raw_payload')
+                            .eq('instance_id', instanceId)
+                            .eq('message_id', key.id)
+                            .maybeSingle();
+
+                        if (incMsg?.raw_payload?.message) {
+                            console.log(`[SessionManager - Retry] Mensagem ${key.id} resgatada de wa_incoming_messages para responder ao retry do WhatsApp.`);
+                            return incMsg.raw_payload.message;
+                        }
+
+                        // 2. Fallback para a tabela messages
+                        const { data: dbMsg } = await supabase
+                            .from('messages')
+                            .select('raw_payload')
+                            .eq('instance_id', instanceId)
+                            .eq('whatsapp_message_id', key.id)
+                            .maybeSingle();
+
+                        if (dbMsg?.raw_payload?.message) {
+                            console.log(`[SessionManager - Retry] Mensagem ${key.id} resgatada da tabela messages para responder ao retry do WhatsApp.`);
+                            return dbMsg.raw_payload.message;
+                        }
+                    } catch (err) {
+                        console.warn(`[SessionManager - Retry] Erro ao buscar mensagem em getMessage (${key.id}):`, err.message);
+                    }
+                    return undefined;
                 }
             });
 
@@ -551,12 +581,13 @@ class SessionManager {
 
                     const isRestartRequired = (status === 515 || status === 428 || status === 1006 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('restart required') || reason.toLowerCase().includes('precondition required') || reason.toLowerCase().includes('connection closed') || reason.toLowerCase().includes('connection terminated') || reason.toLowerCase().includes('stream errored')) && isFullyAuthenticated;
                     if (isRestartRequired) {
-                        console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização pós-pareamento (status ${status} / ${reason}) para a instância ${instanceId}. Reconectando imediatamente em 500ms com as novas chaves pareadas...`);
+                        console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização pós-pareamento (status ${status} / ${reason}) para a instância ${instanceId}. Reciclando chaves em RAM e reconectando imediatamente em 500ms com as novas chaves...`);
                         try {
                             if (sock?.ws) sock.ws.close();
                             if (sock?.end) sock.end();
                         } catch (e) {}
                         this.sessions.delete(instanceId);
+                        clearInstanceMemoryCache(instanceId);
                         setTimeout(() => {
                             if (!this.sessions.has(instanceId)) {
                                 this.createSession(tenantId, instanceId).catch(err => {
@@ -576,12 +607,13 @@ class SessionManager {
                         const delays = [5000, 8000, 12000, 15000];
                         const delay = delays[Math.min(attempts - 1, delays.length - 1)];
 
-                        console.log(`[SessionManager] Oscilação temporária de conexão com servidores WhatsApp (${reason || status}) na instância ${instanceId} (tentativa ${attempts}). Aguardando ${delay / 1000}s para estabilizar chaves...`);
+                        console.log(`[SessionManager] Oscilação temporária de conexão com servidores WhatsApp (${reason || status}) na instância ${instanceId} (tentativa ${attempts}). Reciclando RAM e aguardando ${delay / 1000}s para estabilizar chaves...`);
                         try {
                             if (sock?.ws) sock.ws.close();
                             if (sock?.end) sock.end();
                         } catch (e) {}
                         this.sessions.delete(instanceId);
+                        clearInstanceMemoryCache(instanceId);
                         setTimeout(() => {
                             if (!this.sessions.has(instanceId)) {
                                 this.createSession(tenantId, instanceId).catch(err => {

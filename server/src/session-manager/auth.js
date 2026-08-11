@@ -39,6 +39,13 @@ export async function flushAllPendingWrites() {
     return;
 }
 
+export function clearInstanceMemoryCache(instanceId) {
+    if (sessionCaches.has(instanceId)) {
+        sessionCaches.get(instanceId).clear();
+        console.log(`[SessionManager] Cache de chaves Signal em RAM reciclado para a instância ${instanceId}.`);
+    }
+}
+
 export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState = false) {
     if (forceCleanState && sessionCaches.has(instanceId)) {
         sessionCaches.get(instanceId).clear();

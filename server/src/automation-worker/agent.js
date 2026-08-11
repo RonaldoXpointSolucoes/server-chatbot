@@ -2658,17 +2658,26 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     });
 
                                     if (response.ok) {
-                                        const resData = await response.json();
+                                        const rawText = await response.text();
+                                        let resData = null;
+                                        if (rawText && rawText.trim().length > 0) {
+                                            try {
+                                                resData = JSON.parse(rawText);
+                                            } catch (parseErr) {
+                                                console.warn(`[AutomationWorker - Status Pedido] Resposta da API não é um JSON válido: ${rawText}`);
+                                            }
+                                        }
+                                        
                                         logGastrofoodCall({
                                             direction: 'response',
                                             action: 'Consultar Status',
                                             method: 'POST',
                                             url: requestUrl,
                                             status: response.status,
-                                            response: resData
+                                            response: resData || rawText
                                         });
 
-                                        let finalData = resData.data || resData;
+                                        let finalData = resData ? (resData.data || resData) : null;
                                         if (finalData && Array.isArray(finalData.value)) {
                                             if (finalData.value.length > 0) {
                                                 finalData = finalData.value[0];
