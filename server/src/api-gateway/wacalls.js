@@ -13,6 +13,14 @@ const WACALLS_URL = getWaCallsUrl();
 
 // Proxy para Server-Sent Events (SSE) do WaCalls
 router.get('/wacalls/events', async (req, res) => {
+    if (process.env.ENABLE_WACALLS !== 'true') {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.write('data: {"type":"disabled","message":"WaCalls desativado"}\n\n');
+        return res.end();
+    }
+
     const controller = new AbortController();
     
     // Se o cliente desconectar, interrompe a requisição ao servidor Go
@@ -57,6 +65,9 @@ router.get('/wacalls/events', async (req, res) => {
 
 // Proxy genérico para requisições REST da API WaCalls
 router.all('/wacalls/*', async (req, res) => {
+    if (process.env.ENABLE_WACALLS !== 'true') {
+        return res.status(503).json({ error: 'Módulo WaCalls está temporariamente desativado' });
+    }
     const subpath = req.path.replace(/^\/wacalls/, '');
     const url = `${WACALLS_URL}/api${subpath}`;
 

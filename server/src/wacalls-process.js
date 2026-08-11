@@ -12,6 +12,11 @@ let restartAttempts = 0;
 const MAX_RESTARTS = 5;
 
 export function startWaCallsProcess() {
+    if (process.env.ENABLE_WACALLS !== 'true') {
+        console.log('[WaCalls Process Manager] Módulo WaCalls (VoIP Go) está ISOLADO/DESATIVADO (ENABLE_WACALLS != true).');
+        return;
+    }
+
     // Apenas ativa se estiver em ambiente linux ou se for explicitamente produção,
     // e se o binário wacalls-server existir.
     const binaryName = process.platform === 'win32' ? 'wacalls-server.exe' : 'wacalls-server';

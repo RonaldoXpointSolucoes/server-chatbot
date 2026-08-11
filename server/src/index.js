@@ -501,15 +501,21 @@ app.listen(PORT, '0.0.0.0', async () => {
     }
 
     try {
-        console.log("[Worker Boot] Inicializando WaCalls Background Process...");
-        startWaCallsProcess();
+        if (process.env.ENABLE_WACALLS === 'true') {
+            console.log("[Worker Boot] Inicializando WaCalls Background Process...");
+            startWaCallsProcess();
+        } else {
+            console.log("[Worker Boot] Módulo WaCalls (VoIP Go) está ISOLADO/DESATIVADO (ENABLE_WACALLS != true).");
+        }
     } catch(err) {
         console.error("[Worker Boot] Erro ao iniciar WaCalls Process:", err.message);
     }
 
     try {
-        console.log("[Worker Boot] Inicializando WaCalls Background Listener...");
-        startWaCallsListener();
+        if (process.env.ENABLE_WACALLS === 'true') {
+            console.log("[Worker Boot] Inicializando WaCalls Background Listener...");
+            startWaCallsListener();
+        }
     } catch(err) {
         console.error("[Worker Boot] Erro ao iniciar WaCalls Listener:", err.message);
     }

@@ -25,6 +25,10 @@ async function hasActiveInstances() {
 }
 
 export function startWaCallsListener() {
+    if (process.env.ENABLE_WACALLS !== 'true') {
+        return { stop: () => {} };
+    }
+
     let active = true;
 
     async function listen() {

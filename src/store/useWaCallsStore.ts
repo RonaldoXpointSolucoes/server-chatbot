@@ -277,6 +277,16 @@ export const useWaCallsStore = create<State & Actions>((set, get) => ({
     eventSource.onmessage = (event) => {
       try {
         const ev = JSON.parse(event.data);
+        if (ev.type === "disabled") {
+          console.log("[useWaCallsStore/SSE] WaCalls está desativado no servidor.");
+          set({ isConnectedSSE: false });
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+          return;
+        }
+
         console.log("[useWaCallsStore/SSE Event]:", ev);
 
         if (ev.type === "session-list") {
