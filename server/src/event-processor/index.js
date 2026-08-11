@@ -1638,23 +1638,80 @@ class EventProcessor {
         if (!key || !key.remoteJid || key.remoteJid.endsWith('@g.us')) return;
 
         const rawJid = key.remoteJid;
-        console.log(`[EventProcessor] ACK 463: Re-tentando entrega da mensagem ${key.id} para ${rawJid}...`);
+        const phone = rawJid.split('@')[0].split(':')[0];
+        console.log(`[EventProcessor] ACK 463 detectado para ${phone} (Msg ID: ${key.id}). Purgando sessão Signal obsoleta...`);
 
+        // 1. Purga as chaves de sessão Signal com problema do memCache e do Supabase (wa_auth_keys)
+        if (sock && sock.authState && sock.authState.keys && typeof sock.authState.keys.set === 'function') {
+            const getBrPhoneVariations = (phoneStr) => {
+                if (!phoneStr) return [];
+                const clean = String(phoneStr).replace(/\D/g, '');
+                if (!clean) return [];
+                const res = [clean];
+                if (clean.startsWith('55') && clean.length === 13 && clean.charAt(4) === '9') {
+                    res.push(clean.substring(0, 4) + clean.substring(5));
+                } else if (clean.startsWith('55') && clean.length === 12) {
+                    res.push(clean.substring(0, 4) + '9' + clean.substring(4));
+                }
+                return Array.from(new Set(res));
+            };
+
+            const vars = getBrPhoneVariations(phone);
+            const sessionPurgeObj = {};
+            sessionPurgeObj[rawJid] = null;
+            sessionPurgeObj[`${phone}@s.whatsapp.net`] = null;
+            sessionPurgeObj[`${phone}:0@s.whatsapp.net`] = null;
+            for (const v of vars) {
+                sessionPurgeObj[`${v}@s.whatsapp.net`] = null;
+                sessionPurgeObj[`${v}:0@s.whatsapp.net`] = null;
+            }
+            try {
+                await sock.authState.keys.set({ session: sessionPurgeObj });
+                console.log(`[EventProcessor] ACK 463: Chaves de sessão obsoletas para ${phone} foram purgadas do memCache e DB.`);
+            } catch (pErr) {
+                console.warn(`[EventProcessor] Aviso ao purgar chaves 463:`, pErr.message);
+            }
+        }
+
+        // 2. Localiza o texto da mensagem no banco (messages ou wa_outgoing_messages)
+        let bodyText = null;
         const { data: dbMsg } = await supabase
             .from('messages')
-            .select('*')
+            .select('text_content')
             .eq('instance_id', instanceId)
             .or(`whatsapp_message_id.eq.${key.id},id.eq.${key.id}`)
             .maybeSingle();
 
-        if (!dbMsg || !dbMsg.text_content) return;
+        if (dbMsg && dbMsg.text_content) {
+            bodyText = dbMsg.text_content;
+        } else {
+            const { data: outMsg } = await supabase
+                .from('wa_outgoing_messages')
+                .select('body')
+                .eq('instance_id', instanceId)
+                .or(`chat_jid.eq.${rawJid},chat_jid.like.%${phone}%`)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (outMsg && outMsg.body) bodyText = outMsg.body;
+        }
 
+        if (!bodyText) {
+            console.warn(`[EventProcessor] ACK 463: Texto da mensagem ${key.id} não foi encontrado no banco para re-envio.`);
+            return;
+        }
+
+        // 3. Re-dispara o envio com resolução de JID renovada e sessão Signal recém-criada
         const sendFn = sock.originalSendMessage || sock.sendMessage;
-        try {
-            await sendFn(rawJid, { text: dbMsg.text_content });
-            console.log(`[EventProcessor] Re-envio via ACK 463 retry para ${rawJid} concluído!`);
-        } catch (retryErr) {
-            console.error(`[EventProcessor] Falha no re-envio ACK 463 retry para ${rawJid}:`, retryErr.message);
+        if (typeof sendFn === 'function') {
+            let targetJid = rawJid;
+            try {
+                targetJid = await resolveTargetJid(sock, rawJid, tenantId);
+                const retryRes = await sendFn(targetJid, { text: bodyText });
+                console.log(`[EventProcessor] ACK 463: Re-envio concluído com SUCESSO para ${targetJid}! Novo ID:`, retryRes?.key?.id);
+            } catch (retryErr) {
+                console.error(`[EventProcessor] Falha no re-envio ACK 463 para ${targetJid || rawJid}:`, retryErr.message);
+            }
         }
     }
 

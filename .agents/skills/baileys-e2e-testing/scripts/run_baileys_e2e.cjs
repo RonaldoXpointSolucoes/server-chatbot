@@ -96,6 +96,32 @@ async function invokeSendMessage(instanceId, targetJid, text) {
   });
 }
 
+function verifyDeliveryInDb(instanceId, textMatch) {
+  return new Promise((resolve) => {
+    const queryPath = `/rest/v1/wa_outgoing_messages?instance_id=eq.${instanceId}&body=like.*${encodeURIComponent(textMatch)}*&select=id,status,last_error,sent_at`;
+    const url = new URL(queryPath, SUPABASE_URL);
+    const req = https.request(url, {
+      method: 'GET',
+      headers: {
+        'apikey': SERVICE_KEY,
+        'Authorization': `Bearer ${SERVICE_KEY}`
+      }
+    }, res => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          const msg = parsed && parsed[0];
+          resolve(msg || null);
+        } catch (e) { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -114,13 +140,17 @@ async function runCycle(cycleNumber) {
   console.log(`Texto: "${fnText}"`);
 
   const fnResult = await invokeSendMessage(FOODNEXT_INSTANCE_ID, RONALDO_WEB_JID, fnText);
-  console.log(`[ETAPA 1] Retorno da Baileys Engine:`, JSON.stringify(fnResult, null, 2));
+  console.log(`[ETAPA 1] Retorno da Baileys Engine API:`, JSON.stringify(fnResult, null, 2));
 
   if (!fnResult.body || !fnResult.body.ok || !fnResult.body.result?.key?.id) {
     throw new Error(`Falha no envio da Etapa 1 do Ciclo ${cycleNumber}!`);
   }
 
-  await delay(2500);
+  await delay(4000);
+
+  // Checa status de entrega real no Supabase
+  const fnDbVerification = await verifyDeliveryInDb(FOODNEXT_INSTANCE_ID, fnText);
+  console.log(`[ETAPA 1] Verificação no Banco (wa_outgoing_messages):`, JSON.stringify(fnDbVerification, null, 2));
 
   // STEP 2: Ronaldo-Web -> FoodNext
   const rwText = `RESPOSTA-BAILEYS-RW-FN-CICLO${cycleNumber}-${ts}-${nowMs}`;
@@ -128,26 +158,34 @@ async function runCycle(cycleNumber) {
   console.log(`Texto: "${rwText}"`);
 
   const rwResult = await invokeSendMessage(RONALDO_WEB_INSTANCE_ID, FOODNEXT_JID, rwText);
-  console.log(`[ETAPA 2] Retorno da Baileys Engine:`, JSON.stringify(rwResult, null, 2));
+  console.log(`[ETAPA 2] Retorno da Baileys Engine API:`, JSON.stringify(rwResult, null, 2));
 
   if (!rwResult.body || !rwResult.body.ok || !rwResult.body.result?.key?.id) {
     throw new Error(`Falha no envio da Etapa 2 do Ciclo ${cycleNumber}!`);
   }
 
-  console.log(`\n✅ CICLO ${cycleNumber} CONCLUÍDO COM CONFIRMAÇÃO REAL DA BAILEYS!`);
+  await delay(4000);
+
+  // Checa status de entrega real no Supabase
+  const rwDbVerification = await verifyDeliveryInDb(RONALDO_WEB_INSTANCE_ID, rwText);
+  console.log(`[ETAPA 2] Verificação no Banco (wa_outgoing_messages):`, JSON.stringify(rwDbVerification, null, 2));
+
+  console.log(`\n✅ CICLO ${cycleNumber} CONCLUÍDO!`);
   return {
     cycleNumber,
     fnSent: {
       text: fnText,
       messageId: fnResult.body.result.key.id,
       remoteJid: fnResult.body.result.key.remoteJid,
-      fromMe: fnResult.body.result.key.fromMe
+      dbStatus: fnDbVerification?.status || 'unknown',
+      sentAt: fnDbVerification?.sent_at || null
     },
     rwReply: {
       text: rwText,
       messageId: rwResult.body.result.key.id,
       remoteJid: rwResult.body.result.key.remoteJid,
-      fromMe: rwResult.body.result.key.fromMe
+      dbStatus: rwDbVerification?.status || 'unknown',
+      sentAt: rwDbVerification?.sent_at || null
     }
   };
 }

@@ -98,6 +98,9 @@ Sempre que o usuário digitar `teste envios` (ou variações como `teste envios.
    `node .agents/skills/baileys-e2e-testing/scripts/run_baileys_e2e.cjs`
 3. **Acompanhamento e Relatório**: Acompanhar a execução dos 3 ciclos bidirecionais de envio e recebimento de mensagens entre as caixas **FoodNext** (`11 94775-8860`) e **Ronaldo-Web** (`11 97596-0999`) e apresentar a tabela de evidências e o resultado final ao usuário.
 
+
+
+
 ## Credenciais para Testes de Automação no Chrome
 
 Sempre que o agente precisar realizar login de forma automatizada e testar as funcionalidades e fluxos no Chrome, deve utilizar as seguintes credenciais:
