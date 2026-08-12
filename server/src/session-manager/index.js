@@ -653,53 +653,37 @@ class SessionManager {
 
                     await this.logConnectionEvent(tenantId, instanceId, 'disconnected', 'close', reason || `status_${status}`, null, null);
 
-                    if ((loggedOut || status === 401 || status === 403 || status === 400 || status === 500 || isBadSession) && !isFullyAuthenticated && !isPairingPendingSync) {
-                        console.log(`[SessionManager] Pareamento pendente ou conexão falhou na instância ${instanceId} (status: ${status}, reason: ${reason}). Limpando credenciais temporárias corrompidas.`);
+                    if (loggedOut || status === 401 || status === 403 || status === 400 || status === 500 || isBadSession) {
+                        console.log(`[SessionManager] Desconexão/Sessão inválida detectada na instância ${instanceId} (status: ${status}, reason: ${reason}). Limpando credenciais desatualizadas em RAM e Supabase.`);
                         this.authenticatedSessions.delete(instanceId);
                         this.pairingPendingSync.delete(instanceId);
+                        this.reconnectAttempts.delete(instanceId);
+                        clearInstanceMemoryCache(instanceId);
+
                         await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId));
                         
-                        this.reconnectAttempts.delete(instanceId);
-                        
+                        const nextStatus = loggedOut ? 'logged_out' : 'disconnected';
+                        const errMsg = loggedOut 
+                            ? 'Desconectado pelo celular. A sessão do WhatsApp foi encerrada no dispositivo móvel. Clique em Reconectar para vincular novamente.' 
+                            : 'A sessão de conexão expirou ou falhou. Clique em Reconectar para vincular novamente via QR Code ou Código de Pareamento.';
+
                         await retryWithBackoff(() =>
                             supabase.from('whatsapp_instances')
                                 .update({ 
-                                    status: 'offline', 
-                                    last_error: 'O pareamento por código falhou ou foi cancelado no celular. Por favor, tente gerar um novo código e digite-o novamente.' 
+                                    status: nextStatus, 
+                                    last_error: errMsg 
                                 })
                                 .eq('id', instanceId)
                         );
                         
+                        await this.logConnectionEvent(tenantId, instanceId, nextStatus, 'close', reason, null, null);
+
                         // Publica evento de status offline para o frontend
                         await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
                             connection: 'close', 
-                            lastDisconnect: { error: { output: { statusCode: status || 400 } } } 
-                        });
-                    } else if (loggedOut && isFullyAuthenticated) {
-                        console.log(`[SessionManager] Instância ${instanceId} desconectada pelo celular (loggedOut). Limpando credenciais e definindo como logged_out.`);
-                        this.authenticatedSessions.delete(instanceId);
-                        await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));
-                        await retryWithBackoff(() => supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId));
-                        await retryWithBackoff(() => supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId));
-                        
-                        this.reconnectAttempts.delete(instanceId);
-                        
-                        await retryWithBackoff(() =>
-                            supabase.from('whatsapp_instances')
-                                .update({ 
-                                    status: 'logged_out', 
-                                    last_error: 'Desconectado pelo celular. A sessão do WhatsApp foi encerrada no dispositivo móvel. Por favor, faça um novo pareamento.' 
-                                })
-                                .eq('id', instanceId)
-                        );
-                        
-                        await this.logConnectionEvent(tenantId, instanceId, 'logged_out', 'logged_out', reason, null, null);
-                        
-                        await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
-                            connection: 'close', 
-                            lastDisconnect: { error: { output: { statusCode: 401 } } } 
+                            lastDisconnect: { error: { output: { statusCode: status || 401 } } } 
                         });
                     } else if (isBlocked12h && isFullyAuthenticated) {
                         console.error(`[SessionManager] Instância ${instanceId} está BLOQUEADA por 12h no WhatsApp.`);

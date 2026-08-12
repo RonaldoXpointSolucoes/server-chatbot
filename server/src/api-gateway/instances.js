@@ -83,11 +83,22 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
             }
         }
         
-        // Limpa credenciais apenas se for expressamente solicitado via parâmetro force_new=true
-        if (forceNewQR) {
-            console.log(`[API] Limpeza forçada de credenciais solicitada para a instância ${instanceId}...`);
+        // Verifica status atual no banco para determinar se é uma reconexão de instância desconectada/offline
+        const { data: dbInst } = await supabase
+            .from('whatsapp_instances')
+            .select('status')
+            .eq('id', instanceId)
+            .single();
+
+        const currentStatus = dbInst?.status;
+        const isStaleDisconnect = ['disconnected', 'offline', 'paused', 'logged_out', 'bad_session'].includes(currentStatus);
+
+        // Limpa credenciais desatualizadas se for solicitado force_new=true ou se a instância já estava desconectada/offline
+        if (forceNewQR || isStaleDisconnect) {
+            console.log(`[API] Limpeza de credenciais desatualizadas executada para a instância ${instanceId} (status anterior: ${currentStatus}, forceNew: ${forceNewQR})...`);
             const { sessionCaches } = await import('../session-manager/auth.js');
             if (sessionCaches && sessionCaches.has(instanceId)) {
+                sessionCaches.get(instanceId).clear();
                 sessionCaches.delete(instanceId);
             }
             await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
