@@ -436,6 +436,7 @@ export default function ChatDashboard() {
 
   const {  
     contacts, 
+    rawInstances,
     activeChatId, 
     evolutionConnected, 
     connectedInstanceName,
@@ -494,6 +495,7 @@ export default function ChatDashboard() {
     toggleGlobalAi
   } = useChatStore(useShallow(state => ({
     contacts: state.contacts,
+    rawInstances: state.rawInstances,
     globalAiEnabled: state.globalAiEnabled,
     toggleGlobalAi: state.toggleGlobalAi, 
     activeChatId: state.activeChatId, 
@@ -667,6 +669,16 @@ export default function ChatDashboard() {
       document.removeEventListener('visibilitychange', handleFocusOrVisibility);
     };
   }, []);
+
+  // Dispara a busca global no Supabase quando o usuário digita no campo de busca do chat
+  useEffect(() => {
+    if (searchTerm && searchTerm.trim().length >= 2) {
+      const timer = setTimeout(() => {
+        searchGlobalContacts(searchTerm.trim());
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [searchTerm, searchGlobalContacts]);
 
   // Limpa o termo de pesquisa (input e filtro) sempre que a caixa comercial/instância (activeChannelFilter) ou o tipo de filtro (filterType) for alterado
   useEffect(() => {
@@ -1681,8 +1693,10 @@ export default function ChatDashboard() {
            const s = searchTerm.toLowerCase();
            const match = c.name?.toLowerCase().includes(s) ||
                          c.custom_name?.toLowerCase().includes(s) ||
-                         c.whatsapp_jid?.includes(searchTerm) ||
-                         c.phone?.includes(searchTerm) ||
+                         c.push_name?.toLowerCase().includes(s) ||
+                         c.pushname?.toLowerCase().includes(s) ||
+                         c.whatsapp_jid?.toLowerCase().includes(s) ||
+                         c.phone?.toLowerCase().includes(s) ||
                          c.fantasy_name?.toLowerCase().includes(s) ||
                          c.document_number?.includes(searchTerm) ||
                          c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(s));

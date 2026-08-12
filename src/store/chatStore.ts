@@ -424,6 +424,7 @@ interface ChatState {
   contacts: ContactType[];
   activeChatId: string | null;
   evolutionConnected: boolean;
+  rawInstances: any[];
   instancesStatus: Record<string, string>;
   setInstanceStatus: (id: string, status: string) => void;
   connectedInstanceName: string | null;
@@ -499,6 +500,7 @@ interface ChatState {
   deleteAgent: (id: string) => Promise<void>;
   updateConversationField: (contactId: string, payload: Record<string, any>) => Promise<void>;
   updateAgentProfile: (fullName: string, signature: string, use_signature: boolean) => Promise<void>;
+  updateInstanceEnabledGroups: (instanceId: string, groupJids: string[], activeGroupItems?: any[]) => Promise<void>;
   
   // Gemini Actions
   // Automations
@@ -824,6 +826,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
   connectedInstanceName: null,
+  rawInstances: [],
   tenantInfo: null,
   agents: [],
   crmBoards: [],
@@ -1522,6 +1525,109 @@ export const useChatStore = create<ChatState>((set, get) => ({
       get().loadTicketsForContact(id);
     } else {
       set({ activeTicket: null, contactTickets: [] });
+    }
+  },
+
+  updateInstanceEnabledGroups: async (instanceId: string, groupJids: string[], activeGroupItems?: any[]) => {
+    try {
+      const { data: instData } = await supabase
+        .from('whatsapp_instances')
+        .select('settings')
+        .eq('id', instanceId)
+        .single();
+
+      const currentSettings = instData?.settings || {};
+      const updatedSettings = {
+        ...currentSettings,
+        enabled_groups: groupJids
+      };
+
+      const { error } = await supabase
+        .from('whatsapp_instances')
+        .update({ settings: updatedSettings, updated_at: new Date().toISOString() })
+        .eq('id', instanceId);
+
+      if (error) throw error;
+
+      const state = get();
+      const updatedRawInstances = (state.rawInstances || []).map((inst: any) => 
+        inst.id === instanceId ? { ...inst, settings: updatedSettings } : inst
+      );
+
+      // Garante a injeção instantânea na memória e no banco Supabase de todos os grupos marcados como ativos
+      const tenantId = state.tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || '';
+      if (Array.isArray(activeGroupItems) && activeGroupItems.length > 0 && tenantId) {
+        const activeJids = activeGroupItems.filter(g => g.enabled && (g.jid || g.whatsapp_jid)).map(g => g.jid || g.whatsapp_jid);
+        
+        if (activeJids.length > 0) {
+          const { data: existingDbContacts } = await supabase
+            .from('contacts')
+            .select('id, whatsapp_jid')
+            .eq('tenant_id', tenantId)
+            .in('whatsapp_jid', activeJids);
+
+          const existingJidToUuidMap = new Map<string, string>();
+          if (existingDbContacts) {
+            existingDbContacts.forEach(c => {
+              if (c.whatsapp_jid && c.id) existingJidToUuidMap.set(c.whatsapp_jid, c.id);
+            });
+          }
+
+          const contactsToUpsertDb: any[] = [];
+
+          activeGroupItems.forEach((g: any) => {
+            if (!g.enabled) return;
+            const groupJid = g.jid || g.whatsapp_jid;
+            if (!groupJid) return;
+
+            const groupName = g.name || g.subject || 'Grupo de WhatsApp';
+            const uuid = existingJidToUuidMap.get(groupJid) || crypto.randomUUID();
+            const compositeId = `${uuid}_${instanceId}`;
+
+            const existingLocal = state.contacts.find(c => c.whatsapp_jid === groupJid || c.phone === groupJid || c.id === compositeId || c.id === uuid);
+
+            const groupContactObj = {
+              id: existingLocal ? existingLocal.id : compositeId,
+              instance_id: instanceId,
+              whatsapp_jid: groupJid,
+              phone: groupJid,
+              name: groupName,
+              custom_name: groupName,
+              push_name: groupName,
+              avatar: g.avatar_url || existingLocal?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(groupName)}&background=00a884&color=fff`,
+              avatar_url: g.avatar_url || existingLocal?.avatar_url,
+              bot_status: 'active',
+              conv_status: existingLocal?.conv_status || 'bot',
+              unread: existingLocal?.unread || 0,
+              messages: existingLocal?.messages || []
+            };
+
+            state.upsertContactLocally(groupContactObj as any);
+
+            contactsToUpsertDb.push({
+              id: uuid,
+              tenant_id: tenantId,
+              instance_id: instanceId,
+              whatsapp_jid: groupJid,
+              name: groupName,
+              custom_name: groupName,
+              phone: groupJid,
+              bot_status: 'active'
+            });
+          });
+
+          if (contactsToUpsertDb.length > 0) {
+            const { error: dbErr } = await supabase.from('contacts').upsert(contactsToUpsertDb, { onConflict: 'id' });
+            if (dbErr) console.warn('[updateInstanceEnabledGroups] Upsert contacts:', dbErr);
+          }
+        }
+      }
+
+      set({ rawInstances: updatedRawInstances });
+      await state.fetchInitialData();
+    } catch (err: any) {
+      console.error('[updateInstanceEnabledGroups] Erro ao salvar grupos ativos:', err);
+      throw err;
     }
   },
 
@@ -3242,21 +3348,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const validContacts = dbContacts.filter(c => {
              const conv = dbConvs?.find(cv => cv.contact_id === c.id);
              const effectiveInstanceId = conv?.instance_id || c.instance_id;
+             const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+             const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+             const isGlobalAdmin = isRonaldo || roleStr === 'owner' || roleStr === 'admin';
              
-             if (effectiveInstanceId) {
+             if (effectiveInstanceId && !isGlobalAdmin) {
                  if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                    if (!allowedInstances.includes(effectiveInstanceId)) return false;
-                } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                    const matchInst = allowedInstances.some(inst => 
+                      inst === effectiveInstanceId || 
+                      instanceCache.getId(inst) === effectiveInstanceId || 
+                      instanceCache.getName(inst) === effectiveInstanceId
+                    );
+                    if (!matchInst) return false;
+                 } else if (roleStr === 'agent' || roleStr === 'Agente') {
                     return false;
-                }
-            }
-            const jid = c.whatsapp_jid || '';
-            const phone = c.phone || '';
-            if (jid.includes('@lid') || jid.includes('undefined') || jid.includes('null')) return false;
-            if (phone === 'undefined' || phone === 'null' || !phone) return false;
-            const isGroup = jid.endsWith('@g.us');
-            if (phone.length > 15 && !phone.includes('+') && !isGroup) return false;
-            return true;
+                 }
+             }
+             const jid = c.whatsapp_jid || '';
+             const phone = c.phone || '';
+             if (jid.includes('@lid') || jid.includes('undefined') || jid.includes('null')) return false;
+             if (phone === 'undefined' || phone === 'null' || !phone) return false;
+             const isGroup = jid.endsWith('@g.us');
+             if (phone.length > 15 && !phone.includes('+') && !isGroup) return false;
+             return true;
         });
 
         const newContacts: ContactType[] = validContacts.map(dbC => {
@@ -3420,8 +3534,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 dbContacts = dbContacts.concat(res.data);
             }
             if (res.error) {
-               console.warn('Erro ao buscar dbContacts chunk', res.error);
+                console.warn('Erro ao buscar dbContacts chunk', res.error);
             }
+        }
+
+        // Puxar também contatos de todos os grupos de WhatsApp ativados nas caixas
+        const rawInstsForGroups = get().rawInstances || [];
+        const enabledGroupJids = new Set<string>();
+        rawInstsForGroups.forEach((inst: any) => {
+           if (Array.isArray(inst.settings?.enabled_groups)) {
+              inst.settings.enabled_groups.forEach((jid: string) => {
+                 if (jid && jid.endsWith('@g.us')) enabledGroupJids.add(jid);
+              });
+           }
+        });
+
+        if (enabledGroupJids.size > 0) {
+           try {
+              const { data: grpContacts } = await supabase
+                 .from('contacts')
+                 .select('*')
+                 .eq('tenant_id', tenant.id)
+                 .in('whatsapp_jid', Array.from(enabledGroupJids));
+              
+              if (grpContacts && grpContacts.length > 0) {
+                 grpContacts.forEach(gc => {
+                    if (!dbContacts.some(c => c.id === gc.id || c.whatsapp_jid === gc.whatsapp_jid)) {
+                       dbContacts.push(gc);
+                    }
+                 });
+              }
+           } catch(e) {
+              console.warn('Erro ao carregar contatos de grupos habilitados:', e);
+           }
         }
 
         // Puxar tarefas CRM ativas para popular reativamente os contatos de imediato

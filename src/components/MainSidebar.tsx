@@ -60,6 +60,7 @@ import { formatPhoneNumber } from '../utils/format';
 import KanbanBoardCreator from './KanbanBoardCreator';
 import { AgentSettingsModal } from './AgentSettingsModal';
 import { CreateInboxModal } from './modals/CreateInboxModal';
+import { ManageGroupsModal } from './modals/ManageGroupsModal';
 
 const SidebarContext = React.createContext<{ onClose?: () => void }>({});
 
@@ -71,6 +72,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const reopenedTicketToast = useChatStore(state => state.reopenedTicketToast);
   const setReopenedTicketToast = useChatStore(state => state.setReopenedTicketToast);
   const [isCreateInboxModalOpen, setIsCreateInboxModalOpen] = useState(false);
+  const [manageGroupsTarget, setManageGroupsTarget] = useState<{ id: string; name: string } | null>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem('sidebar_expanded_sections');
     if (saved) {
@@ -1298,6 +1300,17 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               Sincronizar Conversas
             </button>
             <button 
+              className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2"
+              onClick={(e) => {
+                 e.stopPropagation();
+                 setManageGroupsTarget({ id: instanceContextMenu.id, name: instanceContextMenu.name });
+                 setInstanceContextMenu(null);
+              }}
+            >
+              <Users size={14} className="text-[#00a884]" />
+              Ativar Grupos
+            </button>
+            <button 
               className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2 border-t border-[#2a3942] mt-1 pt-2"
               onClick={(e) => {
                  e.stopPropagation();
@@ -1390,6 +1403,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       <CreateInboxModal
         isOpen={isCreateInboxModalOpen}
         onClose={() => setIsCreateInboxModalOpen(false)}
+      />
+      <ManageGroupsModal
+        isOpen={Boolean(manageGroupsTarget)}
+        onClose={() => setManageGroupsTarget(null)}
+        instanceId={manageGroupsTarget?.id || null}
+        instanceName={manageGroupsTarget?.name || null}
       />
       </div>
     </SidebarContext.Provider>

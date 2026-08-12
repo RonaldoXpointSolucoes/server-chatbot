@@ -3,7 +3,7 @@ import { supabase, ContactRow } from '../services/supabase';
 import { useChatStore } from '../store/chatStore';
 import { 
   Search, Plus, Edit2, Trash2, X, Phone, Mail, FileText,
-  User, CheckCircle2, AlertCircle, Building2, UserCircle2, ArrowLeft, MessageSquare, ChevronDown, MoreVertical
+  User, CheckCircle2, AlertCircle, Building2, UserCircle2, ArrowLeft, MessageSquare, ChevronDown, MoreVertical, Users
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
@@ -116,7 +116,7 @@ export default function ContactsManager() {
       
       // Cria um termo limpo apenas com números para buscar documentos/celulares formatados ou não
       const cleanSearch = search.replace(/\D/g, '');
-      let orCondition = `name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%`;
+      let orCondition = `name.ilike.%${search}%,custom_name.ilike.%${search}%,fantasy_name.ilike.%${search}%,whatsapp_jid.ilike.%${search}%`;
       
       if (cleanSearch) {
         orCondition += `,document_number.ilike.%${cleanSearch}%,phone.ilike.%${cleanSearch}%,document_number.ilike.%${search}%,phone.ilike.%${search}%`;
@@ -958,15 +958,21 @@ export default function ContactsManager() {
                                 </div>
                             </>
                           ) : (
-                            <div className={`w-10 h-10 rounded-full ${contact.document_type === 'cnpj' ? 'bg-blue-500/10 border border-blue-500/20 text-blue-500' : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-500'} flex items-center justify-center font-bold text-lg shrink-0`}>
-                               {contact.document_type === 'cnpj' ? <Building2 size={20} /> : (contact.custom_name || contact.name || 'U').charAt(0).toUpperCase()}
+                            <div className={`w-10 h-10 rounded-full ${contact.whatsapp_jid?.endsWith('@g.us') ? 'bg-[#00a884]/15 border border-[#00a884]/30 text-[#00a884]' : contact.document_type === 'cnpj' ? 'bg-blue-500/10 border border-blue-500/20 text-blue-500' : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-500'} flex items-center justify-center font-bold text-lg shrink-0`}>
+                               {contact.whatsapp_jid?.endsWith('@g.us') ? <Users size={20} /> : contact.document_type === 'cnpj' ? <Building2 size={20} /> : (contact.custom_name || contact.name || 'U').charAt(0).toUpperCase()}
                             </div>
                           )}
                           <div className="flex flex-col">
                              <div className="flex items-center gap-2">
-                               <span className={`font-semibold text-sm ${contact.document_type === 'cnpj' ? 'text-blue-400 group-hover:text-blue-300' : 'text-[#e9edef] group-hover:text-emerald-400'} transition-colors`}>
+                               <span className={`font-semibold text-sm ${contact.whatsapp_jid?.endsWith('@g.us') ? 'text-[#00a884] group-hover:text-emerald-300' : contact.document_type === 'cnpj' ? 'text-blue-400 group-hover:text-blue-300' : 'text-[#e9edef] group-hover:text-emerald-400'} transition-colors flex items-center gap-1.5`}>
+                                 {contact.whatsapp_jid?.endsWith('@g.us') && <Users size={14} className="text-[#00a884]" />}
                                  {contact.fantasy_name || contact.custom_name || contact.name}
                                </span>
+                               {contact.whatsapp_jid?.endsWith('@g.us') && (
+                                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#00a884]/15 border border-[#00a884]/30 text-[10px] font-bold text-[#00a884]">
+                                     Grupo
+                                  </span>
+                               )}
                                {contact.document_type === 'cnpj' && !contact.fantasy_name && (
                                   <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-[10px] font-bold text-blue-400">
                                      Empresa

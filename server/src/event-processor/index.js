@@ -392,7 +392,7 @@ class EventProcessor {
             }
             
             const instanceConfig = await this.getInstanceConfig(instanceId);
-            const allowedGroups = instanceConfig.allowed_groups || [];
+            const allowedGroups = instanceConfig.enabled_groups || instanceConfig.allowed_groups || instanceConfig.enabledGroups || instanceConfig.allowedGroups || [];
             
             // Ignora status e LIDs isolados sem conteúdo de mensagem
             if (this.isBroadcast(jid) || (this.isLid(jid) && !msg.message)) {
@@ -1627,7 +1627,7 @@ class EventProcessor {
 
         try {
             const instanceConfig = await this.getInstanceConfig(instanceId);
-            const allowedGroups = instanceConfig.allowed_groups || [];
+            const allowedGroups = instanceConfig.enabled_groups || instanceConfig.allowed_groups || instanceConfig.enabledGroups || instanceConfig.allowedGroups || [];
 
             for (const update of updates) {
                 if (!update.key || !update.key.id) continue;

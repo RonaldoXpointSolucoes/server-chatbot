@@ -564,7 +564,7 @@ export const MessageBubble = memo(({
           </div>
         )}
 
-        {!isMe && activeChat?.phone?.endsWith('@g.us') && (() => {
+        {!isMe && (activeChat?.whatsapp_jid?.endsWith('@g.us') || activeChat?.phone?.endsWith('@g.us') || activeChat?.id?.includes('@g.us')) && (() => {
            const participantJid = msg.payload?.key?.participant || msg.payload?.participant;
            if (!participantJid) return null;
            const cleanParticipant = participantJid.replace(/\D/g, '');
