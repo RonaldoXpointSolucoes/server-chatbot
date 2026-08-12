@@ -67,6 +67,10 @@ class SessionManager {
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
             write: (msg) => {
+                if (typeof msg === 'string' && (msg.includes('Closing session:') || msg.includes('_chains'))) {
+                    return; // Ignora dumps verbosos de chaves criptográficas do libsignal ao fechar/reciclar sessão
+                }
+
                 try {
                     const parsed = JSON.parse(msg);
                     
@@ -93,7 +97,8 @@ class SessionManager {
                         'no name present, ignoring presence update request',
                         'failed to sync state',
                         'failed to find key',
-                        'critical_unblock'
+                        'critical_unblock',
+                        'Closing session:'
                     ];
                     
                     if (parsed.msg && ignoredLogs.some(text => parsed.msg.includes(text))) {
@@ -121,7 +126,9 @@ class SessionManager {
                     const lvl = parsed.level >= 50 ? 'error' : parsed.level >= 40 ? 'warn' : 'info';
                     addLog(lvl, `[Baileys] ${parsed.msg || ''} ${JSON.stringify(parsed, (k,v) => ['msg','level','time','pid','hostname'].includes(k) ? undefined : v)}`);
                 } catch(e) {
-                    addLog('info', `[Baileys] ${msg.trim()}`);
+                    if (typeof msg === 'string' && !msg.includes('Closing session:') && !msg.includes('_chains')) {
+                        addLog('info', `[Baileys] ${msg.trim()}`);
+                    }
                 }
                 process.stdout.write(msg);
             }
