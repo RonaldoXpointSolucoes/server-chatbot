@@ -736,9 +736,14 @@ class EventProcessor {
                   const targetPhone = ex?.phone || rawPhone;
                   const key = `${currentTenant}_${targetPhone}`;
 
-                  if (!uniqueContactsMap.has(key)) {
-                      const hasValidOldName = ex && ex.name && ex.name !== ex.phone && ex.name !== targetPhone;
-                      const finalName = ex?.custom_name ? ex.custom_name : (hasValidOldName ? ex.name : (c.name || targetPhone));
+                      const isGroupContact = (c.whatsapp_jid && c.whatsapp_jid.endsWith('@g.us')) || targetPhone.endsWith('@g.us');
+                      let finalName;
+                      if (isGroupContact) {
+                          finalName = ex?.custom_name || ex?.name || (c.name && !c.name.includes('@g.us') && c.name !== targetPhone ? c.name : 'Grupo de WhatsApp');
+                      } else {
+                          const hasValidOldName = ex && ex.name && ex.name !== ex.phone && ex.name !== targetPhone;
+                          finalName = ex?.custom_name ? ex.custom_name : (hasValidOldName ? ex.name : (c.name || targetPhone));
+                      }
                       let finalJid = c.whatsapp_jid;
                       if (!finalJid || finalJid.endsWith('@lid')) {
                           finalJid = `${targetPhone}@s.whatsapp.net`;
