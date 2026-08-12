@@ -736,6 +736,7 @@ class EventProcessor {
                   const targetPhone = ex?.phone || rawPhone;
                   const key = `${currentTenant}_${targetPhone}`;
 
+                  if (!uniqueContactsMap.has(key)) {
                       const isGroupContact = (c.whatsapp_jid && c.whatsapp_jid.endsWith('@g.us')) || targetPhone.endsWith('@g.us');
                       let finalName;
                       if (isGroupContact) {
