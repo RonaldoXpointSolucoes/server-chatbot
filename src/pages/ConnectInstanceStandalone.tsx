@@ -40,6 +40,13 @@ export default function ConnectInstanceStandalone() {
   const instanceId = paramId || searchParams.get('id');
 
   const [instance, setInstance] = useState<InstanceData | null>(null);
+  const instanceRef = useRef<InstanceData | null>(null);
+
+  // Atualiza o ref sempre que instance mudar
+  useEffect(() => {
+    instanceRef.current = instance;
+  }, [instance]);
+
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,16 +71,81 @@ export default function ConnectInstanceStandalone() {
 
   const fetchEngineApi = useCallback(async (path: string, options: RequestInit = {}) => {
     const baseUrl = getActiveEngineUrl();
-    const apiKey = 'sk_live_xpoint_master_key_2026';
+    const inst = instanceRef.current;
+    const tenantId = inst?.tenant_id;
+    const apiKey = inst?.api_key || 'chatboot-secret-key';
+    
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'apikey': apiKey,
+      ...(tenantId ? { 'x-tenant-id': tenantId } : {}),
+      ...((options.headers as Record<string, string>) || {})
+    };
+
     return fetch(`${baseUrl}${path}`, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        ...(options.headers || {})
-      }
+      headers
     });
   }, []);
+
+  // 2. Consulta o status em tempo real no motor Node/Baileys
+  const checkEngineStatus = useCallback(async (targetInst?: InstanceData | null) => {
+    const inst = targetInst || instanceRef.current;
+    const currentInstanceId = instanceId;
+    if (!currentInstanceId || !inst?.tenant_id) return;
+
+    try {
+      const baseUrl = getActiveEngineUrl();
+      const apiKey = inst.api_key || 'chatboot-secret-key';
+      const res = await fetch(`${baseUrl}/api/v1/instances/${currentInstanceId}/status`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': inst.tenant_id,
+          'apikey': apiKey
+        }
+      });
+
+      if (!res.ok) return;
+
+      const rawJson = await res.json();
+      const data = rawJson.data || rawJson;
+      const st = data.status || data.sessionStatus || 'disconnected';
+      const phone = data.phoneNumber || data.phone || data.user_jid?.split('@')[0];
+
+      setConnectionStatus(st);
+      if (phone) setConnectedNumber(phone);
+
+      const isConn = st === 'connected' || st === 'connected_local' || st === 'open';
+
+      if (isConn) {
+        setStatusStep(4);
+        setStatusMessage('WhatsApp conectado e sincronizado com sucesso!');
+        setQrCodeData(null);
+        setQrBase64(null);
+      } else if (data.qrBase64 || data.qr_base64 || data.base64) {
+        const b64 = data.qrBase64 || data.qr_base64 || data.base64;
+        setQrBase64(b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`);
+        setQrCodeData(null);
+        setStatusStep(2);
+        setStatusMessage('Aguardando leitura do QR Code pelo celular...');
+      } else if (data.qrCode || data.qr_code || data.whatsapp_instance_runtime?.[0]?.qr_code) {
+        const qrText = data.qrCode || data.qr_code || data.whatsapp_instance_runtime?.[0]?.qr_code;
+        setQrCodeData(qrText);
+        setQrBase64(null);
+        setStatusStep(2);
+        setStatusMessage('Aguardando leitura do QR Code pelo celular...');
+      } else if (st === 'connecting' || st === 'pairing') {
+        setStatusStep(3);
+        setStatusMessage('QR Code lido no celular! Autenticando com o WhatsApp...');
+      } else {
+        setStatusStep(1);
+        setStatusMessage('Instância pronta para geração de QR Code.');
+      }
+    } catch (e) {
+      console.warn('[ConnectStandalone] Erro ao consultar engine:', e);
+    }
+  }, [instanceId]);
 
   // 1. Carrega dados básicos da instância no Supabase
   const loadInstanceMetadata = useCallback(async () => {
@@ -86,6 +158,8 @@ export default function ConnectInstanceStandalone() {
     try {
       setLoading(true);
       setError(null);
+
+      let instData: InstanceData | null = null;
 
       const { data, error: dbErr } = await supabase
         .from('whatsapp_instances')
@@ -101,69 +175,41 @@ export default function ConnectInstanceStandalone() {
           .ilike('display_name', instanceId)
           .maybeSingle();
 
-        if (!dataByName) {
-          setError(`Instância '${instanceId}' não foi encontrada.`);
-          setLoading(false);
-          return;
+        if (dataByName) {
+          instData = dataByName;
         }
-
-        setInstance(dataByName);
-        setConnectedNumber(dataByName.phone_number || null);
-        setConnectionStatus(dataByName.status || 'disconnected');
       } else {
-        setInstance(data);
-        setConnectedNumber(data.phone_number || null);
-        setConnectionStatus(data.status || 'disconnected');
+        instData = data;
       }
+
+      if (!instData) {
+        setError(`Instância '${instanceId}' não foi encontrada.`);
+        setLoading(false);
+        return;
+      }
+
+      setInstance(instData);
+      instanceRef.current = instData;
+      setConnectedNumber(instData.phone_number || null);
+      setConnectionStatus(instData.status || 'disconnected');
+
+      // Consulta imediatamente o status na engine enviando o tenant_id recém obtido
+      checkEngineStatus(instData);
     } catch (e: any) {
       setError(`Erro ao carregar instância: ${e.message}`);
     } finally {
       setLoading(false);
     }
-  }, [instanceId]);
-
-  // 2. Consulta o status em tempo real no motor Node/Baileys
-  const checkEngineStatus = useCallback(async () => {
-    if (!instanceId) return;
-
-    try {
-      const res = await fetchEngineApi(`/api/v1/instances/${instanceId}/status`, { method: 'GET' });
-      if (!res.ok) return;
-
-      const data = await res.json();
-      const st = data.status || data.sessionStatus || 'disconnected';
-      const phone = data.phoneNumber || data.phone || data.user_jid?.split('@')[0];
-
-      setConnectionStatus(st);
-      if (phone) setConnectedNumber(phone);
-
-      const isConn = st === 'connected' || st === 'connected_local' || st === 'open';
-
-      if (isConn) {
-        setStatusStep(4);
-        setStatusMessage('WhatsApp conectado e sincronizado com sucesso!');
-        setQrCodeData(null);
-        setQrBase64(null);
-      } else if (data.qrCode || data.qr_code || data.whatsapp_instance_runtime?.[0]?.qr_code) {
-        const qrText = data.qrCode || data.qr_code || data.whatsapp_instance_runtime?.[0]?.qr_code;
-        setQrCodeData(qrText);
-        setStatusStep(2);
-        setStatusMessage('Aguardando leitura do QR Code pelo celular...');
-      } else if (st === 'connecting' || st === 'pairing') {
-        setStatusStep(3);
-        setStatusMessage('QR Code lido no celular! Autenticando com o WhatsApp...');
-      } else {
-        setStatusStep(1);
-        setStatusMessage('Instância pronta para geração de QR Code.');
-      }
-    } catch (e) {
-      console.warn('[ConnectStandalone] Erro ao consultar engine:', e);
-    }
-  }, [instanceId, fetchEngineApi]);
+  }, [instanceId, checkEngineStatus]);
 
   // 3. Dispara a geração de QR Code
   const handleGenerateQr = async (forceNew = false) => {
-    if (!instanceId) return;
+    const inst = instanceRef.current;
+    if (!instanceId || !inst?.tenant_id) {
+      setError('Aguardando carregamento dos dados da instância.');
+      return;
+    }
+
     try {
       setActionLoading(true);
       setError(null);
@@ -172,16 +218,29 @@ export default function ConnectInstanceStandalone() {
       setStatusStep(1);
       setStatusMessage('Inicializando motor Baileys e gerando novo QR Code...');
 
-      const endpoint = `/api/v1/instances/${instanceId}/connect${forceNew ? '?force_new=true' : ''}`;
-      const res = await fetchEngineApi(endpoint, { method: 'POST' });
-      const data = await res.json();
+      const baseUrl = getActiveEngineUrl();
+      const apiKey = inst.api_key || 'chatboot-secret-key';
+      const endpoint = `${baseUrl}/api/v1/instances/${instanceId}/connect${forceNew ? '?force_new=true' : ''}`;
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': inst.tenant_id,
+          'apikey': apiKey
+        }
+      });
+
+      const rawJson = await res.json();
+      const data = rawJson.data || rawJson;
 
       if (!res.ok) {
         throw new Error(data.error || data.message || 'Falha ao acionar servidor.');
       }
 
-      if (data.qrBase64 || data.base64) {
-        setQrBase64(data.qrBase64 || data.base64);
+      if (data.qrBase64 || data.qr_base64 || data.base64) {
+        const b64 = data.qrBase64 || data.qr_base64 || data.base64;
+        setQrBase64(b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`);
         setStatusStep(2);
         setStatusMessage('QR Code gerado com sucesso! Leia com a câmera do WhatsApp.');
       } else if (data.qrCode || data.qr_code) {
@@ -191,7 +250,7 @@ export default function ConnectInstanceStandalone() {
       }
 
       // Inicia o polling contínuo de validação
-      checkEngineStatus();
+      checkEngineStatus(inst);
     } catch (e: any) {
       setError(e.message || 'Erro ao gerar QR Code.');
       setStatusStep(1);
@@ -203,7 +262,8 @@ export default function ConnectInstanceStandalone() {
 
   // 4. Dispara a geração de Código de Pareamento (8 Dígitos)
   const handleGeneratePairingCode = async () => {
-    if (!instanceId) return;
+    const inst = instanceRef.current;
+    if (!instanceId || !inst?.tenant_id) return;
     if (!pairingPhone || pairingPhone.length < 10) {
       setError('Por favor, informe o número completo com DDD (Ex: 5511999999999)');
       return;
@@ -217,13 +277,22 @@ export default function ConnectInstanceStandalone() {
       setStatusMessage('Solicitando Código de Pareamento de 8 dígitos ao WhatsApp...');
 
       const cleanPhone = pairingPhone.replace(/\D/g, '');
-      const endpoint = `/api/v1/instances/${instanceId}/pairing-code?force_new=true`;
-      const res = await fetchEngineApi(endpoint, {
+      const baseUrl = getActiveEngineUrl();
+      const apiKey = inst.api_key || 'chatboot-secret-key';
+      const endpoint = `${baseUrl}/api/v1/instances/${instanceId}/pairing-code?force_new=true`;
+
+      const res = await fetch(endpoint, {
         method: 'POST',
-        body: JSON.stringify({ phone_number: cleanPhone })
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': inst.tenant_id,
+          'apikey': apiKey
+        },
+        body: JSON.stringify({ phone_number: cleanPhone, phoneNumber: cleanPhone })
       });
 
-      const data = await res.json();
+      const rawJson = await res.json();
+      const data = rawJson.data || rawJson;
 
       if (!res.ok) {
         throw new Error(data.error || data.message || 'Falha ao gerar código de pareamento.');
@@ -247,12 +316,22 @@ export default function ConnectInstanceStandalone() {
 
   // 5. Desconectar instância
   const handleDisconnect = async () => {
-    if (!instanceId) return;
+    const inst = instanceRef.current;
+    if (!instanceId || !inst?.tenant_id) return;
     if (!window.confirm('Tem certeza que deseja desconectar este WhatsApp? A conexão atual será encerrada.')) return;
 
     try {
       setActionLoading(true);
-      await fetchEngineApi(`/api/v1/instances/${instanceId}/disconnect`, { method: 'POST' });
+      const baseUrl = getActiveEngineUrl();
+      const apiKey = inst.api_key || 'chatboot-secret-key';
+      await fetch(`${baseUrl}/api/v1/instances/${instanceId}/disconnect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': inst.tenant_id,
+          'apikey': apiKey
+        }
+      });
       setConnectionStatus('disconnected');
       setConnectedNumber(null);
       setQrCodeData(null);
@@ -270,7 +349,6 @@ export default function ConnectInstanceStandalone() {
   // Efeito Inicial: Carrega metadados e faz polling contínuo
   useEffect(() => {
     loadInstanceMetadata();
-    checkEngineStatus();
 
     // Polling a cada 2.5s enquanto estiver na página
     pollTimerRef.current = setInterval(() => {
@@ -286,6 +364,11 @@ export default function ConnectInstanceStandalone() {
           { event: 'UPDATE', schema: 'public', table: 'whatsapp_instances', filter: `id=eq.${instanceId}` },
           (payload) => {
             const updated = payload.new as InstanceData;
+            setInstance((prev) => {
+              const merged = { ...prev, ...updated };
+              instanceRef.current = merged;
+              return merged;
+            });
             setConnectionStatus(updated.status);
             if (updated.phone_number) setConnectedNumber(updated.phone_number);
             if (updated.status === 'connected' || updated.status === 'connected_local') {
