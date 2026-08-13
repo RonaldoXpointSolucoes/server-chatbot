@@ -38,6 +38,8 @@ import {
   UserCheck,
   ShieldAlert,
   ArrowUpRight,
+  Share2,
+  Link as LinkIcon,
   Building2
 } from 'lucide-react';
 
@@ -1497,6 +1499,19 @@ export default function InstanceManagerStandalone() {
 
                     <button
                       onClick={() => {
+                        const directUrl = `${window.location.origin}/connect-instance/${inst.id}`;
+                        navigator.clipboard.writeText(directUrl);
+                        alert(`🔗 Link de Conexão Direta (Sem Login) copiado!\n\n${directUrl}\n\nQualquer pessoa pode abrir este link no celular para conectar o WhatsApp sem precisar de senha.`);
+                      }}
+                      className="p-3 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition active:scale-[0.98]"
+                      title="Copiar Link de Conexão Direta (Sem Necessidade de Login)"
+                    >
+                      <LinkIcon className="w-4 h-4 text-purple-400" />
+                      <span className="hidden sm:inline">Link QR</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
                         setTestTargetInstance(inst);
                         runAllSuiteTests(inst);
                       }}
@@ -1765,12 +1780,28 @@ export default function InstanceManagerStandalone() {
                 </h3>
                 <p className="text-xs text-slate-400">{connectInstance.display_name}</p>
               </div>
-              <button
-                onClick={closeConnectModal}
-                className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const directUrl = `${window.location.origin}/connect-instance/${connectInstance.id}`;
+                    navigator.clipboard.writeText(directUrl);
+                    alert(`🔗 Link de Conexão Direta (Sem Login) copiado!\n\n${directUrl}\n\nEnvie este link para qualquer pessoa conectar o WhatsApp sem precisar de login.`);
+                  }}
+                  className="px-3 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition"
+                  title="Copiar Link de Conexão Direta (Sem Login)"
+                >
+                  <LinkIcon className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Copiar Link QR</span>
+                </button>
+
+                <button
+                  onClick={closeConnectModal}
+                  className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Alternar Abas */}
