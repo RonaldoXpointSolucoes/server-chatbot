@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 
 import { masterSupabase } from '../services/supabase';
+import { migrateInstanceHistory } from '../services/whatsappEngine';
 
 // Configurações do Supabase & Engines com Fallback Automático
 const SUPABASE_URL = 'https://yzbxsxabzncdzuxvlppt.supabase.co';
@@ -661,9 +662,16 @@ export default function InstanceManagerStandalone() {
         headers: { 'x-tenant-id': deleteTarget.tenant_id }
       }).catch(() => null);
 
-      // 1. Limpar mensagens e conversas filhas da instância para evitar conflito de chave única ou FK
-      await supabase.from('messages').delete().eq('instance_id', deleteTarget.id);
-      await supabase.from('conversations').delete().eq('instance_id', deleteTarget.id);
+      // 1. Tentar migrar histórico para outra caixa do mesmo número/tenant se existir
+      const otherTarget = instances.find(i => i.id !== deleteTarget.id && (i.phone_number === deleteTarget.phone_number || i.status === 'connected' || i.status === 'connected_local'));
+      if (otherTarget) {
+        await migrateInstanceHistory(deleteTarget.id, otherTarget.id);
+      } else {
+        // Se não houver outra caixa, apenas desvincula o instance_id para PRESERVAR todo o histórico no Supabase!
+        await supabase.from('messages').update({ instance_id: null }).eq('instance_id', deleteTarget.id);
+        await supabase.from('conversations').update({ instance_id: null }).eq('instance_id', deleteTarget.id);
+        await supabase.from('contacts').update({ instance_id: null }).eq('instance_id', deleteTarget.id);
+      }
       await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', deleteTarget.id);
 
       // 2. Excluir a instância

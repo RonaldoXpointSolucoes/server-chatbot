@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe } from 'lucide-react';
+import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
 import { useChatStore, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey } from '../store/chatStore';
 import { useWaCallsStore } from '../store/useWaCallsStore';
@@ -91,6 +92,15 @@ export const getStrictInstance = (c: any): string | null => {
   const compositeInst = typeof c.id === 'string' && c.id.includes('_') ? c.id.split('_')[1] : null;
   return compositeInst || c.instance_id || null;
 };
+
+export function isGroupContact(c: any): boolean {
+  if (!c) return false;
+  return (
+    (typeof c.whatsapp_jid === 'string' && c.whatsapp_jid.endsWith('@g.us')) ||
+    (typeof c.phone === 'string' && c.phone.endsWith('@g.us')) ||
+    (typeof c.id === 'string' && c.id.includes('@g.us'))
+  );
+}
 
 export function getContactDisplayName(name: string | undefined | null, pushName: string | undefined | null, phone: string | undefined | null): string {
   let cleanName = (name && name !== 'undefined' && name !== 'null') ? name.trim() : null;
@@ -5247,6 +5257,41 @@ export default function ChatDashboard() {
                 <BrainCircuit size={20} />
               </button>
               
+              {/* Badge Permanente de Ambiente (PRODUÇÃO / ALFA) */}
+              {(() => {
+                const env = getCurrentEnvironment();
+                const isAdmin = true; // Permite visualização e gestão por administradores
+                return (
+                  <div 
+                    onClick={async () => {
+                      if (!isAdmin) return;
+                      const nextEnv = env.id === 'production' ? 'alpha' : 'production';
+                      const confirmChange = window.confirm(`Deseja alterar o ambiente ativo para ${nextEnv.toUpperCase()} (${ENVIRONMENTS[nextEnv].url})?\n\nO sistema irá validar se o servidor ${nextEnv.toUpperCase()} está online antes da confirmação.`);
+                      if (!confirmChange) return;
+
+                      const val = await validateServerEnvironment(nextEnv);
+                      if (!val.valid) {
+                        alert(`⚠️ Divergência/Falha de Conexão no Ambiente ${nextEnv.toUpperCase()}!\n\nErro: ${val.error || 'Servidor indisponível ou configurado com ambiente divergente.'}\n\nA troca foi cancelada para proteger os dados.`);
+                        return;
+                      }
+
+                      setEnvironment(nextEnv);
+                      window.location.reload();
+                    }}
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-extrabold cursor-pointer transition-all hover:scale-105 select-none shrink-0",
+                      env.id === 'alpha' 
+                        ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.2)]" 
+                        : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                    )}
+                    title={isAdmin ? `Ambiente Atual: ${env.name}. Clique para alternar ambiente.` : `Ambiente Servidor: ${env.name}`}
+                  >
+                    <span className={cn("w-2 h-2 rounded-full", env.id === 'alpha' ? "bg-rose-500 animate-pulse" : "bg-emerald-500")} />
+                    <span className="tracking-wide">{env.name}</span>
+                  </div>
+                );
+              })()}
+
               <ThemeToggle />
               
               {/* Menu de Opções Avançadas */}
@@ -5288,6 +5333,41 @@ export default function ChatDashboard() {
                       <Settings size={18} />
                       <span className="text-[15px] text-[#3b4a54] dark:text-[#d1d7db]">Configurações</span>
                     </button>
+
+                    {/* Alternador de Ambiente para Admins */}
+                    {(() => {
+                      const env = getCurrentEnvironment();
+                      const nextEnv = env.id === 'production' ? 'alpha' : 'production';
+                      return (
+                        <button 
+                          onClick={async () => {
+                            setActiveDropdown(null);
+                            const confirmChange = window.confirm(`Deseja alterar o ambiente ativo para ${nextEnv.toUpperCase()} (${ENVIRONMENTS[nextEnv].url})?\n\nO sistema irá validar se o servidor ${nextEnv.toUpperCase()} está online antes da confirmação.`);
+                            if (!confirmChange) return;
+
+                            const val = await validateServerEnvironment(nextEnv);
+                            if (!val.valid) {
+                              alert(`⚠️ Divergência/Falha de Conexão no Ambiente ${nextEnv.toUpperCase()}!\n\nErro: ${val.error || 'Servidor indisponível ou configurado com ambiente divergente.'}\n\nA troca foi cancelada para proteger os dados.`);
+                              return;
+                            }
+
+                            setEnvironment(nextEnv);
+                            window.location.reload();
+                          }}
+                          className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 border-t border-gray-100 dark:border-[#304046]"
+                        >
+                          <Globe size={18} className={env.id === 'alpha' ? "text-rose-500" : "text-emerald-500"} />
+                          <div className="flex flex-col">
+                            <span className="text-[14px] font-bold text-[#3b4a54] dark:text-[#d1d7db]">
+                              Ambiente: {env.name}
+                            </span>
+                            <span className="text-[11px] text-gray-400">
+                              {env.id === 'alpha' ? 'Alternar para Produção' : 'Alternar para Alfa'}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -5982,12 +6062,21 @@ export default function ChatDashboard() {
                     <img 
                         src={contact.avatar} 
                         alt="Avatar" 
-                        className="w-12 h-12 rounded-full object-cover shadow-sm hover:scale-105 transition-transform duration-200 cursor-pointer ring-2 ring-transparent hover:ring-[#00a884]/30" 
+                        className={cn(
+                          "w-12 h-12 rounded-full object-cover shadow-sm hover:scale-105 transition-transform duration-200 cursor-pointer ring-2 ring-transparent hover:ring-[#00a884]/30",
+                          isGroupContact(contact) && "ring-2 ring-indigo-500/40 dark:ring-indigo-400/40"
+                        )} 
                         onClick={(e) => { e.stopPropagation(); setFullscreenImage(contact.avatar); }}
                         onError={(e) => {
-                          e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone))}&background=random&color=fff`;
+                          const bg = isGroupContact(contact) ? '4f46e5' : 'random';
+                          e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone))}&background=${bg}&color=fff`;
                         }}
                       />
+                    {isGroupContact(contact) && (
+                      <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 border-2 border-white dark:border-[#111b21] flex items-center justify-center text-white shadow-md select-none" title="Grupo do WhatsApp">
+                        <Users size={10} strokeWidth={2.5} />
+                      </div>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center mb-0.5">
@@ -5995,7 +6084,15 @@ export default function ChatDashboard() {
                          <div className="flex flex-col gap-0.5 w-full">
                            {/* Nome e Flag / Badges de Prioridade */}
                            <span className="font-semibold text-[#111b21] dark:text-[#e9edef] text-sm tracking-tight truncate flex items-center justify-between gap-1.5 w-full">
-                             <span className="truncate">{getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone)}</span>
+                             <span className="truncate flex items-center gap-1.5">
+                               <span>{getContactDisplayName(contact.custom_name || contact.name, contact.push_name, contact.phone)}</span>
+                               {isGroupContact(contact) && (
+                                 <span className="px-1.5 py-[1px] text-[8px] font-black uppercase tracking-wider rounded-md bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 flex items-center gap-0.5 shrink-0 shadow-xs">
+                                   <Users size={8} strokeWidth={2.5} />
+                                   Grupo
+                                 </span>
+                               )}
+                             </span>
                              <div className="flex items-center gap-1 shrink-0">
                                {(() => {
                                  const getCleanId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
@@ -6495,23 +6592,64 @@ export default function ChatDashboard() {
               </button>
               
               <div className="flex items-center gap-3 relative">
-                <img 
-                    src={activeChat.avatar} 
-                    alt="Avatar" 
-                    className="w-10 h-10 rounded-full object-cover hover:scale-105 transition-transform duration-200 cursor-pointer ring-2 ring-transparent hover:ring-[#00a884]/30" 
-                    onClick={(e) => { e.stopPropagation(); setFullscreenImage(activeChat.avatar); }}
-                    onError={(e) => {
-                      e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone))}&background=random&color=fff`;
-                    }}
-                  />
+                <div className="relative shrink-0">
+                  <img 
+                      src={activeChat.avatar} 
+                      alt="Avatar" 
+                      className={cn(
+                        "w-10 h-10 rounded-full object-cover hover:scale-105 transition-transform duration-200 cursor-pointer ring-2 ring-transparent hover:ring-[#00a884]/30",
+                        isGroupContact(activeChat) && "ring-2 ring-indigo-500/40 dark:ring-indigo-400/40"
+                      )} 
+                      onClick={(e) => { e.stopPropagation(); setFullscreenImage(activeChat.avatar); }}
+                      onError={(e) => {
+                        const bg = isGroupContact(activeChat) ? '4f46e5' : 'random';
+                        e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone))}&background=${bg}&color=fff`;
+                      }}
+                    />
+                  {isGroupContact(activeChat) && (
+                    <div className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 border-2 border-white dark:border-[#202c33] flex items-center justify-center text-white shadow-md select-none" title="Grupo do WhatsApp">
+                      <Users size={9} strokeWidth={2.5} />
+                    </div>
+                  )}
+                </div>
                 <div className="flex flex-col justify-center min-w-0">
                   <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
                     <span className="truncate max-w-[120px] sm:max-w-[180px] md:max-w-[220px] lg:max-w-[150px] xl:max-w-[320px]">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
+                    {isGroupContact(activeChat) && (
+                      <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-600 dark:text-indigo-400 rounded-full border border-indigo-500/30 flex items-center gap-1 shrink-0 shadow-sm select-none">
+                        <Users size={10} strokeWidth={2.5} />
+                        Grupo
+                      </span>
+                    )}
                   </h2>
                   
-                  {/* Premium Company Info Button or Phone with Copy Option */}
+                  {/* Premium Group Pill, Company Info Button or Phone with Copy Option */}
                   <div className="flex items-center gap-2 mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300 flex-nowrap whitespace-nowrap">
-                    {(activeChat.fantasy_name || activeChat.document_number || activeChat.document_type === 'cnpj' || (Array.isArray(activeChat.company_ids) && activeChat.company_ids.length > 0) || (Array.isArray(activeChat.tags) && activeChat.tags.length > 0)) ? (
+                    {isGroupContact(activeChat) ? (
+                      <div className="flex items-center gap-1.5 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 dark:from-indigo-500/15 dark:to-purple-500/15 px-2.5 py-0.5 rounded-full border border-indigo-500/25 text-indigo-600 dark:text-indigo-400 text-[11px] font-medium transition-all duration-200">
+                        <Users size={11} className="shrink-0 text-indigo-500" />
+                        <span className="font-mono text-[10.5px]">
+                          ID: {(activeChat.whatsapp_jid || activeChat.phone || activeChat.id || '').split('@')[0]}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const jidToCopy = activeChat.whatsapp_jid || activeChat.phone || activeChat.id;
+                            navigator.clipboard.writeText(jidToCopy);
+                            setCopiedPhone(true);
+                            setTimeout(() => setCopiedPhone(false), 2000);
+                          }}
+                          className="p-0.5 rounded hover:bg-indigo-500/20 transition-colors flex items-center justify-center"
+                          title="Copiar ID do Grupo"
+                        >
+                          {copiedPhone ? (
+                            <CheckCircle2 size={11} className="text-emerald-500 animate-in zoom-in-95 duration-200" />
+                          ) : (
+                            <Copy size={11} className="opacity-70 hover:opacity-100 hover:scale-110 active:scale-95 transition-all duration-200" />
+                          )}
+                        </button>
+                      </div>
+                    ) : (activeChat.fantasy_name || activeChat.document_number || activeChat.document_type === 'cnpj' || (Array.isArray(activeChat.company_ids) && activeChat.company_ids.length > 0) || (Array.isArray(activeChat.tags) && activeChat.tags.length > 0)) ? (
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();

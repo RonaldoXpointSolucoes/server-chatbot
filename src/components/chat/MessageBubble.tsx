@@ -559,53 +559,58 @@ export const MessageBubble = memo(({
           </div>
         )}
         {msg.sender === 'human' && (
-          <div className="flex items-center gap-1 mb-1 text-[10px] text-[#005c4b] dark:text-[#1d9782] opacity-80 font-bold uppercase tracking-wider">
-             <User size={10} /> Você (Atendente)
+          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider mb-1 border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 select-none">
+             <UserCheck size={10} strokeWidth={2.5} /> Você (Atendente)
           </div>
         )}
 
         {!isMe && (activeChat?.whatsapp_jid?.endsWith('@g.us') || activeChat?.phone?.endsWith('@g.us') || activeChat?.id?.includes('@g.us')) && (() => {
-           const participantJid = msg.payload?.key?.participant || msg.payload?.participant;
-           if (!participantJid) return null;
-           const cleanParticipant = participantJid.replace(/\D/g, '');
+           const participantJid = msg.payload?.key?.participant || msg.payload?.participant || msg.participant;
+           const cleanParticipant = participantJid ? participantJid.replace(/\D/g, '') : '';
            
-           const isInstance = Object.values(instanceCache.phoneNumbers).some(phone => {
-             const cleanPhone = phone?.replace(/\D/g, '');
-             return cleanPhone && cleanParticipant.includes(cleanPhone);
-           });
-           if (isInstance) return null;
+           if (cleanParticipant) {
+             const isInstance = Object.values(instanceCache.phoneNumbers).some(phone => {
+               const cleanPhone = phone?.replace(/\D/g, '');
+               return cleanPhone && cleanParticipant.includes(cleanPhone);
+             });
+             if (isInstance) return null;
+           }
 
-           const participantContact = contacts.find((c: any) => {
+           const participantContact = cleanParticipant ? contacts.find((c: any) => {
              const cPhone = c.phone?.replace(/\D/g, '');
              return cPhone && (cPhone === cleanParticipant || cleanParticipant.includes(cPhone));
-           });
+           }) : null;
 
            const displayName = participantContact 
              ? getContactDisplayName(participantContact.custom_name || participantContact.name, participantContact.push_name || participantContact.pushname, participantContact.phone)
-             : (msg.payload?.pushName || msg.payload?.pushname || formatPhoneNumber(cleanParticipant) || cleanParticipant);
+             : (msg.payload?.pushName || msg.payload?.pushname || msg.push_name || (cleanParticipant ? formatPhoneNumber(cleanParticipant) : null) || 'Membro do Grupo');
 
-           const getParticipantColor = (name: string) => {
+           const getParticipantColorStyle = (name: string) => {
              let hash = 0;
              for (let i = 0; i < name.length; i++) {
                hash = name.charCodeAt(i) + ((hash << 5) - hash);
              }
-             const colors = [
-               'text-red-500 dark:text-red-400',
-               'text-blue-500 dark:text-blue-400',
-               'text-green-500 dark:text-green-400',
-               'text-yellow-600 dark:text-yellow-400',
-               'text-purple-500 dark:text-purple-400',
-               'text-pink-500 dark:text-pink-400',
-               'text-orange-500 dark:text-orange-400',
-               'text-teal-500 dark:text-teal-400',
-               'text-indigo-500 dark:text-indigo-400'
+             const colorList = [
+               { text: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-500/10 border-indigo-500/20' },
+               { text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
+               { text: 'text-sky-600 dark:text-sky-400', bg: 'bg-sky-500/10 border-sky-500/20' },
+               { text: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' },
+               { text: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10 border-rose-500/20' },
+               { text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20' },
+               { text: 'text-pink-600 dark:text-pink-400', bg: 'bg-pink-500/10 border-pink-500/20' },
+               { text: 'text-cyan-600 dark:text-cyan-400', bg: 'bg-cyan-500/10 border-cyan-500/20' },
+               { text: 'text-teal-600 dark:text-teal-400', bg: 'bg-teal-500/10 border-teal-500/20' },
+               { text: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-500/10 border-violet-500/20' },
              ];
-             return colors[Math.abs(hash) % colors.length];
+             return colorList[Math.abs(hash) % colorList.length];
            };
 
+           const style = getParticipantColorStyle(displayName);
+
            return (
-             <div className={cn("flex items-center gap-1 mb-1 text-[11px] font-bold uppercase tracking-wide", getParticipantColor(displayName))}>
-               <User size={10} /> {displayName}
+             <div className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold tracking-wide mb-1.5 border shadow-xs select-none", style.bg, style.text)}>
+               <User size={10} strokeWidth={2.5} className="shrink-0" />
+               <span className="truncate max-w-[200px]">{displayName}</span>
              </div>
            );
          })()}

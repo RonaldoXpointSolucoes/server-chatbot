@@ -1,9 +1,15 @@
-const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim();
+import { supabase } from './supabase';
+import { getCurrentEnvironment } from './environmentService';
+
+export const getApiUrl = () => {
+  return getCurrentEnvironment().url;
+};
 
 export const createInstance = async (tenantId: string, instanceId: string, apiKey: string, forceNew = false) => {
-  if (!API_URL) throw new Error("URL do motor Antigravity não definida (.env)");
+  const apiUrl = getApiUrl();
+  if (!apiUrl) throw new Error("URL do motor Antigravity não definida (.env)");
 
-  const url = `${API_URL}/api/v1/instances/${instanceId}/connect${forceNew ? '?force_new=true' : ''}`;
+  const url = `${apiUrl}/api/v1/instances/${instanceId}/connect${forceNew ? '?force_new=true' : ''}`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 
@@ -371,4 +377,47 @@ export const sendContactMessage = async (
   }
 
   return resJson;
+};
+
+export const migrateInstanceHistory = async (oldInstanceId: string, newInstanceId: string) => {
+  if (!oldInstanceId || !newInstanceId || oldInstanceId === newInstanceId) return;
+
+  console.log(`[migrateInstanceHistory] Migrando histórico da instância ${oldInstanceId} -> ${newInstanceId}...`);
+
+  // 1. Atualizar conversas
+  const { error: convErr } = await supabase
+    .from('conversations')
+    .update({ instance_id: newInstanceId })
+    .eq('instance_id', oldInstanceId);
+  if (convErr) console.error('[migrateInstanceHistory] Erro ao atualizar conversas:', convErr);
+
+  // 2. Atualizar contatos
+  const { error: contactErr } = await supabase
+    .from('contacts')
+    .update({ instance_id: newInstanceId })
+    .eq('instance_id', oldInstanceId);
+  if (contactErr) console.error('[migrateInstanceHistory] Erro ao atualizar contatos:', contactErr);
+
+  // 3. Atualizar mensagens
+  const { error: msgErr } = await supabase
+    .from('messages')
+    .update({ instance_id: newInstanceId })
+    .eq('instance_id', oldInstanceId);
+  if (msgErr) console.error('[migrateInstanceHistory] Erro ao atualizar mensagens:', msgErr);
+
+  // 4. Atualizar tickets
+  const { error: ticketErr } = await supabase
+    .from('tickets')
+    .update({ instance_id: newInstanceId })
+    .eq('instance_id', oldInstanceId);
+  if (ticketErr) console.error('[migrateInstanceHistory] Erro ao atualizar tickets:', ticketErr);
+
+  // 5. Atualizar empresas (evolution_api_instance) caso estivesse apontando para a antiga
+  const { error: companyErr } = await supabase
+    .from('companies')
+    .update({ evolution_api_instance: newInstanceId })
+    .eq('evolution_api_instance', oldInstanceId);
+  if (companyErr) console.error('[migrateInstanceHistory] Erro ao atualizar empresa:', companyErr);
+
+  console.log(`[migrateInstanceHistory] Sucesso na migração de ${oldInstanceId} para ${newInstanceId}.`);
 };

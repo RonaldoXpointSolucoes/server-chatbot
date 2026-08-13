@@ -3,6 +3,7 @@ import { supabase, masterSupabase } from '../../services/supabase';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Settings2, Trash2, Smartphone, Inbox, MessageSquare, Building2, X, Loader2 } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
+import { migrateInstanceHistory } from '../../services/whatsappEngine';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -234,9 +235,16 @@ export default function InboxesList() {
          console.warn('Erro ao chamar api de delete da engine:', err);
       });
       
-      // 2. Limpar mensagens, conversas e runtime para evitar erros de FK / chave única no Supabase
-      await supabase.from('messages').delete().eq('instance_id', inst.id);
-      await supabase.from('conversations').delete().eq('instance_id', inst.id);
+      // 2. Tentar migrar histórico para outra caixa do mesmo número/tenant se existir
+      const otherTarget = instances.find(i => i.id !== inst.id && (i.phone_number === inst.phone_number || i.status === 'connected' || i.status === 'connected_local'));
+      if (otherTarget) {
+        await migrateInstanceHistory(inst.id, otherTarget.id);
+      } else {
+        // Se não houver outra caixa, apenas desvincula o instance_id para PRESERVAR todo o histórico no Supabase!
+        await supabase.from('messages').update({ instance_id: null }).eq('instance_id', inst.id);
+        await supabase.from('conversations').update({ instance_id: null }).eq('instance_id', inst.id);
+        await supabase.from('contacts').update({ instance_id: null }).eq('instance_id', inst.id);
+      }
       await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', inst.id);
 
       // 3. Apagar no Supabase

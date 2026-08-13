@@ -25,7 +25,7 @@ interface TenantItem {
 }
 
 import { supabase } from '../services/supabase';
-import { createInstance } from '../services/whatsappEngine';
+import { createInstance, migrateInstanceHistory } from '../services/whatsappEngine';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -468,11 +468,57 @@ export default function InstancesDashboard() {
     setDeletingInstance(inst);
   };
 
+  const handleMigrateAndDelete = async (oldInst: WhatsAppInstance, targetInstId: string) => {
+    if (!oldInst || !targetInstId) return;
+    try {
+      setLoading(true);
+      await migrateInstanceHistory(oldInst.id, targetInstId);
+
+      const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      await fetch(`${ENGINE_URL}/api/v1/instances/${oldInst.id}`, { 
+          method: 'DELETE',
+          headers: { 
+            'x-tenant-id': tenantId!,
+            'apikey': oldInst.api_key || ''
+          }
+      }).catch(() => {});
+      
+      await supabase.from('whatsapp_instances').delete().eq('id', oldInst.id);
+      await useChatStore.getState().logOperation('DELETE', 'whatsapp_instances', oldInst.id, oldInst, null);
+      
+      alert(`Histórico migrado da caixa "${oldInst.display_name}" com sucesso para a caixa ativa! A caixa antiga foi removida.`);
+      fetchInstances();
+      useChatStore.getState().fetchContacts();
+    } catch (e: any) {
+      console.error(e);
+      alert('Erro ao migrar histórico: ' + (e.message || String(e)));
+    } finally {
+      setLoading(false);
+      setDeletingInstance(null);
+    }
+  };
+
   const confirmDelete = async () => {
     if (!deletingInstance) return;
     try {
       setLoading(true);
       const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      
+      const cleanDelPhone = deletingInstance.phone_number ? deletingInstance.phone_number.replace(/\D/g, '') : '';
+      const otherActiveInst = instances.find(i => 
+        i.id !== deletingInstance.id && 
+        (i.status === 'connected' || i.status === 'connected_local') && 
+        (cleanDelPhone ? (i.phone_number?.replace(/\D/g, '') === cleanDelPhone) : true)
+      );
+
+      if (otherActiveInst) {
+        await migrateInstanceHistory(deletingInstance.id, otherActiveInst.id);
+      } else {
+        await supabase.from('messages').update({ instance_id: null }).eq('instance_id', deletingInstance.id);
+        await supabase.from('conversations').update({ instance_id: null }).eq('instance_id', deletingInstance.id);
+        await supabase.from('contacts').update({ instance_id: null }).eq('instance_id', deletingInstance.id);
+      }
+
       await fetch(`${ENGINE_URL}/api/v1/instances/${deletingInstance.id}`, { 
           method: 'DELETE',
           headers: { 
@@ -481,7 +527,6 @@ export default function InstancesDashboard() {
           }
       }).catch(() => {});
       
-      // Remove do banco de dados local por precaução e reatividade
       await supabase.from('whatsapp_instances').delete().eq('id', deletingInstance.id);
       await useChatStore.getState().logOperation('DELETE', 'whatsapp_instances', deletingInstance.id, deletingInstance, null);
       
@@ -918,25 +963,61 @@ export default function InstancesDashboard() {
           </div>
         )}
 
-        {/* Modal de Exclusão */}
-        {deletingInstance && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xl animate-in fade-in duration-200">
-             <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-3xl shadow-2xl p-8 max-w-sm w-full animate-in zoom-in-95">
-               <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mb-6 border border-red-500/20">
-                 <Trash2 size={32} className="text-red-500" />
+        {/* Modal de Exclusão Inteligente */}
+        {deletingInstance && (() => {
+          const cleanDelPhone = deletingInstance.phone_number ? deletingInstance.phone_number.replace(/\D/g, '') : '';
+          const targetInst = instances.find(i => 
+            i.id !== deletingInstance.id && 
+            (i.status === 'connected' || i.status === 'connected_local' || (cleanDelPhone && i.phone_number?.replace(/\D/g, '') === cleanDelPhone))
+          );
+
+          return (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xl animate-in fade-in duration-200">
+               <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-3xl shadow-2xl p-8 max-w-md w-full animate-in zoom-in-95">
+                 <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mb-6 border border-red-500/20 mx-auto">
+                   <Trash2 size={32} className="text-red-500" />
+                 </div>
+                 <h2 className="text-2xl font-bold dark:text-white mb-2 text-center">Excluir Conexão?</h2>
+                 <p className="text-gray-500 dark:text-gray-400 mb-4 font-medium text-center text-sm">
+                   Esta ação removerá a caixa <strong className="text-gray-800 dark:text-white">"{deletingInstance.display_name}"</strong>.
+                 </p>
+                 
+                 {targetInst ? (
+                   <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 p-4 rounded-2xl text-xs leading-relaxed font-semibold mb-6 flex flex-col gap-2">
+                     <span className="flex items-center gap-1.5 font-bold text-sm text-emerald-600 dark:text-emerald-400">
+                       <RefreshCcw size={16} /> Caixa Ativa Encontrada: "{targetInst.display_name}"
+                     </span>
+                     <p>
+                       Recomendamos transferir todo o histórico de conversas, contatos e mensagens desta caixa para a caixa ativa <strong>"{targetInst.display_name}"</strong> antes da exclusão.
+                     </p>
+                   </div>
+                 ) : (
+                   <div className="bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 p-3 rounded-2xl text-xs leading-relaxed font-semibold mb-6">
+                     ⚠️ O histórico de conversas e mensagens será preservado com segurança no Supabase.
+                   </div>
+                 )}
+
+                 <div className="flex flex-col gap-2.5">
+                   {targetInst && (
+                     <button 
+                       onClick={() => handleMigrateAndDelete(deletingInstance, targetInst.id)} 
+                       className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold py-3.5 rounded-2xl transition-all shadow-md text-xs flex items-center justify-center gap-2"
+                     >
+                       <RefreshCcw size={14} />
+                       Sim, Migrar Histórico para "{targetInst.display_name}" & Excluir
+                     </button>
+                   )}
+                   <div className="flex gap-2">
+                     <button onClick={() => setDeletingInstance(null)} className="flex-1 bg-gray-100 dark:bg-black/30 hover:bg-gray-200 dark:hover:bg-black/50 text-gray-800 dark:text-white font-semibold py-3 rounded-2xl text-xs transition-all">Cancelar</button>
+                     <button onClick={confirmDelete} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-2xl text-xs transition-all shadow-md">
+                       {targetInst ? "Excluir Sem Migrar" : "Sim, Excluir"}
+                     </button>
+                   </div>
+                 </div>
                </div>
-               <h2 className="text-2xl font-bold dark:text-white mb-2">Excluir Conexão?</h2>
-               <p className="text-gray-500 dark:text-gray-400 mb-4 font-medium">Esta ação removerá a caixa <strong className="text-gray-800 dark:text-white">"{deletingInstance.display_name}"</strong> do painel.</p>
-               <div className="bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 p-3 rounded-2xl text-xs leading-relaxed font-semibold mb-6">
-                 ⚠️ <strong>Atenção:</strong> Se você deseja apenas <strong>trocar o número</strong> desta caixa (ex: conectar outro número no Suporte), cancele este modal e use o botão <strong>Desparear</strong> no card. Isso mantém todo o histórico!
-               </div>
-               <div className="flex gap-3">
-                 <button onClick={() => setDeletingInstance(null)} className="flex-1 bg-gray-100 dark:bg-black/30 hover:bg-gray-200 dark:hover:bg-black/50 text-gray-800 dark:text-white font-semibold py-3.5 rounded-2xl transition-all">Cancelar</button>
-                 <button onClick={confirmDelete} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3.5 rounded-2xl transition-all shadow-md">Sim, excluir</button>
-               </div>
-             </div>
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {/* Modal Sucesso Conexão */}
         {successConnectId && (
@@ -954,7 +1035,70 @@ export default function InstancesDashboard() {
             </div>
         )}
 
+        {/* Banner de Detecção de Instâncias Duplicadas no mesmo Número */}
+        {(() => {
+          const duplicateGroups: Record<string, WhatsAppInstance[]> = {};
+          instances.forEach(inst => {
+            const raw = inst.phone_number || (inst.settings as any)?.phone_number || (inst.settings as any)?.pairing_phone;
+            const clean = raw ? raw.replace(/\D/g, '') : '';
+            if (clean && clean.length >= 8) {
+              if (!duplicateGroups[clean]) duplicateGroups[clean] = [];
+              duplicateGroups[clean].push(inst);
+            }
+          });
 
+          const duplicateEntries = Object.entries(duplicateGroups).filter(([_, group]) => group.length > 1);
+          if (duplicateEntries.length === 0) return null;
+
+          return (
+            <div className="space-y-4 mb-6">
+              {duplicateEntries.map(([phone, group]) => {
+                const activeInst = group.find(i => i.status === 'connected' || i.status === 'connected_local') || group[0];
+                const oldInsts = group.filter(i => i.id !== activeInst.id);
+
+                return (
+                  <div key={phone} className="bg-amber-500/10 border-2 border-amber-500/30 rounded-3xl p-6 shadow-xl animate-in fade-in flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                    <div className="flex items-start gap-4">
+                      <div className="p-3 bg-amber-500/20 text-amber-500 rounded-2xl shrink-0 border border-amber-500/30">
+                        <ShieldAlert size={28} className="animate-pulse text-amber-500" />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-base font-extrabold text-amber-700 dark:text-amber-300">
+                            Instância Duplicada Detectada (Número +{phone})
+                          </h4>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            {group.length} Caixas
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed font-medium">
+                          Detectamos que a caixa ativa <strong>"{activeInst.display_name}"</strong> (ID: <code className="font-mono text-emerald-600 dark:text-emerald-400">{activeInst.id.substring(0, 8)}...</code>) compartilha o mesmo número de WhatsApp com {oldInsts.length} {oldInsts.length === 1 ? 'outra caixa' : 'outras caixas'}.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 shrink-0 w-full lg:w-auto">
+                      {oldInsts.map(oldInst => (
+                        <button
+                          key={oldInst.id}
+                          onClick={() => {
+                            if (window.confirm(`Deseja transferir todo o histórico de conversas, mensagens e contatos da caixa "${oldInst.display_name}" (${oldInst.id.substring(0, 8)}...) para a caixa ativa "${activeInst.display_name}" (${activeInst.id.substring(0, 8)}...) e excluir a caixa antiga?`)) {
+                              handleMigrateAndDelete(oldInst, activeInst.id);
+                            }
+                          }}
+                          className="w-full lg:w-auto px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold rounded-2xl text-xs shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95 cursor-pointer"
+                        >
+                          <RefreshCcw size={14} className="animate-spin duration-1000" />
+                          <span>Migrar Dados de "{oldInst.display_name}" para Caixa Ativa & Excluir Antiga</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {/* Grid Principal */}
         {loading && instances.length === 0 ? (

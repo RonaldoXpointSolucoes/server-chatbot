@@ -89,9 +89,84 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use(morgan('dev'));
 
-// Endpoint de Saúde do Servidor
+const APP_ENV = (process.env.APP_ENV || 'production').toLowerCase();
+const APP_NODE = process.env.APP_NODE || (APP_ENV === 'alpha' ? 'ALFA-A' : 'PROD-C');
+const APP_VERSION = process.env.APP_VERSION || ENGINE_VERSION;
+const GIT_COMMIT_SHA = process.env.GIT_COMMIT_SHA || process.env.VITE_PACKAGE_BUILD_DATE || 'dev-head';
+
+// Endpoint de Saúde do Servidor (/health)
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', engine: 'Node.js Baileys Engine', version: ENGINE_VERSION, time: new Date().toISOString() });
+    res.json({ 
+        status: 'ok', 
+        environment: APP_ENV,
+        node: APP_NODE,
+        version: APP_VERSION,
+        time: new Date().toISOString() 
+    });
+});
+
+// Endpoint de Prontidão (/ready) - Usado pelo Coolify Health Check
+app.get('/ready', async (req, res) => {
+    try {
+        const { error } = await supabase.from('tenants').select('id').limit(1);
+        const isDbReady = !error;
+        const isBaileysReady = Boolean(sessionManager);
+
+        if (!isDbReady) {
+            return res.status(503).json({ 
+                status: 'error', 
+                environment: APP_ENV,
+                node: APP_NODE,
+                database: false,
+                baileys: isBaileysReady,
+                error: error.message 
+            });
+        }
+
+        return res.json({ 
+            status: 'ready', 
+            environment: APP_ENV,
+            node: APP_NODE,
+            database: true, 
+            baileys: isBaileysReady 
+        });
+    } catch(err) {
+        return res.status(503).json({ status: 'error', environment: APP_ENV, error: err.message });
+    }
+});
+
+// Endpoint de Informação do Sistema (/api/v1/system/info)
+app.get('/api/v1/system/info', (req, res) => {
+    res.json({
+        environment: APP_ENV,
+        node: APP_NODE,
+        version: APP_VERSION,
+        commit: GIT_COMMIT_SHA,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Endpoint de Diagnóstico Avançado para Admins (/api/v1/admin/diagnostics)
+app.get('/api/v1/admin/diagnostics', async (req, res) => {
+    try {
+        const { error: dbErr } = await supabase.from('tenants').select('id').limit(1);
+        const activeSessions = sessionManager ? sessionManager.sessions.size : 0;
+
+        return res.json({
+            environment: APP_ENV,
+            node: APP_NODE,
+            version: APP_VERSION,
+            commit: GIT_COMMIT_SHA,
+            uptimeSeconds: process.uptime(),
+            database: dbErr ? `error: ${dbErr.message}` : 'ok',
+            baileys: {
+                activeSessionsCount: activeSessions
+            },
+            timestamp: new Date().toISOString()
+        });
+    } catch(err) {
+        return res.status(500).json({ status: 'error', detail: err.message });
+    }
 });
 
 // Metadata da Versão do Baileys rodando no servidor

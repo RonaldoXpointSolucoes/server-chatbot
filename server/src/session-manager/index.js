@@ -480,13 +480,44 @@ class SessionManager {
                 if (isRealAuthConnection) {
                     this.startWatchdog(tenantId, instanceId, sock);
                     
-                    // Proteção contra duplicação de chip (mesmo número em múltiplas instâncias)
+                    // Proteção contra duplicação de chip (mesmo número em múltiplas instâncias) e Auto-Migração de Histórico
                     const ownerJid = sock.user?.id;
                     if (ownerJid) {
                         const ownerPhone = ownerJid.split('@')[0].split(':')[0];
                         console.log(`[SessionManager] Instância ${instanceId} conectada com sucesso. Telefone: ${ownerPhone}`);
                         
-                        // Varre o cache em memória buscando outras sessões com o mesmo telefone
+                        // 1. Atualizar phone_number no banco de dados para esta instância
+                        supabase.from('whatsapp_instances')
+                            .update({ phone_number: ownerPhone, updated_at: new Date().toISOString() })
+                            .eq('id', instanceId)
+                            .then(() => {});
+
+                        // 2. Buscar no banco outras instâncias do mesmo tenant que usam este mesmo telefone
+                        supabase.from('whatsapp_instances')
+                            .select('id, display_name')
+                            .eq('tenant_id', tenantId)
+                            .neq('id', instanceId)
+                            .or(`phone_number.eq.${ownerPhone},phone_number.eq.55${ownerPhone}`)
+                            .then(({ data: oldInsts }) => {
+                                if (oldInsts && oldInsts.length > 0) {
+                                    for (const oldInst of oldInsts) {
+                                        console.log(`[SessionManager] 🔄 Detectada caixa legada "${oldInst.display_name}" (${oldInst.id}) no mesmo número (${ownerPhone}). Migrando histórico para a nova caixa ${instanceId}...`);
+                                        Promise.all([
+                                            supabase.from('conversations').update({ instance_id: instanceId }).eq('instance_id', oldInst.id),
+                                            supabase.from('contacts').update({ instance_id: instanceId }).eq('instance_id', oldInst.id),
+                                            supabase.from('messages').update({ instance_id: instanceId }).eq('instance_id', oldInst.id),
+                                            supabase.from('tickets').update({ instance_id: instanceId }).eq('instance_id', oldInst.id),
+                                            supabase.from('companies').update({ evolution_api_instance: instanceId }).eq('evolution_api_instance', oldInst.id)
+                                        ]).then(() => {
+                                            console.log(`[SessionManager] ✅ Auto-migração concluída: Histórico de "${oldInst.display_name}" (${oldInst.id}) transferido para ${instanceId}.`);
+                                        }).catch(err => {
+                                            console.error(`[SessionManager] Erro ao migrar dados de ${oldInst.id}:`, err.message);
+                                        });
+                                    }
+                                }
+                            });
+
+                        // 3. Varre o cache em memória buscando outras sessões ativas com o mesmo telefone para desconectar colisão
                         for (const [otherInstanceId, otherSession] of this.sessions.entries()) {
                             if (otherInstanceId !== instanceId) {
                                 const otherSock = otherSession.sock;

@@ -17,6 +17,9 @@ function broadcast(logEntry) {
   });
 }
 
+const APP_ENV = (process.env.APP_ENV || 'production').toUpperCase();
+const APP_NODE = process.env.APP_NODE || (APP_ENV === 'ALPHA' ? 'ALFA-A' : 'PROD-C');
+
 function interceptConsole() {
   const originalLog = console.log;
   const originalError = console.error;
@@ -32,6 +35,10 @@ function interceptConsole() {
         }).join(' ');
     } catch(e) {
         text = '[Non-serializable Object Object]';
+    }
+
+    if (!text.startsWith('[')) {
+        text = `[${APP_ENV}][${APP_NODE}] ${text}`;
     }
 
     // Filtro de ruído: Ignora warnings de prekey bundle e logs rotineiros para não inundar o logger

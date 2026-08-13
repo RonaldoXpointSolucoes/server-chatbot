@@ -1,6 +1,11 @@
 const https = require('https');
 
-const ENGINE_URL = 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
+const args = process.argv.slice(2);
+const isAlpha = args.includes('--env') && args[args.indexOf('--env') + 1] === 'alpha';
+const ENGINE_URL = isAlpha ? 'https://api-alpha.xpointsolucoes.com' : 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
+
+console.log(`[Baileys E2E] Executando bateria de testes contra o ambiente: ${isAlpha ? '🔴 ALFA (api-alpha.xpointsolucoes.com)' : '🟢 PRODUÇÃO (api.xpointsolucoes.com)'}`);
+
 const SUPABASE_URL = 'https://yzbxsxabzncdzuxvlppt.supabase.co';
 const TENANT_ID = '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
 const SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k';
