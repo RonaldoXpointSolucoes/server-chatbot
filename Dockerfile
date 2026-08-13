@@ -21,24 +21,18 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM node:20
 WORKDIR /app
 
-# 1. Install baileys-core dependencies with cache
-COPY baileys-core/package.json baileys-core/package-lock.json baileys-core/engine-requirements.js /app/baileys-core/
-WORKDIR /app/baileys-core
-RUN --mount=type=cache,target=/root/.npm npm ci
-
-# 2. Copy baileys-core source code and build
+# 1. Install dependencies and build baileys-core
 COPY baileys-core/ /app/baileys-core/
+WORKDIR /app/baileys-core
+RUN --mount=type=cache,target=/root/.npm npm install --legacy-peer-deps
 RUN npm run build
 
-# 3. Install server dependencies with cache
-COPY server/package.json server/package-lock.json /app/server/
-WORKDIR /app/server
-RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps
-
-# 4. Copy server source code
+# 2. Install dependencies and setup server
 COPY server/ /app/server/
+WORKDIR /app/server
+RUN --mount=type=cache,target=/root/.npm npm install --legacy-peer-deps
 
-# 5. Copy compiled Go binary from Stage 1 into the server directory
+# 3. Copy compiled Go binary from Stage 1 into the server directory
 COPY --from=go-builder /build/wacalls-server /app/server/wacalls-server
 
 # Create data directory for persistent SQLite database
