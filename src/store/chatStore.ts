@@ -308,7 +308,7 @@ export const resolveInstanceUuid = async (tenantId: string, identifier: string |
 };
 
 export const hasUserAccessToInstance = (sessionId: string | null | undefined): boolean => {
-  if (!sessionId) return false;
+  if (!sessionId || sessionId === 'default' || sessionId === 'all') return true;
 
   const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
   const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
@@ -346,21 +346,30 @@ export const hasUserAccessToInstance = (sessionId: string | null | undefined): b
     }
   }
 
-  const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
-
+  // Se o usuário possui allowed_instances configurado (lista restrita de caixas)
   if (allowedStr) {
     try {
       const allowedArr = JSON.parse(allowedStr);
       if (Array.isArray(allowedArr) && allowedArr.length > 0) {
-        return allowedArr.some((inst: string) => 
+        const hasAccess = allowedArr.some((inst: string) => 
           inst === sessionId || 
           (targetUuid && inst === targetUuid) || 
-          (targetName && inst === targetName)
+          (targetName && inst === targetName) ||
+          instanceCache.getId(inst) === sessionId ||
+          instanceCache.getName(inst) === sessionId ||
+          (targetUuid && instanceCache.getId(inst) === targetUuid) ||
+          (targetName && instanceCache.getName(inst) === targetName)
         );
+        return hasAccess;
+      } else if (roleStr === 'agent' || roleStr === 'Agente') {
+        return false;
       }
-    } catch(e) {}
+    } catch(e) {
+      if (roleStr === 'agent' || roleStr === 'Agente') return false;
+    }
   }
 
+  const isGlobalAdmin = isRonaldo || roleStr === 'owner' || roleStr === 'admin';
   if (isGlobalAdmin) return true;
   if (roleStr === 'agent' || roleStr === 'Agente') return false;
 
@@ -2582,31 +2591,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   upsertContactLocally: (contact) => {
-    // RBAC: Se for agente, só carrega contatos de instâncias permitidas
-    const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
-    const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-    // --- PROTEÇÃO RIGOROSA RONALDO-WEB ---
-    const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
-    const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
-    if (!isRonaldo && contact.instance_id === '5c78d358-d449-41c4-b396-a04ab20a39e4') {
-        return; // Bloqueia contato do Ronaldo-Web para outros operadores
-    }
-
-    if (!isRonaldo && contact.instance_id) {
-        if (allowedStr) {
-            try { 
-                const allowedInstances = JSON.parse(allowedStr); 
-                if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                    if (!allowedInstances.includes(contact.instance_id)) return;
-                } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                    return;
-                }
-            } catch(e) {
-                if (roleStr === 'agent' || roleStr === 'Agente') return;
-            }
-        } else if (roleStr === 'agent' || roleStr === 'Agente') {
-            return;
-        }
+    // RBAC: Se o usuário não possui acesso à caixa (instance_id), ignora o contato
+    if (contact.instance_id && !hasUserAccessToInstance(contact.instance_id)) {
+        return;
     }
 
     // VALIDAÇÃO INTELIGENTE APPWEB (Realtime Barreira)
@@ -3621,30 +3608,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 if (isEmpty) {
                     return false;
                 }
-               
-               // --- PROTEÇÃO RIGOROSA RONALDO-WEB ---
-               if (!isRonaldo) {
-                   if (effectiveInstanceId === '5c78d358-d449-41c4-b396-a04ab20a39e4') return false;
-               }
-
-               if (!isRonaldo) {
-                   if (allowedStr) {
-                       try {
-                           const allowed = JSON.parse(allowedStr);
-                           if (Array.isArray(allowed) && allowed.length > 0) {
-                               if (effectiveInstanceId && !allowed.includes(effectiveInstanceId)) return false;
-                           } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                               return false;
-                           }
-                       } catch(e) {
-                           if (roleStr === 'agent' || roleStr === 'Agente') return false;
-                       }
-                   } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                       return false;
-                   }
-               }
-               return true;
-           });
+                // --- RBAC CENTRALIZADO E PROTEÇÃO DE CAIXAS ---
+                if (effectiveInstanceId && !hasUserAccessToInstance(effectiveInstanceId)) {
+                    return false;
+                }
+                return true;
+            });
 
            set((s) => {
                const newContacts = [...s.contacts];
@@ -5285,32 +5254,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const effectiveInstanceId = convInstanceId || cData.instance_id;
         cData.instance_id = effectiveInstanceId;
 
-        // RBAC RIGOROSO: Verifica se o contato que recebeu a msg é de uma instância permitida
-        const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
-        const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-        const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
-        const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
-
-        // --- PROTEÇÃO RIGOROSA RONALDO-WEB ---
-        if (!isRonaldo && effectiveInstanceId === '5c78d358-d449-41c4-b396-a04ab20a39e4') {
-            return; // Bloqueado! Outros operadores nunca processam mensagens do Ronaldo-Web
-        }
-
-        if (!isRonaldo) {
-            if (allowedStr) {
-                try {
-                    const allowedInstances = JSON.parse(allowedStr);
-                    if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                        if (effectiveInstanceId && !allowedInstances.includes(effectiveInstanceId)) return;
-                    } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                        return;
-                    }
-                } catch(e) {
-                    if (roleStr === 'agent' || roleStr === 'Agente') return;
-                }
-            } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                return;
-            }
+        // RBAC RIGOROSO: Verifica se a caixa (effectiveInstanceId) é permitida para o usuário logado
+        if (effectiveInstanceId && !hasUserAccessToInstance(effectiveInstanceId)) {
+            console.log(`[Realtime RBAC] Bloqueando mensagem da caixa sem permissão: ${effectiveInstanceId}`);
+            return;
         }
 
         const expectedCompositeIdRefined = targetContactId + '_' + (effectiveInstanceId || 'default');

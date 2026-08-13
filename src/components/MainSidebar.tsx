@@ -51,7 +51,7 @@ import {
   Building2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { useChatStore } from '../store/chatStore';
+import { useChatStore, hasUserAccessToInstance } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 import { createPortal } from 'react-dom';
 import { getLocalNotificationPrefs, fetchUserInboxNotificationPreferences, toggleInboxNotification } from '../services/notificationPreferences';
@@ -329,31 +329,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                return true;
              });
 
-             const storage = getActiveStorage();
-             const loggedEmail = storage ? storage.getItem('current_user_email') : null;
-             const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
-             const allowedStr = storage ? storage.getItem('allowed_instances') : null;
-              
-             if (!isRonaldo) {
-                finalData = finalData.filter(d => d.id !== '5c78d358-d449-41c4-b396-a04ab20a39e4' && !d.display_name?.toLowerCase().includes('ronaldo'));
-             }
-              
-             if (!isRonaldo) {
-                if (allowedStr) {
-                    try {
-                        const allowedInstances = JSON.parse(allowedStr);
-                        if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                            finalData = finalData.filter(d => allowedInstances.includes(d.id));
-                        } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
-                            finalData = [];
-                        }
-                    } catch(e) {
-                        if (currentUserRole === 'agent' || currentUserRole === 'Agente') finalData = [];
-                    }
-                } else if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
-                    finalData = [];
-                }
-             }
+             finalData = finalData.filter(d => hasUserAccessToInstance(d.id));
 
              setInstances(finalData);
 
