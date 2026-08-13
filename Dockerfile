@@ -22,7 +22,7 @@ FROM node:20
 WORKDIR /app
 
 # 1. Install baileys-core dependencies with cache
-COPY baileys-core/package.json baileys-core/package-lock.json /app/baileys-core/
+COPY baileys-core/package.json baileys-core/package-lock.json baileys-core/engine-requirements.js /app/baileys-core/
 WORKDIR /app/baileys-core
 RUN --mount=type=cache,target=/root/.npm npm ci
 

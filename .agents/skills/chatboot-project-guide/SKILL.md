@@ -117,7 +117,11 @@ Ao concluir e verificar qualquer desenvolvimento ou correção localmente, a IA 
    - **Alvo**: Servidor Backend Node no **2º Coolify** (`serverchat.xpointsolucoes.com.br` / `ServerChatBaileys-V2` - UUID: `fq2ailrq1q4smlsir1ackw5u`).
    - **Ação**: Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z`, realiza o commit/push no GitHub (`main`) e dispara o deploy via API no Coolify 2 (`POST /api/v1/deploy?uuid=fq2ailrq1q4smlsir1ackw5u`). Relata o status no chat.
 
-6. **Se nenhum destes comandos for fornecido pelo usuário, nenhum git push ou deploy será efetuado.**
+6. **Regra de Cancelamento de Deploys Anteriores (Prioridade do Novo Commit)**:
+   - Ao executar qualquer comando de deploy (`Deploy Server`, `Deploy Server1` ou via API), a IA deve obrigatoriamente verificar se existem compilações anteriores em andamento (`in_progress`) ou na fila (`queued`) para a mesma aplicação.
+   - Caso existam, a IA deve invocar o cancelamento (`deployment` -> `action: "cancel"`) dessas instâncias antigas antes de iniciar a nova build. Isso impede que commits mais novos fiquem travados aguardando builds obsoletos.
+
+7. **Se nenhum destes comandos for fornecido pelo usuário, nenhum git push ou deploy será efetuado.**
 
 ---
 
