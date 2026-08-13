@@ -7,7 +7,7 @@ export interface EnvironmentConfig {
 }
 
 const DEFAULT_PROD_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
-const DEFAULT_ALPHA_URL = 'https://api-alpha.xpointsolucoes.com';
+const DEFAULT_ALPHA_URL = 'http://wh1ss8sy848ufj6zh8t492y7.69.62.92.212.sslip.io';
 
 export const ENVIRONMENTS: Record<'alpha' | 'production', EnvironmentConfig> = {
   production: {
