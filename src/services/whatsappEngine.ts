@@ -5,6 +5,8 @@ export const getApiUrl = () => {
   return getCurrentEnvironment().url;
 };
 
+export const API_URL = getApiUrl();
+
 export const createInstance = async (tenantId: string, instanceId: string, apiKey: string, forceNew = false) => {
   const apiUrl = getApiUrl();
   if (!apiUrl) throw new Error("URL do motor Antigravity não definida (.env)");
@@ -25,8 +27,8 @@ export const createInstance = async (tenantId: string, instanceId: string, apiKe
 };
 
 export const sendNativeMessage = async (tenantId: string, instanceId: string, number: string, text: string, apiKey: string) => {
-  // Mock ou endpoint de mensagens (Apenas atualizar para as URLs corretas se houver uso no UI)
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, {
     method: 'POST',
     headers: { 
       'Content-Type': 'application/json',
@@ -57,7 +59,8 @@ export const sendNativeMessage = async (tenantId: string, instanceId: string, nu
 export const sendTextMessage = sendNativeMessage;
 
 export const editNativeMessage = async (tenantId: string, instanceId: string, number: string, newText: string, messageKey: any, apiKey: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, {
     method: 'POST',
     headers: { 
       'Content-Type': 'application/json',
@@ -86,7 +89,8 @@ export const editNativeMessage = async (tenantId: string, instanceId: string, nu
 };
 
 export const deleteNativeMessage = async (tenantId: string, instanceId: string, number: string, messageKey: any, apiKey: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, {
     method: 'POST',
     headers: { 
       'Content-Type': 'application/json',
@@ -115,7 +119,8 @@ export const deleteNativeMessage = async (tenantId: string, instanceId: string, 
 };
 
 export const logoutEngine = async (tenantId: string, instanceId: string, apiKey: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/disconnect`, { 
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/disconnect`, { 
     method: 'POST',
     headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
   });
@@ -124,7 +129,8 @@ export const logoutEngine = async (tenantId: string, instanceId: string, apiKey:
 };
 
 export const reconnectEngine = async (tenantId: string, instanceId: string, apiKey: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/connect`, { 
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/connect`, { 
     method: 'POST',
     headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
   });
@@ -133,7 +139,8 @@ export const reconnectEngine = async (tenantId: string, instanceId: string, apiK
 };
 
 export const fetchEngineStatus = async (tenantId: string, instanceId: string, apiKey: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/status`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/status`, {
     headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
   });
   if (!res.ok) throw new Error('Falha ao checar status');
@@ -141,7 +148,8 @@ export const fetchEngineStatus = async (tenantId: string, instanceId: string, ap
 };
 
 export const syncEngineContacts = async (tenantId: string, instanceId: string, apiKey: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, { 
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, { 
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
     body: JSON.stringify({ method: 'syncContacts', args: [] })
@@ -151,7 +159,8 @@ export const syncEngineContacts = async (tenantId: string, instanceId: string, a
 };
 
 export const clearEngineStore = async (tenantId: string, instanceId: string, apiKey: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, { 
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, { 
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
     body: JSON.stringify({ method: 'clearStore', args: [] })
@@ -161,7 +170,8 @@ export const clearEngineStore = async (tenantId: string, instanceId: string, api
 };
 
 export const forceEnginePresence = async (tenantId: string, instanceId: string, apiKey: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, { 
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, { 
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
     body: JSON.stringify({ method: 'sendPresenceUpdate', args: ['available'] })
@@ -171,7 +181,8 @@ export const forceEnginePresence = async (tenantId: string, instanceId: string, 
 };
 
 export const fetchEngineGroups = async (tenantId: string, instanceId: string, apiKey: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups`, { 
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups`, { 
     method: 'GET',
     headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
   });
@@ -180,7 +191,8 @@ export const fetchEngineGroups = async (tenantId: string, instanceId: string, ap
 };
 
 export const fetchEngineGroupMetadata = async (tenantId: string, instanceId: string, apiKey: string, groupId: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}`, { 
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/${groupId}`, { 
     method: 'GET',
     headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
   });
@@ -189,7 +201,8 @@ export const fetchEngineGroupMetadata = async (tenantId: string, instanceId: str
 };
 
 export const createEngineGroup = async (tenantId: string, instanceId: string, apiKey: string, subject: string, participants: string[]) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
     body: JSON.stringify({ subject, participants })
@@ -199,7 +212,8 @@ export const createEngineGroup = async (tenantId: string, instanceId: string, ap
 };
 
 export const updateEngineGroupSubject = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, subject: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/subject`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/${groupId}/subject`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
     body: JSON.stringify({ subject })
@@ -209,7 +223,8 @@ export const updateEngineGroupSubject = async (tenantId: string, instanceId: str
 };
 
 export const updateEngineGroupDescription = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, description: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/description`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/${groupId}/description`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
     body: JSON.stringify({ description })
@@ -219,7 +234,8 @@ export const updateEngineGroupDescription = async (tenantId: string, instanceId:
 };
 
 export const updateEngineGroupSettings = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, setting: 'announcement' | 'not_announcement' | 'locked' | 'unlocked') => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/settings`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/${groupId}/settings`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
     body: JSON.stringify({ setting })
@@ -229,7 +245,8 @@ export const updateEngineGroupSettings = async (tenantId: string, instanceId: st
 };
 
 export const updateEngineGroupParticipants = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, participants: string[], action: 'add' | 'remove' | 'promote' | 'demote') => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/participants`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/${groupId}/participants`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
     body: JSON.stringify({ participants, action })
@@ -239,7 +256,8 @@ export const updateEngineGroupParticipants = async (tenantId: string, instanceId
 };
 
 export const leaveEngineGroup = async (tenantId: string, instanceId: string, apiKey: string, groupId: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/leave`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/${groupId}/leave`, {
     method: 'DELETE',
     headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
   });
@@ -248,7 +266,8 @@ export const leaveEngineGroup = async (tenantId: string, instanceId: string, api
 };
 
 export const getEngineGroupInviteCode = async (tenantId: string, instanceId: string, apiKey: string, groupId: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/invite-code`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/${groupId}/invite-code`, {
     method: 'GET',
     headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
   });
@@ -257,7 +276,8 @@ export const getEngineGroupInviteCode = async (tenantId: string, instanceId: str
 };
 
 export const revokeEngineGroupInvite = async (tenantId: string, instanceId: string, apiKey: string, groupId: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/revoke-invite`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/${groupId}/revoke-invite`, {
     method: 'POST',
     headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
   });
@@ -266,7 +286,8 @@ export const revokeEngineGroupInvite = async (tenantId: string, instanceId: stri
 };
 
 export const acceptEngineGroupInvite = async (tenantId: string, instanceId: string, apiKey: string, code: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/accept-invite/${code}`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/accept-invite/${code}`, {
     method: 'POST',
     headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
   });
@@ -275,7 +296,8 @@ export const acceptEngineGroupInvite = async (tenantId: string, instanceId: stri
 };
 
 export const fetchEngineGroupProfilePicture = async (tenantId: string, instanceId: string, apiKey: string, groupId: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/profile-picture`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/${groupId}/profile-picture`, {
     method: 'GET',
     headers: { 'x-tenant-id': tenantId, 'apikey': apiKey }
   });
@@ -284,7 +306,8 @@ export const fetchEngineGroupProfilePicture = async (tenantId: string, instanceI
 };
 
 export const updateEngineGroupProfilePicture = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, url: string) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/profile-picture`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/${groupId}/profile-picture`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
     body: JSON.stringify({ url })
@@ -294,7 +317,8 @@ export const updateEngineGroupProfilePicture = async (tenantId: string, instance
 };
 
 export const toggleEngineGroupEphemeral = async (tenantId: string, instanceId: string, apiKey: string, groupId: string, ephemeralExpiration: number) => {
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/groups/${groupId}/ephemeral`, {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/groups/${groupId}/ephemeral`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
     body: JSON.stringify({ ephemeralExpiration })
@@ -304,8 +328,9 @@ export const toggleEngineGroupEphemeral = async (tenantId: string, instanceId: s
 };
 
 export const sendEnginePresenceUpdate = async (tenantId: string, instanceId: string, jid: string, presence: 'composing' | 'recording' | 'paused' | 'available' | 'unavailable', apiKey: string) => {
-  if (!API_URL) throw new Error("URL do motor Antigravity não definida (.env)");
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, { 
+  const apiUrl = getApiUrl();
+  if (!apiUrl) throw new Error("URL do motor Antigravity não definida (.env)");
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, { 
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
     body: JSON.stringify({ method: 'sendPresenceUpdate', args: [presence, jid] })
@@ -334,7 +359,8 @@ export const sendContactMessage = async (
   contactPhone: string, 
   apiKey: string
 ) => {
-  if (!API_URL) throw new Error("URL do motor Antigravity não definida (.env)");
+  const apiUrl = getApiUrl();
+  if (!apiUrl) throw new Error("URL do motor Antigravity não definida (.env)");
   const cleanPhone = contactPhone.replace(/\D/g, '');
   const vcard = 
     'BEGIN:VCARD\n' +
@@ -351,7 +377,7 @@ export const sendContactMessage = async (
     }
   };
 
-  const res = await fetch(`${API_URL}/api/v1/instances/${instanceId}/invoke`, {
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, {
     method: 'POST',
     headers: { 
       'Content-Type': 'application/json',
