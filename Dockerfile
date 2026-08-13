@@ -2,11 +2,14 @@
 FROM golang:alpine AS go-builder
 RUN apk add --no-cache git
 WORKDIR /build
+
 COPY wacalls-go/go.mod wacalls-go/go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
 COPY wacalls-go/ ./
-RUN go mod tidy
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o wacalls-server ./cmd/server
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o wacalls-server ./cmd/server
 
 # Stage 2: Main Node.js app
 FROM node:20-slim
@@ -16,23 +19,26 @@ RUN apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 -o Acquire::http::T
 
 WORKDIR /app
 
-# Copy the entire workspace into the image so local references like "file:../baileys-core" will work
-COPY . .
-
-# Copy compiled Go binary from Stage 1 into the server directory
-COPY --from=go-builder /build/wacalls-server /app/server/wacalls-server
-
-# We need to install dependencies in baileys-core if any
+# 1. Install baileys-core dependencies with cache
+COPY baileys-core/package.json baileys-core/package-lock.json /app/baileys-core/
 WORKDIR /app/baileys-core
-RUN npm install
-RUN npm run build
-RUN npm pack
+RUN --mount=type=cache,target=/root/.npm npm ci
 
-# Then install dependencies in server
+# 2. Copy baileys-core source code and build package
+COPY baileys-core/ /app/baileys-core/
+RUN npm run build && npm pack
+
+# 3. Install server dependencies with cache
+COPY server/package.json server/package-lock.json /app/server/
 WORKDIR /app/server
-RUN npm install --legacy-peer-deps
-# Ensure we install the packed tarball exactly
-RUN npm install /app/baileys-core/baileys-7.0.0-rc.9.tgz --legacy-peer-deps
+RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps
+RUN --mount=type=cache,target=/root/.npm npm install /app/baileys-core/baileys-7.0.0-rc.9.tgz --legacy-peer-deps
+
+# 4. Copy server source code
+COPY server/ /app/server/
+
+# 5. Copy compiled Go binary from Stage 1 into the server directory
+COPY --from=go-builder /build/wacalls-server /app/server/wacalls-server
 
 # Create data directory for persistent SQLite database
 RUN mkdir -p /app/server/data
