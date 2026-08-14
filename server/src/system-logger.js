@@ -62,6 +62,12 @@ function interceptConsole() {
                                   text.includes('Decrypted message with closed session') ||
                                   text.includes('received error in ack') ||
                                   text.includes('error":"479"') ||
+                                  text.includes('Own LID session created successfully') ||
+                                  text.includes('sent retry receipt') ||
+                                  text.includes('Connection Terminated') ||
+                                  text.includes('status 428') ||
+                                  text.includes('[QueueProcessor]') ||
+                                  (text.includes('[Baileys]') && text.includes('connection errored')) ||
                                   (text.includes('libsignal') && text.includes('session_cipher'));
     if (isBaileysDecryptError) {
         originalFn.apply(console, args);
