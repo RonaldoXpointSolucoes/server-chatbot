@@ -291,11 +291,38 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
             const jid = args ? args[0] : null;
             const content = args ? args[1] : null;
             
-            // Se for uma edição de mensagem (contém a chave 'edit'), necessita do socket ativo
-            if (content && content.edit) {
+            // Se for uma edição de mensagem (contém 'edit') ou exclusão/revogação (contém 'delete'), necessita do socket ativo diretamente no Baileys
+            if (content && (content.edit || content.delete)) {
                 const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
-                if (!sock) return res.status(400).json({ error: 'Socket offline' });
-                // Deixa seguir para invocar no socket diretamente
+                if (!sock) return res.status(400).json({ error: 'Socket offline ou não conectado.' });
+                
+                // Normalização defensiva do JID para o Brasil (+55)
+                let targetJid = jid;
+                if (targetJid && typeof targetJid === 'string' && !targetJid.endsWith('@g.us')) {
+                    targetJid = await resolveTargetJid(sock, jid, req.tenantId);
+                }
+
+                if (content.delete && typeof content.delete === 'object') {
+                    if (!content.delete.remoteJid) {
+                        content.delete.remoteJid = targetJid;
+                    }
+                }
+
+                console.log(`[Invoke] Executando ${content.delete ? 'DELETE/REVOKE' : 'EDIT'} de mensagem na instância ${instanceId}:`, content);
+                const sent = await sock.sendMessage(targetJid, content);
+                
+                // Se for exclusão de mensagem, atualiza o status na tabela messages do Supabase
+                if (content.delete && content.delete.id) {
+                    supabase.from('messages')
+                        .update({ status: 'deleted' })
+                        .eq('whatsapp_message_id', content.delete.id)
+                        .then(({ error }) => {
+                            if (error) console.error('[Invoke Delete] Erro ao atualizar status no banco:', error);
+                            else console.log('[Invoke Delete] Status da mensagem atualizado para deleted no banco:', content.delete.id);
+                        });
+                }
+
+                return res.json({ ok: true, result: sent, key: sent?.key });
             } else if (jid && content) {
                 let messageType = 'text';
                 let body = content.text || '';

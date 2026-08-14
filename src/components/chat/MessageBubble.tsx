@@ -76,6 +76,7 @@ export const MessageBubble = memo(({
   const [dropdownDirection, setDropdownDirection] = useState<'up' | 'down'>('down');
   const [dropdownCoords, setDropdownCoords] = useState<{x: number, y: number} | null>(null);
   const [showDeletedContent, setShowDeletedContent] = useState(false);
+  const [showEditedOriginal, setShowEditedOriginal] = useState(false);
 
   const handleDownloadMedia = async (url: string, mediaType: string, id: string) => {
     try {
@@ -881,38 +882,86 @@ export const MessageBubble = memo(({
                )}
                
                {(!msg.mediaType || (msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
-                  (() => {
-                    const t = msg.text || '';
-                    const isUnsupported = t.includes('Mensagem não suportada');
-                    const isInteractive = t.includes('Mensagem Interativa') || t.includes('Mensagem Estruturada');
-                    const isSpecial = t.includes('Álbum de Fotos') || t.includes('Mensagem Editada');
-                    
-                    if (isUnsupported || isInteractive || isSpecial) {
-                      return (
-                        <div className="flex flex-col gap-2 bg-gradient-to-br from-indigo-50/50 to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl border border-indigo-100 dark:border-gray-700/50 mt-1 shadow-sm group">
-                          <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
-                            <div className="bg-indigo-100 dark:bg-indigo-900/30 p-1.5 rounded-lg group-hover:scale-110 transition-transform">
-                              {isInteractive ? <LayoutTemplate size={18} /> : <Smartphone size={18} />}
-                            </div>
-                            <span className="font-semibold text-[13px]">
-                              {isInteractive ? 'Conteúdo Interativo' : isUnsupported ? 'Conteúdo não suportado' : t.replace(/^(?:📸|✏️)\s*/, '')}
-                            </span>
-                          </div>
-                          <span className="text-[12px] text-gray-600 dark:text-gray-300 leading-snug">
-                            {isInteractive ? 'Este tipo de mensagem (catálogo, botões ou listas) deve ser visualizado no aplicativo WhatsApp oficial.' : 'Esta mensagem utiliza um formato especial. Recomendamos abrir o WhatsApp no seu celular para visualizar.'}
-                          </span>
-                        </div>
-                      );
-                    }
-                    
-                    return (
-                      <span className="text-[14px] leading-[1.4] block whitespace-pre-wrap break-words overflow-hidden shadow-none mt-1">
-                         {renderMessageText(t.replace(/^(?:磁|汐)\s*Vídeo\s*\n?/i, ''))}
-                         {!msg.buttons && <span className="inline-block w-[110px] h-3 ml-2 shrink-0"></span>}
-                      </span>
-                    );
-                  })()
-               )}
+                   (() => {
+                     const t = msg.text || '';
+                     const isEdited = Boolean(
+                       msg.status === 'edited' ||
+                       msg.raw_payload?.is_edited ||
+                       t.includes('*(Editado)*') ||
+                       t.includes('(Editado)')
+                     );
+                     const originalText = msg.raw_payload?.original_text || msg.original_text || null;
+
+                     const isUnsupported = t.includes('Mensagem não suportada');
+                     const isInteractive = t.includes('Mensagem Interativa') || t.includes('Mensagem Estruturada');
+                     const isSpecial = t.includes('Álbum de Fotos') || (t.includes('Mensagem Editada') && !isEdited && t === '✏️ Mensagem Editada');
+                     
+                     if (isUnsupported || isInteractive || isSpecial) {
+                       return (
+                         <div className="flex flex-col gap-2 bg-gradient-to-br from-indigo-50/50 to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl border border-indigo-100 dark:border-gray-700/50 mt-1 shadow-sm group">
+                           <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                             <div className="bg-indigo-100 dark:bg-indigo-900/30 p-1.5 rounded-lg group-hover:scale-110 transition-transform">
+                               {isInteractive ? <LayoutTemplate size={18} /> : <Smartphone size={18} />}
+                             </div>
+                             <span className="font-semibold text-[13px]">
+                               {isInteractive ? 'Conteúdo Interativo' : isUnsupported ? 'Conteúdo não suportado' : t.replace(/^(?:📸|✏️)\s*/, '')}
+                             </span>
+                           </div>
+                           <span className="text-[12px] text-gray-600 dark:text-gray-300 leading-snug">
+                             {isInteractive ? 'Este tipo de mensagem (catálogo, botões ou listas) deve ser visualizado no aplicativo WhatsApp oficial.' : 'Esta mensagem utiliza um formato especial. Recomendamos abrir o WhatsApp no seu celular para visualizar.'}
+                           </span>
+                         </div>
+                       );
+                     }
+                     
+                     const cleanText = t.replace(/\s*\*\(Editado\)\*$/, '').replace(/\s*\(Editado\)$/, '').replace(/^(?:磁|汐)\s*Vídeo\s*\n?/i, '');
+
+                     return (
+                       <div className="flex flex-col gap-1 mt-1">
+                         {isEdited && (
+                           <div className="flex items-center justify-between gap-2 border-b border-amber-500/20 pb-1.5 mb-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 select-none">
+                             <div className="flex items-center gap-1.5">
+                               <Edit2 size={12} className="shrink-0" />
+                               <span>Mensagem Editada</span>
+                             </div>
+                             {originalText && (
+                               <button
+                                 type="button"
+                                 onClick={(e) => {
+                                   e.stopPropagation();
+                                   setShowEditedOriginal(!showEditedOriginal);
+                                 }}
+                                 className={cn(
+                                   "flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-lg border transition-all cursor-pointer shadow-xs select-none",
+                                   showEditedOriginal
+                                     ? "bg-amber-500/20 border-amber-500/30 text-amber-800 dark:text-amber-300"
+                                     : "bg-slate-500/10 border-slate-500/20 text-slate-600 dark:text-slate-400 hover:bg-slate-500/20"
+                                 )}
+                               >
+                                 {showEditedOriginal ? <EyeOff size={11} /> : <Eye size={11} />}
+                                 {showEditedOriginal ? 'Ocultar Original' : 'Ver Original'}
+                               </button>
+                             )}
+                           </div>
+                         )}
+
+                         <span className="text-[14px] leading-[1.4] block whitespace-pre-wrap break-words overflow-hidden shadow-none">
+                            {renderMessageText(cleanText)}
+                            {!msg.buttons && <span className="inline-block w-[110px] h-3 ml-2 shrink-0"></span>}
+                         </span>
+
+                         {isEdited && showEditedOriginal && originalText && (
+                           <div className="mt-1.5 pl-3 py-1.5 border-l-2 border-dashed border-amber-500/50 dark:border-amber-400/50 text-[12.5px] text-slate-600 dark:text-slate-300 bg-amber-500/5 dark:bg-amber-500/10 rounded-r-xl font-normal leading-relaxed animate-in fade-in slide-in-from-top-1 duration-200">
+                             <span className="block text-[9px] uppercase tracking-wider font-extrabold text-amber-700 dark:text-amber-400 select-none mb-0.5">
+                               📝 Conteúdo original (antes da edição):
+                             </span>
+                             {originalText}
+                           </div>
+                         )}
+                       </div>
+                     );
+                   })()
+                )}
 
                {msg.buttons && msg.buttons.length > 0 && (
                   <div className="flex flex-col gap-1.5 mt-2 w-full pt-1 pb-4">

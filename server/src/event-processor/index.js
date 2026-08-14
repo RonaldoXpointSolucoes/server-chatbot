@@ -473,27 +473,51 @@ class EventProcessor {
                     
                     // Verifica se é uma edição de mensagem (MESSAGE_EDIT = 14)
                     // Ou se possui explicitamente a propriedade "editedMessage"
-                    if (p.type === 14 || p.type === 'MESSAGE_EDIT' || p.editedMessage) {
-                        if (p.key && p.key.id && p.editedMessage) {
-                             let newText = this.extractTextFromMessage({ message: p.editedMessage });
-                             if (newText && !newText.endsWith(' *(Editado)*')) {
-                                 newText = newText + ' *(Editado)*';
+                    if (p.type === 14 || p.type === 'MESSAGE_EDIT' || p.editedMessage || content.editedMessage) {
+                        const targetMsgId = p.key?.id || msg.key?.id;
+                        if (targetMsgId) {
+                             let newText = this.extractTextFromMessage({ message: p.editedMessage || content.editedMessage });
+                             if (newText) {
+                                 // Busca a mensagem original no banco para preservar o texto original
+                                 supabase.from('messages')
+                                     .select('id, text_content, raw_payload, status')
+                                     .eq('whatsapp_message_id', targetMsgId)
+                                     .maybeSingle()
+                                     .then(async ({ data: existingMsg }) => {
+                                         if (existingMsg) {
+                                             const originalText = existingMsg.raw_payload?.original_text || existingMsg.text_content || '';
+                                             const updatedPayload = {
+                                                 ...(existingMsg.raw_payload || {}),
+                                                 is_edited: true,
+                                                 original_text: originalText,
+                                                 edited_text: newText,
+                                                 edited_at: new Date().toISOString()
+                                             };
+
+                                             await supabase.from('messages')
+                                                 .update({
+                                                     text_content: newText,
+                                                     status: 'edited',
+                                                     raw_payload: updatedPayload,
+                                                     updated_at: new Date().toISOString()
+                                                 })
+                                                 .eq('id', existingMsg.id);
+
+                                             console.log(`[EventProcessor] Mensagem editada atualizada com sucesso! ID: ${targetMsgId} | Texto Original: "${originalText}" -> Novo: "${newText}"`);
+
+                                             realtime.publishInboxEvent(tenantId, 'message.update', {
+                                                 id: existingMsg.id,
+                                                 whatsapp_message_id: targetMsgId,
+                                                 text_content: newText,
+                                                 status: 'edited',
+                                                 raw_payload: updatedPayload
+                                             }).catch(() => {});
+                                         }
+                                     })
+                                     .catch(err => console.error('[EventProcessor] Erro ao atualizar mensagem editada:', err));
                              }
-                             supabase.from('messages')
-                                 .update({ text_content: newText })
-                                 .eq('whatsapp_message_id', p.key.id)
-                                 .then(({ error }) => {
-                                     if (error) console.error('[EventProcessor] Erro ao atualizar mensagem editada:', error);
-                                     else console.log('[EventProcessor] Mensagem editada processada no banco:', p.key.id);
-                                 });
-                             
-                             // Tenta publicar no realtime (não bloqueia o fluxo)
-                             realtime.publishInboxEvent(tenantId, 'message.update', {
-                                 whatsapp_message_id: p.key.id,
-                                 text_content: newText
-                             }).catch(() => {});
                         }
-                        // Sempre pula o enfileiramento de protocolMessage de edição
+                        // Sempre pula o enfileiramento de protocolMessage de edição para evitar mensagens duplicadas fantasma na UI
                         continue; 
                     } 
                     
@@ -904,8 +928,9 @@ class EventProcessor {
                  if(exist) {
                      let nextStatus = exist.status || 'bot';
                      let nextAiPaused = exist.ai_paused || false;
-                     
-                     if ((exist.status === 'resolved' || exist.status === 'closed' || exist.status === 'snoozed') && (data.has_inbound || data.has_human_outbound)) {
+                     const isOldHistory = data.last_message_at && (Date.now() - new Date(data.last_message_at).getTime() > 24 * 60 * 60 * 1000);
+                      
+                     if ((exist.status === 'resolved' || exist.status === 'closed' || exist.status === 'snoozed') && !isOldHistory) {
                           if (data.has_inbound && !exist.ai_paused) {
                               nextStatus = 'bot';
                           } else {
@@ -951,9 +976,9 @@ class EventProcessor {
                      if (!isOldHistory) {
                          if (data.has_inbound) {
                              initialStatus = 'bot';
-                         } else if (data.has_human_outbound) {
+                         } else {
                              initialStatus = 'open';
-                             initialAiPaused = true;
+                             if (data.has_human_outbound) initialAiPaused = true;
                          }
                      }
                      

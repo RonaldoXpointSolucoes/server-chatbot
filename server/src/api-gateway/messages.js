@@ -78,6 +78,18 @@ router.post('/messages/send', requireTenant, async (req, res) => {
 
         if (dbError) throw dbError;
 
+        // Buscar status atual da conversa para garantir que ticket ativo é aberto se estivesse resolvido/fechado
+        const { data: convData } = await supabase
+            .from('conversations')
+            .select('status, ai_paused')
+            .eq('id', conversationId)
+            .single();
+
+        let nextStatus = convData?.status || 'open';
+        if (convData?.status === 'resolved' || convData?.status === 'closed' || convData?.status === 'snoozed') {
+            nextStatus = convData?.ai_paused ? 'open' : 'bot';
+        }
+
         if (!isAuto) {
             try {
                 AutomationWorker.cancelPendingMessage(conversationId);
@@ -88,11 +100,13 @@ router.post('/messages/send', requireTenant, async (req, res) => {
 
             await supabase.from('conversations').update({
                 updated_at: new Date().toISOString(),
-                unread_count: 0
+                unread_count: 0,
+                status: nextStatus
             }).eq('id', conversationId);
         } else {
             await supabase.from('conversations').update({
-                updated_at: new Date().toISOString()
+                updated_at: new Date().toISOString(),
+                status: nextStatus
             }).eq('id', conversationId);
         }
 

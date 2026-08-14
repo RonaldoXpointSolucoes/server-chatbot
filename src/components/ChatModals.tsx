@@ -4454,12 +4454,25 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   });
   const [loading, setLoading] = useState(false);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
-  const [search, setSearch] = useState('');
-  const [dateFilter, setDateFilter] = useState('today'); // all, today, yesterday, week, month
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [search, setSearch] = useState(() => {
+    return localStorage.getItem('closed_tickets_search') || '';
+  });
+  const [dateFilter, setDateFilter] = useState(() => {
+    return localStorage.getItem('closed_tickets_date_filter') || 'today';
+  }); // all, today, yesterday, week, month
+  const [selectedDate, setSelectedDate] = useState<Date>(() => {
+    const savedDate = localStorage.getItem('closed_tickets_selected_date');
+    if (savedDate) {
+      const d = new Date(savedDate);
+      if (!isNaN(d.getTime())) return d;
+    }
+    return new Date();
+  });
   const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
   const [activeKanbanTab, setActiveKanbanTab] = useState<'rapido' | 'medio' | 'complexo'>('rapido');
-  const [activeView, setActiveView] = useState<'kanban' | 'dashboard'>('kanban');
+  const [activeView, setActiveView] = useState<'kanban' | 'dashboard'>(() => {
+    return (localStorage.getItem('closed_tickets_active_view') as 'kanban' | 'dashboard') || 'kanban';
+  });
   const [showTicketMenu, setShowTicketMenu] = useState(false);
   const [reanalyzingId, setReanalyzingId] = useState<number | null>(null);
 
@@ -4660,9 +4673,38 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           }
         }
         setInstances(finalData);
-        if (selectedInstanceId !== 'all' && !finalData.some((i: any) => i.id === selectedInstanceId)) {
-          setSelectedInstanceId('all');
-          localStorage.setItem('closed_tickets_selected_instance_id', 'all');
+
+        // Preservar a caixa/instância selecionada salva pelo usuário no localStorage se for válida
+        const savedInstanceId = localStorage.getItem('closed_tickets_selected_instance_id');
+        if (savedInstanceId && (savedInstanceId === 'all' || finalData.some((i: any) => i.id === savedInstanceId))) {
+          setSelectedInstanceId(savedInstanceId);
+        } else {
+          // Pre-selecionar por padrão a caixa/empresa ativa no topo da aplicação apenas se não houver um filtro salvo
+          const activeFilter = useChatStore.getState().activeChannelFilter || localStorage.getItem('activeChannelFilter');
+          const connName = useChatStore.getState().connectedInstanceName;
+          
+          let targetInstId: string | null = null;
+          if (activeFilter && activeFilter !== 'all') {
+            const matched = finalData.find((i: any) => i.id === activeFilter || i.display_name === activeFilter);
+            if (matched) targetInstId = matched.id;
+          }
+          if (!targetInstId && connName) {
+            const matchedConn = finalData.find((i: any) => i.id === connName || i.display_name === connName);
+            if (matchedConn) targetInstId = matchedConn.id;
+          }
+
+          if (targetInstId) {
+            setSelectedInstanceId(targetInstId);
+            localStorage.setItem('closed_tickets_selected_instance_id', targetInstId);
+          } else if (selectedInstanceId !== 'all' && !finalData.some((i: any) => i.id === selectedInstanceId)) {
+            if (finalData.length > 0) {
+              setSelectedInstanceId(finalData[0].id);
+              localStorage.setItem('closed_tickets_selected_instance_id', finalData[0].id);
+            } else {
+              setSelectedInstanceId('all');
+              localStorage.setItem('closed_tickets_selected_instance_id', 'all');
+            }
+          }
         }
       }
     } catch (err) {
@@ -4689,7 +4731,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       // 1.5. Busca conversas com status 'resolved' ou 'closed' como fallback
       let convResolvedQuery = supabase
         .from('conversations')
-        .select('id, contact_id, status, updated_at, assigned_to, instance_id')
+        .select('id, contact_id, status, created_at, updated_at, assigned_to, instance_id')
         .or('status.eq.resolved,status.eq.closed');
 
       if (tenantId) {
@@ -4768,6 +4810,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               id: `conv_${conv.id.substring(0, 8)}`,
               tenant_id: tenantId,
               contact_id: conv.contact_id,
+              conversation_id: conv.id,
               status: 'resolved',
               opened_at: conv.created_at || dt,
               closed_at: dt,
@@ -4782,55 +4825,15 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       const validateUuid = (uuid: any) => typeof uuid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid);
 
-      // 2. Obter todos os contact IDs envolvidos (apenas UUIDs válidos)
-      const contactIds = Array.from(new Set(resolvedList.map(t => t.contact_id).filter(validateUuid)));
-
-      let contactsData: any[] = [];
-      if (contactIds.length > 0) {
-        const { data: cData, error: cErr } = await supabase
-          .from('contacts')
-          .select('id, name, custom_name, fantasy_name, phone, company_ids, profile_picture_url, exclude_reports, instance_id, is_blocked')
-          .in('id', contactIds);
-        if (!cErr && cData) {
-          contactsData = cData;
-        }
-      }
-
-      // Buscar empresas vinculadas a estes contatos (apenas UUIDs válidos)
-      const assocCompanyIds = Array.from(
-        new Set(
-          contactsData.flatMap(c => c.company_ids || []).filter(validateUuid)
-        )
-      );
-      let companiesData: any[] = [];
-      if (assocCompanyIds.length > 0) {
-        const { data: compData } = await supabase
-          .from('contacts')
-          .select('id, name, fantasy_name')
-          .in('id', assocCompanyIds);
-        if (compData) {
-          companiesData = compData;
-        }
-      }
-
-      const companiesMap = new Map<string, any>();
-      companiesData.forEach(c => {
-        companiesMap.set(c.id, c);
-      });
-
-      const contactsMap = new Map<string, any>();
-      contactsData.forEach(c => {
-        contactsMap.set(c.id, c);
-      });
-
-      // Mapeamento de operadores e fallbacks das conversas
+      // Mapeamento de operadores e conversas por contato
       const operatorFallbacks = new Map<string, string>();
+      const contactToConvMap = new Map<string, string>();
       
       let allConvsData: any[] = [];
       if (contactIds.length > 0) {
         const { data: convsData } = await supabase
           .from('conversations')
-          .select('contact_id, assigned_to')
+          .select('id, contact_id, assigned_to')
           .in('contact_id', contactIds);
         if (convsData) allConvsData = convsData;
       }
@@ -4847,6 +4850,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       if (allConvsData.length > 0) {
         allConvsData.forEach(c => {
           if (c.contact_id) {
+            if (c.id) contactToConvMap.set(c.contact_id, c.id);
             let opName = 'Atendente';
             if (c.assigned_to) {
               const matchedUser = tenantUsersData.find(u => u.id === c.assigned_to);
@@ -4857,6 +4861,35 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             operatorFallbacks.set(c.contact_id, opName);
           }
         });
+      }
+
+      // 1.8. Buscar primeira mensagem (opened_at) e última mensagem (closed_at) reais de cada atendimento
+      const targetConvIds = Array.from(new Set(
+        resolvedList
+          .map(t => t.conversation_id || contactToConvMap.get(t.contact_id))
+          .filter(validateUuid)
+      ));
+
+      const messageTimeBounds = new Map<string, { firstMsgAt: string; lastMsgAt: string }>();
+
+      if (targetConvIds.length > 0) {
+        const { data: msgTimeList } = await supabase
+          .from('messages')
+          .select('conversation_id, timestamp')
+          .in('conversation_id', targetConvIds)
+          .order('timestamp', { ascending: true });
+
+        if (msgTimeList && msgTimeList.length > 0) {
+          msgTimeList.forEach(m => {
+            if (!m.conversation_id || !m.timestamp) return;
+            const existing = messageTimeBounds.get(m.conversation_id);
+            if (!existing) {
+              messageTimeBounds.set(m.conversation_id, { firstMsgAt: m.timestamp, lastMsgAt: m.timestamp });
+            } else {
+              existing.lastMsgAt = m.timestamp;
+            }
+          });
+        }
       }
 
       // Map resolved tickets
@@ -4885,15 +4918,34 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         const fallbackOp = operatorFallbacks.get(t.contact_id) || 'Atendente';
         const operatorName = t.metadata?.closed_by || (t.metadata?.operators && t.metadata.operators[0]?.name) || fallbackOp;
         
-        const start = new Date(t.opened_at);
-        const end = t.closed_at ? new Date(t.closed_at) : new Date();
-        const diffMs = end.getTime() - start.getTime();
+        const convIdKey = t.conversation_id || contactToConvMap.get(t.contact_id);
+        const msgBounds = convIdKey ? messageTimeBounds.get(convIdKey) : null;
+
+        let opened_at = t.opened_at;
+        let closed_at = t.closed_at || t.updated_at || new Date().toISOString();
+
+        if (msgBounds) {
+          if (msgBounds.firstMsgAt) opened_at = msgBounds.firstMsgAt;
+          if (msgBounds.lastMsgAt) closed_at = msgBounds.lastMsgAt;
+        }
+
+        if (opened_at && closed_at && new Date(opened_at).getTime() >= new Date(closed_at).getTime()) {
+          if (t.created_at && new Date(t.created_at).getTime() < new Date(closed_at).getTime()) {
+            opened_at = t.created_at;
+          }
+        }
+
+        const start = new Date(opened_at);
+        const end = new Date(closed_at);
+        const diffMs = Math.max(0, end.getTime() - start.getTime());
         const diffHrs = Math.floor(diffMs / 3600000);
         const diffMins = Math.floor((diffMs % 3600000) / 60000);
         const duration = diffHrs > 0 ? `${diffHrs}h ${diffMins}m` : `${diffMins} min`;
 
         return {
           ...t,
+          opened_at,
+          closed_at,
           contactName,
           companyFantasyName,
           companyName,
@@ -4915,8 +4967,6 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
   useEffect(() => {
     if (isOpen) {
-      setDateFilter('today');
-      setSelectedDate(new Date());
       setSelectedTicket(null);
     }
   }, [isOpen]);
@@ -4972,26 +5022,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       if (dateFilter === 'all') return true;
 
       const closedDate = new Date(t.closed_at);
-      const now = new Date();
+      if (isNaN(closedDate.getTime())) return true;
 
       if (dateFilter === 'today') {
         return closedDate.toDateString() === selectedDate.toDateString();
-      }
-
-      if (dateFilter === 'yesterday') {
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        return closedDate.toDateString() === yesterday.toDateString();
-      }
-
-      if (dateFilter === 'week') {
-        const diffTime = Math.abs(now.getTime() - closedDate.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        return diffDays <= 7;
-      }
-
-      if (dateFilter === 'month') {
-        return closedDate.getMonth() === now.getMonth() && closedDate.getFullYear() === now.getFullYear();
       }
 
       return true;
@@ -5356,7 +5390,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             {/* View switcher */}
             <div className="flex gap-1 bg-slate-200/60 dark:bg-[#182229]/40 p-1 rounded-xl border border-slate-200/40 dark:border-white/5 select-none shrink-0 h-[36px] items-center ml-auto mr-4 shadow-inner">
               <button
-                onClick={() => setActiveView('kanban')}
+                onClick={() => {
+                  setActiveView('kanban');
+                  localStorage.setItem('closed_tickets_active_view', 'kanban');
+                }}
                 type="button"
                 className={cn(
                   "px-3.5 py-1.5 rounded-lg text-[9.5px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
@@ -5368,7 +5405,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 <span>Mosaico</span>
               </button>
               <button
-                onClick={() => setActiveView('dashboard')}
+                onClick={() => {
+                  setActiveView('dashboard');
+                  localStorage.setItem('closed_tickets_active_view', 'dashboard');
+                }}
                 type="button"
                 className={cn(
                   "px-3.5 py-1.5 rounded-lg text-[9.5px] font-black uppercase transition-all flex items-center gap-1.5 cursor-pointer",
@@ -5394,7 +5434,11 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 type="text"
                 placeholder="Buscar por cliente, atendente, problema ou resumo..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearch(val);
+                  localStorage.setItem('closed_tickets_search', val);
+                }}
                 className="w-full text-xs pl-10 pr-4 py-2.5 bg-white dark:bg-[#182229]/40 border border-slate-200 dark:border-white/5 rounded-2xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 font-semibold font-sans transition-all shadow-sm text-slate-800 dark:text-[#e9edef] placeholder-slate-400 dark:placeholder-slate-500"
               />
             </div>
@@ -5434,14 +5478,19 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 <button
                   key={btn.id}
                   onClick={() => {
+                    let d = selectedDate;
                     if (btn.id === 'yesterday') {
-                      const y = new Date();
-                      y.setDate(y.getDate() - 1);
-                      setSelectedDate(y);
+                      d = new Date();
+                      d.setDate(d.getDate() - 1);
+                      setSelectedDate(d);
+                      localStorage.setItem('closed_tickets_selected_date', d.toISOString());
                     } else if (btn.id === 'today') {
-                      setSelectedDate(new Date());
+                      d = new Date();
+                      setSelectedDate(d);
+                      localStorage.setItem('closed_tickets_selected_date', d.toISOString());
                     }
                     setDateFilter(btn.id);
+                    localStorage.setItem('closed_tickets_date_filter', btn.id);
                   }}
                   type="button"
                   className={cn(
@@ -5470,7 +5519,9 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     type="button"
                     onClick={() => {
                       setSelectedDate(day);
+                      localStorage.setItem('closed_tickets_selected_date', day.toISOString());
                       setDateFilter('today');
+                      localStorage.setItem('closed_tickets_date_filter', 'today');
                     }}
                     className={cn(
                       "flex flex-col items-center justify-center py-0.5 w-8 h-[28px] rounded-xl transition-all duration-200 shrink-0 cursor-pointer border",
@@ -5493,44 +5544,47 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         {/* Top Metrics Row */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0 px-5 md:px-0">
           {/* Total */}
-          <div className="bg-[#182229]/40 border border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden group animate-in fade-in duration-300">
-            <div className="flex flex-col text-left">
-              <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Total Geral</span>
-              <span className="text-xl font-black text-slate-800 dark:text-white mt-0.5">{stats.total}</span>
+          <div className="bg-gradient-to-br from-white/90 to-slate-100/80 dark:from-[#182229]/80 dark:to-[#111b21]/90 backdrop-blur-xl border border-slate-200/80 dark:border-white/10 rounded-2xl p-3.5 flex items-center justify-between shadow-sm hover:shadow-md dark:shadow-[0_8px_30px_rgba(0,0,0,0.2)] hover:border-indigo-500/40 transition-all duration-300 group relative overflow-hidden animate-in fade-in">
+            <div className="flex flex-col text-left z-10">
+              <span className="text-[9.5px] font-black uppercase text-slate-400 dark:text-slate-400 tracking-wider">Total Geral</span>
+              <span className="text-2xl font-black text-slate-800 dark:text-white mt-0.5 tracking-tight">{stats.total}</span>
             </div>
-            <div className="p-2 bg-indigo-500/10 rounded-xl text-indigo-500 dark:text-indigo-400 shrink-0">
-              <FolderCheck size={16} />
+            <div className="p-2.5 bg-indigo-500/10 dark:bg-indigo-500/15 border border-indigo-500/20 rounded-xl text-indigo-600 dark:text-indigo-400 shrink-0 group-hover:scale-110 group-hover:rotate-3 transition-transform shadow-inner z-10">
+              <FolderCheck size={18} />
             </div>
+            <div className="absolute -right-4 -bottom-4 w-16 h-16 bg-indigo-500/10 rounded-full blur-xl pointer-events-none group-hover:bg-indigo-500/20 transition-all" />
           </div>
 
           {/* Fechados */}
-          <div className="bg-[#182229]/40 border border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
-            <div className="flex flex-col text-left">
-              <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Fechados</span>
-              <span className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5">{stats.closed}</span>
+          <div className="bg-gradient-to-br from-white/90 to-slate-100/80 dark:from-[#182229]/80 dark:to-[#111b21]/90 backdrop-blur-xl border border-slate-200/80 dark:border-white/10 rounded-2xl p-3.5 flex items-center justify-between shadow-sm hover:shadow-md dark:shadow-[0_8px_30px_rgba(0,0,0,0.2)] hover:border-emerald-500/40 transition-all duration-300 group relative overflow-hidden animate-in fade-in">
+            <div className="flex flex-col text-left z-10">
+              <span className="text-[9.5px] font-black uppercase text-slate-400 dark:text-slate-400 tracking-wider">Fechados</span>
+              <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5 tracking-tight">{stats.closed}</span>
             </div>
-            <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400 shrink-0">
-              <CheckCircle2 size={16} />
+            <div className="p-2.5 bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/20 rounded-xl text-emerald-600 dark:text-emerald-400 shrink-0 group-hover:scale-110 group-hover:rotate-3 transition-transform shadow-inner z-10">
+              <CheckCircle2 size={18} />
             </div>
+            <div className="absolute -right-4 -bottom-4 w-16 h-16 bg-emerald-500/10 rounded-full blur-xl pointer-events-none group-hover:bg-emerald-500/20 transition-all" />
           </div>
 
           {/* Abertos */}
-          <div className="bg-[#182229]/40 border border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
-            <div className="flex flex-col text-left">
-              <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Em Aberto</span>
-              <span className="text-xl font-black text-sky-500 dark:text-sky-400 mt-0.5">{stats.open}</span>
+          <div className="bg-gradient-to-br from-white/90 to-slate-100/80 dark:from-[#182229]/80 dark:to-[#111b21]/90 backdrop-blur-xl border border-slate-200/80 dark:border-white/10 rounded-2xl p-3.5 flex items-center justify-between shadow-sm hover:shadow-md dark:shadow-[0_8px_30px_rgba(0,0,0,0.2)] hover:border-sky-500/40 transition-all duration-300 group relative overflow-hidden animate-in fade-in">
+            <div className="flex flex-col text-left z-10">
+              <span className="text-[9.5px] font-black uppercase text-slate-400 dark:text-slate-400 tracking-wider">Em Aberto</span>
+              <span className="text-2xl font-black text-sky-500 dark:text-sky-400 mt-0.5 tracking-tight">{stats.open}</span>
             </div>
-            <div className="p-2 bg-sky-500/10 rounded-xl text-sky-500 dark:text-sky-400 shrink-0">
-              <Clock size={16} />
+            <div className="p-2.5 bg-sky-500/10 dark:bg-sky-500/15 border border-sky-500/20 rounded-xl text-sky-500 dark:text-sky-400 shrink-0 group-hover:scale-110 group-hover:rotate-3 transition-transform shadow-inner z-10">
+              <Clock size={18} />
             </div>
+            <div className="absolute -right-4 -bottom-4 w-16 h-16 bg-sky-500/10 rounded-full blur-xl pointer-events-none group-hover:bg-sky-500/20 transition-all" />
           </div>
 
-          {/* Saúde do Atendimento */}
-          <div className="bg-[#182229]/40 border border-white/5 rounded-2xl p-3 flex items-center justify-between shadow-sm relative overflow-hidden animate-in fade-in duration-300">
-            <div className="flex flex-col text-left">
-              <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Saúde do Suporte</span>
+          {/* Saúde do Suporte */}
+          <div className="bg-gradient-to-br from-white/90 to-slate-100/80 dark:from-[#182229]/80 dark:to-[#111b21]/90 backdrop-blur-xl border border-slate-200/80 dark:border-white/10 rounded-2xl p-3.5 flex items-center justify-between shadow-sm hover:shadow-md dark:shadow-[0_8px_30px_rgba(0,0,0,0.2)] hover:border-emerald-500/40 transition-all duration-300 group relative overflow-hidden animate-in fade-in">
+            <div className="flex flex-col text-left z-10">
+              <span className="text-[9.5px] font-black uppercase text-slate-400 dark:text-slate-400 tracking-wider">Saúde do Suporte</span>
               <span className={cn(
-                "text-xl font-black mt-0.5",
+                "text-2xl font-black mt-0.5 tracking-tight",
                 stats.health >= 85 
                   ? "text-emerald-600 dark:text-emerald-400" 
                   : stats.health >= 60 
@@ -5539,15 +5593,16 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               )}>{stats.health}%</span>
             </div>
             <div className={cn(
-              "p-2 rounded-xl shrink-0",
+              "p-2.5 rounded-xl shrink-0 border group-hover:scale-110 group-hover:rotate-3 transition-transform shadow-inner z-10",
               stats.health >= 85 
-                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
+                ? "bg-emerald-500/10 dark:bg-emerald-500/15 border-emerald-500/20 text-emerald-600 dark:text-emerald-400" 
                 : stats.health >= 60 
-                  ? "bg-amber-500/10 text-amber-500" 
-                  : "bg-rose-500/10 text-rose-500"
+                  ? "bg-amber-500/10 dark:bg-amber-500/15 border-amber-500/20 text-amber-500" 
+                  : "bg-rose-500/10 dark:bg-rose-500/15 border-rose-500/20 text-rose-500"
             )}>
-              <Activity size={16} className={cn(stats.health < 85 && "animate-pulse")} />
+              <Activity size={18} className={cn(stats.health < 85 && "animate-pulse")} />
             </div>
+            <div className="absolute -right-4 -bottom-4 w-16 h-16 bg-emerald-500/10 rounded-full blur-xl pointer-events-none group-hover:bg-emerald-500/20 transition-all" />
           </div>
         </div>
 
@@ -5560,7 +5615,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                 onClick={() => setActiveKanbanTab(col.id)}
                 type="button"
                 className={cn(
-                  "flex-1 py-1.5 rounded-xl text-[10.5px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                  "flex-1 py-1.5 rounded-xl text-[10.5px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95",
                   activeKanbanTab === col.id 
                     ? "bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400 font-extrabold" 
                     : "text-slate-500 dark:text-[#aebac1] hover:text-slate-900"
@@ -5597,7 +5652,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     <div 
                       key={col.id}
                       className={cn(
-                        "flex flex-col h-fit md:h-full bg-slate-100/50 dark:bg-[#182229]/20 border rounded-[24px] overflow-hidden transition-all duration-200 shadow-sm border-slate-200/60 dark:border-white/5",
+                        "flex flex-col h-fit md:h-full bg-slate-100/50 dark:bg-[#182229]/30 border rounded-[28px] overflow-hidden transition-all duration-200 shadow-sm border-slate-200/60 dark:border-white/10 backdrop-blur-md",
                         !isVisible ? "hidden md:flex" : "flex"
                       )}
                     >
@@ -5605,7 +5660,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                       <div className={cn("px-4 py-3 flex flex-col gap-0.5 shrink-0 select-none border-b border-slate-200/40 dark:border-white/5", col.headerBg)}>
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-black uppercase tracking-wider">{col.title}</span>
-                          <span className={cn("px-2 py-0.5 rounded-full text-[9px] font-black shrink-0", col.badgeBg)}>
+                          <span className={cn("px-2.5 py-0.5 rounded-full text-[9px] font-black shrink-0 shadow-xs", col.badgeBg)}>
                             {col.tickets.length}
                           </span>
                         </div>
@@ -5626,8 +5681,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 key={t.id}
                                 onClick={() => setSelectedTicket(t)}
                                 className={cn(
-                                  "group p-2.5 md:p-3 rounded-2xl border text-left cursor-pointer transition-all duration-300 bg-white hover:bg-slate-50 dark:bg-[#1f2c34]/40 dark:hover:bg-[#1f2c34]/60 hover:scale-[1.01] hover:-translate-y-0.5 hover:shadow-md dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.3)] flex flex-col gap-1.5 relative border-slate-200/60 dark:border-white/5",
-                                  selectedTicket?.id === t.id && "border-emerald-500 dark:border-emerald-500/50 ring-1 ring-emerald-500/30 dark:ring-emerald-500/10 shadow-md",
+                                  "group p-3 rounded-2xl border text-left cursor-pointer transition-all duration-300 bg-white hover:bg-slate-50 dark:bg-[#1f2c34]/50 dark:hover:bg-[#1f2c34]/80 hover:scale-[1.01] hover:-translate-y-0.5 active:scale-[0.98] hover:shadow-md dark:hover:shadow-[0_12px_35px_rgba(0,0,0,0.35)] flex flex-col gap-1.5 relative border-slate-200/60 dark:border-white/10",
+                                  selectedTicket?.id === t.id && "border-emerald-500 dark:border-emerald-500/60 ring-1 ring-emerald-500/40 dark:ring-emerald-500/20 shadow-md",
                                   col.cardHoverBorder,
                                   col.cardLeftBorder
                                 )}
@@ -5636,10 +5691,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                 <div className="flex items-start justify-between gap-2 border-b border-slate-100 dark:border-white/5 pb-2">
                                   <div className="flex flex-col gap-1 min-w-0">
                                     <div className="flex items-center gap-1 flex-wrap">
-                                      <span className="px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-500/25 dark:border-emerald-500/15 shrink-0">
+                                      <span className="px-1.5 py-0.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-500/25 dark:border-emerald-500/15 shrink-0">
                                         {t.chamadosCount > 1 ? `#${t.ticketIds.length > 2 ? t.ticketIds.slice(0, 2).join(', #') + ' (+' + (t.ticketIds.length - 2) + ')' : t.ticketIds.join(', #')}` : `#${t.id}`}
                                       </span>
-                                      <span className={cn("text-[8.5px] font-black px-1.5 py-0.5 rounded truncate max-w-[120px] md:max-w-[150px] uppercase tracking-wider inline-block", col.companyBadgeClass)}>
+                                      <span className={cn("text-[8.5px] font-black px-1.5 py-0.5 rounded-lg truncate max-w-[120px] md:max-w-[150px] uppercase tracking-wider inline-block", col.companyBadgeClass)}>
                                         🏢 {t.companyFantasyName || 'Empresa Própria'}
                                       </span>
                                     </div>
@@ -5666,7 +5721,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                       <img 
                                         src={t.profile_picture_url} 
                                         alt={t.contactName} 
-                                        className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-white/10 shadow-sm shrink-0"
+                                        className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-white/15 ring-2 ring-emerald-500/20 dark:ring-white/10 shadow-sm shrink-0"
                                         onError={(e) => {
                                           e.currentTarget.style.display = 'none';
                                           if (e.currentTarget.nextElementSibling) {
@@ -5677,7 +5732,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                       />
                                     ) : null}
                                     <div className={cn(
-                                      "w-8 h-8 rounded-full bg-gradient-to-tr text-white font-black text-[10px] flex items-center justify-center shadow-inner shrink-0",
+                                      "w-8 h-8 rounded-full bg-gradient-to-tr text-white font-black text-[10px] flex items-center justify-center shadow-inner shrink-0 ring-2 ring-white/10",
                                       col.avatarGradient,
                                       t.profile_picture_url ? "hidden" : "flex"
                                     )}>
@@ -5696,7 +5751,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
                                 {/* Problem description / Multiple Chamados Problems */}
                                 {t.chamadosCount > 1 && t.subTickets ? (
-                                  <div className="bg-slate-50/50 dark:bg-black/15 p-2 rounded-xl border border-slate-100 dark:border-white/5 flex flex-col gap-0.5">
+                                  <div className="bg-slate-50/50 dark:bg-black/25 p-2.5 rounded-xl border border-slate-100 dark:border-white/5 flex flex-col gap-0.5">
                                     <span className="font-extrabold text-[8px] text-slate-400 dark:text-slate-500 uppercase tracking-wide flex items-center justify-between select-none">
                                       <span>Problemas do Dia ({t.chamadosCount}):</span>
                                     </span>
@@ -5716,7 +5771,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                   </div>
                                 ) : (
                                   t.problem_description && (
-                                    <p className="text-[9.5px] text-slate-600 dark:text-[#e9edef] leading-snug line-clamp-2 bg-slate-50/50 dark:bg-black/15 p-2 rounded-xl border border-slate-100 dark:border-white/5">
+                                    <p className="text-[9.5px] text-slate-600 dark:text-[#e9edef] leading-snug line-clamp-2 bg-slate-50/50 dark:bg-black/25 p-2.5 rounded-xl border border-slate-100 dark:border-white/5">
                                       <span className="font-extrabold text-[8px] text-slate-400 dark:text-slate-500 uppercase tracking-wide mr-1 select-none text-left block mb-0.5">Problema:</span>
                                       {t.problem_description}
                                     </p>
@@ -5733,13 +5788,13 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                                   
                                   <div className="flex items-center gap-1">
                                     {(t.metadata?.error_log || t.problem_description === "Erro no processamento do problema." || t.metadata?.summary === "Erro ao gerar resumo da solução.") && (
-                                      <span className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded text-[8px] font-black animate-pulse flex items-center gap-0.5 shrink-0 border border-rose-500/20">
+                                      <span className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md text-[8px] font-black animate-pulse flex items-center gap-0.5 shrink-0 border border-rose-500/20">
                                         <AlertTriangle size={9} /> Falha I.A.
                                       </span>
                                     )}
                                     {checklistItems.length > 0 && (
                                       <span className={cn(
-                                        "px-1.5 py-0.5 rounded text-[8px] font-black flex items-center gap-0.5 shrink-0 transition-colors border",
+                                        "px-1.5 py-0.5 rounded-md text-[8px] font-black flex items-center gap-0.5 shrink-0 transition-colors border",
                                         resolvedCount === checklistItems.length
                                           ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
                                           : "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
@@ -5753,8 +5808,16 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                             );
                           })
                         ) : (
-                          <div className="flex-grow flex items-center justify-center flex-col gap-2 p-8 text-slate-400 dark:text-slate-500 border-2 border-dashed border-slate-200 dark:border-white/5 rounded-3xl bg-slate-50/50 dark:bg-black/10">
-                            <span className="text-[11px] font-bold">Nenhum ticket nesta coluna</span>
+                          <div className="flex-1 flex items-center justify-center flex-col gap-3 p-6 text-slate-400 dark:text-slate-500 border border-dashed border-slate-200/80 dark:border-white/5 rounded-2xl bg-white/40 dark:bg-black/15 min-h-[160px] animate-in fade-in duration-300">
+                            <div className="w-11 h-11 rounded-2xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 flex items-center justify-center text-slate-400 dark:text-slate-500 shadow-inner">
+                              <CheckCircle2 size={20} className="opacity-60" />
+                            </div>
+                            <div className="flex flex-col items-center gap-1 text-center">
+                              <span className="text-xs font-black text-slate-700 dark:text-[#e9edef]">Zero tickets nesta categoria</span>
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium max-w-[200px]">
+                                Todos os atendimentos foram concluídos ou estão em outras colunas.
+                              </span>
+                            </div>
                           </div>
                         )}
                       </div>

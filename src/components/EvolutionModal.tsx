@@ -261,7 +261,7 @@ export default function EvolutionModal({
   useEffect(() => {
     if (isOpen && targetInstanceName && !activePollingId) {
       const targetInst = existingInstances.find((i) => i.id === targetInstanceName || i.display_name === targetInstanceName) || { id: targetInstanceName };
-      handleConnectExisting(targetInst, true);
+      handleConnectExisting(targetInst, false);
     }
   }, [isOpen, targetInstanceName, activePollingId, existingInstances]);
 
@@ -308,12 +308,11 @@ export default function EvolutionModal({
       const tenantId =
         localStorage.getItem("current_tenant_id") ||
         sessionStorage.getItem("current_tenant_id");
-      if (!tenantId) return;
-      const { data } = await supabase
-        .from("whatsapp_instances")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .order("created_at", { ascending: false });
+      let query = supabase.from("whatsapp_instances").select("*");
+      if (tenantId) {
+        query = query.eq("tenant_id", tenantId);
+      }
+      const { data } = await query.order("created_at", { ascending: false });
       if (data) {
         setExistingInstances(data);
         if (data.length === 0) setTab("new");
@@ -370,11 +369,29 @@ export default function EvolutionModal({
 
       const cId =
         localStorage.getItem("current_tenant_id") ||
-        sessionStorage.getItem("current_tenant_id");
-      if (!cId) throw new Error("Tenant não identificado");
+        sessionStorage.getItem("current_tenant_id") ||
+        targetInst?.tenant_id ||
+        "00000000-0000-0000-0000-000000000000";
 
-      useDevStore.getState().addBreadcrumb(2, 7, `Enviando requisição de ignição para o servidor Node/Baileys...`, 'EvolutionModal', { tenantId: cId, instanceId: targetInst.id });
-      await createInstance(cId, targetInst.id, targetInst.api_key || "", true);
+      if (!isConn && !forceNew && targetInst.api_key) {
+        try {
+          const engineSt = await fetchEngineStatus(cId, targetInst.id, targetInst.api_key);
+          const st = engineSt?.data?.status || engineSt?.status;
+          if (st === 'connected' || st === 'connected_local' || st === 'open') {
+            useDevStore.getState().addBreadcrumb(7, 7, `Instância verificada online no servidor: ${targetInst.id}`, 'EvolutionModal');
+            useChatStore.getState().updateTenantInstance(targetInst.id);
+            useChatStore.getState().setInstanceStatus(targetInst.id, 'connected');
+            setEvolutionConnection(true, targetInst.id);
+            setLoading(false);
+            return;
+          }
+        } catch (e) {
+          // ignora falha de checagem silenciosa
+        }
+      }
+
+      useDevStore.getState().addBreadcrumb(2, 7, `Enviando requisição de ignição para o servidor Node/Baileys...`, 'EvolutionModal', { tenantId: cId, instanceId: targetInst.id, forceNew });
+      await createInstance(cId, targetInst.id, targetInst.api_key || "", forceNew);
     } catch (err: any) {
       const msg = err?.message || "";
       useDevStore.getState().addLog({

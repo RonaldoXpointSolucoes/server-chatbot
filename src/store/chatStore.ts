@@ -1982,8 +1982,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
        return;
     }
 
-    if (!msgToDelete.whatsapp_id) {
-       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Não é possível apagar remotamente esta mensagem (chave ausente). Ela será apagada apenas localmente.', type: 'warning' } }));
+    const waId = msgToDelete.whatsapp_id || (msgToDelete as any).whatsapp_message_id;
+
+    if (!waId) {
+       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Não é possível apagar remotamente esta mensagem no WhatsApp (chave ID de envio ausente). Ela será marcada apenas localmente.', type: 'warning' } }));
     }
 
     const originalStatus = msgToDelete.status;
@@ -2005,16 +2007,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      if (msgToDelete && msgToDelete.whatsapp_id) {
+      if (msgToDelete && waId) {
          const { deleteNativeMessage } = await import('../services/whatsappEngine');
          
          const apiKey = await getOrFetchApiKey(resolvedInstanceId);
          const targetJid = getContactJid(contact);
+         const isFromMe = msgToDelete.from_me !== false && (msgToDelete as any).sender_type !== 'client';
 
          const messageKey = {
             remoteJid: targetJid,
-            fromMe: true,
-            id: msgToDelete.whatsapp_id
+            fromMe: isFromMe,
+            id: waId
          };
 
          await deleteNativeMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, messageKey, apiKey);
@@ -5135,9 +5138,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     channel
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
         const m = payload.new as any;
-        console.log('[Realtime] Message INSERT:', m);
-
-        if (m.sender_type === 'system') return; // Ignore system echoes that don't need realtime sync
+        // Allow system and automation messages to sync in realtime so they display on screen
 
         let targetContactId = null;
         let convInstanceId = m.instance_id || null;
@@ -5457,6 +5458,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     id: m.id,
                     whatsapp_id: m.whatsapp_message_id || newMessages[msgIndex].whatsapp_id,
                     status: m.status,
+                    raw_payload: m.raw_payload || newMessages[msgIndex].raw_payload,
                     ...(m.text_content !== undefined && { text: advanced.text || m.text_content }),
                     ...(m.media_url !== undefined && { media_url: m.media_url }),
                     ...(advanced.mediaType !== undefined && { mediaType: advanced.mediaType }),

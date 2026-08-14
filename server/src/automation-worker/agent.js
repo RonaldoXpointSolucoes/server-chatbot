@@ -1650,6 +1650,19 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `4. Escreva com naturalidade: use parágrafos curtos, linguagem coloquial profissional fluida do Brasil e adicione de 1 a 3 emojis calorosos para humanizar a conversa, sem exagerar.\n` +
                           `5. PRIORIZE E SIGA ESTRITAMENTE as instruções e exemplos de respostas corrigidas que constam no Manual de Raciocínio e Ajustes da I.A ou nas correções anteriores. Se houver uma correção registrada para uma pergunta similar do cliente, você deve replicar o estilo, o tom e a solução adotada pelo atendente humano.\n`;
 
+            // Regra Global de Acompanhamento de Pedido e Notificações em Tempo Real (ESTRITA E CRÍTICA)
+            basePrompt += `\n\n### DIRETRIZES DE ACOMPANHAMENTO EM TEMPO REAL E STATUS DE PEDIDO (ESTRITAS E OBRIGATÓRIAS) ###\n` +
+                          `1. RECONHECIMENTO DE MENSAGENS DE OPT-IN/ACOMPANHAMENTO DE PEDIDO:\n` +
+                          `   - Quando o cliente enviar uma mensagem solicitando ou confirmando o recebimento de atualizações em tempo real sobre seu pedido (exemplo: "Olá! Gostaria de receber atualizações em tempo real sobre o andamento do meu pedido (Nº 13130)", "quero acompanhar o pedido Nº X", "atualização em tempo real"), isto significa que ele fez o pedido pelo site/cardápio e ativou o acompanhamento por WhatsApp.\n` +
+                          `2. PROIBIÇÃO ABSOLUTA DE RESPOSTAS DE ERRO OU PEDIDOS NÃO ENCONTRADOS:\n` +
+                          `   - NUNCA responda dizendo "Sinto muito, não consegui encontrar o status do seu pedido", "Não encontrei seu pedido no momento", "Pode ter ocorrido algum erro temporário", ou peça para ele verificar se o número do pedido está correto.\n` +
+                          `   - NUNCA trate esse tipo de mensagem como uma falha, erro de busca ou pedido inexistente.\n` +
+                          `3. RESPOSTA PADRÃO OBRIGATÓRIA DE CONFIRMAÇÃO E TRANQUILIZAÇÃO:\n` +
+                          `   - A nossa automação de sistema envia notificações automáticas no WhatsApp a cada atualização de status do pedido (saída para entrega, etc.).\n` +
+                          `   - Portanto, responda SEMPRE de forma calorosa, simpática e tranquilizadora confirmando o recebimento de forma positiva. Exemplo:\n` +
+                          `     "Perfeito, [Nome do Cliente]! Pode deixar que assim que o seu pedido (Nº [Número do Pedido]) sair para entrega ou tiver qualquer atualização no andamento, avisaremos você por aqui em tempo real! 😉🛵"\n` +
+                          `   - (Substitua [Nome do Cliente] pelo nome real do cliente se disponível e [Número do Pedido] pelo número que veio na mensagem dele, ex: 13130).\n`;
+
             // Regra Global de Uso do Nome do Cliente (ESTRITA)
             basePrompt += `\n\n### DIRETRIZES DE USO DO NOME DO CLIENTE (ESTRITAS) ###\n` +
                           `1. Se o nome do cliente estiver disponível nos dados do cliente atual e NÃO for um nome genérico (como "Cliente", "Cliente Simulador" ou vazio), você DEVE OBRIGATORIAMENTE chamar o cliente pelo nome nas suas respostas e saudações.\n` +
@@ -3199,6 +3212,29 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                         console.error("[AutomationWorker - Draft] Erro ao extrair rascunho do pedido em tempo real:", draftErr);
                     }
                 })();
+            }
+
+            // Sanitização e Garantia de Resposta para Opt-In de Acompanhamento de Pedido em Tempo Real
+            const isOrderTrackingMessage = /atualizações?\s+em\s+tempo\s+real\s+sobre\s+o\s+andamento\s+do\s+meu\s+pedido/i.test(textMessage) ||
+                                           (/andamento\s+do\s+meu\s+pedido/i.test(textMessage) && /Nº?\s*\d+/i.test(textMessage));
+
+            if (isOrderTrackingMessage) {
+                const matchOrder = textMessage.match(/Nº?\s*(\d+)/i);
+                const orderNum = matchOrder ? matchOrder[1] : '';
+                
+                // Se a resposta gerada contiver negativas como "não consegui encontrar", "sinto muito", "não encontrei", "erro temporário"
+                const hasNegativePattern = /não\s+consegui\s+encontrar|não\s+encontrei|erro\s+temporário|não\s+foi\s+possível\s+localizar|desculpe/i.test(finalResponseText || '');
+
+                if (hasNegativePattern || !finalResponseText || finalResponseText.trim() === '') {
+                    const clientFirstName = (contactInfo?.name && contactInfo.name !== 'Cliente' && contactInfo.name !== 'Cliente Simulador')
+                        ? contactInfo.name.split(' ')[0]
+                        : '';
+                    const clientGreeting = clientFirstName ? ` ${clientFirstName}` : '';
+                    const orderRef = orderNum ? ` de número ${orderNum}` : (matchOrder ? ` ${matchOrder[0]}` : '');
+
+                    finalResponseText = `Perfeito${clientGreeting}! Pode deixar que assim que o seu pedido${orderRef} sair para entrega ou tiver qualquer atualização no andamento, avisaremos você por aqui em tempo real! 😉🛵`;
+                    console.log(`[AutomationWorker] Resposta de Acompanhamento em Tempo Real sanitizada com sucesso: "${finalResponseText}"`);
+                }
             }
 
             try {

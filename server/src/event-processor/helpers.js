@@ -17,6 +17,7 @@ export function isLid(jid) {
 export function extractMessageContent(msg) {
     if (!msg || !msg.message) return null;
     let content = msg.message;
+    if (content.editedMessage) content = content.editedMessage.message || content.editedMessage;
     if (content.viewOnceMessage) content = content.viewOnceMessage.message;
     if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
     if (content.viewOnceMessageV2Extension) content = content.viewOnceMessageV2Extension.message;
@@ -29,6 +30,12 @@ export function extractTextFromMessage(msg) {
     let content = extractMessageContent(msg);
     if (!content) return '';
     let text = '';
+    if (content.protocolMessage && content.protocolMessage.editedMessage) {
+        return extractTextFromMessage({ message: content.protocolMessage.editedMessage });
+    }
+    if (content.editedMessage) {
+        return extractTextFromMessage({ message: content.editedMessage.message || content.editedMessage });
+    }
     if (content.conversation) text = content.conversation;
     else if (content.extendedTextMessage) text = content.extendedTextMessage.text;
     else if (content.imageMessage) text = content.imageMessage.caption || '📸 Imagem / Foto';
