@@ -59,6 +59,9 @@ function interceptConsole() {
                                   text.includes('Failed to decrypt message with any known session') ||
                                   text.includes('Session error:Error: Bad MAC') ||
                                   text.includes('verifyMAC') ||
+                                  text.includes('Decrypted message with closed session') ||
+                                  text.includes('received error in ack') ||
+                                  text.includes('error":"479"') ||
                                   (text.includes('libsignal') && text.includes('session_cipher'));
     if (isBaileysDecryptError) {
         originalFn.apply(console, args);
