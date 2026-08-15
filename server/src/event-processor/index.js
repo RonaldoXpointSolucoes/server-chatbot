@@ -2039,7 +2039,8 @@ export async function dispatchWebhookTriggers(tenantId, eventType, data) {
                 headers: {
                     'Content-Type': 'application/json',
                     ...(trigger.headers || {})
-                }
+                },
+                signal: AbortSignal.timeout(5000)
             };
 
             if (trigger.action_type === 'webhook_post') {
@@ -2052,10 +2053,10 @@ export async function dispatchWebhookTriggers(tenantId, eventType, data) {
                     console.log(`[WebhookTrigger] Gatilho '${trigger.name}' respondeu com status ${res.status}`);
                 })
                 .catch((err) => {
-                    console.error(`[WebhookTrigger] Falha ao enviar requisição para '${trigger.name}':`, err.message);
+                    console.warn(`[WebhookTrigger] Falha no disparo do gatilho '${trigger.name}' (${processedUrl}): ${err.message}`);
                 });
         }
     } catch (e) {
-        console.error('[WebhookTrigger] Falha ao executar gatilhos:', e);
+        console.error('[WebhookTrigger] Falha ao consultar gatilhos no banco:', e?.message || e);
     }
 }

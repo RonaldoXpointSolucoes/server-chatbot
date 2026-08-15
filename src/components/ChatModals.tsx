@@ -4731,57 +4731,53 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       // 1.5. Busca conversas com status 'resolved' ou 'closed' como fallback
       let convResolvedQuery = supabase
         .from('conversations')
-        .select('id, contact_id, status, created_at, updated_at, assigned_to, instance_id')
-        .or('status.eq.resolved,status.eq.closed');
+        .select('id, contact_id, status, updated_at, assigned_to, instance_id')
+        .in('status', ['resolved', 'closed']);
 
       if (tenantId) {
         convResolvedQuery = convResolvedQuery.eq('tenant_id', tenantId);
       }
 
-      if (selectedInstanceId && selectedInstanceId !== 'all') {
+      const validateUuid = (uuid: any) => typeof uuid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid);
+
+      if (selectedInstanceId && selectedInstanceId !== 'all' && validateUuid(selectedInstanceId)) {
         convResolvedQuery = convResolvedQuery.eq('instance_id', selectedInstanceId);
-      } else if (instances && instances.length > 0) {
-        const allowedInstIds = instances.map(i => i.id);
-        convResolvedQuery = convResolvedQuery.in('instance_id', allowedInstIds);
       }
 
       // Aplicar filtros de data diretamente nas queries de banco de dados
       if (dateFilter === 'today') {
-        const startOfDay = new Date(selectedDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(selectedDate);
-        endOfDay.setHours(23, 59, 59, 999);
+        const targetDate = new Date(selectedDate || new Date());
+        const startOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 0, 0, 0, 0);
+        const endOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 23, 59, 59, 999);
 
         resolvedQuery = resolvedQuery.gte('closed_at', startOfDay.toISOString()).lte('closed_at', endOfDay.toISOString());
         convResolvedQuery = convResolvedQuery.gte('updated_at', startOfDay.toISOString()).lte('updated_at', endOfDay.toISOString());
       } else if (dateFilter === 'yesterday') {
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
-        const startOfDay = new Date(yesterday);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(yesterday);
-        endOfDay.setHours(23, 59, 59, 999);
+        const startOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0, 0);
+        const endOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
 
         resolvedQuery = resolvedQuery.gte('closed_at', startOfDay.toISOString()).lte('closed_at', endOfDay.toISOString());
         convResolvedQuery = convResolvedQuery.gte('updated_at', startOfDay.toISOString()).lte('updated_at', endOfDay.toISOString());
       } else if (dateFilter === 'week') {
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        sevenDaysAgo.setHours(0, 0, 0, 0);
+        const startOfDay = new Date(sevenDaysAgo.getFullYear(), sevenDaysAgo.getMonth(), sevenDaysAgo.getDate(), 0, 0, 0, 0);
 
-        resolvedQuery = resolvedQuery.gte('closed_at', sevenDaysAgo.toISOString());
-        convResolvedQuery = convResolvedQuery.gte('updated_at', sevenDaysAgo.toISOString());
+        resolvedQuery = resolvedQuery.gte('closed_at', startOfDay.toISOString());
+        convResolvedQuery = convResolvedQuery.gte('updated_at', startOfDay.toISOString());
       } else if (dateFilter === 'month') {
         const startOfMonth = new Date();
         startOfMonth.setDate(1);
-        startOfMonth.setHours(0, 0, 0, 0);
+        const startOfDay = new Date(startOfMonth.getFullYear(), startOfMonth.getMonth(), startOfMonth.getDate(), 0, 0, 0, 0);
 
         resolvedQuery = resolvedQuery.gte('closed_at', startOfMonth.toISOString());
         convResolvedQuery = convResolvedQuery.gte('updated_at', startOfMonth.toISOString());
       } else {
-        // limit to 100 on 'all' to prevent HTTP 400 URI too large on contact details
-        resolvedQuery = resolvedQuery.limit(100);
-        convResolvedQuery = convResolvedQuery.limit(100);
+        // limit to 200 on 'all' to prevent HTTP 400 URI too large on contact details
+        resolvedQuery = resolvedQuery.limit(200);
+        convResolvedQuery = convResolvedQuery.limit(200);
       }
 
       const { data: resolvedData, error: resolvedErr } = await resolvedQuery.order('closed_at', { ascending: false });
@@ -4812,7 +4808,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
               contact_id: conv.contact_id,
               conversation_id: conv.id,
               status: 'resolved',
-              opened_at: conv.created_at || dt,
+              opened_at: conv.updated_at || dt,
               closed_at: dt,
               problem_description: 'Atendimento finalizado pelo atendente',
               resolution_summary: 'Resolvido pelo atendente.',
@@ -4823,7 +4819,40 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         });
       }
 
-      const validateUuid = (uuid: any) => typeof uuid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid);
+      const contactIds = Array.from(
+        new Set(
+          resolvedList
+            .map(t => t.contact_id)
+            .filter(validateUuid)
+        )
+      );
+
+      const contactsMap = new Map<string, any>();
+      const companiesMap = new Map<string, any>();
+
+      if (contactIds.length > 0) {
+        const { data: contactsData } = await supabase
+          .from('contacts')
+          .select('id, name, custom_name, phone, profile_picture_url, exclude_reports, company_ids, fantasy_name, instance_id')
+          .in('id', contactIds);
+
+        if (contactsData && contactsData.length > 0) {
+          contactsData.forEach(c => contactsMap.set(c.id, c));
+
+          const allCompanyIds = Array.from(
+            new Set(contactsData.flatMap(c => c.company_ids || []).filter(validateUuid))
+          );
+          if (allCompanyIds.length > 0) {
+            const { data: compData } = await supabase
+              .from('contacts')
+              .select('id, name, fantasy_name')
+              .in('id', allCompanyIds);
+            if (compData) {
+              compData.forEach(comp => companiesMap.set(comp.id, comp));
+            }
+          }
+        }
+      }
 
       // Mapeamento de operadores e conversas por contato
       const operatorFallbacks = new Map<string, string>();
@@ -5000,19 +5029,20 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       const cleanTerm = term.startsWith('#') ? term.substring(1) : term;
       const matchSearch = !term || 
         (t.id && String(t.id).includes(cleanTerm)) ||
-        t.contactName.toLowerCase().includes(term) ||
+        (t.contactName && t.contactName.toLowerCase().includes(term)) ||
         (t.companyFantasyName || '').toLowerCase().includes(term) ||
+        (t.companyName || '').toLowerCase().includes(term) ||
         (t.operatorName || '').toLowerCase().includes(term) ||
         (t.problem_description || '').toLowerCase().includes(term) ||
         (t.metadata?.summary || '').toLowerCase().includes(term) ||
         (t.resolution_summary || '').toLowerCase().includes(term) ||
-        (t.metadata?.operators || []).some((op: any) => op.name.toLowerCase().includes(term));
+        (t.metadata?.operators || []).some((op: any) => op.name && op.name.toLowerCase().includes(term));
 
       if (!matchSearch) return false;
 
       if (selectedInstanceId !== 'all') {
         const ticketInstId = t.instance_id || null;
-        if (ticketInstId !== selectedInstanceId) return false;
+        if (ticketInstId && ticketInstId !== selectedInstanceId) return false;
       } else if (instances && instances.length > 0) {
         const allowedInstIds = new Set(instances.map(i => i.id));
         const ticketInstId = t.instance_id || null;
@@ -5021,11 +5051,33 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
 
       if (dateFilter === 'all') return true;
 
-      const closedDate = new Date(t.closed_at);
+      const rawDate = t.closed_at || t.opened_at || t.updated_at;
+      if (!rawDate) return true;
+      const closedDate = new Date(rawDate);
       if (isNaN(closedDate.getTime())) return true;
 
       if (dateFilter === 'today') {
         return closedDate.toDateString() === selectedDate.toDateString();
+      }
+
+      if (dateFilter === 'yesterday') {
+        const y = new Date();
+        y.setDate(y.getDate() - 1);
+        return closedDate.toDateString() === y.toDateString() || closedDate.toDateString() === selectedDate.toDateString();
+      }
+
+      if (dateFilter === 'week') {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+        return closedDate.getTime() >= sevenDaysAgo.getTime();
+      }
+
+      if (dateFilter === 'month') {
+        const startOfMonth = new Date();
+        startOfMonth.setDate(1);
+        startOfMonth.setHours(0, 0, 0, 0);
+        return closedDate.getTime() >= startOfMonth.getTime();
       }
 
       return true;
@@ -5509,7 +5561,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
             <div className="flex justify-center items-center gap-1 bg-slate-200/60 dark:bg-[#182229]/40 p-1 rounded-2xl border border-slate-200/40 dark:border-white/5 select-none overflow-x-auto shrink-0 custom-scrollbar h-[38px] w-full md:w-auto">
               {daysList.map((day, idx) => {
                 const isToday = day.toDateString() === new Date().toDateString();
-                const isSelected = dateFilter === 'today' && day.toDateString() === selectedDate.toDateString();
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                const isYesterday = day.toDateString() === yesterday.toDateString();
+                const isSelected = (dateFilter === 'today' || dateFilter === 'yesterday') && day.toDateString() === selectedDate.toDateString();
                 const weekdayLabel = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'][day.getDay()];
                 const dayOfMonth = day.getDate();
                 
@@ -5520,8 +5575,16 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     onClick={() => {
                       setSelectedDate(day);
                       localStorage.setItem('closed_tickets_selected_date', day.toISOString());
-                      setDateFilter('today');
-                      localStorage.setItem('closed_tickets_date_filter', 'today');
+                      if (isToday) {
+                        setDateFilter('today');
+                        localStorage.setItem('closed_tickets_date_filter', 'today');
+                      } else if (isYesterday) {
+                        setDateFilter('yesterday');
+                        localStorage.setItem('closed_tickets_date_filter', 'yesterday');
+                      } else {
+                        setDateFilter('today');
+                        localStorage.setItem('closed_tickets_date_filter', 'today');
+                      }
                     }}
                     className={cn(
                       "flex flex-col items-center justify-center py-0.5 w-8 h-[28px] rounded-xl transition-all duration-200 shrink-0 cursor-pointer border",
@@ -5936,12 +5999,21 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                         src={selectedTicket.profile_picture_url} 
                         alt={selectedTicket.contactName} 
                         className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/30 shadow-md shrink-0"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          if (e.currentTarget.nextElementSibling) {
+                            e.currentTarget.nextElementSibling.classList.remove('hidden');
+                            e.currentTarget.nextElementSibling.classList.add('flex');
+                          }
+                        }}
                       />
-                    ) : (
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-500 text-white font-black text-base flex items-center justify-center shadow-md shrink-0">
-                        {selectedTicket.contactName.charAt(0).toUpperCase()}
-                      </div>
-                    )}
+                    ) : null}
+                    <div className={cn(
+                      "w-12 h-12 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-500 text-white font-black text-base flex items-center justify-center shadow-md shrink-0",
+                      selectedTicket.profile_picture_url ? "hidden" : "flex"
+                    )}>
+                      {selectedTicket.contactName.charAt(0).toUpperCase()}
+                    </div>
                     <div className="flex flex-col text-left">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-base font-black text-slate-800 dark:text-white">

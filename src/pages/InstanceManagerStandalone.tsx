@@ -542,41 +542,14 @@ export default function InstanceManagerStandalone() {
     setShowCreateModal(true);
   };
 
-  // Criar Nova Instância (Com Vínculo a Empresa Selecionada ou Nova Empresa)
+  // Criar Nova Instância (padrão com Empresa: Nenhuma)
   const handleCreateInstance = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newInstanceName.trim()) return;
 
     setCreating(true);
     try {
-      let targetCompanyId = newInstanceCompanyId;
-
-      if (isCreatingNewCompany) {
-        if (!newCompanyName.trim()) {
-          setShowCompanySelection(true);
-          alert('Por favor, informe o nome da nova empresa.');
-          setCreating(false);
-          return;
-        }
-        const { data: newCompData, error: compErr } = await supabase
-          .from('companies')
-          .insert([{ name: newCompanyName.trim() }])
-          .select('id, name')
-          .single();
-
-        if (compErr || !newCompData) {
-          throw new Error(`Erro ao criar nova empresa: ${compErr?.message || 'Falha ao salvar no banco'}`);
-        }
-        targetCompanyId = newCompData.id;
-        await fetchCompanies();
-      }
-
-      if (!targetCompanyId) {
-        setShowCompanySelection(true);
-        alert('Por favor, selecione ou crie uma empresa para vincular esta instância.');
-        setCreating(false);
-        return;
-      }
+      const targetCompanyId = STANDALONE_TENANT_ID;
 
       const newId = crypto.randomUUID();
       const apiKey = `sk_inst_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -588,7 +561,7 @@ export default function InstanceManagerStandalone() {
             id: newId,
             tenant_id: targetCompanyId,
             display_name: newInstanceName.trim(),
-            phone_number: newInstancePhone.replace(/\D/g, '') || null,
+            phone_number: null,
             status: 'disconnected',
             color: newInstanceColor,
             api_key: apiKey,
@@ -1561,112 +1534,15 @@ export default function InstanceManagerStandalone() {
             <form onSubmit={handleCreateInstance} className="space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                  Empresa / Tenant Vincular
-                </label>
-                {!showCompanySelection ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowCompanySelection(true)}
-                    className="w-full py-3.5 px-4 bg-slate-950/80 hover:bg-slate-950 border border-slate-800 hover:border-emerald-500/40 text-slate-300 hover:text-emerald-400 font-semibold rounded-xl text-xs flex items-center justify-between transition shadow-inner group"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Building2 className="w-4 h-4 text-slate-500 group-hover:text-emerald-400 transition" />
-                      <span>
-                        {newInstanceCompanyId && companies.find(c => c.id === newInstanceCompanyId)
-                          ? companies.find(c => c.id === newInstanceCompanyId)?.name
-                          : 'Nenhuma empresa selecionada'}
-                      </span>
-                    </span>
-                    <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-bold rounded-lg flex items-center gap-1.5 group-hover:bg-emerald-500/20 transition">
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>+ Adicionar Empresa</span>
-                    </span>
-                  </button>
-                ) : (
-                  <div className="p-4 bg-slate-950/90 border border-slate-800 rounded-2xl space-y-3 animate-in fade-in zoom-in-95 duration-200">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-300 border-b border-slate-800 pb-2">
-                      <span>Vincular ou Criar Empresa</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowCompanySelection(false);
-                          setIsCreatingNewCompany(false);
-                        }}
-                        className="text-[11px] text-slate-400 hover:text-white underline"
-                      >
-                        Ocultar
-                      </button>
-                    </div>
-
-                    {!isCreatingNewCompany ? (
-                      <div className="space-y-2">
-                        <select
-                          value={newInstanceCompanyId}
-                          onChange={(e) => setNewInstanceCompanyId(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500 transition"
-                        >
-                          <option value="">Nenhuma empresa selecionada (Selecione...)</option>
-                          {companies.map((comp) => (
-                            <option key={comp.id} value={comp.id}>
-                              🏢 {comp.name} {comp.id === '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21' ? '(X-Point Soluções)' : ''}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => setIsCreatingNewCompany(true)}
-                          className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1.5 pt-1"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>+ Criar uma nova empresa...</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <input
-                          type="text"
-                          required
-                          value={newCompanyName}
-                          onChange={(e) => setNewCompanyName(e.target.value)}
-                          placeholder="Nome da Nova Empresa (Ex: HBI Pizza, Pizzaria Frigideira...)"
-                          className="w-full bg-slate-900 border border-emerald-500/50 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setIsCreatingNewCompany(false)}
-                          className="text-xs text-slate-400 hover:text-slate-200 font-medium underline pt-1"
-                        >
-                          Voltar para seleção de empresas existentes
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
                   Nome da Instância *
                 </label>
                 <input
                   type="text"
                   required
+                  autoFocus
                   value={newInstanceName}
                   onChange={(e) => setNewInstanceName(e.target.value)}
                   placeholder="Ex: Comercial X-Point, Suporte SP"
-                  className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition shadow-inner"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                  Número de WhatsApp (Opcional)
-                </label>
-                <input
-                  type="text"
-                  value={newInstancePhone}
-                  onChange={(e) => setNewInstancePhone(e.target.value)}
-                  placeholder="5511999999999"
                   className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition shadow-inner"
                 />
               </div>
