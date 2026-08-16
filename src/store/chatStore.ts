@@ -1928,13 +1928,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
       if (!resolvedInstanceId) return;
 
+      const instStatus = state.instancesStatus[resolvedInstanceId];
+      if (instStatus && instStatus !== 'connected' && instStatus !== 'connected_local') {
+        return;
+      }
+
       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
       const jid = getContactJid(contact);
 
       const { sendEnginePresenceUpdate } = await import('../services/whatsappEngine');
       await sendEnginePresenceUpdate(state.tenantInfo.id, resolvedInstanceId, jid, presence, apiKey);
     } catch (err: any) {
-      console.warn('[sendPresenceUpdate] Erro ao enviar status de presença:', err);
+      // Falha inofensiva de presença
     }
   },
 

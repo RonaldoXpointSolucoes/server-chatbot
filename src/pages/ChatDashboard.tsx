@@ -18,6 +18,7 @@ import { GeminiEditorModal } from '../components/GeminiEditorModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useDevStore } from '../store/devStore';
 import { format, isToday, isYesterday } from 'date-fns';
+import { formatDocumentNumber } from '../utils/format';
 import { useShallow } from 'zustand/react/shallow';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import clsx from 'clsx';
@@ -519,7 +520,7 @@ export default function ChatDashboard() {
         // 1. Fetch explicit companies with document_type = 'cnpj' OR fantasy_name OR document_number
         const { data: explicitCompanies } = await supabase
           .from('contacts')
-          .select('id, name, custom_name, fantasy_name, document_number, document_type, tags, company_ids')
+          .select('id, name, custom_name, fantasy_name, document_number, document_type, tags, company_ids, phone')
           .eq('tenant_id', tenantId)
           .or('document_type.eq.cnpj,fantasy_name.neq.,document_number.neq.');
 
@@ -550,7 +551,7 @@ export default function ChatDashboard() {
           if (idsToFetch.length > 0) {
             const { data: linkedCompanies } = await supabase
               .from('contacts')
-              .select('id, name, custom_name, fantasy_name, document_number, document_type, tags, company_ids')
+              .select('id, name, custom_name, fantasy_name, document_number, document_type, tags, company_ids, phone')
               .eq('tenant_id', tenantId)
               .in('id', idsToFetch);
               
@@ -6308,9 +6309,10 @@ export default function ChatDashboard() {
 
                           {/* Empresa / Grupo Empresarial Associado - Clicável */}
                           {(() => {
+                            const contactGroups = tenantInfo?.settings?.contactGroups || [];
+
                             // 1. Caso o próprio contato tenha fantasy_name ou seja uma empresa CNPJ
                             if (contact.fantasy_name || (contact.document_type === 'cnpj' && (contact.custom_name || contact.name))) {
-                              const contactGroups = tenantInfo?.settings?.contactGroups || [];
                               const matchingGroups = contactGroups.filter((g: any) => 
                                 Array.isArray(contact.tags) && contact.tags.includes(g.id)
                               );
@@ -6352,14 +6354,27 @@ export default function ChatDashboard() {
                               );
                             }
 
-                            // 2. Caso o contato esteja associado a uma ou mais empresas via company_ids
-                            const linkedCompanies = (Array.isArray(contact.company_ids) ? contact.company_ids : [])
+                            // 2. Caso o contato esteja associado a uma ou mais empresas via company_ids ou auto-match
+                            let linkedCompanies = (Array.isArray(contact.company_ids) ? contact.company_ids : [])
                               .map((id: string) => allCompanies.find((c: any) => c.id === id))
                               .filter(Boolean);
 
+                            // Fallback auto-match por documento ou telefone compartilhado
+                            if (linkedCompanies.length === 0 && (contact.document_number || contact.phone)) {
+                              const cleanDoc = contact.document_number ? contact.document_number.replace(/\D/g, '') : null;
+                              const cleanPhone = contact.phone ? contact.phone.replace(/\D/g, '').slice(-8) : null;
+                              
+                              const matched = allCompanies.find((c: any) => {
+                                if (c.id === contact.id) return false;
+                                const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
+                                const compPhone = c.phone ? c.phone.replace(/\D/g, '').slice(-8) : null;
+                                return (cleanDoc && compDoc && cleanDoc === compDoc) || (cleanPhone && compPhone && cleanPhone === compPhone);
+                              });
+                              if (matched) linkedCompanies = [matched];
+                            }
+
                             if (linkedCompanies.length > 0) {
                               const primaryComp = linkedCompanies[0];
-                              const contactGroups = tenantInfo?.settings?.contactGroups || [];
                               const matchingGroups = contactGroups.filter((g: any) => 
                                 (Array.isArray(contact.tags) && contact.tags.includes(g.id)) ||
                                 linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
@@ -6798,7 +6813,7 @@ export default function ChatDashboard() {
                         {/* Celular com botão de cópia rápida */}
                         {activeChat.phone && (
                           <div className="flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/5 px-2.5 py-0.5 rounded-full border border-blue-500/20 text-blue-600 dark:text-blue-400 text-[11px] font-medium transition-all duration-200">
-                            <span className="font-mono">{formatDisplayPhone(activeChat.phone)}</span>
+                            <span className="font-mono">{formatPhoneNumber(activeChat.phone)}</span>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -6833,11 +6848,23 @@ export default function ChatDashboard() {
                           </button>
                         )}
 
-                        {/* Empresas Vinculadas via company_ids */}
+                        {/* Empresas Vinculadas via company_ids ou auto-match */}
                         {(() => {
-                          const linkedCompanies = (Array.isArray(activeChat.company_ids) ? activeChat.company_ids : [])
+                          let linkedCompanies = (Array.isArray(activeChat.company_ids) ? activeChat.company_ids : [])
                             .map((id: string) => allCompanies.find((c: any) => c.id === id))
                             .filter(Boolean);
+
+                          if (linkedCompanies.length === 0 && (activeChat.document_number || activeChat.phone)) {
+                            const cleanDoc = activeChat.document_number ? activeChat.document_number.replace(/\D/g, '') : null;
+                            const cleanPhone = activeChat.phone ? activeChat.phone.replace(/\D/g, '').slice(-8) : null;
+                            const matched = allCompanies.find((c: any) => {
+                              if (c.id === activeChat.id) return false;
+                              const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
+                              const compPhone = c.phone ? c.phone.replace(/\D/g, '').slice(-8) : null;
+                              return (cleanDoc && compDoc && cleanDoc === compDoc) || (cleanPhone && compPhone && cleanPhone === compPhone);
+                            });
+                            if (matched) linkedCompanies = [matched];
+                          }
 
                           if (linkedCompanies.length > 0) {
                             return linkedCompanies.map((comp: any) => (
@@ -6870,6 +6897,128 @@ export default function ChatDashboard() {
                                 <Building2 size={10} className="shrink-0" />
                                 <span>+ Empresa</span>
                               </button>
+                            );
+                          }
+
+                          return null;
+                        })()}
+
+                        {/* Grupos Empresariais */}
+                        {(() => {
+                          const contactGroups = tenantInfo?.settings?.contactGroups || [];
+                          let linkedCompanies = (Array.isArray(activeChat.company_ids) ? activeChat.company_ids : [])
+                            .map((id: string) => allCompanies.find((c: any) => c.id === id))
+                            .filter(Boolean);
+
+                          if (linkedCompanies.length === 0 && (activeChat.document_number || activeChat.phone)) {
+                            const cleanDoc = activeChat.document_number ? activeChat.document_number.replace(/\D/g, '') : null;
+                            const cleanPhone = activeChat.phone ? activeChat.phone.replace(/\D/g, '').slice(-8) : null;
+                            const matched = allCompanies.find((c: any) => {
+                              if (c.id === activeChat.id) return false;
+                              const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
+                              const compPhone = c.phone ? c.phone.replace(/\D/g, '').slice(-8) : null;
+                              return (cleanDoc && compDoc && cleanDoc === compDoc) || (cleanPhone && compPhone && cleanPhone === compPhone);
+                            });
+                            if (matched) linkedCompanies = [matched];
+                          }
+
+                          const matchingGroups = contactGroups.filter((g: any) => 
+                            (Array.isArray(activeChat.tags) && activeChat.tags.includes(g.id)) ||
+                            linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
+                          );
+
+                          if (matchingGroups.length === 0) return null;
+
+                          return matchingGroups.map((g: any) => (
+                            <button
+                              key={g.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCompanyDetailsOpen(linkedCompanies[0] || activeChat);
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold shadow-sm transition-all duration-200 hover:scale-105"
+                              style={{
+                                backgroundColor: `${g.color}15`,
+                                borderColor: `${g.color}30`,
+                                color: g.color
+                              }}
+                              title={`Grupo Empresarial: ${g.name}. Clique para detalhes.`}
+                            >
+                              <span>{g.name}</span>
+                            </button>
+                          ));
+                        })()}
+
+                        {/* Documento CNPJ / CPF e Acesso a Faturamento */}
+                        {(() => {
+                          let linkedCompanies = (Array.isArray(activeChat.company_ids) ? activeChat.company_ids : [])
+                            .map((id: string) => allCompanies.find((c: any) => c.id === id))
+                            .filter(Boolean);
+
+                          if (linkedCompanies.length === 0 && (activeChat.document_number || activeChat.phone)) {
+                            const cleanDoc = activeChat.document_number ? activeChat.document_number.replace(/\D/g, '') : null;
+                            const cleanPhone = activeChat.phone ? activeChat.phone.replace(/\D/g, '').slice(-8) : null;
+                            const matched = allCompanies.find((c: any) => {
+                              if (c.id === activeChat.id) return false;
+                              const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
+                              const compPhone = c.phone ? c.phone.replace(/\D/g, '').slice(-8) : null;
+                              return (cleanDoc && compDoc && cleanDoc === compDoc) || (cleanPhone && compPhone && cleanPhone === compPhone);
+                            });
+                            if (matched) linkedCompanies = [matched];
+                          }
+
+                          const docNumber = activeChat.document_number || linkedCompanies.find((c: any) => !!c.document_number)?.document_number;
+                          const rawCnpj = docNumber ? docNumber.replace(/\D/g, '') : null;
+
+                          if (docNumber) {
+                            return (
+                              <div className="flex items-center gap-1 bg-slate-500/10 dark:bg-slate-500/5 px-2.5 py-0.5 rounded-full border border-slate-500/20 text-slate-600 dark:text-slate-400 text-[11px] font-mono font-medium transition-all duration-200">
+                                <span>{formatDocumentNumber(docNumber)}</span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigator.clipboard.writeText(docNumber);
+                                    setCopiedDoc(true);
+                                    setTimeout(() => setCopiedDoc(false), 2000);
+                                  }}
+                                  className="p-0.5 rounded hover:bg-slate-500/20 transition-colors flex items-center justify-center"
+                                  title="Copiar CNPJ/CPF"
+                                >
+                                  {copiedDoc ? (
+                                    <CheckCircle2 size={11} className="text-emerald-500 animate-in zoom-in-95 duration-200" />
+                                  ) : (
+                                    <Copy size={11} className="opacity-70 hover:opacity-100 hover:scale-110 active:scale-95 transition-all duration-200" />
+                                  )}
+                                </button>
+                                {rawCnpj && rawCnpj.length === 14 && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      window.open(`https://mensalidadedatadivas.vercel.app/?e=${rawCnpj}`, '_blank');
+                                    }}
+                                    className="p-0.5 rounded hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors flex items-center justify-center"
+                                    title="Abrir Portal de Mensalidades / Faturamento"
+                                  >
+                                    <CircleDollarSign size={12} />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          // Se não tem CNPJ nem grupo, mostrar badge FALTA CNPJ
+                          const contactGroups = tenantInfo?.settings?.contactGroups || [];
+                          const hasGroup = contactGroups.some((g: any) => 
+                            (Array.isArray(activeChat.tags) && activeChat.tags.includes(g.id)) ||
+                            linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
+                          );
+
+                          if (!hasGroup && (activeChat.fantasy_name || activeChat.document_type === 'cnpj' || linkedCompanies.length > 0)) {
+                            return (
+                              <span className="flex items-center gap-1 bg-rose-500/10 text-rose-500 px-2 py-0.5 rounded-full border border-rose-500/20 text-[10.5px] font-bold">
+                                <AlertTriangle size={10} className="shrink-0 animate-pulse" />
+                                FALTA CNPJ
+                              </span>
                             );
                           }
 
@@ -10161,6 +10310,17 @@ export default function ChatDashboard() {
 
           </div>
         </div>
+      )}
+
+      {companyDetailsOpen && (
+        <CompanyDetailsModal 
+          isOpen={!!companyDetailsOpen} 
+          onClose={() => setCompanyDetailsOpen(null)} 
+          contact={companyDetailsOpen}
+          onUpdateCompany={(updated) => {
+            setAllCompanies(prev => prev.map(c => c.id === updated.id ? { ...c, ...updated } : c));
+          }}
+        />
       )}
 
       <CreateInboxModal 

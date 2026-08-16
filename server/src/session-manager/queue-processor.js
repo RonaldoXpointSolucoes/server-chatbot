@@ -32,16 +32,24 @@ class QueueProcessor {
             const instances = await retryWithBackoff(async () => {
                 const { data, error } = await supabase
                     .from('whatsapp_instances')
-                    .select('id, tenant_id')
+                    .select('id, tenant_id, assigned_node_id, lease_until')
                     .in('status', ['connected', 'connected_local']);
                 if (error) throw error;
                 return data;
             });
 
             if (instances && instances.length > 0) {
+                const now = new Date();
+                const currentNodeId = String(NODE_ID).trim();
+
                 for (const inst of instances) {
                     const instanceId = inst.id;
                     const tenantId = inst.tenant_id;
+                    const assignedNodeId = inst.assigned_node_id ? String(inst.assigned_node_id).trim() : null;
+                    const isLockedByOther = assignedNodeId && assignedNodeId !== currentNodeId && inst.lease_until && new Date(inst.lease_until) > now;
+
+                    // Se a instância está sob lease ativo de outro worker, este nó não deve processá-la
+                    if (isLockedByOther) continue;
 
                     // Se já houver um processador rodando para esta instância, pula para não enviar em paralelo
                     if (this.activeProcessors.has(instanceId)) continue;

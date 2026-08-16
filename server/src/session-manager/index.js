@@ -1081,26 +1081,44 @@ class SessionManager {
         let sock = this.getSocket(instanceId, requireAuthenticated);
         if (sock) return sock;
 
-        // Se estiver configurado para desativar auto-start (ambiente local de desenvolvimento),
-        // permitimos o lazy loading sob demanda quando o desenvolvedor interage ativamente,
-        // mas o auto-start em lote na inicialização do servidor continuará desativado.
-
         // Fallback para acordar a instância (Lazy Load) se o Node foi reiniciado
-        const { data } = await retryWithBackoff(() => supabase.from('whatsapp_instances').select('status').eq('id', instanceId).single());
-        const allowedStatuses = requireAuthenticated 
-            ? ['connected', 'connected_local'] 
-            : ['connected', 'connecting', 'qr_ready', 'connected_local'];
+        try {
+            const { data } = await retryWithBackoff(() => 
+                supabase
+                    .from('whatsapp_instances')
+                    .select('status, assigned_node_id, lease_until')
+                    .eq('id', instanceId)
+                    .single()
+            );
 
-        if (data && allowedStatuses.includes(data.status)) {
-            console.log(`[SessionManager] Lazy loading instance ${instanceId} (DB status: ${data.status})...`);
-            const createdSock = await this.createSession(tenantId, instanceId);
-            if (requireAuthenticated) {
-                const meId = createdSock?.user?.id || createdSock?.authState?.creds?.me?.id;
-                if (!meId || !createdSock?.ws || !createdSock.ws.isOpen) {
+            const allowedStatuses = requireAuthenticated 
+                ? ['connected', 'connected_local'] 
+                : ['connected', 'connecting', 'qr_ready', 'connected_local'];
+
+            if (data && allowedStatuses.includes(data.status)) {
+                const now = new Date();
+                const currentNodeId = String(NODE_ID).trim();
+                const assignedNodeId = data.assigned_node_id ? String(data.assigned_node_id).trim() : null;
+
+                // Se a instância já possui um lock ativo por outro worker com lease válido, não devemos acordá-la neste nó
+                if (assignedNodeId && assignedNodeId !== currentNodeId && data.lease_until && new Date(data.lease_until) > now) {
+                    console.log(`[SessionManager] Instância ${instanceId} está sob lock ativo do worker ${assignedNodeId} (lease até ${data.lease_until}). Ignorando wake local.`);
                     return null;
                 }
+
+                console.log(`[SessionManager] Lazy loading instance ${instanceId} (DB status: ${data.status})...`);
+                const createdSock = await this.createSession(tenantId, instanceId);
+                if (requireAuthenticated) {
+                    const meId = createdSock?.user?.id || createdSock?.authState?.creds?.me?.id;
+                    if (!meId || !createdSock?.ws || !createdSock.ws.isOpen) {
+                        return null;
+                    }
+                }
+                return createdSock;
             }
-            return createdSock;
+        } catch (err) {
+            console.warn(`[SessionManager] Não foi possível acordar a instância ${instanceId}:`, err.message);
+            return null;
         }
         
         return null;

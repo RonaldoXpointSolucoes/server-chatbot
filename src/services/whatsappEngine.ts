@@ -329,26 +329,24 @@ export const toggleEngineGroupEphemeral = async (tenantId: string, instanceId: s
 
 export const sendEnginePresenceUpdate = async (tenantId: string, instanceId: string, jid: string, presence: 'composing' | 'recording' | 'paused' | 'available' | 'unavailable', apiKey: string) => {
   const apiUrl = getApiUrl();
-  if (!apiUrl) throw new Error("URL do motor Antigravity não definida (.env)");
-  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, { 
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
-    body: JSON.stringify({ method: 'sendPresenceUpdate', args: [presence, jid] })
-  });
-  
-  let resJson;
+  if (!apiUrl) return { ok: false, error: "URL do motor Antigravity não definida (.env)" };
   try {
-    resJson = await res.json();
-  } catch (e) {
-    resJson = {};
+    const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
+      body: JSON.stringify({ method: 'sendPresenceUpdate', args: [presence, jid] })
+    });
+    
+    let resJson;
+    try {
+      resJson = await res.json();
+    } catch (e) {
+      resJson = { ok: false };
+    }
+    return resJson;
+  } catch (err: any) {
+    return { ok: false, error: err?.message };
   }
-  
-  if (!res.ok || resJson.ok === false) {
-    const errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
-    throw new Error(`Falha ao enviar presença: ${errorDetail}`);
-  }
-  
-  return resJson;
 };
 
 export const sendContactMessage = async (

@@ -376,8 +376,21 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
             }
         }
 
+        if (method === 'sendPresenceUpdate') {
+            const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
+            if (!sock) {
+                return res.json({ ok: false, message: 'Socket offline or presence update ignored' });
+            }
+            try {
+                const result = await sock.sendPresenceUpdate(...(args || []));
+                return res.json({ ok: true, result });
+            } catch (err) {
+                return res.json({ ok: false, message: err?.message || 'Presence update failed' });
+            }
+        }
+
         const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
-        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+        if (!sock) return res.status(200).json({ ok: false, error: 'Socket offline' });
 
         // Intercept custom macros that don't exist directly on sock
         if (method === 'syncContacts') {
