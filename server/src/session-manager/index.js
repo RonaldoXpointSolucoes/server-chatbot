@@ -969,10 +969,12 @@ class SessionManager {
                                             sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
                                         } else {
                                             console.warn(`[SessionManager - Antiban] Sem sessão ativa saudável para ${instanceId}. Tentando acordar...`);
-                                            const wakedSock = await this.getSocketOrWake(tenantId, instanceId);
+                                            const wakedSock = await this.getSocketOrWake(tenantId, instanceId, true);
                                             if (wakedSock) {
                                                 activeSock = wakedSock;
                                                 sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
+                                            } else {
+                                                throw new Error(`Connection Closed (Instância ${instanceId} está desconectada ou indisponível no banco de dados)`);
                                             }
                                         }
                                     }
@@ -1006,6 +1008,16 @@ class SessionManager {
                                 } catch (error) {
                                     lastError = error;
                                     attempts++;
+
+                                    const isPermanentlyClosed = error.message?.includes('está desconectada ou indisponível no banco') ||
+                                        error.message?.includes('logged_out') ||
+                                        error.message?.includes('blocked_12h');
+
+                                    if (isPermanentlyClosed) {
+                                        console.warn(`[SessionManager - Antiban] Abortando retentativas para ${jid} via instância ${instanceId}: ${error.message}`);
+                                        break;
+                                    }
+
                                     console.error(`[SessionManager - Antiban] Erro na tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}:`, error.message || error);
                                     
                                     if (attempts < maxAttempts) {
@@ -1015,7 +1027,9 @@ class SessionManager {
                                 }
                             }
                             
-                            console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}.`);
+                            if (attempts >= maxAttempts) {
+                                console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}.`);
+                            }
                             reject(lastError);
                         } finally {
                             // Independente de sucesso ou falha, resolve a fila interna para permitir o próximo envio
@@ -1041,7 +1055,7 @@ class SessionManager {
         }
     }
 
-    getSocket(instanceId) {
+    getSocket(instanceId, requireAuthenticated = false) {
         const data = this.sessions.get(instanceId);
         if (!data || !data.sock) return null;
 
@@ -1053,11 +1067,18 @@ class SessionManager {
             return null;
         }
 
+        if (requireAuthenticated) {
+            const meId = sock?.user?.id || sock?.authState?.creds?.me?.id;
+            if (!meId || !sock.ws || !sock.ws.isOpen) {
+                return null;
+            }
+        }
+
         return sock;
     }
 
-    async getSocketOrWake(tenantId, instanceId) {
-        let sock = this.getSocket(instanceId);
+    async getSocketOrWake(tenantId, instanceId, requireAuthenticated = false) {
+        let sock = this.getSocket(instanceId, requireAuthenticated);
         if (sock) return sock;
 
         // Se estiver configurado para desativar auto-start (ambiente local de desenvolvimento),
@@ -1066,9 +1087,20 @@ class SessionManager {
 
         // Fallback para acordar a instância (Lazy Load) se o Node foi reiniciado
         const { data } = await retryWithBackoff(() => supabase.from('whatsapp_instances').select('status').eq('id', instanceId).single());
-        if (data && ['connected', 'connecting', 'qr_ready', 'connected_local'].includes(data.status)) {
+        const allowedStatuses = requireAuthenticated 
+            ? ['connected', 'connected_local'] 
+            : ['connected', 'connecting', 'qr_ready', 'connected_local'];
+
+        if (data && allowedStatuses.includes(data.status)) {
             console.log(`[SessionManager] Lazy loading instance ${instanceId} (DB status: ${data.status})...`);
-            return await this.createSession(tenantId, instanceId);
+            const createdSock = await this.createSession(tenantId, instanceId);
+            if (requireAuthenticated) {
+                const meId = createdSock?.user?.id || createdSock?.authState?.creds?.me?.id;
+                if (!meId || !createdSock?.ws || !createdSock.ws.isOpen) {
+                    return null;
+                }
+            }
+            return createdSock;
         }
         
         return null;

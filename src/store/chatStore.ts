@@ -458,6 +458,12 @@ interface ChatState {
   setOfflineStatus: (status: boolean) => void;
   globalAiEnabled: boolean;
   setGlobalAiEnabled: (enabled: boolean) => void;
+  globalAiAuditInfo: {
+    status: 'active' | 'inactive';
+    updated_by: string;
+    updated_at: string;
+  } | null;
+  setGlobalAiAuditInfo: (audit: any) => void;
   toggleGlobalAi: () => Promise<void>;
   syncMissedMessages: () => Promise<void>;
   
@@ -868,24 +874,68 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setOfflineStatus: (status) => set({ isOffline: status }),
   globalAiEnabled: true,
   setGlobalAiEnabled: (enabled) => set({ globalAiEnabled: enabled }),
+  globalAiAuditInfo: null,
+  setGlobalAiAuditInfo: (audit) => set({ globalAiAuditInfo: audit }),
   toggleGlobalAi: async () => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
-    const newValue = !get().globalAiEnabled;
-    set({ globalAiEnabled: newValue });
+    const prevValue = get().globalAiEnabled;
+    const prevAudit = get().globalAiAuditInfo;
+    const newValue = !prevValue;
+
+    // Identificar o nome do operador atual
+    const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+    const currentUserName = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_name') || localStorage.getItem('current_user_name')) : null;
+    const me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
+    
+    let operatorName = currentUserName || me?.full_name || currentUserEmail?.split('@')[0] || 'Usuário';
+    if (operatorName.includes('@')) {
+       operatorName = operatorName.split('@')[0];
+    }
+    operatorName = operatorName.trim();
+
+    const nowIso = new Date().toISOString();
+    const auditData = {
+      status: (newValue ? 'active' : 'inactive') as 'active' | 'inactive',
+      updated_by: operatorName,
+      updated_at: nowIso
+    };
+
+    set({ 
+      globalAiEnabled: newValue,
+      globalAiAuditInfo: auditData
+    });
+
     try {
-      const { error } = await supabase.from('companies').update({ global_ai_enabled: newValue }).eq('id', tenant.id);
+      // Buscar settings atuais no Supabase para não sobrescrever outros campos do JSONB
+      const { data: comp } = await supabase.from('companies').select('settings').eq('id', tenant.id).maybeSingle();
+      const currentSettings = (comp?.settings && typeof comp.settings === 'object') ? comp.settings : {};
+      const updatedSettings = {
+        ...currentSettings,
+        global_ai_audit: auditData
+      };
+
+      const { error } = await supabase.from('companies').update({ 
+        global_ai_enabled: newValue,
+        settings: updatedSettings
+      }).eq('id', tenant.id);
+
       if (error) throw error;
+
+      set(s => ({
+        tenantInfo: s.tenantInfo ? { ...s.tenantInfo, global_ai_enabled: newValue, settings: updatedSettings } : s.tenantInfo
+      }));
+
       get().logOperation(
         'UPDATE',
         'companies',
         tenant.id,
-        { global_ai_enabled: !newValue },
-        { global_ai_enabled: newValue }
+        { global_ai_enabled: prevValue, global_ai_audit: prevAudit },
+        { global_ai_enabled: newValue, global_ai_audit: auditData }
       );
     } catch (e) {
       console.error("Erro ao atualizar status global do IA:", e);
-      set({ globalAiEnabled: !newValue }); // Reverter
+      set({ globalAiEnabled: prevValue, globalAiAuditInfo: prevAudit }); // Reverter
     }
   },
 
@@ -3846,7 +3896,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({
            tenantInfo: tenantData,
            connectedInstanceName: tenantData.evolution_api_instance || null,
-           globalAiEnabled: tenantData.global_ai_enabled ?? true
+           globalAiEnabled: tenantData.global_ai_enabled ?? true,
+           globalAiAuditInfo: tenantData.settings?.global_ai_audit || null
         });
 
         // Pré-popular cache com todas as instâncias do tenant para máxima performance de mensagens

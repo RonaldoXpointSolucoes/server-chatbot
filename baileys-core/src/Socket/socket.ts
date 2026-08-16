@@ -862,7 +862,11 @@ export const makeSocket = (config: SocketConfig) => {
 				id: stanza.attrs.id!
 			}
 		}
-		await sendNode(iq)
+		try {
+			await sendNode(iq)
+		} catch (err: any) {
+			logger.warn({ err: err?.message || err }, 'failed to send pair-device iq response')
+		}
 
 		const pairDeviceNode = getBinaryNodeChild(stanza, 'pair-device')
 		const refNodes = getBinaryNodeChildren(pairDeviceNode, 'ref')
@@ -989,11 +993,15 @@ export const makeSocket = (config: SocketConfig) => {
 
 	ws.on('CB:ib,,offline_preview', async (node: BinaryNode) => {
 		logger.info('offline preview received', JSON.stringify(node))
-		await sendNode({
-			tag: 'ib',
-			attrs: {},
-			content: [{ tag: 'offline_batch', attrs: { count: '100' } }]
-		})
+		try {
+			await sendNode({
+				tag: 'ib',
+				attrs: {},
+				content: [{ tag: 'offline_batch', attrs: { count: '100' } }]
+			})
+		} catch (err: any) {
+			logger.warn({ err: err?.message || err }, 'failed to send offline_preview response')
+		}
 	})
 
 	ws.on('CB:ib,,edge_routing', (node: BinaryNode) => {

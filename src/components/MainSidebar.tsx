@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   Search, 
@@ -22,6 +22,8 @@ import {
   History,
   Mails,
   Bot,
+  Info,
+  ShieldCheck,
   MoreVertical,
   RotateCcw,
   RefreshCw,
@@ -186,18 +188,69 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const instancesStatus = useChatStore(state => state.instancesStatus);
   const crmBoards = useChatStore(state => state.crmBoards) || [];
   
+  const tenantInfo = useChatStore(state => state.tenantInfo);
+  const tenantIdFromStore = tenantInfo?.id;
+  const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+  const currentUserId = (localStorage.getItem('current_user_id') || sessionStorage.getItem('current_user_id') || currentUserEmail || '') as string;
+  const [instances, setInstances] = useState<any[]>([]);
+
   const currentAgent = agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
-  const myConversationsCount = currentAgent ? contacts.filter(c => c.assigned_to?.split(',').includes(currentAgent.id) && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length : 0;
-  const unreadCountGlobal = contacts.filter(c => c.unread > 0 && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length;
-  
-  const myTasksCount = React.useMemo(() => {
+
+  const isContactUnattended = React.useCallback((c: any) => {
+    if (tenantId && c.tenant_id && c.tenant_id !== tenantId) return false;
+    if (instances.length > 0) {
+      const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+      if (cInst && cInst !== 'default' && !instances.some(i => i.id === cInst || i.display_name === cInst)) {
+        return false;
+      }
+    }
+    if (c.is_blocked) return false;
+    if (c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed') {
+      return false;
+    }
+    if (c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) {
+      return false;
+    }
+
+    const hasUnread = (Number(c.unread) > 0) || Boolean(c.isManuallyUnread);
+    const isPending = c.conv_status === 'unassigned' || c.conv_status === 'pending' || c.status === 'unassigned' || c.status === 'pending';
+    if (!hasUnread && !isPending) return false;
+
+    if (c.messages && c.messages.length > 0) {
+      const lastMsg = c.messages[c.messages.length - 1];
+      if (lastMsg && (lastMsg.sender === 'human' || lastMsg.sender === 'agent' || lastMsg.sender === 'user') && Number(c.unread) <= 0 && !c.isManuallyUnread) {
+        return false;
+      }
+    }
+    return true;
+  }, [tenantId, instances]);
+
+  const myConversationsCount = React.useMemo(() => {
     if (!currentAgent) return 0;
-    return contacts.filter(c => 
-      c.messages && c.messages.some(m => 
-        m.isTask && !m.taskCompleted && (m.assignedTo === currentAgent.id || m.assignedTo === currentAgent.user_id)
-      )
-    ).length;
-  }, [contacts, currentAgent]);
+    return contacts.filter(c => {
+      if (tenantId && c.tenant_id && c.tenant_id !== tenantId) return false;
+      if (instances.length > 0) {
+        const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+        if (cInst && cInst !== 'default' && !instances.some(i => i.id === cInst || i.display_name === cInst)) return false;
+      }
+      return c.assigned_to?.split(',').includes(currentAgent.id) && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved';
+    }).length;
+  }, [contacts, currentAgent, tenantId, instances]);
+
+  const unreadCountGlobal = React.useMemo(() => {
+    return contacts.filter(isContactUnattended).length;
+  }, [contacts, isContactUnattended]);
+
+  const myTasksCount = React.useMemo(() => {
+    return contacts.filter(c => {
+      if (tenantId && c.tenant_id && c.tenant_id !== tenantId) return false;
+      if (instances.length > 0) {
+        const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+        if (cInst && cInst !== 'default' && !instances.some(i => i.id === cInst || i.display_name === cInst)) return false;
+      }
+      return (c.crm_tasks && c.crm_tasks.some((t: any) => !t.completed && (!t.assigned_to || (currentAgent && t.assigned_to === currentAgent.id))));
+    }).length;
+  }, [contacts, currentAgent, tenantId, instances]);
   
   const [userCompanies, setUserCompanies] = useState<any[]>([]);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
@@ -205,6 +258,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const [currentCompanyContext, setCurrentCompanyContext] = useState<any>(null);
   const globalAiEnabled = useChatStore(state => state.globalAiEnabled);
   const setGlobalAiEnabled = useChatStore(state => state.setGlobalAiEnabled);
+  const globalAiAuditInfo = useChatStore(state => state.globalAiAuditInfo);
+  const setGlobalAiAuditInfo = useChatStore(state => state.setGlobalAiAuditInfo);
   const toggleGlobalAi = useChatStore(state => state.toggleGlobalAi);
   const [instanceContextMenu, setInstanceContextMenu] = useState<{ id: string, name: string, status?: string, x: number, y: number } | null>(null);
   const [myConversationsMenu, setMyConversationsMenu] = useState<{ x: number, y: number } | null>(null);
@@ -212,7 +267,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const [agentSettingsTab, setAgentSettingsTab] = useState<'profile' | 'notifications'>('profile');
   const [isChannelsCollapsed, setIsChannelsCollapsed] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('chatboot_sidebar_channels_collapsed') === 'true';
+      return localStorage.getItem('chatboot_sidebar_sidebar_collapsed') === 'true';
     }
     return false;
   });
@@ -222,19 +277,51 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     const newVal = !isChannelsCollapsed;
     setIsChannelsCollapsed(newVal);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('chatboot_sidebar_channels_collapsed', String(newVal));
+      localStorage.setItem('chatboot_sidebar_sidebar_collapsed', String(newVal));
     }
   };
 
-  const tenantInfo = useChatStore(state => state.tenantInfo);
-  const tenantIdFromStore = tenantInfo?.id;
-  const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-  const currentUserId = (localStorage.getItem('current_user_id') || sessionStorage.getItem('current_user_id') || currentUserEmail || '') as string;
   const [notifPrefs, setNotifPrefs] = useState<Record<string, any>>(getLocalNotificationPrefs());
-  const [instances, setInstances] = useState<any[]>([]);
+  const [showAiAuditModal, setShowAiAuditModal] = useState(false);
+
+  const auditDataFormatted = useMemo(() => {
+    if (globalAiAuditInfo?.updated_by && globalAiAuditInfo?.updated_at) {
+      try {
+        const d = new Date(globalAiAuditInfo.updated_at);
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        const hours = String(d.getHours()).padStart(2, '0');
+        const mins = String(d.getMinutes()).padStart(2, '0');
+        
+        const rawName = globalAiAuditInfo.updated_by.trim();
+        const firstName = rawName.split(' ')[0] || rawName;
+
+        return {
+          compact: `${globalAiEnabled ? 'Ativo' : 'Inativo'}: ${firstName} • ${day}/${month} ${hours}:${mins}`,
+          fullText: `${globalAiEnabled ? 'Ativo' : 'Inativo'} por ${rawName} em ${day}/${month}/${year} às ${hours}:${mins}h`,
+          operator: rawName,
+          date: `${day}/${month}/${year}`,
+          time: `${hours}:${mins}h`,
+          hasAudit: true
+        };
+      } catch (e) {}
+    }
+    return {
+      compact: globalAiEnabled ? 'Robô I.A Ativo' : 'Robô I.A Inativo',
+      fullText: globalAiEnabled ? 'Robô I.A Ativo' : 'Robô I.A Inativo',
+      operator: 'Configuração Padrão',
+      date: '-',
+      time: '-',
+      hasAudit: false
+    };
+  }, [globalAiAuditInfo, globalAiEnabled]);
 
   useEffect(() => {
-    onClose?.();
+    const timer = setTimeout(() => {
+      onClose?.();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [location.pathname, onClose]);
 
   useEffect(() => {
@@ -376,6 +463,9 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         
         setCurrentCompanyContext(currentCompany);
         setGlobalAiEnabled(currentCompany.global_ai_enabled ?? true);
+        if (currentCompany.settings?.global_ai_audit) {
+           setGlobalAiAuditInfo(currentCompany.settings.global_ai_audit);
+        }
 
         const storage = getActiveStorage();
         const allowedCompsStr = storage ? storage.getItem('allowed_companies') : null;
@@ -487,8 +577,13 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     const companyChannel = supabase.channel(`public:companies:id=${tenantId}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'companies', filter: `id=eq.${tenantId}` }, (payload) => {
           console.log("Realtime event for company received:", payload);
-          if (payload.new && typeof payload.new.global_ai_enabled !== 'undefined') {
-              setGlobalAiEnabled(payload.new.global_ai_enabled);
+          if (payload.new) {
+              if (typeof payload.new.global_ai_enabled !== 'undefined') {
+                  setGlobalAiEnabled(payload.new.global_ai_enabled);
+              }
+              if (payload.new.settings?.global_ai_audit) {
+                  setGlobalAiAuditInfo(payload.new.settings.global_ai_audit);
+              }
           }
       })
       .subscribe();
@@ -632,19 +727,54 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         <div className="px-3 pb-3">
            <div className={cn(
              "flex items-center bg-gray-200/50 dark:bg-[#202c33] rounded-lg border border-gray-250 dark:border-[#2a3942]/50 hover:border-[#00a884]/30 transition-all overflow-hidden",
-             "px-3 py-2 justify-between",
+             "px-3 py-2 justify-between gap-2",
              "group-[.is-minimized]/sidebar:justify-center group-[.is-minimized]/sidebar:px-0",
              "group-hover/sidebar:!justify-between group-hover/sidebar:!px-3"
            )}>
-             <div className="flex items-center gap-2.5 shrink-0">
-               <div className={cn("p-1.5 rounded-md transition-colors", globalAiEnabled ? "bg-[#00a884]/20" : "bg-gray-200 dark:bg-[#2a3942]")}>
+             <div className="flex items-center gap-2 min-w-0 flex-1">
+               <div className={cn("p-1.5 rounded-md transition-colors shrink-0", globalAiEnabled ? "bg-[#00a884]/20" : "bg-gray-200 dark:bg-[#2a3942]")}>
                  <Bot size={14} className={globalAiEnabled ? "text-[#00a884]" : "text-[#8696a0]"} />
                </div>
-               <span className={cn(
-                 "text-[13px] font-medium text-[#54656f] dark:text-[#d1d7db] transition-all duration-200 whitespace-nowrap", 
-                 "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0",
+               <div className={cn(
+                 "flex flex-col min-w-0 flex-1 transition-all duration-200", 
+                 "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:overflow-hidden",
                  "group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto"
-               )}>Robô I.A</span>
+               )}>
+                 <div className="flex items-center gap-1.5">
+                   <span className="text-[13px] font-semibold text-[#111b21] dark:text-[#d1d7db] leading-tight whitespace-nowrap">
+                     Robô I.A
+                   </span>
+                   {auditDataFormatted.hasAudit && (
+                     <button
+                       type="button"
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         setShowAiAuditModal(true);
+                       }}
+                       className="text-[#8696a0] hover:text-[#00a884] transition-colors p-0.5 rounded focus:outline-none"
+                       title="Ver detalhes de auditoria"
+                     >
+                       <Info size={11} />
+                     </button>
+                   )}
+                 </div>
+                 <div 
+                   onClick={(e) => {
+                     if (auditDataFormatted.hasAudit) {
+                       e.stopPropagation();
+                       setShowAiAuditModal(true);
+                     }
+                   }}
+                   className={cn(
+                     "text-[9.5px] leading-tight font-medium tracking-tight truncate transition-colors mt-0.5",
+                     auditDataFormatted.hasAudit ? "cursor-pointer hover:underline" : "",
+                     globalAiEnabled ? "text-[#00a884] dark:text-[#00a884]" : "text-amber-600 dark:text-amber-400"
+                   )}
+                   title={auditDataFormatted.fullText}
+                 >
+                   {auditDataFormatted.compact}
+                 </div>
+               </div>
              </div>
              <label className={cn(
                "relative inline-flex items-center cursor-pointer transition-all duration-200 shrink-0", 
@@ -718,7 +848,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               <div className="relative flex-1">
                 <NavItem 
                   title="Todas as conversas" 
-                  isActive={filterType !== 'mine' && filterType !== 'blocked'} 
+                  isActive={filterType === 'all' && activeChannelFilter === null} 
                   onClick={() => {
                     if (activeChannelFilter === null && filterType === 'all' && window.location.pathname === '/chat') return;
                     setActiveChannelFilter(null, null);
@@ -748,7 +878,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
             {instances.length > 0 && !isChannelsCollapsed && (
                <div className="pl-1 border-l-2 border-[#2a3942]/50 ml-5 my-1 py-0.5 space-y-0.5">
                  {instances.map(inst => {
-                    const unreadCount = contacts.filter(c => c.instance_id === inst.id && c.unread > 0 && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved').length;
+                    const unreadCount = contacts.filter(c => {
+                      const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+                      const isMatch = cInst === inst.id || cInst === inst.display_name;
+                      if (!isMatch) return false;
+                      return isContactUnattended(c);
+                    }).length;
                     const status = instancesStatus[inst.id] ?? inst.status ?? 'connected';
                     const isConnected = status === 'connected' || status === 'connected_local';
                     const isConnecting = status === 'connecting' || status === 'reconnecting' || status === 'reconnecting_local' || status === 'connecting_local';
@@ -1386,6 +1521,84 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         instanceId={manageGroupsTarget?.id || null}
         instanceName={manageGroupsTarget?.name || null}
       />
+
+      {/* Modal de Auditoria do Robô I.A */}
+      {showAiAuditModal && (
+        <div 
+          className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setShowAiAuditModal(false)}
+        >
+          <div 
+            className="bg-white dark:bg-[#1f2c34] border border-gray-200 dark:border-[#2a3942] rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-[#2a3942]/60 bg-gray-50/50 dark:bg-[#111b21]/40">
+              <div className="flex items-center gap-2.5">
+                <div className={cn(
+                  "p-2 rounded-xl flex items-center justify-center shadow-inner",
+                  globalAiEnabled ? "bg-[#00a884]/15 text-[#00a884]" : "bg-amber-500/15 text-amber-500"
+                )}>
+                  <Bot size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Auditoria do Robô I.A</h3>
+                  <p className="text-[11px] text-gray-500 dark:text-[#8696a0]">Status operacional global</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowAiAuditModal(false)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-[#2a3942] transition"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Conteúdo */}
+            <div className="p-5 space-y-4">
+              {/* Status Badge */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-[#111b21]/60 border border-gray-100 dark:border-[#2a3942]/40">
+                <span className="text-xs text-gray-600 dark:text-gray-400 font-medium">Status Atual</span>
+                <span className={cn(
+                  "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold shadow-sm",
+                  globalAiEnabled 
+                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" 
+                    : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                )}>
+                  <span className={cn("w-1.5 h-1.5 rounded-full", globalAiEnabled ? "bg-emerald-500 animate-pulse" : "bg-amber-500")} />
+                  {globalAiEnabled ? "Ativo (Respondendo)" : "Inativo (Pausado)"}
+                </span>
+              </div>
+
+              {/* Detalhes de Auditoria */}
+              <div className="space-y-2.5 text-xs">
+                <div className="flex justify-between items-center py-1.5 border-b border-gray-100 dark:border-[#2a3942]/30">
+                  <span className="text-gray-500 dark:text-[#8696a0]">Última alteração por:</span>
+                  <span className="font-semibold text-gray-800 dark:text-gray-200">{auditDataFormatted.operator}</span>
+                </div>
+                <div className="flex justify-between items-center py-1.5 border-b border-gray-100 dark:border-[#2a3942]/30">
+                  <span className="text-gray-500 dark:text-[#8696a0]">Data:</span>
+                  <span className="font-semibold text-gray-800 dark:text-gray-200">{auditDataFormatted.date}</span>
+                </div>
+                <div className="flex justify-between items-center py-1.5 border-b border-gray-100 dark:border-[#2a3942]/30">
+                  <span className="text-gray-500 dark:text-[#8696a0]">Horário:</span>
+                  <span className="font-semibold text-gray-800 dark:text-gray-200">{auditDataFormatted.time}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-3 bg-gray-50 dark:bg-[#111b21]/60 border-t border-gray-100 dark:border-[#2a3942]/40 flex justify-end">
+              <button
+                onClick={() => setShowAiAuditModal(false)}
+                className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-gray-200 dark:bg-[#2a3942] hover:bg-gray-300 dark:hover:bg-[#3b4a54] text-gray-800 dark:text-gray-200 transition"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </SidebarContext.Provider>
   );

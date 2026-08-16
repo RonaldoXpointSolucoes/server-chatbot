@@ -293,7 +293,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
             
             // Se for uma edição de mensagem (contém 'edit') ou exclusão/revogação (contém 'delete'), necessita do socket ativo diretamente no Baileys
             if (content && (content.edit || content.delete)) {
-                const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
+                const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId, true);
                 if (!sock) return res.status(400).json({ error: 'Socket offline ou não conectado.' });
                 
                 // Normalização defensiva do JID para o Brasil (+55)

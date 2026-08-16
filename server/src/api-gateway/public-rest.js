@@ -320,8 +320,8 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
         
         if (!number || !text) return res.status(400).json({ error: 'number and text are required in body' });
 
-        const sock = await sessionManager.getSocketOrWake(tenant_id, id);
-        if (!sock) return res.status(400).json({ error: 'WhatsApp socket offline for this instance.' });
+        const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
+        if (!sock) return res.status(400).json({ error: 'WhatsApp socket offline or not authenticated for this instance.' });
         
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         const msgResult = await sock.sendMessage(remoteJid, { text });
@@ -400,8 +400,8 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
             return res.status(400).json({ error: 'Missing file, number, mediatype or instance' });
         }
 
-        const sock = await sessionManager.getSocketOrWake(tenant_id, id);
-        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+        const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
+        if (!sock) return res.status(400).json({ error: 'Socket offline or not authenticated' });
 
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         const timestamp = Date.now();
@@ -525,15 +525,15 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
  *     responses:
  *       200:
  *         description: Localização enviada com sucesso
- */
+ *  */
 router.post('/message/sendLocation', requireApiKey, async (req, res) => {
     try {
         const { number, instance, latitude, longitude, name, address } = req.body;
         const { id, tenant_id } = req.instanceData;
         if (!number || !latitude || !longitude) return res.status(400).json({ error: 'number, latitude and longitude required' });
 
-        const sock = await sessionManager.getSocketOrWake(tenant_id, id);
-        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+        const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
+        if (!sock) return res.status(400).json({ error: 'Socket offline or not authenticated' });
 
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         const msgResult = await sock.sendMessage(remoteJid, {
@@ -584,20 +584,20 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
  *     responses:
  *       200:
  *         description: Contato enviado com sucesso
- */
+ *  */
 router.post('/message/sendContact', requireApiKey, async (req, res) => {
     try {
         const { number, instance, contactName, contactNumber } = req.body;
         const { id, tenant_id } = req.instanceData;
         if (!number || !contactName || !contactNumber) return res.status(400).json({ error: 'number, contactName and contactNumber required' });
 
-        const sock = await sessionManager.getSocketOrWake(tenant_id, id);
-        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+        const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
+        if (!sock) return res.status(400).json({ error: 'Socket offline or not authenticated' });
 
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         
         // Formatar o vCard no padrão WhatsApp
-        const formattedNumber = contactNumber.replace(/\\D/g, '');
+        const formattedNumber = contactNumber.replace(/\D/g, '');
         const vcard = `BEGIN:VCARD\nVERSION:3.0\nFN:${contactName}\nTEL;type=CELL;type=VOICE;waid=${formattedNumber}:+${formattedNumber}\nEND:VCARD`;
         
         const msgResult = await sock.sendMessage(remoteJid, {
@@ -657,15 +657,15 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
  *     responses:
  *       200:
  *         description: Reação enviada com sucesso
- */
+ *  */
 router.post('/message/sendReaction', requireApiKey, async (req, res) => {
     try {
         const { number, instance, messageId, reaction, fromMe = false } = req.body;
         const { id, tenant_id } = req.instanceData;
         if (!number || !messageId || !reaction) return res.status(400).json({ error: 'number, messageId and reaction required' });
 
-        const sock = await sessionManager.getSocketOrWake(tenant_id, id);
-        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+        const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
+        if (!sock) return res.status(400).json({ error: 'Socket offline or not authenticated' });
 
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         

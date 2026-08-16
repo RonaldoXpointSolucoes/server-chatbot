@@ -1599,19 +1599,35 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 	// recv a message
 	ws.on('CB:message', async (node: BinaryNode) => {
-		await processNode('message', node, 'processing message', handleMessage)
+		try {
+			await processNode('message', node, 'processing message', handleMessage)
+		} catch (err: any) {
+			logger.warn({ err: err?.message || err }, 'failed processing incoming message node')
+		}
 	})
 
 	ws.on('CB:call', async (node: BinaryNode) => {
-		await processNode('call', node, 'handling call', handleCall)
+		try {
+			await processNode('call', node, 'handling call', handleCall)
+		} catch (err: any) {
+			logger.warn({ err: err?.message || err }, 'failed processing incoming call node')
+		}
 	})
 
 	ws.on('CB:receipt', async node => {
-		await processNode('receipt', node, 'handling receipt', handleReceipt)
+		try {
+			await processNode('receipt', node, 'handling receipt', handleReceipt)
+		} catch (err: any) {
+			logger.warn({ err: err?.message || err }, 'failed processing incoming receipt node')
+		}
 	})
 
 	ws.on('CB:notification', async (node: BinaryNode) => {
-		await processNode('notification', node, 'handling notification', handleNotification)
+		try {
+			await processNode('notification', node, 'handling notification', handleNotification)
+		} catch (err: any) {
+			logger.warn({ err: err?.message || err }, 'failed processing incoming notification node')
+		}
 	})
 	ws.on('CB:ack,class:message', (node: BinaryNode) => {
 		handleBadAck(node).catch(error => onUnexpectedError(error, 'handling bad ack'))

@@ -36,12 +36,12 @@ export default function ContactsManager() {
   useEffect(() => {
     if (!tenantId) return;
     const loadCompanies = async () => {
-      // 1. Fetch explicit companies with document_type = 'cnpj'
+      // 1. Fetch explicit companies with document_type = 'cnpj' OR fantasy_name OR document_number
       const { data: explicitCompanies } = await supabase
         .from('contacts')
-        .select('id, name, fantasy_name, document_number, tags, company_ids, document_type')
+        .select('id, name, custom_name, fantasy_name, document_number, tags, company_ids, document_type')
         .eq('tenant_id', tenantId)
-        .eq('document_type', 'cnpj');
+        .or('document_type.eq.cnpj,fantasy_name.neq.,document_number.neq.');
 
       // 2. Fetch all contacts that have company_ids defined to find referenced company IDs
       const { data: contactsWithCompanies } = await supabase

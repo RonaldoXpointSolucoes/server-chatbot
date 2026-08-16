@@ -41,7 +41,17 @@ function interceptConsole() {
         text = `[${APP_ENV}][${APP_NODE}] ${text}`;
     }
 
-    // Filtro de ruído: Ignora warnings de prekey bundle e logs rotineiros para não inundar o logger
+    // Filtro de ruído: Ignora dumps verbosos de chaves criptográficas do libsignal e rotinas inofensivas
+    const isSignalKeyDump = text.includes('Closing session:') ||
+                            text.includes('Removing old closed session:') ||
+                            text.includes('_chains') ||
+                            text.includes('currentRatchet') ||
+                            text.includes('pendingPreKey');
+    if (isSignalKeyDump) {
+        originalFn.apply(console, args);
+        return;
+    }
+
     if (level === 'warn' && (
         text.includes('Closing open session in favor of incoming prekey bundle') ||
         text.includes('socket zumbi') ||

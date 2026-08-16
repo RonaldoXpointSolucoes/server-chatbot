@@ -54,6 +54,32 @@ const DEFAULT_CADASTRO_CLIENTE_PAYLOAD = {
     }
 };
 
+function formatAiMessageForWhatsApp(text) {
+    if (!text || typeof text !== 'string') return text;
+
+    let formatted = text.trim();
+
+    // 1. Remove aspas externas caso o modelo tenha envolvido toda a mensagem em aspas
+    if ((formatted.startsWith('"') && formatted.endsWith('"')) || (formatted.startsWith('“') && formatted.endsWith('”'))) {
+        formatted = formatted.slice(1, -1).trim();
+    }
+
+    // 2. Garante quebra de linha dupla entre emojis no fim de frases e início do próximo parágrafo (ex: "😊Agradecemos" -> "😊\n\nAgradecemos")
+    formatted = formatted.replace(/([\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}])([A-ZÀ-Ú])/gu, '$1\n\n$2');
+
+    // 3. Garante quebra de linha dupla antes e depois de links destacados com emojis (ex: "opções:🍔 link" -> "opções:\n\n🍔 link\n\n")
+    formatted = formatted.replace(/([^\n])\s*(🍔|🍕|👉|🛵|🌐|🔗|📍)\s*(https?:\/\/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\/[^\s]*)/g, '$1\n\n$2 $3');
+    formatted = formatted.replace(/(🍔|🍕|👉|🛵|🌐|🔗|📍)\s*(https?:\/\/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\/[^\s]*)\s*([^\n])/g, '$1 $2\n\n$3');
+
+    // 4. Quebra de linha após ponto final seguido de nova frase iniciada com maiúscula sem espaçamento (ex: "ajudar.Esperamos seu pedido!" -> "ajudar.\n\nEsperamos seu pedido!")
+    formatted = formatted.replace(/([.!?])\s*([A-ZÀ-Ú][a-zà-ú]{2,})/g, '$1\n\n$2');
+
+    // 5. Normaliza quebras de linha excessivas (mais de 2 \n seguidos viram exatamente 2 \n)
+    formatted = formatted.replace(/\n{3,}/g, '\n\n');
+
+    return formatted.trim();
+}
+
 function injectStoreId(payloadObj, storeId) {
     if (!storeId || !payloadObj || typeof payloadObj !== 'object') return payloadObj;
     const clone = Array.isArray(payloadObj) ? [...payloadObj] : { ...payloadObj };
@@ -1660,14 +1686,18 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `3. RESPOSTA PADRÃO OBRIGATÓRIA DE CONFIRMAÇÃO E TRANQUILIZAÇÃO:\n` +
                           `   - A nossa automação de sistema envia notificações automáticas no WhatsApp a cada atualização de status do pedido (saída para entrega, etc.).\n` +
                           `   - Portanto, responda SEMPRE de forma calorosa, simpática e tranquilizadora confirmando o recebimento de forma positiva. Exemplo:\n` +
-                          `     "Perfeito, [Nome do Cliente]! Pode deixar que assim que o seu pedido (Nº [Número do Pedido]) sair para entrega ou tiver qualquer atualização no andamento, avisaremos você por aqui em tempo real! 😉🛵"\n` +
-                          `   - (Substitua [Nome do Cliente] pelo nome real do cliente se disponível e [Número do Pedido] pelo número que veio na mensagem dele, ex: 13130).\n`;
+                          `     "Perfeito, [Primeiro Nome do Cliente]! Pode deixar que assim que o seu pedido (Nº [Número do Pedido]) sair para entrega ou tiver qualquer atualização no andamento, avisaremos você por aqui em tempo real! 😉🛵"\n` +
+                          `   - (Substitua [Primeiro Nome do Cliente] EXCLUSIVAMENTE pelo PRIMEIRO NOME do cliente, ex: use 'Tatiane' e NUNCA 'Tatiane Almeida'. E [Número do Pedido] pelo número que veio na mensagem dele, ex: 13130).\n`;
 
-            // Regra Global de Uso do Nome do Cliente (ESTRITA)
-            basePrompt += `\n\n### DIRETRIZES DE USO DO NOME DO CLIENTE (ESTRITAS) ###\n` +
-                          `1. Se o nome do cliente estiver disponível nos dados do cliente atual e NÃO for um nome genérico (como "Cliente", "Cliente Simulador" ou vazio), você DEVE OBRIGATORIAMENTE chamar o cliente pelo nome nas suas respostas e saudações.\n` +
-                          `2. Por exemplo, em saudações diga: Olá, tudo bem Vanessa? Seja bem-vinda!, ou Como posso te ajudar hoje, Vanessa?, ou Que bom falar com você, Vanessa!\n` +
-                          `3. Mantenha essa personalização afetuosa, chamando-o pelo nome no decorrer da conversa de maneira natural.\n`;
+            // Regra Global de Uso do Nome do Cliente (ESTRITA E OBRIGATÓRIA)
+            basePrompt += `\n\n### DIRETRIZES DE USO DO NOME DO CLIENTE (ESTRITAS E OBRIGATÓRIAS) ###\n` +
+                          `1. REGRA ABSOLUTA DO PRIMEIRO NOME: Ao interagir com o cliente, você DEVE SEMPRE e OBRIGATORIAMENTE chamá-lo APENAS pelo seu PRIMEIRO NOME. NUNCA, sob hipótese alguma, inclua o sobrenome ou nome completo na sua resposta (exemplo: se o cliente se chama "Tatiane Almeida", chame-a SEMPRE e unicamente de "Tatiane"; se for "Ronaldo Clemente", chame de "Ronaldo"). No WhatsApp brasileiro, usar sobrenome soa formal, distante, frio e robótico.\n` +
+                          `2. Se o nome do cliente estiver disponível nos dados do cliente atual e NÃO for um nome genérico (como "Cliente", "Cliente Simulador" ou vazio), você DEVE OBRIGATORIAMENTE chamar o cliente pelo seu PRIMEIRO NOME nas suas respostas e saudações.\n` +
+                          `3. Exemplos corretos de saudações e respostas:\n` +
+                          `   - "Olá, tudo bem Vanessa? Seja bem-vinda!" (e NUNCA "Olá Vanessa Souza")\n` +
+                          `   - "Como posso te ajudar hoje, Vanessa?"\n` +
+                          `   - "Perfeito, Tatiane! Pode deixar que avisaremos você por aqui em tempo real! 😉🛵" (e NUNCA "Perfeito, Tatiane Almeida!")\n` +
+                          `4. Mantenha essa personalização afetuosa e natural, chamando o cliente exclusivamente pelo primeiro nome no decorrer da conversa.\n`;
 
             // Regra Global de Entendimento de Saladas (ESTRITA)
             basePrompt += `\n\n### DIRETRIZES DE ENTENDIMENTO DE SALADAS (ESTRITAS) ###\n` +
@@ -1682,16 +1712,23 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `4. REGRAS PARA INCLUIR LINKS DE PRODUTOS E CARDÁPIO (CRÍTICAS):\n` +
                           `   - Se você estiver listando ou recomendando até 3 produtos (no máximo 3), você DEVE incluir o link individual de cada produto logo abaixo dele, usando o 'link_produto' retornado pela ferramenta 'Consultar_produtos_cardapio'.\n` +
                           `     * Formato do link do produto: se construir o link manualmente, ele deve seguir a estrutura exata: [LINK_CARDAPIO]/loja/burguerplus/produto/CODIGO_DO_PRODUTO (por exemplo: https://www.burguerplus.com.br/loja/burguerplus/produto/CODIGO_DO_PRODUTO).\n` +
-                          `   - Se a lista de produtos for grande (mais de 3 produtos), você NÃO DEVE incluir os links individuais de cada produto para não poluir a mensagem. Em vez disso, apresente os produtos de forma limpa e, ao final da lista, envie apenas o link geral do cardápio digital (ex: '[LINK_CARDAPIO]').\n` +
-                          `5. DIRETRIZ DE FORMATAÇÃO E ESPAÇAMENTO DE MENSAGENS (ESTRITA):\n` +
-                          `   - Quando listar produtos ou enviar respostas para o cliente, NUNCA agrupe tudo em um único bloco de texto ou parágrafo longo. Isso torna a leitura cansativa e confusa no WhatsApp.\n` +
-                          `   - Você DEVE obrigatoriamente pular UMA ou DUAS linhas (usando quebras de linha duplas \\n\\n) entre cada produto apresentado ou seções da mensagem.\n` +
-                          `   - Para cada produto listado, use o seguinte padrão de formatação limpo e espaçado (incluindo o link apenas se a lista tiver no máximo 3 produtos):\n` +
+                          `   - Se a lista de produtos for grande (mais de 3 produtos), você NÃO DEVE incluir os links individuais de cada produto para não poluir a mensagem. Em vez disso, apresente os produtos de forma limpa e, ao final da lista, envie apenas o link geral do cardápio digital (ex: '[LINK_CARDAPIO]').\n`;
+            
+            // Regra Global de Formatação, Espaçamento e Estética Visual no WhatsApp (ESTRITA E OBRIGATÓRIA)
+            basePrompt += `\n\n### DIRETRIZES GLOBAIS DE FORMATAÇÃO, ESPAÇAMENTO E ESTÉTICA VISUAL (ESTRITAS E OBRIGATÓRIAS) ###\n` +
+                          `1. QUEBRAS DE LINHA DUPLAS E AREJAMENTO OBRIGATÓRIO:\n` +
+                          `   - NUNCA envie mensagens compactadas em blocos únicos de texto. Textos aglomerados são difíceis de ler no celular e tornam a conversa cansativa.\n` +
+                          `   - Você DEVE SEMPRE pular UMA LINHA EM BRANCO (usando duas quebras de linha \\n\\n) entre cada parágrafo, saudação, bloco explicativo, lista e encerramento.\n` +
+                          `2. DESTAQUE VISUAL DE LINKS:\n` +
+                          `   - Sempre posicione links em uma linha isolada, com linha em branco antes e depois, antecedido de emoji temático (exemplo:\n\n🍔 [LINK_CARDAPIO]\n\n).\n` +
+                          `3. LISTAGEM DE PRODUTOS E ITENS:\n` +
+                          `   - Para cada produto ou item apresentado, mantenha uma formatação limpa e espaçada, separando os itens com linha em branco:\n` +
                           `     *Nome do Produto*\n` +
                           `     Descrição: [Descrição do produto]\n` +
                           `     Preço: R$ [Preço]\n` +
-                          `     👉 Acesse e peça aqui: [link_produto] (INCLUIR ESTE LINK APENAS SE A LISTA DE PRODUTOS TIVER NO MÁXIMO 3 PRODUTOS)\n\n` +
-                          `   - Mantenha sempre um tom amigável e uma formatação arejada com bastante espaçamento visual (com duas quebras de linha) entre os itens apresentados.\n`;
+                          `     👉 Acesse e peça aqui: [link_produto] (se lista até 3 produtos)\n\n` +
+                          `4. EMOJIS HUMANIZADOS:\n` +
+                          `   - Utilize de 1 a 3 emojis calorosos em posições estratégicas (ao lado de cumprimentos, links ou agradecimentos) para enriquecer o visual de forma leve e acolhedora.\n`;
 
             // Diretrizes de Vendas e Montagem de Pedido
             basePrompt += `\n\n### DIRETRIZES DE VENDAS, CARDÁPIO E MONTAGEM DE PEDIDO (ESTRITAS) ###\n` +
@@ -1716,8 +1753,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `3. Quando o cliente pedir o link do cardápio, envie apenas e exatamente o link [LINK_CARDAPIO].\n`;
 
             if (isFirstMessage) {
-                basePrompt += `\n⚠️ AVISO DE PRIMEIRA MENSAGEM (URGENTE/OBRIGATÓRIO): Esta é a PRIMEIRA mensagem desta conversa. Você DEVE saudar o cliente com carinho e OBRIGATORIAMENTE incluir o link do cardápio digital [LINK_CARDAPIO] nesta resposta inicial.` +
-                              ` Além disso, se houver um bloco de texto sob a tag '[PRIMEIRA MENSSAGEM A SER ENVIADA]' ou '[PRIMEIRA MENSAGEM A SER ENVIADA]' no seu prompt de sistema, você DEVE retornar EXATAMENTE o texto daquele bloco (substituindo apenas as variáveis/links como [LINK_CARDAPIO] se aplicável), sem adicionar comentários, explicações extras ou outros emojis além do que está contido no bloco. Se o bloco estiver presente, use-o de forma literal como sua resposta inicial.\n`;
+                basePrompt += `\n⚠️ AVISO DE PRIMEIRA MENSAGEM (URGENTE/OBRIGATÓRIO): Esta é a PRIMEIRA mensagem desta conversa. Você DEVE saudar o cliente com carinho chamando-o pelo seu PRIMEIRO NOME e OBRIGATORIAMENTE incluir o link oficial do cardápio digital [LINK_CARDAPIO] nesta resposta inicial.\n` +
+                              `Modelo de Abertura Padrão (Siga estritamente esta estrutura acolhedora e calorosa):\n` +
+                              `"Olá, [Primeiro Nome do Cliente]! Seja muito bem-vindo(a) à [NOME_DA_EMPRESA]! 😊\n\n` +
+                              `Agradecemos pelo seu contato. Segue o link do nosso cardápio para você conferir todas as nossas opções:\n` +
+                              `🍔 [LINK_CARDAPIO]\n\n` +
+                              `Caso tenha qualquer dúvida ou precise de uma recomendação, estamos à disposição para ajudar.\n` +
+                              `Esperamos seu pedido! 😋"\n` +
+                              `(Substitua [Primeiro Nome do Cliente] EXCLUSIVAMENTE pelo primeiro nome do cliente (ex: Vanessa ou Tatiane - NUNCA use sobrenome), [NOME_DA_EMPRESA] pelo nome da empresa e [LINK_CARDAPIO] pelo link oficial do cardápio).\n` +
+                              `Além disso, se houver um bloco de texto customizado sob a tag '[PRIMEIRA MENSSAGEM A SER ENVIADA]' ou '[PRIMEIRA MENSAGEM A SER ENVIADA]' no seu prompt de sistema, você DEVE retornar o texto daquele bloco como sua resposta inicial.\n`;
             }
 
             if (botInstructions && botInstructions.trim().length > 0) {
@@ -1759,8 +1803,12 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             basePrompt += companyMemoryText;
 
             if (contactInfo) {
+                const rawClientName = (contactInfo.name || '').trim();
+                const clientFirstName = rawClientName.split(' ')[0] || rawClientName || 'Cliente';
+
                 basePrompt += `\n\n### DADOS DO CLIENTE ATUAL (CONVERSANDO NO CHAT) ###\n` +
-                              `- Nome: ${contactInfo.name || 'Cliente'}\n` +
+                              `- Primeiro Nome do Cliente (CHAME O CLIENTE SEMPRE POR ESTE PRIMEIRO NOME): ${clientFirstName}\n` +
+                              `- Nome Completo (Apenas para registro cadastral, NUNCA use o sobrenome na conversa): ${contactInfo.name || 'Cliente'}\n` +
                               `- Telefone: ${contactInfo.phone || ''}\n` +
                               `- CEP do Cliente: ${contactInfo.cep || 'Não informado'}\n` +
                               `- Rua / Logradouro: ${contactInfo.address_street || 'Não informado'}\n` +
@@ -3245,6 +3293,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                 }).catch(()=>{});
             } catch (logErr) {}
 
+            finalResponseText = formatAiMessageForWhatsApp(finalResponseText);
             return finalResponseText;
 
         } catch (error) {
@@ -3265,6 +3314,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
         const { tenantId, instanceId, conversationId, contactId, jid, botSettings, sock, botDelay } = params;
         
         try {
+            finalResponseText = formatAiMessageForWhatsApp(finalResponseText);
             if (finalResponseText && sock) {
                 // Simulação de digitação (Atraso Humano) baseada no botDelay (mínimo de 5 a 10 segundos para IA)
                 let delaySec = Number(botDelay) || 0;

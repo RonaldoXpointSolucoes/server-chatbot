@@ -22,7 +22,7 @@ router.post('/messages/send', requireTenant, async (req, res) => {
             return res.status(400).json({ error: 'Missing required parameters' });
         }
 
-        let sock = sessionManager.getSocket(instanceId);
+        let sock = sessionManager.getSocket(instanceId, true);
         
         // Anti-Bug: Se o socket estiver no meio do boot (deploy/restart), aguarda
         if (!sock && sessionManager.connectingState.has(instanceId)) {
@@ -30,15 +30,12 @@ router.post('/messages/send', requireTenant, async (req, res) => {
             sock = await sessionManager.connectingState.get(instanceId);
         }
         
-        // Anti-Bug: Se o socket não existe na memória (servidor reiniciou e não carregou ainda), força o boot!
+        // Se o socket não existe na memória, tenta acordar apenas se a instância estiver conectada no banco
         if (!sock) {
-         // Removido bloqueio emergencial local para permitir que instâncias ativas funcionem em desenvolvimento local.
-             console.log(`[Messages API] Forçando boot emergencial do socket na rota de envio: ${instanceId}`);
-             try {
-                 sock = await sessionManager.createSession(tenantId, instanceId);
-             } catch (e) {
-                 return res.status(400).json({ error: 'WhatsApp socket offline para esta instancia.' });
-             }
+            sock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
+            if (!sock) {
+                return res.status(400).json({ error: 'WhatsApp socket offline ou não autenticado para esta instância.' });
+            }
         }
         
         const remoteJid = await resolveTargetJid(sock, contactPhone, tenantId);

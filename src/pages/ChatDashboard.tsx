@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock } from 'lucide-react';
 import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
 import { useChatStore, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey } from '../store/chatStore';
@@ -388,62 +388,6 @@ export default function ChatDashboard() {
   const [companyDetailsOpen, setCompanyDetailsOpen] = useState<any | null>(null);
   const [allCompanies, setAllCompanies] = useState<any[]>([]);
 
-  useEffect(() => {
-    const fetchCompanies = async () => {
-      const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
-      if (!tenantId) return;
-      try {
-        const { supabase } = await import('../services/supabase');
-        // 1. Fetch explicit companies with document_type = 'cnpj'
-        const { data: explicitCompanies } = await supabase
-          .from('contacts')
-          .select('id, name, fantasy_name, document_number, tags')
-          .eq('tenant_id', tenantId)
-          .eq('document_type', 'cnpj');
-
-        // 2. Fetch all contacts that have company_ids defined to find referenced company IDs
-        const { data: contactsWithCompanies } = await supabase
-          .from('contacts')
-          .select('company_ids')
-          .eq('tenant_id', tenantId)
-          .not('company_ids', 'is', null)
-          .neq('company_ids', '{}');
-
-        const referencedIds = new Set<string>();
-        if (contactsWithCompanies) {
-          contactsWithCompanies.forEach(c => {
-            if (Array.isArray(c.company_ids)) {
-              c.company_ids.forEach((id: string) => {
-                if (id) referencedIds.add(id);
-              });
-            }
-          });
-        }
-
-        let allMergedCompanies = explicitCompanies || [];
-        if (referencedIds.size > 0) {
-          const explicitIds = new Set(allMergedCompanies.map(c => c.id));
-          const idsToFetch = Array.from(referencedIds).filter(id => !explicitIds.has(id));
-          
-          if (idsToFetch.length > 0) {
-            const { data: linkedCompanies } = await supabase
-              .from('contacts')
-              .select('id, name, fantasy_name, document_number, tags')
-              .eq('tenant_id', tenantId)
-              .in('id', idsToFetch);
-              
-            if (linkedCompanies) {
-              allMergedCompanies = [...allMergedCompanies, ...linkedCompanies];
-            }
-          }
-        }
-
-        setAllCompanies(allMergedCompanies);
-      } catch (e) {}
-    };
-    fetchCompanies();
-  }, []);
-
   const {  
     contacts, 
     rawInstances,
@@ -502,11 +446,13 @@ export default function ChatDashboard() {
     tenantLabels,
     fetchTenantLabels,
     globalAiEnabled,
+    globalAiAuditInfo,
     toggleGlobalAi
   } = useChatStore(useShallow(state => ({
     contacts: state.contacts,
     rawInstances: state.rawInstances,
     globalAiEnabled: state.globalAiEnabled,
+    globalAiAuditInfo: state.globalAiAuditInfo,
     toggleGlobalAi: state.toggleGlobalAi, 
     activeChatId: state.activeChatId, 
     evolutionConnected: state.evolutionConnected, 
@@ -562,8 +508,65 @@ export default function ChatDashboard() {
     historySyncError: state.historySyncError,
     setHistorySyncError: state.setHistorySyncError,
     tenantLabels: state.tenantLabels,
-    fetchTenantLabels: state.fetchTenantLabels
   })));
+
+  useEffect(() => {
+    const fetchCompanies = async () => {
+      const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (!tenantId) return;
+      try {
+        const { supabase } = await import('../services/supabase');
+        // 1. Fetch explicit companies with document_type = 'cnpj' OR fantasy_name OR document_number
+        const { data: explicitCompanies } = await supabase
+          .from('contacts')
+          .select('id, name, custom_name, fantasy_name, document_number, document_type, tags, company_ids')
+          .eq('tenant_id', tenantId)
+          .or('document_type.eq.cnpj,fantasy_name.neq.,document_number.neq.');
+
+        // 2. Fetch all contacts that have company_ids defined to find referenced company IDs
+        const { data: contactsWithCompanies } = await supabase
+          .from('contacts')
+          .select('company_ids')
+          .eq('tenant_id', tenantId)
+          .not('company_ids', 'is', null)
+          .neq('company_ids', '{}');
+
+        const referencedIds = new Set<string>();
+        if (contactsWithCompanies) {
+          contactsWithCompanies.forEach(c => {
+            if (Array.isArray(c.company_ids)) {
+              c.company_ids.forEach((id: string) => {
+                if (id) referencedIds.add(id);
+              });
+            }
+          });
+        }
+
+        let allMergedCompanies = explicitCompanies || [];
+        if (referencedIds.size > 0) {
+          const explicitIds = new Set(allMergedCompanies.map(c => c.id));
+          const idsToFetch = Array.from(referencedIds).filter(id => !explicitIds.has(id));
+          
+          if (idsToFetch.length > 0) {
+            const { data: linkedCompanies } = await supabase
+              .from('contacts')
+              .select('id, name, custom_name, fantasy_name, document_number, document_type, tags, company_ids')
+              .eq('tenant_id', tenantId)
+              .in('id', idsToFetch);
+              
+            if (linkedCompanies) {
+              allMergedCompanies = [...allMergedCompanies, ...linkedCompanies];
+            }
+          }
+        }
+
+        setAllCompanies(allMergedCompanies);
+      } catch (e) {
+        console.warn('[ChatDashboard] Erro ao buscar empresas vinculadas:', e);
+      }
+    };
+    fetchCompanies();
+  }, [tenantInfo?.id]);
 
   const [editingMessage, setEditingMessage] = useState<{ id: string, text: string } | null>(null);
   const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
@@ -1488,7 +1491,11 @@ export default function ChatDashboard() {
 
   // Helper de validação de Ticket Aberto para a caixa atual
   const isContactOpenTicket = React.useCallback((c: any) => {
-    if (!c) return false;
+    // 0) ISOLAMENTO ESTRITO POR EMPRESA / TENANT ATIVO
+    const currentTenantId = tenantInfo?.id || (typeof window !== 'undefined' ? (sessionStorage.getItem('current_tenant_id') || localStorage.getItem('current_tenant_id')) : null);
+    if (currentTenantId && c.tenant_id && c.tenant_id !== currentTenantId) {
+      return false;
+    }
 
     // 1) RBAC Enforcement & Proteção Ronaldo-Web
     const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
@@ -1599,144 +1606,192 @@ export default function ChatDashboard() {
 
   const filteredContacts = React.useMemo(() => {
     const sorted = contacts.filter(c => {
-       // 1) RBAC ENFORCEMENT - A REGRA DE OURO (Nunca mostrar conversas que não tenho acesso)
-       const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
-       const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
-       const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
-       const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-       
-       const instanceIdFromId = c.id.includes('_') ? c.id.split('_')[1] : null;
-       const effectiveInstId = instanceIdFromId || c.instance_id || connectedInstanceName;
+        // 0) ISOLAMENTO ESTRITO POR EMPRESA / TENANT ATIVO:
+        const currentTenantId = tenantInfo?.id || (typeof window !== 'undefined' ? (sessionStorage.getItem('current_tenant_id') || localStorage.getItem('current_tenant_id')) : null);
+        if (currentTenantId && c.tenant_id && c.tenant_id !== currentTenantId) {
+            return false;
+        }
 
-       // --- PROTEÇÃO RIGOROSA RONALDO-WEB ---
-       if (!isRonaldo) {
-           if (effectiveInstId === '5c78d358-d449-41c4-b396-a04ab20a39e4') return false;
-       }
+        // 1) RBAC ENFORCEMENT - A REGRA DE OURO (Nunca mostrar conversas que não tenho acesso)
+        const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+        const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+        const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+        const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+        
+        const instanceIdFromId = c.id.includes('_') ? c.id.split('_')[1] : null;
+        const effectiveInstId = instanceIdFromId || c.instance_id || connectedInstanceName;
 
-       if (!isRonaldo) {
-           if (allowedStr) {
-               try {
-                   const allowedInstances = JSON.parse(allowedStr);
-                   if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                       if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) return false;
-                   } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                       return false;
-                   }
-               } catch(e) {
-                   if (roleStr === 'agent' || roleStr === 'Agente') return false;
-               }
-           } else if (roleStr === 'agent' || roleStr === 'Agente') {
-               return false;
-           }
-       }
-
-       // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa
-       if (activeChannelFilter && !searchTerm && activeChannelFilter !== 'all') {
-           const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
-           const dbInstId = c.instance_id;
-           const targetInst = instIdFromContactId || dbInstId || 'default';
-           const resolvedTargetUuid = instanceCache.getId(targetInst) || targetInst;
-           const resolvedFilterUuid = instanceCache.getId(activeChannelFilter) || activeChannelFilter;
-           const resolvedTargetName = instanceCache.getName(targetInst) || targetInst;
-
-           const matchesChannel = targetInst === activeChannelFilter ||
-                                  targetInst === activeChannelName ||
-                                  resolvedTargetUuid === resolvedFilterUuid ||
-                                  resolvedTargetName === activeChannelName;
-
-           if (!matchesChannel) return false;
-
-           // --- FILTRO DE AUTO-CONVERSA (SELF-CHAT DA PRÓPRIA INSTÂNCIA) ---
-           const filterInstUuid = activeChannelFilter ? (instanceCache.getId(activeChannelFilter) || activeChannelFilter) : null;
-           const channelPhone = filterInstUuid ? instanceCache.phoneNumbers[filterInstUuid] : null;
-           if (channelPhone) {
-               const cleanChannelPhone = channelPhone.replace(/\D/g, '');
-               const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
-               if (cleanChannelPhone && cleanContactPhone && cleanContactPhone === cleanChannelPhone) {
-                   return false;
-               }
-           }
-       }
-
-       // 3) PROTEÇÃO RIGOROSA DE CHAT ATIVO:
-       // Se ESTE CARD ESPECÍFICO for o chat ativo aberto no painel principal, ele permanece visível na sidebar enquanto o usuário estiver interagindo com ele (EXCETO se tiver sido resolvido/encerrado no Modo Ticket)
-       const isExactActiveChat = Boolean(
-         activeChatId && (c.id === activeChatId || c.conv_id === activeChatId)
-       );
-       const isResolvedOrClosed = c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed';
-
-       if (isExactActiveChat && !searchTerm) {
-           // No Modo Ticket (ou filtros de tickets abertos), se o chat ativo foi RESOLVIDO/ENCERRADO ou BLOQUEADO, não força visibilidade na lista de tickets abertos
-           if ((ticketMode || filterType === 'tickets' || filterType === 'open') && (isResolvedOrClosed || c.is_blocked)) {
-               return false;
-           }
-           return true;
-       }
-
-       // 4) LÓGICA DE STATUS: CONTATOS BLOQUEADOS, ADIADOS (SNOOZED) E RESOLVIDOS
-       if (filterType === 'blocked') {
-           if (!c.is_blocked) return false;
-       } else {
-           if (c.is_blocked) return false;
-       }
-
-       // REGRA DE OURO DO MODO TICKET:
-       // - Modo Ticket ATIVO (ticketMode === true OU filterType === 'tickets' OU filterType === 'open'):
-       //   Mostra APENAS tickets abertos na lista lateral. Oculta conversas resolvidas, encerradas e adiadas ativas.
-       // - Modo Ticket DESATIVADO (ticketMode === false E filterType === 'all'):
-       //   Mostra TODAS as conversas da caixa (abertas, resolvidas, encerradas, etc.).
-       if (!searchTerm && (ticketMode || filterType === 'tickets' || filterType === 'open')) {
-          if (c.conv_status === 'snoozed' && c.snoozed_until) {
-             const untilTimestamp = new Date(c.snoozed_until).getTime();
-             if (untilTimestamp > Date.now() && filterType !== 'snoozed' && filterType !== 'appointments') {
+        // Se houver caixas válidas carregadas para a empresa ativa (rawInstances), garantir que a conversa pertence a uma dessas caixas
+        if (rawInstances && rawInstances.length > 0 && effectiveInstId && effectiveInstId !== 'default') {
+            const resolvedEffUuid = instanceCache.getId(effectiveInstId) || effectiveInstId;
+            const belongsToTenant = rawInstances.some((inst: any) => 
+                inst.id === effectiveInstId || 
+                inst.id === resolvedEffUuid ||
+                inst.display_name === effectiveInstId
+            );
+            if (!belongsToTenant && !isRonaldo) {
                 return false;
-             }
-          }
-          if (isResolvedOrClosed) {
-             return false;
-          }
-       }
+            }
+        }
 
+        // --- PROTEÇÃO RIGOROSA RONALDO-WEB ---
+        if (!isRonaldo) {
+            if (effectiveInstId === '5c78d358-d449-41c4-b396-a04ab20a39e4') return false;
+        }
 
-       // 4) BUSCA EM TEXTO E METADADOS
-       if (searchTerm) {
-           const s = searchTerm.toLowerCase();
-           const match = c.name?.toLowerCase().includes(s) ||
-                         c.custom_name?.toLowerCase().includes(s) ||
-                         c.push_name?.toLowerCase().includes(s) ||
-                         c.pushname?.toLowerCase().includes(s) ||
-                         c.whatsapp_jid?.toLowerCase().includes(s) ||
-                         c.phone?.toLowerCase().includes(s) ||
-                         c.fantasy_name?.toLowerCase().includes(s) ||
-                         c.document_number?.includes(searchTerm) ||
-                         c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(s));
-           if (!match) return false;
-       }
+        if (!isRonaldo) {
+            if (allowedStr) {
+                try {
+                    const allowedInstances = JSON.parse(allowedStr);
+                    if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+                        if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) return false;
+                    } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                        return false;
+                    }
+                } catch(e) {
+                    if (roleStr === 'agent' || roleStr === 'Agente') return false;
+                }
+            } else if (roleStr === 'agent' || roleStr === 'Agente') {
+                return false;
+            }
+        }
 
-       // Filtro de Tarefas CRM do operador ativo (independente de searchTerm)
-       if (filterType === 'tasks') {
-           const realContactId = c.id.includes('_') ? c.id.split('_')[0] : c.id;
-           const hasActiveTask = myActiveTasks.some(t => t.contactId === realContactId);
-           if (!hasActiveTask) return false;
-       }
+        // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa
+        if (activeChannelFilter && !searchTerm && activeChannelFilter !== 'all') {
+            const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
+            const dbInstId = c.instance_id;
+            const targetInst = instIdFromContactId || dbInstId || 'default';
+            const resolvedTargetUuid = instanceCache.getId(targetInst) || targetInst;
+            const resolvedFilterUuid = instanceCache.getId(activeChannelFilter) || activeChannelFilter;
+            const resolvedTargetName = instanceCache.getName(targetInst) || targetInst;
 
-       // Filtros de Pills - IGNORADOS DURANTE PESQUISA
-       if (!searchTerm) {
-           if (filterType === 'unread' && c.unread <= 0) return false;
-           if (filterType === 'favorite' && !c.is_favorite) return false;
-           if (filterType === 'labels') {
-              if (selectedLabelId) {
-                 if (!(c.conv_labels && c.conv_labels.some((l: any) => l.id === selectedLabelId))) return false;
-              } else {
-                 if (!(c.conv_labels && c.conv_labels.length > 0)) return false;
+            const matchesChannel = targetInst === activeChannelFilter ||
+                                   targetInst === activeChannelName ||
+                                   resolvedTargetUuid === resolvedFilterUuid ||
+                                   resolvedTargetName === activeChannelName;
+
+            if (!matchesChannel) return false;
+
+            // --- FILTRO DE AUTO-CONVERSA (SELF-CHAT DA PRÓPRIA INSTÂNCIA) ---
+            const filterInstUuid = activeChannelFilter ? (instanceCache.getId(activeChannelFilter) || activeChannelFilter) : null;
+            const channelPhone = filterInstUuid ? instanceCache.phoneNumbers[filterInstUuid] : null;
+            if (channelPhone) {
+                const cleanChannelPhone = channelPhone.replace(/\D/g, '');
+                const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
+                if (cleanChannelPhone && cleanContactPhone && cleanContactPhone === cleanChannelPhone) {
+                    return false;
+                }
+            }
+        }
+
+        // 3) PROTEÇÃO RIGOROSA DE CHAT ATIVO:
+        // Se ESTE CARD ESPECÍFICO for o chat ativo aberto no painel principal, ele permanece visível na sidebar enquanto o usuário estiver interagindo com ele (EXCETO se tiver sido resolvido/encerrado no Modo Ticket)
+        const isExactActiveChat = Boolean(
+          activeChatId && (c.id === activeChatId || c.conv_id === activeChatId)
+        );
+        const isResolvedOrClosed = c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed';
+
+        if (isExactActiveChat && !searchTerm) {
+            // No Modo Ticket (ou filtros de tickets abertos), se o chat ativo foi RESOLVIDO/ENCERRADO ou BLOQUEADO, não força visibilidade na lista de tickets abertos
+            if ((ticketMode || filterType === 'tickets' || filterType === 'open') && (isResolvedOrClosed || c.is_blocked)) {
+                return false;
+            }
+            return true;
+        }
+
+        // 4) LÓGICA DE STATUS: CONTATOS BLOQUEADOS, ADIADOS (SNOOZED) E RESOLVIDOS
+        if (filterType === 'blocked') {
+            if (!c.is_blocked) return false;
+        } else {
+            if (c.is_blocked) return false;
+        }
+
+        // 5) FILTRO NÃO ATENDIDAS (filterType === 'unread')
+        if (filterType === 'unread') {
+            // Conversas resolvidas, encerradas ou bloqueadas NUNCA são consideradas não atendidas
+            if (isResolvedOrClosed || c.is_blocked) return false;
+
+            // Conversas adiadas ativas no futuro NUNCA são consideradas não atendidas no momento
+            if (c.conv_status === 'snoozed' && c.snoozed_until) {
+                const untilTimestamp = new Date(c.snoozed_until).getTime();
+                if (untilTimestamp > Date.now()) return false;
+            }
+
+            const hasUnread = (Number(c.unread) > 0) || Boolean(c.isManuallyUnread);
+            const isPendingUnanswered = c.conv_status === 'unassigned' || c.conv_status === 'pending' || c.status === 'unassigned' || c.status === 'pending';
+
+            if (!hasUnread && !isPendingUnanswered) {
+                return false;
+            }
+
+            // Se as mensagens já foram carregadas, verificar se a última mensagem foi enviada por atendente humano ou agente
+            if (c.messages && c.messages.length > 0) {
+                const lastMsg = c.messages[c.messages.length - 1];
+                if (lastMsg && (lastMsg.sender === 'human' || lastMsg.sender === 'agent' || lastMsg.sender === 'user') && Number(c.unread) <= 0 && !c.isManuallyUnread) {
+                    return false;
+                }
+            }
+        }
+
+        // REGRA DE OURO DO MODO TICKET:
+        // - Modo Ticket ATIVO (ticketMode === true OU filterType === 'tickets' OU filterType === 'open'):
+        //   Mostra APENAS tickets abertos na lista lateral. Oculta conversas resolvidas, encerradas e adiadas ativas.
+        // - Modo Ticket DESATIVADO (ticketMode === false E filterType === 'all'):
+        //   Mostra TODAS as conversas da caixa (abertas, resolvidas, encerradas, etc.).
+        if (!searchTerm && (ticketMode || filterType === 'tickets' || filterType === 'open')) {
+           if (c.conv_status === 'snoozed' && c.snoozed_until) {
+              const untilTimestamp = new Date(c.snoozed_until).getTime();
+              if (untilTimestamp > Date.now() && filterType !== 'snoozed' && filterType !== 'appointments') {
+                 return false;
               }
            }
-           if (filterType === 'mine') {
-               const currentUserEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
-               const currentAgent = agents.find(a => a.email === currentUserEmail);
-               if (!currentAgent || !c.assigned_to?.split(',').includes(currentAgent.id)) return false;
+           if (isResolvedOrClosed) {
+              return false;
            }
-       }
+        }
+
+
+        // 4) BUSCA EM TEXTO E METADADOS
+        if (searchTerm) {
+            const s = searchTerm.toLowerCase();
+            const match = c.name?.toLowerCase().includes(s) ||
+                          c.custom_name?.toLowerCase().includes(s) ||
+                          c.push_name?.toLowerCase().includes(s) ||
+                          c.pushname?.toLowerCase().includes(s) ||
+                          c.whatsapp_jid?.toLowerCase().includes(s) ||
+                          c.phone?.toLowerCase().includes(s) ||
+                          c.fantasy_name?.toLowerCase().includes(s) ||
+                          c.document_number?.includes(searchTerm) ||
+                          c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(s));
+            if (!match) return false;
+        }
+
+        // Filtro de Tarefas CRM do operador ativo (independente de searchTerm)
+        if (filterType === 'tasks') {
+            const realContactId = c.id.includes('_') ? c.id.split('_')[0] : c.id;
+            const hasActiveTask = myActiveTasks.some(t => t.contactId === realContactId);
+            if (!hasActiveTask) return false;
+        }
+
+        // Filtros de Pills - IGNORADOS DURANTE PESQUISA
+        if (!searchTerm) {
+            if (filterType === 'unread') {
+               // Já tratado rigorosamente acima
+            }
+            if (filterType === 'favorite' && !c.is_favorite) return false;
+            if (filterType === 'labels') {
+               if (selectedLabelId) {
+                  if (!(c.conv_labels && c.conv_labels.some((l: any) => l.id === selectedLabelId))) return false;
+               } else {
+                  if (!(c.conv_labels && c.conv_labels.length > 0)) return false;
+               }
+            }
+            if (filterType === 'mine') {
+                const currentUserEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
+                const currentAgent = agents.find(a => a.email === currentUserEmail);
+                if (!currentAgent || !c.assigned_to?.split(',').includes(currentAgent.id)) return false;
+            }
+        }
 
        // Esconde contatos que são apenas resultados de busca global quando a pesquisa é limpa (a menos que seja o chat ativo)
        if (!searchTerm && c.isSearchResult && !isExactActiveChat) {
@@ -5102,18 +5157,67 @@ export default function ChatDashboard() {
         originalText={geminiModalState.originalText}
         suggestedText={geminiModalState.suggestedText}
         intent={geminiModalState.intent}
-        onSend={(finalText) => {
-           if (isSendingRef.current) return;
-           const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
-           if (activeChatId && properTargetInstance) {
-             setInputText('');
-             if (textareaRef.current) {
+        isInternalNote={chatMode === 'internal_note'}
+        onApply={(finalText) => {
+          setInputText(finalText);
+          if (textareaRef.current) {
+            textareaRef.current.value = finalText;
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 240)}px`;
+          }
+        }}
+        onSend={async (finalText) => {
+          if (isSendingRef.current) return;
+          
+          if (chatMode === 'internal_note') {
+            if (!activeChatId) return;
+            isSendingRef.current = true;
+            setIsSendingMessage(true);
+            try {
+              const formattedChecklist = isTaskMode 
+                ? checklistDraft
+                    .filter(item => item.trim() !== '')
+                    .map((item, idx) => ({ id: `item-${Date.now()}-${idx}`, text: item, completed: false }))
+                : [];
+                
+              await useChatStore.getState().createInternalNote(
+                activeChatId,
+                finalText,
+                undefined,
+                undefined,
+                undefined,
+                isTaskMode,
+                taskAssignedTo,
+                formattedChecklist
+              );
+              
+              setInputText('');
+              setChecklistDraft([]);
+              setIsTaskMode(false);
+              setTaskAssignedTo(null);
+              if (textareaRef.current) {
                 textareaRef.current.style.height = 'auto';
-             }
-             sendHumanMessage(activeChatId, finalText, properTargetInstance as string).catch(err => {
-                console.error('[GeminiEditorModal onSend] Erro ao enviar mensagem:', err);
-             });
-           }
+              }
+            } catch (err) {
+              console.error('[GeminiEditorModal onSend Note] Erro ao salvar anotação interna:', err);
+            } finally {
+              isSendingRef.current = false;
+              setIsSendingMessage(false);
+            }
+            return;
+          }
+
+          // Modo WhatsApp
+          const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+          if (activeChatId && properTargetInstance) {
+            setInputText('');
+            if (textareaRef.current) {
+               textareaRef.current.style.height = 'auto';
+            }
+            sendHumanMessage(activeChatId, finalText, properTargetInstance as string).catch(err => {
+               console.error('[GeminiEditorModal onSend] Erro ao enviar mensagem:', err);
+            });
+          }
         }}
       />
 
@@ -5209,52 +5313,72 @@ export default function ChatDashboard() {
           "h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex flex-col justify-center px-4 py-2 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 shadow-sm relative transition-all duration-200",
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
-          <div className="flex items-center justify-between w-full mt-2">
-            <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between w-full mt-1 gap-1.5">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               <button 
                 onClick={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
                   setShowMainSidebar(!showMainSidebar);
                 }}
-                className="flex p-2 -ml-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors"
+                className="flex p-1.5 -ml-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors"
                 title={showMainSidebar ? "Ocultar Menu Principal" : "Mostrar Menu Principal"}
               >
-                <Menu size={20} />
+                <Menu size={18} />
               </button>
-              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-400 flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white dark:ring-[#202c33]">
+              <div className="w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full bg-gradient-to-tr from-[#00a884] to-teal-400 flex items-center justify-center text-white text-xs font-bold shadow-sm ring-2 ring-white dark:ring-[#202c33] shrink-0 select-none">
                 RA
               </div>
             </div>
             
-            <div className="flex gap-3 text-[#54656f] dark:text-[#aebac1] items-center">
-              {/* Botão de Controle Global da IA (Glow verde se ativo, cinza/inativo se inativo - Visível apenas em mobile/tablet) */}
+            <div className="flex gap-1 sm:gap-1.5 text-[#54656f] dark:text-[#aebac1] items-center shrink-0">
+              {/* Botão de Controle Global da IA (Visível apenas em mobile/tablet) */}
               <button 
                 className={cn(
-                  "p-2 rounded-full transition-all duration-300 relative group lg:hidden",
+                  "p-1.5 rounded-full transition-all duration-300 relative group lg:hidden",
                   globalAiEnabled 
                     ? "bg-[#00a884]/15 text-[#00a884] hover:bg-[#00a884]/25 shadow-[0_0_12px_rgba(0,168,132,0.3)] border border-[#00a884]/20" 
                     : "bg-gray-100 dark:bg-gray-800/60 text-gray-400 dark:text-slate-500 hover:bg-gray-200 dark:hover:bg-gray-700/60 border border-transparent"
                 )}
-                title={globalAiEnabled ? "Desativar Robô I.A (Global)" : "Ativar Robô I.A (Global)"}
+                title={(() => {
+                  if (globalAiAuditInfo?.updated_by && globalAiAuditInfo?.updated_at) {
+                    try {
+                      const d = new Date(globalAiAuditInfo.updated_at);
+                      const day = String(d.getDate()).padStart(2, '0');
+                      const month = String(d.getMonth() + 1).padStart(2, '0');
+                      const hours = String(d.getHours()).padStart(2, '0');
+                      const mins = String(d.getMinutes()).padStart(2, '0');
+                      return `Robô I.A: ${globalAiEnabled ? 'Ativo' : 'Inativo'} por ${globalAiAuditInfo.updated_by} ${day}/${month} às ${hours}:${mins}h`;
+                    } catch(e) {}
+                  }
+                  return globalAiEnabled ? "Desativar Robô I.A (Global)" : "Ativar Robô I.A (Global)";
+                })()}
                 onClick={toggleGlobalAi}
               >
-                <Bot size={20} className={cn("transition-transform duration-500", globalAiEnabled && "animate-pulse scale-105")} />
+                <Bot size={18} className={cn("transition-transform duration-500", globalAiEnabled && "animate-pulse scale-105")} />
                 {/* Indicador de Status */}
                 <span className={cn(
-                  "absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white dark:border-[#202c33] shadow-sm transition-all duration-300",
+                  "absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border border-white dark:border-[#202c33] shadow-sm transition-all duration-300",
                   globalAiEnabled 
                     ? "bg-emerald-500 animate-pulse" 
                     : "bg-red-500"
                 )}></span>
               </button>
 
-              <button className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all text-[#00a884]" onClick={() => setIsNewChatOpen(true)}>
-                <MessageSquarePlus size={20} />
+              <button 
+                className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all text-[#00a884]" 
+                title="Nova Conversa"
+                onClick={() => setIsNewChatOpen(true)}
+              >
+                <MessageSquarePlus size={18} />
               </button>
               
-              <button className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-emerald-500/20 transition-all text-emerald-500" title="Base de Conhecimento RAG" onClick={() => navigate('/knowledge')}>
-                <BrainCircuit size={20} />
+              <button 
+                className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all text-emerald-500" 
+                title="Base de Conhecimento RAG" 
+                onClick={() => navigate('/knowledge')}
+              >
+                <BrainCircuit size={18} />
               </button>
               
               {/* Badge Permanente de Ambiente (PRODUÇÃO / ALFA) */}
@@ -5279,31 +5403,32 @@ export default function ChatDashboard() {
                       window.location.reload();
                     }}
                     className={cn(
-                      "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-extrabold cursor-pointer transition-all hover:scale-105 select-none shrink-0",
+                      "flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-all hover:scale-105 select-none shrink-0",
                       env.id === 'alpha' 
                         ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.2)]" 
                         : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
                     )}
                     title={isAdmin ? `Ambiente Atual: ${env.name}. Clique para alternar ambiente.` : `Ambiente Servidor: ${env.name}`}
                   >
-                    <span className={cn("w-2 h-2 rounded-full", env.id === 'alpha' ? "bg-rose-500 animate-pulse" : "bg-emerald-500")} />
-                    <span className="tracking-wide">{env.name}</span>
+                    <span className={cn("w-1.5 h-1.5 rounded-full", env.id === 'alpha' ? "bg-rose-500 animate-pulse" : "bg-emerald-500")} />
+                    <span className="tracking-tight uppercase">{env.name}</span>
                   </div>
                 );
               })()}
 
-              <ThemeToggle />
+              <ThemeToggle className="p-1.5" size={18} />
               
               {/* Menu de Opções Avançadas */}
               <div className="relative">
                 <button 
-                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+                  className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all text-[#54656f] dark:text-[#aebac1]"
+                  title="Mais Opções"
                   onClick={(e) => {
                     e.stopPropagation();
                     setActiveDropdown(activeDropdown === 'sidebar-menu' ? null : 'sidebar-menu');
                   }}
                 >
-                  <MoreVertical size={20} />
+                  <MoreVertical size={18} />
                 </button>
                 {activeDropdown === 'sidebar-menu' && (
                   <div className="absolute right-0 top-12 w-56 bg-white dark:bg-[#233138] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 dark:border-[#304046] py-2 z-50 animate-in fade-in zoom-in-95 duration-200">
@@ -6141,126 +6266,145 @@ export default function ChatDashboard() {
                              </div>
                            </span>
   
-                           {/* Labels and Assigned Agent on a new line */}
-                           {(contact.assigned_to || (contact.conv_labels && contact.conv_labels.length > 0)) && (
-                             <div className="flex items-center gap-1.5 overflow-hidden w-full flex-wrap mt-1">
-                               {contact.assigned_to && (
-                                 <span className="shrink-0 px-1.5 py-[2px] bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-500/20 text-[8px] font-extrabold uppercase rounded-md flex items-center gap-1 shadow-sm">
-                                   <User size={8} />
-                                   <span className="max-w-[120px] truncate">
-                                     {agents.filter(a => contact.assigned_to?.split(',').includes(a.id)).map(a => a.full_name?.split(' ')[0]).join(', ') || 'Agente'}
-                                   </span>
-                                 </span>
-                               )}
-                               {contact.conv_labels && contact.conv_labels.length > 0 && (
-                                 <div className="flex items-center gap-1.5 overflow-hidden shrink-0 flex-wrap mt-0.5">
-                                   {contact.conv_labels.map((l: any, i: number) => {
-                                     const styles = resolveLabelColor(l.color);
-                                     return (
-                                       <span 
-                                         key={i} 
-                                         className="px-2 py-[2.5px] text-[9px] font-bold rounded-full flex items-center max-w-[100px] truncate shadow-sm border transition-all hover:scale-105 duration-200" 
-                                         style={{ 
-                                           backgroundColor: styles.bg, 
-                                           borderColor: styles.border, 
-                                           color: styles.text 
-                                         }} 
-                                         title={l.name}
-                                       >
-                                         <span 
-                                           className="w-1.5 h-1.5 rounded-full mr-1.5 shrink-0 shadow-inner" 
-                                           style={{ backgroundColor: styles.hex }}
-                                         />
-                                         <span className="truncate tracking-wide">{l.name}</span>
-                                       </span>
-                                     );
+                            {/* Labels and Assigned Agent on a new line */}
+                            {(contact.assigned_to || (contact.conv_labels && contact.conv_labels.length > 0)) && (
+                              <div className="flex items-center gap-1.5 overflow-hidden w-full flex-wrap mt-1">
+                                {contact.assigned_to && (
+                                  <span className="shrink-0 px-1.5 py-[2px] bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-500/20 text-[8px] font-extrabold uppercase rounded-md flex items-center gap-1 shadow-sm">
+                                    <User size={8} />
+                                    <span className="max-w-[120px] truncate">
+                                      {agents.filter(a => contact.assigned_to?.split(',').includes(a.id)).map(a => a.full_name?.split(' ')[0]).join(', ') || 'Agente'}
+                                    </span>
+                                  </span>
+                                )}
+                                {contact.conv_labels && contact.conv_labels.length > 0 && (
+                                  <div className="flex items-center gap-1.5 overflow-hidden shrink-0 flex-wrap mt-0.5">
+                                    {contact.conv_labels.map((l: any, i: number) => {
+                                      const styles = resolveLabelColor(l.color);
+                                      return (
+                                        <span 
+                                          key={i} 
+                                          className="px-2 py-[2.5px] text-[9px] font-bold rounded-full flex items-center max-w-[100px] truncate shadow-sm border transition-all hover:scale-105 duration-200" 
+                                          style={{ 
+                                            backgroundColor: styles.bg, 
+                                            borderColor: styles.border, 
+                                            color: styles.text 
+                                          }} 
+                                          title={l.name}
+                                        >
+                                          <span 
+                                            className="w-1.5 h-1.5 rounded-full mr-1.5 shrink-0 shadow-inner" 
+                                            style={{ backgroundColor: styles.hex }}
+                                          />
+                                          <span className="truncate tracking-wide">{l.name}</span>
+                                        </span>
+                                      );
                                     })}
-                                 </div>
-                               )}
-                             </div>
-                           )}
-                         </div>
-                           {contact.fantasy_name ? (
-                             (() => {
-                               const linkedCompanies = contact.company_ids
-                                 ?.map((id: string) => allCompanies.find((c: any) => c.id === id))
-                                 .filter(Boolean) || [];
-                               const contactGroups = tenantInfo?.settings?.contactGroups || [];
-                               const matchingGroups = contactGroups.filter((g: any) => 
-                                 (Array.isArray(contact.tags) && contact.tags.includes(g.id)) ||
-                                 linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
-                               );
-                               const hasGroup = matchingGroups.length > 0;
-                               const hasCnpj = !!contact.document_number || linkedCompanies.some((c: any) => !!c.document_number);
-                               const missingCnpj = !hasCnpj && !hasGroup;
-                               return (
-                                 <div className="flex items-center gap-1.5 truncate">
-                                   <span className={cn("text-[11px] truncate flex items-center gap-1", missingCnpj ? "text-rose-500 dark:text-rose-400 font-medium" : "text-emerald-600 dark:text-emerald-400 font-medium")}>
-                                     {missingCnpj ? <AlertTriangle size={10} className="shrink-0 text-rose-500 animate-pulse" /> : <Building2 size={10} className="shrink-0" />}
-                                     {contact.fantasy_name}
-                                   </span>
-                                   {missingCnpj && (
-                                     <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-1.5 py-[1px] rounded border border-rose-500/20 shrink-0">FALTA CNPJ</span>
-                                   )}
-                                   {hasGroup && matchingGroups.map((g: any) => (
-                                     <span 
-                                       key={g.id} 
-                                       className="text-[9px] font-bold px-1.5 py-[1px] rounded border shrink-0"
-                                       style={{
-                                         backgroundColor: `${g.color}15`,
-                                         borderColor: `${g.color}30`,
-                                         color: g.color
-                                       }}
-                                     >
-                                       {g.name}
-                                     </span>
-                                   ))}
-                                 </div>
-                               );
-                             })()
-                           ) : (
-                             (() => {
-                               const linkedCompanies = contact.company_ids
-                                 ?.map((id: string) => allCompanies.find((c: any) => c.id === id))
-                                 .filter(Boolean) || [];
-                               if (linkedCompanies.length > 0) {
-                                 const contactGroups = tenantInfo?.settings?.contactGroups || [];
-                                 const matchingGroups = contactGroups.filter((g: any) => 
-                                   (Array.isArray(contact.tags) && contact.tags.includes(g.id)) ||
-                                   linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
-                                 );
-                                 const hasGroup = matchingGroups.length > 0;
-                                 const hasCnpj = !!contact.document_number || linkedCompanies.some((c: any) => !!c.document_number);
-                                 const missingCnpj = !hasCnpj && !hasGroup;
-                                 return (
-                                   <div className="flex items-center gap-1.5 truncate">
-                                     <span className={cn("text-[11px] font-medium truncate flex items-center gap-1", missingCnpj ? "text-rose-500 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>
-                                       {missingCnpj ? <AlertTriangle size={10} className="shrink-0 text-rose-500 animate-pulse" /> : <Building2 size={10} className="shrink-0" />}
-                                       {linkedCompanies[0].fantasy_name || linkedCompanies[0].name}
-                                       {linkedCompanies.length > 1 && ` (+${linkedCompanies.length - 1})`}
-                                     </span>
-                                     {missingCnpj && (
-                                       <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-1.5 py-[1px] rounded border border-rose-500/20 shrink-0">FALTA CNPJ</span>
-                                     )}
-                                     {hasGroup && matchingGroups.map((g: any) => (
-                                       <span 
-                                         key={g.id} 
-                                         className="text-[9px] font-bold px-1.5 py-[1px] rounded border shrink-0"
-                                         style={{
-                                           backgroundColor: `${g.color}15`,
-                                           borderColor: `${g.color}30`,
-                                           color: g.color
-                                         }}
-                                       >
-                                         {g.name}
-                                       </span>
-                                     ))}
-                                   </div>
-                                 );
-                               }
-                               return null;
-                             })()
-                           )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Empresa / Grupo Empresarial Associado - Clicável */}
+                          {(() => {
+                            // 1. Caso o próprio contato tenha fantasy_name ou seja uma empresa CNPJ
+                            if (contact.fantasy_name || (contact.document_type === 'cnpj' && (contact.custom_name || contact.name))) {
+                              const contactGroups = tenantInfo?.settings?.contactGroups || [];
+                              const matchingGroups = contactGroups.filter((g: any) => 
+                                Array.isArray(contact.tags) && contact.tags.includes(g.id)
+                              );
+                              const hasGroup = matchingGroups.length > 0;
+                              const hasCnpj = !!contact.document_number;
+                              const missingCnpj = !hasCnpj && !hasGroup;
+                              const compName = contact.fantasy_name || contact.custom_name || contact.name;
+
+                              return (
+                                <div 
+                                  className="flex items-center gap-1.5 truncate mt-0.5 cursor-pointer hover:opacity-80 transition-opacity"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setCompanyDetailsOpen(contact);
+                                  }}
+                                  title={`Empresa: ${compName}. Clique para ver ou editar.`}
+                                >
+                                  <span className={cn("text-[11px] truncate flex items-center gap-1 font-medium", missingCnpj ? "text-rose-500 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>
+                                    {missingCnpj ? <AlertTriangle size={10} className="shrink-0 text-rose-500 animate-pulse" /> : <Building2 size={10} className="shrink-0" />}
+                                    <span className="truncate hover:underline">{compName}</span>
+                                  </span>
+                                  {missingCnpj && (
+                                    <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-1.5 py-[1px] rounded border border-rose-500/20 shrink-0">FALTA CNPJ</span>
+                                  )}
+                                  {hasGroup && matchingGroups.map((g: any) => (
+                                    <span 
+                                      key={g.id} 
+                                      className="text-[9px] font-bold px-1.5 py-[1px] rounded border shrink-0"
+                                      style={{
+                                        backgroundColor: `${g.color}15`,
+                                        borderColor: `${g.color}30`,
+                                        color: g.color
+                                      }}
+                                    >
+                                      {g.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              );
+                            }
+
+                            // 2. Caso o contato esteja associado a uma ou mais empresas via company_ids
+                            const linkedCompanies = (Array.isArray(contact.company_ids) ? contact.company_ids : [])
+                              .map((id: string) => allCompanies.find((c: any) => c.id === id))
+                              .filter(Boolean);
+
+                            if (linkedCompanies.length > 0) {
+                              const primaryComp = linkedCompanies[0];
+                              const contactGroups = tenantInfo?.settings?.contactGroups || [];
+                              const matchingGroups = contactGroups.filter((g: any) => 
+                                (Array.isArray(contact.tags) && contact.tags.includes(g.id)) ||
+                                linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
+                              );
+                              const hasGroup = matchingGroups.length > 0;
+                              const hasCnpj = !!contact.document_number || linkedCompanies.some((c: any) => !!c.document_number);
+                              const missingCnpj = !hasCnpj && !hasGroup;
+                              const primaryName = primaryComp.fantasy_name || primaryComp.custom_name || primaryComp.name;
+
+                              return (
+                                <div 
+                                  className="flex items-center gap-1.5 truncate mt-0.5 cursor-pointer hover:opacity-80 transition-opacity"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setCompanyDetailsOpen(primaryComp);
+                                  }}
+                                  title={`Empresa Vinculada: ${primaryName}. Clique para ver detalhes.`}
+                                >
+                                  <span className={cn("text-[11px] font-medium truncate flex items-center gap-1", missingCnpj ? "text-rose-500 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>
+                                    {missingCnpj ? <AlertTriangle size={10} className="shrink-0 text-rose-500 animate-pulse" /> : <Building2 size={10} className="shrink-0" />}
+                                    <span className="truncate hover:underline">{primaryName}</span>
+                                    {linkedCompanies.length > 1 && ` (+${linkedCompanies.length - 1})`}
+                                  </span>
+                                  {missingCnpj && (
+                                    <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-1.5 py-[1px] rounded border border-rose-500/20 shrink-0">FALTA CNPJ</span>
+                                  )}
+                                  {hasGroup && matchingGroups.map((g: any) => (
+                                    <span 
+                                      key={g.id} 
+                                      className="text-[9px] font-bold px-1.5 py-[1px] rounded border shrink-0"
+                                      style={{
+                                        backgroundColor: `${g.color}15`,
+                                        borderColor: `${g.color}30`,
+                                        color: g.color
+                                      }}
+                                    >
+                                      {g.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              );
+                            }
+
+                            return null;
+                          })()}
                            
                          
                         {!activeChannelFilter && (contact.instance_id ? instanceNamesMap[contact.instance_id] : connectedInstanceName) && (
@@ -6649,20 +6793,9 @@ export default function ChatDashboard() {
                           )}
                         </button>
                       </div>
-                    ) : (activeChat.fantasy_name || activeChat.document_number || activeChat.document_type === 'cnpj' || (Array.isArray(activeChat.company_ids) && activeChat.company_ids.length > 0) || (Array.isArray(activeChat.tags) && activeChat.tags.length > 0)) ? (
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCompanyDetailsOpen(activeChat);
-                        }}
-                        className="flex items-center gap-1.5 bg-[#00a884]/10 hover:bg-[#00a884]/20 px-2.5 py-0.5 rounded-full border border-[#00a884]/20 transition-all duration-200 group"
-                        title="Ver Dados da Empresa e Faturamento"
-                      >
-                        <Building2 size={12} className="text-[#00a884] group-hover:scale-110 transition-transform" />
-                        <span className="text-[11px] font-semibold text-[#00a884]">Ver Empresa</span>
-                      </button>
                     ) : (
-                      <>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* Celular com botão de cópia rápida */}
                         {activeChat.phone && (
                           <div className="flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/5 px-2.5 py-0.5 rounded-full border border-blue-500/20 text-blue-600 dark:text-blue-400 text-[11px] font-medium transition-all duration-200">
                             <span className="font-mono">{formatDisplayPhone(activeChat.phone)}</span>
@@ -6684,26 +6817,65 @@ export default function ChatDashboard() {
                             </button>
                           </div>
                         )}
+
+                        {/* Empresa direta (se o contato for empresa ou tiver fantasy_name) */}
+                        {(activeChat.fantasy_name || (activeChat.document_type === 'cnpj' && (activeChat.custom_name || activeChat.name))) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCompanyDetailsOpen(activeChat);
+                            }}
+                            className="flex items-center gap-1 bg-[#00a884]/10 hover:bg-[#00a884]/20 px-2.5 py-0.5 rounded-full border border-[#00a884]/25 text-[#00a884] text-[11px] font-semibold transition-all duration-200 shadow-sm"
+                            title="Ver Dados da Empresa e Faturamento"
+                          >
+                            <Building2 size={11} className="shrink-0" />
+                            <span className="truncate max-w-[150px]">{activeChat.fantasy_name || activeChat.custom_name || activeChat.name}</span>
+                          </button>
+                        )}
+
+                        {/* Empresas Vinculadas via company_ids */}
                         {(() => {
-                          const linkedCompanies = activeChat.company_ids
-                            ?.map((id: string) => allCompanies.find((c: any) => c.id === id))
-                            .filter(Boolean) || [];
-                          return linkedCompanies.map((comp: any) => (
-                            <button
-                              key={comp.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setCompanyDetailsOpen(comp);
-                              }}
-                              className="flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold transition-all duration-200"
-                              title={`Empresa Vinculada: ${comp.fantasy_name || comp.name}`}
-                            >
-                              <Building2 size={10} className="shrink-0" />
-                              <span className="truncate max-w-[120px]">{comp.fantasy_name || comp.name}</span>
-                            </button>
-                          ));
+                          const linkedCompanies = (Array.isArray(activeChat.company_ids) ? activeChat.company_ids : [])
+                            .map((id: string) => allCompanies.find((c: any) => c.id === id))
+                            .filter(Boolean);
+
+                          if (linkedCompanies.length > 0) {
+                            return linkedCompanies.map((comp: any) => (
+                              <button
+                                key={comp.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCompanyDetailsOpen(comp);
+                                }}
+                                className="flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold transition-all duration-200 shadow-sm"
+                                title={`Empresa Vinculada: ${comp.fantasy_name || comp.name}`}
+                              >
+                                <Building2 size={11} className="shrink-0" />
+                                <span className="truncate max-w-[140px]">{comp.fantasy_name || comp.custom_name || comp.name}</span>
+                              </button>
+                            ));
+                          }
+
+                          // Se não tem empresa nem fantasy_name, botão para associar empresa
+                          if (!activeChat.fantasy_name && activeChat.document_type !== 'cnpj') {
+                            return (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCompanyDetailsOpen(activeChat);
+                                }}
+                                className="flex items-center gap-1 bg-gray-500/10 hover:bg-[#00a884]/15 px-2 py-0.5 rounded-full border border-dashed border-gray-400/40 hover:border-[#00a884]/40 text-gray-500 dark:text-gray-400 hover:text-[#00a884] text-[10.5px] font-medium transition-all duration-200"
+                                title="Associar Empresa a este Contato"
+                              >
+                                <Building2 size={10} className="shrink-0" />
+                                <span>+ Empresa</span>
+                              </button>
+                            );
+                          }
+
+                          return null;
                         })()}
-                      </>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -7943,25 +8115,21 @@ export default function ChatDashboard() {
                     </div>
                   )}
 
-                  <div className={cn(
-                    "flex flex-1 border transition-all duration-350 relative shadow-sm",
-                    chatMode === 'internal_note'
-                      ? cn(
-                          "flex-col items-stretch px-5 py-4 bg-gradient-to-b from-amber-500/[0.015] to-amber-600/[0.045] dark:from-[#231b13]/40 dark:to-[#2e2216]/55 border-amber-500/20 dark:border-amber-500/15 focus-within:border-amber-500/40 dark:focus-within:border-amber-500/35 focus-within:ring-2 focus-within:ring-amber-500/15 shadow-[0_8px_32px_rgba(245,158,11,0.03)] gap-3.5 order-first md:order-none transition-all duration-300",
-                          isTaskMode ? "rounded-b-[32px] rounded-t-none border-t-transparent" : "rounded-[32px]"
-                        )
-                      : "flex-row items-end px-4 py-2 bg-white dark:bg-[#2a3942] border-transparent focus-within:border-[#00a884]/50 gap-3 rounded-[24px]"
-                  )}>
-                    
-                    {/* Barra de Ferramentas do Editor de Notas CRM */}
-                    {chatMode === 'internal_note' && (
-                      <div className="w-full flex items-center justify-between border-b border-amber-500/10 dark:border-amber-500/15 pb-2.5 select-none animate-in fade-in duration-300 flex-wrap gap-2">
+                  {chatMode === 'internal_note' ? (
+                    /* Workspace de Anotação CRM Unificado & Glassmorphic */
+                    <div className={cn(
+                      "flex flex-1 flex-col items-stretch border transition-all duration-300 relative shadow-sm",
+                      "p-4 bg-gradient-to-b from-amber-500/[0.025] via-amber-500/[0.015] to-amber-600/[0.05] dark:from-[#201811]/60 dark:via-[#19140f]/50 dark:to-[#241a10]/70 border-amber-500/25 dark:border-amber-500/20 focus-within:border-amber-500/50 dark:focus-within:border-amber-500/40 focus-within:ring-4 focus-within:ring-amber-500/10 shadow-[0_8px_32px_rgba(245,158,11,0.04)] gap-3",
+                      isTaskMode ? "rounded-b-[28px] rounded-t-none border-t-transparent" : "rounded-[28px]"
+                    )}>
+                      {/* Barra Superior de Ferramentas CRM */}
+                      <div className="w-full flex items-center justify-between border-b border-amber-500/15 dark:border-amber-500/20 pb-3 select-none flex-wrap gap-2">
                         {/* Botões de Formatação */}
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                        <div className="flex items-center gap-1 flex-wrap overflow-x-auto scrollbar-hide py-0.5">
                           <button
                             type="button"
                             onClick={() => insertMarkdownTag('bold')}
-                            className="p-1.5 rounded-xl hover:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
+                            className="p-1.5 rounded-xl hover:bg-amber-500/15 dark:hover:bg-amber-500/25 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
                             title="Negrito (**)"
                           >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -7972,7 +8140,7 @@ export default function ChatDashboard() {
                           <button
                             type="button"
                             onClick={() => insertMarkdownTag('italic')}
-                            className="p-1.5 rounded-xl hover:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
+                            className="p-1.5 rounded-xl hover:bg-amber-500/15 dark:hover:bg-amber-500/25 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
                             title="Itálico (*)"
                           >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -7984,7 +8152,7 @@ export default function ChatDashboard() {
                           <button
                             type="button"
                             onClick={() => insertMarkdownTag('strikethrough')}
-                            className="p-1.5 rounded-xl hover:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
+                            className="p-1.5 rounded-xl hover:bg-amber-500/15 dark:hover:bg-amber-500/25 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
                             title="Riscado (~~)"
                           >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -7995,7 +8163,7 @@ export default function ChatDashboard() {
                           <button
                             type="button"
                             onClick={() => insertMarkdownTag('code')}
-                            className="p-1.5 rounded-xl hover:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
+                            className="p-1.5 rounded-xl hover:bg-amber-500/15 dark:hover:bg-amber-500/25 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
                             title="Bloco de Código (`)"
                           >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -8006,7 +8174,7 @@ export default function ChatDashboard() {
                           <button
                             type="button"
                             onClick={() => insertMarkdownTag('bullet_list')}
-                            className="p-1.5 rounded-xl hover:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
+                            className="p-1.5 rounded-xl hover:bg-amber-500/15 dark:hover:bg-amber-500/25 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-all hover:scale-105 active:scale-95 border border-transparent hover:border-amber-500/10 flex items-center justify-center shrink-0"
                             title="Lista Bullet (-)"
                           >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -8019,12 +8187,12 @@ export default function ChatDashboard() {
                             </svg>
                           </button>
 
-                          <div className="w-[1px] h-4 bg-amber-500/15 mx-1 shrink-0" />
+                          <div className="w-[1px] h-4 bg-amber-500/20 mx-1 shrink-0" />
 
                           <button
                             type="button"
                             onClick={handleExtractRulesForRag}
-                            className="px-3.5 py-1.5 rounded-xl text-[10px] bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-md shadow-amber-500/10 hover:shadow-amber-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 cursor-pointer select-none font-bold mr-1 shrink-0"
+                            className="px-3 py-1.5 rounded-xl text-[10px] bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-md shadow-amber-500/10 hover:shadow-amber-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 cursor-pointer select-none font-bold shrink-0"
                             title="Mapear Regras de Negócio para o RAG"
                           >
                             <BrainCircuit size={12} className="animate-pulse" />
@@ -8037,7 +8205,7 @@ export default function ChatDashboard() {
                               type="button"
                               className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-amber-500/10 hover:bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/15 transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer hover:scale-105 select-none font-bold"
                             >
-                              💡 Modelos
+                              <span>💡 Modelos</span>
                               <ChevronDown size={11} />
                             </button>
                             
@@ -8067,494 +8235,748 @@ export default function ChatDashboard() {
                           </div>
                         </div>
 
-                        {/* Alternador de Modo de Escrita / Preview */}
-                        <div className="flex items-center bg-amber-500/5 dark:bg-amber-500/10 rounded-xl p-0.5 border border-amber-500/15 shadow-inner">
-                          <button
-                            type="button"
-                            onClick={() => setNotePreviewMode(false)}
-                            className={cn(
-                              "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none font-bold",
-                              !notePreviewMode
-                                ? "bg-amber-500 text-white shadow-sm font-black"
-                                : "text-gray-500 dark:text-gray-400 hover:text-amber-700 dark:hover:text-amber-400"
-                            )}
-                          >
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setNotePreviewMode(true)}
-                            className={cn(
-                              "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none font-bold",
-                              notePreviewMode
-                                ? "bg-amber-500 text-white shadow-sm font-black"
-                                : "text-gray-500 dark:text-gray-400 hover:text-amber-700 dark:hover:text-amber-400"
-                            )}
-                          >
-                            Visualizar
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                        {/* Alternador de Modo de Escrita / Preview e Tag de Segurança */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold text-amber-700/80 dark:text-amber-400/70 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/15">
+                            <Lock size={10} />
+                            <span>Privado CRM</span>
+                          </span>
 
-                    {/* Quick Replies Popover */}
-                    {showQuickReplies && quickReplies.length > 0 && (
-                      <div className="absolute bottom-full left-0 mb-2 w-[350px] max-w-[90vw] bg-white dark:bg-[#202c33] rounded-2xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden z-[100] animate-in fade-in zoom-in-95 slide-in-from-bottom-4">
-                        <div className="p-3 bg-gray-50/50 dark:bg-[#111b21]/50 border-b border-gray-100 dark:border-white/5 text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                          ⚡ Respostas Prontas
-                        </div>
-                        <div className="max-h-64 overflow-y-auto custom-scrollbar">
-                          {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).map(qr => (
+                          <div className="flex items-center bg-amber-500/10 dark:bg-amber-500/15 rounded-xl p-0.5 border border-amber-500/20 shadow-inner">
                             <button
-                              key={qr.id}
                               type="button"
-                              className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-[#2a3942] transition-colors border-b border-gray-50 dark:border-white/5 last:border-0 group"
-                              onClick={() => {
-                                setShowQuickReplies(false);
-                                setInputText(qr.content);
-                                
-                                if (qr.media_url) {
-                                  setPendingMediaToSend({
-                                    url: qr.media_url,
-                                    type: (qr.media_type as 'image'|'video'|'audio'|'document') || 'image',
-                                    name: qr.media_url.split('/').pop()?.split('_').slice(1).join('_') || 'Anexo da resposta rápida'
-                                  });
-                                  setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
-                                  setTimeout(() => setQuickReplyToast(null), 3500);
-                                } else {
-                                  setPendingMediaToSend(null);
-                                  setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
-                                  setTimeout(() => setQuickReplyToast(null), 3500);
-                                }
-                                
-                                setTimeout(() => textareaRef.current?.focus(), 10);
-                              }}
+                              onClick={() => setNotePreviewMode(false)}
+                              className={cn(
+                                "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none font-bold",
+                                !notePreviewMode
+                                  ? "bg-amber-500 text-white shadow-sm font-black"
+                                  : "text-gray-500 dark:text-gray-400 hover:text-amber-700 dark:hover:text-amber-400"
+                              )}
                             >
-                              <div className="font-semibold text-blue-600 dark:text-blue-400 text-[13px] mb-1 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors flex items-center gap-1.5">
-                                {qr.shortcut}
-                                {qr.media_url && (
-                                   <span className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded-md">
-                                      {qr.media_type === 'video' ? <Video className="w-3 h-3" /> : qr.media_type === 'audio' ? <Mic className="w-3 h-3" /> : qr.media_type === 'document' ? <FileText className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
-                                      Mídia
-                                   </span>
-                                )}
-                              </div>
-                              <div className="text-gray-600 dark:text-gray-300 text-[13px] line-clamp-2 leading-relaxed">{qr.content}</div>
+                              Editar
                             </button>
-                          ))}
-                          {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).length === 0 && (
-                            <div className="p-6 text-center text-gray-500 dark:text-gray-400 text-[13px]">
-                              Nenhuma resposta encontrada para "{quickReplyFilter}"
-                            </div>
-                          )}
+                            <button
+                              type="button"
+                              onClick={() => setNotePreviewMode(true)}
+                              className={cn(
+                                "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all select-none font-bold",
+                                notePreviewMode
+                                  ? "bg-amber-500 text-white shadow-sm font-black"
+                                  : "text-gray-500 dark:text-gray-400 hover:text-amber-700 dark:hover:text-amber-400"
+                              )}
+                            >
+                              Visualizar
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    )}
-                    
-                    <div className="relative flex-1 min-w-0 min-h-[20px] flex flex-col gap-1.5 justify-end">
-                      {chatMode !== 'internal_note' && pendingMediaToSend && (
-                        <div className="flex items-center gap-2.5 p-2 bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/15 rounded-2xl self-start max-w-full mb-2 animate-in fade-in slide-in-from-bottom-1 duration-255 select-none shadow-sm">
-                          {pendingMediaToSend.type === 'image' && (
-                            <img src={pendingMediaToSend.url} className="w-8 h-8 rounded-lg object-cover border border-emerald-500/10 shadow-sm shrink-0" />
-                          )}
-                          {pendingMediaToSend.type === 'video' && (
-                            <div className="w-8 h-8 rounded-lg bg-black/25 flex items-center justify-center border border-emerald-500/10 text-emerald-500 shrink-0">
-                              <Video size={14} />
-                            </div>
-                          )}
-                          {pendingMediaToSend.type === 'audio' && (
-                            <div className="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center border border-blue-500/10 text-blue-500 shrink-0">
-                              <Mic size={14} />
-                            </div>
-                          )}
-                          {pendingMediaToSend.type === 'document' && (
-                            <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center border border-emerald-500/10 text-emerald-500 shrink-0">
-                              <FileText size={14} />
-                            </div>
-                          )}
-                          
-                          <div className="min-w-0 flex flex-col pr-1">
-                            <span className="text-[9px] uppercase font-black tracking-widest text-emerald-600 dark:text-emerald-400 leading-none">
-                              Mídia Anexada
-                            </span>
-                            <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate max-w-[180px] mt-0.5" title={pendingMediaToSend.name}>
-                              {pendingMediaToSend.name}
-                            </span>
-                          </div>
-                          
-                          <button
-                            type="button"
-                            onClick={() => setPendingMediaToSend(null)}
-                            className="p-1 hover:bg-red-500/10 text-gray-400 hover:text-red-500 rounded-lg transition-colors shrink-0 active:scale-90 ml-1"
-                            title="Remover anexo"
-                          >
-                            <X className="w-3.5 h-3.5" strokeWidth={2.5} />
-                          </button>
-                        </div>
-                      )}
-                      {chatMode === 'internal_note' && notePreviewMode ? (
-                        <div className="w-full min-h-[36px] bg-transparent pb-0.5 overflow-y-auto max-h-[250px] relative z-10 animate-in fade-in duration-300 select-text">
-                          {renderMarkdownPreview(inputText)}
-                        </div>
-                      ) : (
-                        <textarea 
-                          ref={textareaRef}
-                          value={inputText}
-                          spellCheck={true}
-                          lang="pt-BR"
-                          onFocus={() => {
-                            if (activeChatId) {
-                              const activeContact = contacts.find(c => c.id === activeChatId);
-                              if (activeContact && (Number(activeContact.unread || 0) > 0 || activeContact.isManuallyUnread)) {
-                                useChatStore.getState().markAsRead(activeChatId);
-                              }
-                            }
-                          }}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setInputText(val);
-                            if (val.startsWith('/')) {
-                              setShowQuickReplies(true);
-                              setQuickReplyFilter(val.substring(1).toLowerCase());
-                            } else {
-                              setShowQuickReplies(false);
-                            }
-                            handleUserTyping(val);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              const isCompactMobile = window.innerWidth < 500;
-                              if (isCompactMobile) {
-                                  return;
-                              }
-                              e.preventDefault();
-                              if (inputText.trim()) {
-                                handleSendHuman(e as any);
-                              }
-                            }
-                          }}
-                          onPaste={(e) => {
-                            const items = e.clipboardData?.items;
-                            if (!items) return;
-                            for (let i = 0; i < items.length; i++) {
-                              if (items[i].type.indexOf('image') !== -1) {
-                                e.preventDefault();
-                                const file = items[i].getAsFile();
-                                if (file) {
-                                  setPastedImage(file);
-                                  setPastedImagePreview(URL.createObjectURL(file));
-                                  setPastedImageCaption('');
-                                }
-                                break;
-                              }
-                            }
-                          }}
-                          rows={1}
-                          placeholder={
-                            chatMode === 'internal_note'
-                              ? "Escreva uma anotação interna sobre este contato (não será enviada ao cliente)..."
-                              : "Responda como humano e a IA sera pausada automaticamente..."
-                          }
-                          className={cn(
-                            "bg-transparent border-none outline-none w-full text-sm font-sans leading-relaxed resize-none p-0 pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin relative z-10 transition-colors duration-200",
-                            chatMode === 'internal_note'
-                              ? "text-amber-950 dark:text-amber-50 placeholder:text-amber-700/50 dark:placeholder:text-amber-400/40"
-                              : "text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1]"
-                          )}
-                        />
-                      )}
-                    </div>
 
-                    <button 
-                      type="button" 
-                      onClick={() => setIsGeminiPopoverOpen(!isGeminiPopoverOpen)}
-                      className="ml-2 mb-0.5 p-1.5 text-[#00a884] hover:bg-[#00a884]/10 rounded-full transition-colors flex-shrink-0"
-                      title="Assistente IA"
-                    >
-                      <Sparkles size={20} />
-                    </button>
-
-                    {/* Popover UI Gemini */}
-                    {isGeminiPopoverOpen && (
-                      <div className="absolute bottom-full right-0 mb-3 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/5 dark:border-white/5 rounded-2xl shadow-xl w-72 p-2 animate-in fade-in zoom-in duration-200 z-50">
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-black/5 dark:border-white/5 mb-2">
-                          <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-[#00a884] to-teal-500 flex items-center justify-center text-white shadow-sm">
-                            <Wand2 size={12} />
-                          </div>
-                          <span className="text-xs font-semibold text-[#111b21] dark:text-[#aebac1]">Magia da IA</span>
-                          <button 
-                            onClick={() => {
-                              setIsGeminiPopoverOpen(false);
-                              setGeminiPopoverSubView('main');
-                            }} 
-                            className="ml-auto text-[#54656f] hover:text-red-500 p-1"
-                          >
-                            <X size={14}/>
-                          </button>
-                        </div>
-                        
-                        {isGeminiProcessing ? (
-                          <div className="flex flex-col items-center justify-center py-6 px-4 gap-3 text-center">
-                              <RefreshCw size={24} className="text-[#00a884] animate-spin" />
-                              <span className="text-xs text-[#111b21] dark:text-[#e9edef] font-medium leading-relaxed animate-pulse">
-                                {transcriptionProgressText || "A IA está processando..."}
-                              </span>
-                          </div>
-                        ) : geminiPopoverSubView === 'analyze_period' ? (
-                          <div className="flex flex-col gap-2 p-1">
-                            <button 
-                              onClick={() => setGeminiPopoverSubView('main')} 
-                              className="flex items-center gap-1 text-[11px] text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] transition-colors pb-1 border-b border-black/5 dark:border-white/5 mb-1"
-                            >
-                              <ChevronLeft size={12} /> Voltar para o menu
-                            </button>
-                            
-                            <span className="text-[10px] font-bold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider px-1 mb-1 block">Período de Análise</span>
-                            
-                            <div className="flex flex-col gap-0.5">
-                              {[
-                                { id: '2h', label: 'Últimas 2 horas' },
-                                { id: '24h', label: 'Últimas 24 horas' },
-                                { id: '3d', label: 'Últimos 3 dias' },
-                                { id: '7d', label: 'Últimos 7 dias' },
-                                { id: 'all', label: 'Conversa Toda' }
-                              ].map(item => (
-                                <button
-                                  key={item.id}
-                                  onClick={() => setSelectedAnalyzePeriod(item.id as any)}
-                                  className={cn(
-                                    "flex items-center justify-between w-full px-2.5 py-1.5 text-xs text-left rounded-lg transition-all",
-                                    selectedAnalyzePeriod === item.id 
-                                      ? "bg-[#00a884]/15 text-[#00a884] font-bold" 
-                                      : "hover:bg-black/5 dark:hover:bg-white/5 text-[#111b21] dark:text-[#e9edef]"
-                                  )}
-                                >
-                                  {item.label}
-                                  {selectedAnalyzePeriod === item.id && <Check size={12} className="stroke-[3]" />}
-                                </button>
-                              ))}
-                            </div>
-                            
-                            <button 
-                              onClick={() => handleGeminiAction('analyze')} 
-                              className="mt-2 flex items-center justify-center gap-2 w-full py-2 bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-700 hover:to-fuchsia-700 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98]"
-                            >
-                              <BrainCircuit size={14} /> Iniciar Análise
-                            </button>
+                      {/* Corpo do Editor de Anotações */}
+                      <div className="relative flex-1 min-h-[45px] flex flex-col justify-start">
+                        {notePreviewMode ? (
+                          <div className="w-full min-h-[45px] bg-transparent pb-1 overflow-y-auto max-h-[260px] select-text">
+                            {renderMarkdownPreview(inputText)}
                           </div>
                         ) : (
-                          <div className="flex flex-col gap-1">
-                            <button onClick={() => handleGeminiAction('grammar')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
-                              <CheckCircle2 size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Corrigir Gramática & Ortografia
-                            </button>
-                            <button onClick={() => handleGeminiAction('sales')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
-                              <ShoppingBag size={16} className="text-emerald-500 group-hover:scale-110 transition-transform" /> Focar em Vendas
-                            </button>
-                            <button onClick={() => handleGeminiAction('enchant')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
-                              <HeartHandshake size={16} className="text-pink-500 group-hover:scale-110 transition-transform" /> Encantar Cliente
-                            </button>
-                            <button onClick={() => handleGeminiAction('support')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
-                              <LifeBuoy size={16} className="text-orange-500 group-hover:scale-110 transition-transform" /> Melhorar Suporte/Dúvida
-                            </button>
-                            
-                            <div className="my-1 border-t border-black/5 dark:border-white/5"></div>
-                            
-                            <button onClick={() => setGeminiPopoverSubView('analyze_period')} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors text-[#111b21] dark:text-[#e9edef] group">
-                              <BrainCircuit size={16} className="text-purple-500 group-hover:scale-110 transition-transform" /> Analisar Conversa / Dar Feedback
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Contêiner de Ações Inferior no Mobile / Contents no Desktop */}
-                  <div className={cn(
-                    chatMode === 'internal_note'
-                      ? "flex items-center justify-between w-full mt-2 md:mt-0 md:w-auto md:contents"
-                      : "contents"
-                  )}>
-                    {/* Botões de Ação da Esquerda */}
-                    <div className="flex items-center gap-1.5 shrink-0 relative">
-                      <div className="relative">
-                        <button 
-                          type="button"
-                          onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)}
-                          className={cn(
-                            "p-2 rounded-full transition-colors",
-                            isAttachmentMenuOpen 
-                              ? "bg-black/10 dark:bg-white/10 text-emerald-600 dark:text-emerald-400"
-                              : "text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5"
-                          )}
-                          title="Anexar arquivos ou compartilhar contato"
-                        >
-                          <Paperclip size={20} />
-                        </button>
-
-                        {isAttachmentMenuOpen && (
-                          <div className="absolute bottom-12 left-0 z-50 w-56 p-1.5 bg-white dark:bg-[#111b21] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsAttachmentMenuOpen(false);
-                                fileInputRef.current?.click();
-                              }}
-                              className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group font-medium"
-                            >
-                              <div className="w-8 h-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                <ImageIcon size={16} />
-                              </div>
-                              Fotos & Arquivos
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsAttachmentMenuOpen(false);
-                                setContactShareSearch('');
-                                setSelectedContactToShare(null);
-                                setIsShareContactModalOpen(true);
-                              }}
-                              className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group font-medium"
-                            >
-                              <div className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                <UserCheck size={16} />
-                              </div>
-                              Compartilhar Contato
-                            </button>
-                          </div>
+                          <textarea 
+                            ref={textareaRef}
+                            value={inputText}
+                            spellCheck={true}
+                            lang="pt-BR"
+                            onFocus={() => {
+                              if (activeChatId) {
+                                const activeContact = contacts.find(c => c.id === activeChatId);
+                                if (activeContact && (Number(activeContact.unread || 0) > 0 || activeContact.isManuallyUnread)) {
+                                  useChatStore.getState().markAsRead(activeChatId);
+                                }
+                              }
+                            }}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setInputText(val);
+                              handleUserTyping(val);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                e.preventDefault();
+                                if (inputText.trim() || isTaskMode) {
+                                  handleSendHuman(e as any);
+                                }
+                              }
+                            }}
+                            onPaste={(e) => {
+                              const items = e.clipboardData?.items;
+                              if (!items) return;
+                              for (let i = 0; i < items.length; i++) {
+                                if (items[i].type.indexOf('image') !== -1) {
+                                  e.preventDefault();
+                                  const file = items[i].getAsFile();
+                                  if (file) {
+                                    setPastedImage(file);
+                                    setPastedImagePreview(URL.createObjectURL(file));
+                                    setPastedImageCaption('');
+                                  }
+                                  break;
+                                }
+                              }
+                            }}
+                            rows={2}
+                            placeholder="Escreva uma anotação interna sobre este contato (não será enviada ao cliente)..."
+                            className="bg-transparent border-none outline-none w-full text-sm font-sans leading-relaxed resize-none p-0 pb-1 overflow-y-auto max-h-[260px] scrollbar-thin text-amber-950 dark:text-amber-100 placeholder:text-amber-700/50 dark:placeholder:text-amber-400/40"
+                          />
                         )}
                       </div>
 
-                      <input 
-                        type="file" 
-                        ref={fileInputRef} 
-                        style={{ display: 'none' }} 
-                        onChange={handleFileUpload} 
-                        multiple
-                        accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
-                      />
+                      {/* Barra Inferior de Ações Integrada da Anotação CRM */}
+                      <div className="w-full flex items-center justify-between border-t border-amber-500/15 dark:border-amber-500/20 pt-3 mt-0.5 gap-2 flex-wrap sm:flex-nowrap select-none">
+                        {/* Ações da Esquerda */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {/* Anexo CRM */}
+                          <div className="relative">
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                const next = !isAttachmentMenuOpen;
+                                setIsAttachmentMenuOpen(next);
+                                if (next) {
+                                  setShowTemplatesDropdown(false);
+                                  setIsGeminiPopoverOpen(false);
+                                }
+                              }}
+                              className={cn(
+                                "p-2 rounded-xl transition-all duration-200 border",
+                                isAttachmentMenuOpen 
+                                  ? "bg-amber-500/20 border-amber-500/30 text-amber-800 dark:text-amber-200 scale-105"
+                                  : "bg-transparent border-transparent text-amber-700/80 dark:text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-900 dark:hover:text-amber-200"
+                              )}
+                              title="Anexar arquivo na anotação"
+                            >
+                              <Paperclip size={18} />
+                            </button>
 
-                      {chatMode === 'internal_note' && (
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const newMode = !isTaskMode;
-                            setIsTaskMode(newMode);
-                            if (newMode && checklistDraft.length === 0) {
-                              setChecklistDraft([""]);
-                            }
-                          }}
-                          className={cn(
-                            "p-2 rounded-full transition-all shrink-0 animate-in fade-in zoom-in-95 duration-250",
-                            isTaskMode
-                              ? "text-amber-600 bg-amber-500/25 hover:bg-amber-500/35 scale-105 border border-amber-500/35"
-                              : "text-amber-600 dark:text-amber-500 hover:bg-amber-500/10"
-                          )}
-                          title="Tornar Tarefa CRM / Checklist"
-                        >
-                          <CheckSquare size={20} />
-                        </button>
-                      )}
+                            {isAttachmentMenuOpen && (
+                              <div className="absolute bottom-12 left-0 z-50 w-56 p-1.5 bg-white dark:bg-[#111b21] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAttachmentMenuOpen(false);
+                                    fileInputRef.current?.click();
+                                  }}
+                                  className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group font-medium"
+                                >
+                                  <div className="w-8 h-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                    <ImageIcon size={16} />
+                                  </div>
+                                  Fotos & Arquivos
+                                </button>
+                              </div>
+                            )}
+                          </div>
 
-                      {chatMode === 'internal_note' && (
+                          <input 
+                            type="file" 
+                            ref={fileInputRef} 
+                            style={{ display: 'none' }} 
+                            onChange={handleFileUpload} 
+                            multiple
+                            accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
+                          />
+
+                          {/* Toggle de Modo Tarefa / Checklist */}
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              const newMode = !isTaskMode;
+                              setIsTaskMode(newMode);
+                              if (newMode && checklistDraft.length === 0) {
+                                setChecklistDraft([""]);
+                              }
+                            }}
+                            className={cn(
+                              "flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all duration-200 text-xs font-bold border",
+                              isTaskMode
+                                ? "text-amber-800 dark:text-amber-100 bg-amber-500/25 border-amber-500/40 shadow-sm scale-105"
+                                : "text-amber-700/80 dark:text-amber-400/80 hover:bg-amber-500/10 border-transparent"
+                            )}
+                            title="Tornar Tarefa CRM / Checklist"
+                          >
+                            <CheckSquare size={16} />
+                            <span className="hidden sm:inline">Checklist / Tarefa</span>
+                          </button>
+
+                          {/* Modelos de Tarefa CRM */}
+                          <div className="relative">
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                const next = !showTemplatesDropdown;
+                                setShowTemplatesDropdown(next);
+                                if (next) {
+                                  setIsAttachmentMenuOpen(false);
+                                  setIsGeminiPopoverOpen(false);
+                                }
+                              }}
+                              className={cn(
+                                "p-2 rounded-xl transition-all duration-200 border",
+                                showTemplatesDropdown
+                                  ? "text-emerald-700 dark:text-emerald-300 bg-emerald-500/20 border-emerald-500/30 scale-105"
+                                  : "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 border-transparent"
+                              )}
+                              title="Modelos Pré-prontos de Tarefa CRM"
+                            >
+                              <Sparkles size={18} className={cn(showTemplatesDropdown ? "" : "animate-pulse")} />
+                            </button>
+
+                            {showTemplatesDropdown && (
+                              <div className="absolute bottom-full left-0 mb-3.5 p-4 bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl rounded-3xl border border-emerald-500/35 shadow-[0_8px_32px_rgba(16,185,129,0.18)] flex flex-col gap-3.5 w-72 z-50 animate-in slide-in-from-bottom-2 duration-300">
+                                <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
+                                  <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-extrabold text-[10px] tracking-widest uppercase">
+                                    <Sparkles size={14} className="text-emerald-500 animate-spin duration-3000" />
+                                    Modelos de Tarefa CRM
+                                  </div>
+                                  <button 
+                                    type="button"
+                                    onClick={() => setShowTemplatesDropdown(false)}
+                                    className="text-gray-400 hover:text-red-500 transition-all p-1 hover:scale-110"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+
+                                <div className="flex flex-col gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={handleTriggerImplantacaoModel}
+                                    className="w-full text-left p-3 rounded-2xl border border-dashed border-emerald-500/25 hover:border-emerald-500/60 bg-emerald-500/5 hover:bg-emerald-500/10 transition-all group flex gap-3 items-start cursor-pointer active:scale-[0.98]"
+                                  >
+                                    <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 shrink-0 group-hover:scale-110 transition-transform">
+                                      <Plus size={16} strokeWidth={3} />
+                                    </div>
+                                    <div className="flex flex-col min-w-0">
+                                      <span className="font-extrabold text-[11px] text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">
+                                        Implantação Completa
+                                      </span>
+                                      <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-relaxed mt-0.5 font-medium">
+                                        Gera automaticamente as 5 tarefas diárias de implantação com seus respectivos checklists completos.
+                                      </p>
+                                    </div>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Assistente IA Gemini */}
+                          <div className="relative">
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                const next = !isGeminiPopoverOpen;
+                                setIsGeminiPopoverOpen(next);
+                                if (next) {
+                                  setIsAttachmentMenuOpen(false);
+                                  setShowTemplatesDropdown(false);
+                                }
+                              }}
+                              className={cn(
+                                "p-2 rounded-xl transition-all duration-200 border",
+                                isGeminiPopoverOpen
+                                  ? "text-purple-600 dark:text-purple-400 bg-purple-500/20 border-purple-500/30 scale-105"
+                                  : "text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 border-transparent"
+                              )}
+                              title="Assistente IA Gemini"
+                            >
+                              <Wand2 size={18} />
+                            </button>
+
+                            {/* Popover UI Gemini */}
+                            {isGeminiPopoverOpen && (
+                              <div className="absolute bottom-full left-0 mb-3 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/5 dark:border-white/5 rounded-2xl shadow-xl w-72 p-2 animate-in fade-in zoom-in duration-200 z-50">
+                                <div className="flex items-center gap-2 px-3 py-2 border-b border-black/5 dark:border-white/5 mb-2">
+                                  <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-[#00a884] to-teal-500 flex items-center justify-center text-white shadow-sm">
+                                    <Wand2 size={12} />
+                                  </div>
+                                  <span className="text-xs font-semibold text-[#111b21] dark:text-[#aebac1]">Magia da IA</span>
+                                  <button 
+                                    onClick={() => {
+                                      setIsGeminiPopoverOpen(false);
+                                      setGeminiPopoverSubView('main');
+                                    }} 
+                                    className="ml-auto text-[#54656f] hover:text-red-500 p-1"
+                                  >
+                                    <X size={14}/>
+                                  </button>
+                                </div>
+                                
+                                {isGeminiProcessing ? (
+                                  <div className="flex flex-col items-center justify-center py-6 px-4 gap-3 text-center">
+                                      <RefreshCw size={24} className="text-[#00a884] animate-spin" />
+                                      <span className="text-xs text-[#111b21] dark:text-[#e9edef] font-medium leading-relaxed animate-pulse">
+                                        {transcriptionProgressText || "A IA está processando..."}
+                                      </span>
+                                  </div>
+                                ) : geminiPopoverSubView === 'analyze_period' ? (
+                                  <div className="flex flex-col gap-2 p-1">
+                                    <button 
+                                      onClick={() => setGeminiPopoverSubView('main')} 
+                                      className="flex items-center gap-1 text-[11px] text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] transition-colors pb-1 border-b border-black/5 dark:border-white/5 mb-1"
+                                    >
+                                      <ChevronLeft size={12} /> Voltar para o menu
+                                    </button>
+                                    
+                                    <span className="text-[10px] font-bold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider px-1 mb-1 block">Período de Análise</span>
+                                    
+                                    <div className="flex flex-col gap-0.5">
+                                      {[
+                                        { id: '2h', label: 'Últimas 2 horas' },
+                                        { id: '24h', label: 'Últimas 24 horas' },
+                                        { id: '3d', label: 'Últimos 3 dias' },
+                                        { id: '7d', label: 'Últimos 7 dias' },
+                                        { id: 'all', label: 'Conversa Toda' }
+                                      ].map(item => (
+                                        <button
+                                          key={item.id}
+                                          onClick={() => setSelectedAnalyzePeriod(item.id as any)}
+                                          className={cn(
+                                            "flex items-center justify-between w-full px-2.5 py-1.5 text-xs text-left rounded-lg transition-all",
+                                            selectedAnalyzePeriod === item.id 
+                                              ? "bg-[#00a884]/15 text-[#00a884] font-bold" 
+                                              : "hover:bg-black/5 dark:hover:bg-white/5 text-[#111b21] dark:text-[#e9edef]"
+                                          )}
+                                        >
+                                          {item.label}
+                                          {selectedAnalyzePeriod === item.id && <Check size={12} className="stroke-[3]" />}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    
+                                    <button 
+                                      onClick={() => handleGeminiAction('analyze')} 
+                                      className="mt-2 flex items-center justify-center gap-2 w-full py-2 bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-700 hover:to-fuchsia-700 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98]"
+                                    >
+                                      <BrainCircuit size={14} /> Iniciar Análise
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col gap-1">
+                                    <button onClick={() => handleGeminiAction('grammar')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                                      <CheckCircle2 size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Corrigir Gramática & Ortografia
+                                    </button>
+                                    <button onClick={() => handleGeminiAction('sales')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                                      <ShoppingBag size={16} className="text-emerald-500 group-hover:scale-110 transition-transform" /> Focar em Vendas
+                                    </button>
+                                    <button onClick={() => handleGeminiAction('enchant')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                                      <HeartHandshake size={16} className="text-pink-500 group-hover:scale-110 transition-transform" /> Encantar Cliente
+                                    </button>
+                                    <button onClick={() => handleGeminiAction('support')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                                      <LifeBuoy size={16} className="text-orange-500 group-hover:scale-110 transition-transform" /> Melhorar Suporte/Dúvida
+                                    </button>
+                                    
+                                    <div className="my-1 border-t border-black/5 dark:border-white/5"></div>
+                                    
+                                    <button onClick={() => setGeminiPopoverSubView('analyze_period')} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors text-[#111b21] dark:text-[#e9edef] group">
+                                      <BrainCircuit size={16} className="text-purple-500 group-hover:scale-110 transition-transform" /> Analisar Conversa / Dar Feedback
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Botão de Salvar Anotação CRM à Direita */}
+                        <div className="flex items-center gap-2 shrink-0 ml-auto">
+                          <span className="hidden md:inline text-[10px] text-amber-700/60 dark:text-amber-400/50 font-medium">
+                            Ctrl + Enter para salvar
+                          </span>
+                          <button
+                            type="submit"
+                            disabled={isSendingMessage || (!inputText.trim() && !isTaskMode)}
+                            className={cn(
+                              "px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-2 shadow-md",
+                              (inputText.trim() || isTaskMode) && !isSendingMessage
+                                ? "bg-gradient-to-r from-amber-500 via-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-amber-500/25 hover:shadow-amber-500/40 hover:scale-105 active:scale-95 border border-amber-400/30 cursor-pointer"
+                                : "bg-gray-200/80 dark:bg-black/30 text-gray-400 dark:text-gray-600 cursor-not-allowed border border-transparent shadow-none"
+                            )}
+                          >
+                            {isSendingMessage ? (
+                              <>
+                                <svg className="animate-spin h-3.5 w-3.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span>Salvando...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Send size={13} />
+                                <span>Salvar Anotação</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Modo WhatsApp Tradicional & Fluido */
+                    <>
+                      {/* Botão de Anexo WhatsApp */}
+                      <div className="flex items-center gap-1.5 shrink-0 relative">
                         <div className="relative">
                           <button 
                             type="button"
-                            onClick={() => setShowTemplatesDropdown(!showTemplatesDropdown)}
+                            onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)}
                             className={cn(
-                              "p-2 rounded-full transition-all shrink-0 animate-in fade-in zoom-in-95 duration-250",
-                              showTemplatesDropdown
-                                ? "text-emerald-600 bg-emerald-500/25 hover:bg-emerald-500/35 scale-105 border border-emerald-500/35"
-                                : "text-emerald-600 dark:text-emerald-500 hover:bg-emerald-500/10"
+                              "p-2 rounded-full transition-colors",
+                              isAttachmentMenuOpen 
+                                ? "bg-black/10 dark:bg-white/10 text-emerald-600 dark:text-emerald-400"
+                                : "text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5"
                             )}
-                            title="Modelos de Tarefa CRM"
+                            title="Anexar arquivos ou compartilhar contato"
                           >
-                            <Sparkles size={20} className={cn(showTemplatesDropdown ? "" : "animate-pulse")} />
+                            <Paperclip size={20} />
                           </button>
 
-                          {showTemplatesDropdown && (
-                            <div className="absolute bottom-full left-0 mb-3.5 p-4 bg-white/95 dark:bg-[#111b21]/95 backdrop-blur-xl rounded-3xl border border-emerald-500/35 shadow-[0_8px_32px_rgba(16,185,129,0.18)] flex flex-col gap-3.5 w-72 z-50 animate-in slide-in-from-bottom-2 duration-300">
-                              <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
-                                <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-extrabold text-[10px] tracking-widest uppercase">
-                                  <Sparkles size={14} className="text-emerald-500 animate-spin duration-3000" />
-                                  Modelos de Tarefa CRM
+                          {isAttachmentMenuOpen && (
+                            <div className="absolute bottom-12 left-0 z-50 w-56 p-1.5 bg-white dark:bg-[#111b21] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsAttachmentMenuOpen(false);
+                                  fileInputRef.current?.click();
+                                }}
+                                className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group font-medium"
+                              >
+                                <div className="w-8 h-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                  <ImageIcon size={16} />
                                 </div>
-                                <button 
-                                  type="button"
-                                  onClick={() => setShowTemplatesDropdown(false)}
-                                  className="text-gray-400 hover:text-red-500 transition-all p-1 hover:scale-110"
-                                >
-                                  <X size={14} />
-                                </button>
-                              </div>
+                                Fotos & Arquivos
+                              </button>
 
-                              <div className="flex flex-col gap-2">
-                                <button
-                                  type="button"
-                                  onClick={handleTriggerImplantacaoModel}
-                                  className="w-full text-left p-3 rounded-2xl border border-dashed border-emerald-500/25 hover:border-emerald-500/60 bg-emerald-500/5 hover:bg-emerald-500/10 transition-all group flex gap-3 items-start cursor-pointer active:scale-[0.98]"
-                                >
-                                  <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 shrink-0 group-hover:scale-110 transition-transform">
-                                    <Plus size={16} strokeWidth={3} />
-                                  </div>
-                                  <div className="flex flex-col min-w-0">
-                                    <span className="font-extrabold text-[11px] text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">
-                                      Implantação Completa
-                                    </span>
-                                    <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-relaxed mt-0.5 font-medium">
-                                      Gera automaticamente as 5 tarefas diárias de implantação com seus respectivos checklists completos.
-                                    </p>
-                                  </div>
-                                </button>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsAttachmentMenuOpen(false);
+                                  setContactShareSearch('');
+                                  setSelectedContactToShare(null);
+                                  setIsShareContactModalOpen(true);
+                                }}
+                                className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group font-medium"
+                              >
+                                <div className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                  <UserCheck size={16} />
+                                </div>
+                                Compartilhar Contato
+                              </button>
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
 
-                    {/* Botão de Enviar da Direita */}
-                    <div className="flex items-center shrink-0">
-                      {(inputText.trim() || (chatMode === 'internal_note' && isTaskMode)) ? (
-                         <button 
-                          type="submit"
-                          disabled={isSendingMessage}
-                          className={cn(
-                            "w-10 h-10 flex items-center justify-center text-white rounded-full shadow-md transition-all shrink-0 animate-in fade-in zoom-in-95 duration-200",
-                            isSendingMessage 
-                              ? "opacity-50 cursor-not-allowed" 
-                              : "hover:scale-105 active:scale-95",
-                            chatMode === 'internal_note'
-                              ? "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-lg shadow-amber-500/20 hover:shadow-amber-500/35 border border-amber-600/10"
-                              : "bg-[#00a884] hover:bg-[#00a884]/90 shadow-emerald-500/20"
+                        <input 
+                          type="file" 
+                          ref={fileInputRef} 
+                          style={{ display: 'none' }} 
+                          onChange={handleFileUpload} 
+                          multiple
+                          accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
+                        />
+                      </div>
+
+                      {/* Campo de Texto WhatsApp */}
+                      <div className="flex flex-1 flex-row items-end px-4 py-2 bg-white dark:bg-[#2a3942] border border-transparent focus-within:border-[#00a884]/50 gap-3 rounded-[24px] shadow-sm relative">
+                        
+                        {/* Quick Replies Popover */}
+                        {showQuickReplies && quickReplies.length > 0 && (
+                          <div className="absolute bottom-full left-0 mb-2 w-[350px] max-w-[90vw] bg-white dark:bg-[#202c33] rounded-2xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden z-[100] animate-in fade-in zoom-in-95 slide-in-from-bottom-4">
+                            <div className="p-3 bg-gray-50/50 dark:bg-[#111b21]/50 border-b border-gray-100 dark:border-white/5 text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                              ⚡ Respostas Prontas
+                            </div>
+                            <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                              {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).map(qr => (
+                                <button
+                                  key={qr.id}
+                                  type="button"
+                                  className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-[#2a3942] transition-colors border-b border-gray-50 dark:border-white/5 last:border-0 group"
+                                  onClick={() => {
+                                    setShowQuickReplies(false);
+                                    setInputText(qr.content);
+                                    
+                                    if (qr.media_url) {
+                                      setPendingMediaToSend({
+                                        url: qr.media_url,
+                                        type: (qr.media_type as 'image'|'video'|'audio'|'document') || 'image',
+                                        name: qr.media_url.split('/').pop()?.split('_').slice(1).join('_') || 'Anexo da resposta rápida'
+                                      });
+                                      setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
+                                      setTimeout(() => setQuickReplyToast(null), 3500);
+                                    } else {
+                                      setPendingMediaToSend(null);
+                                      setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
+                                      setTimeout(() => setQuickReplyToast(null), 3500);
+                                    }
+                                    
+                                    setTimeout(() => textareaRef.current?.focus(), 10);
+                                  }}
+                                >
+                                  <div className="font-semibold text-blue-600 dark:text-blue-400 text-[13px] mb-1 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors flex items-center gap-1.5">
+                                    {qr.shortcut}
+                                    {qr.media_url && (
+                                       <span className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded-md">
+                                          {qr.media_type === 'video' ? <Video className="w-3 h-3" /> : qr.media_type === 'audio' ? <Mic className="w-3 h-3" /> : qr.media_type === 'document' ? <FileText className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
+                                          Mídia
+                                       </span>
+                                    )}
+                                  </div>
+                                  <div className="text-gray-600 dark:text-gray-300 text-[13px] line-clamp-2 leading-relaxed">{qr.content}</div>
+                                </button>
+                              ))}
+                              {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).length === 0 && (
+                                <div className="p-6 text-center text-gray-500 dark:text-gray-400 text-[13px]">
+                                  Nenhuma resposta encontrada para "{quickReplyFilter}"
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        <div className="relative flex-1 min-w-0 min-h-[20px] flex flex-col gap-1.5 justify-end">
+                          {pendingMediaToSend && (
+                            <div className="flex items-center gap-2.5 p-2 bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/15 rounded-2xl self-start max-w-full mb-2 animate-in fade-in slide-in-from-bottom-1 duration-255 select-none shadow-sm">
+                              {pendingMediaToSend.type === 'image' && (
+                                <img src={pendingMediaToSend.url} className="w-8 h-8 rounded-lg object-cover border border-emerald-500/10 shadow-sm shrink-0" />
+                              )}
+                              {pendingMediaToSend.type === 'video' && (
+                                <div className="w-8 h-8 rounded-lg bg-black/25 flex items-center justify-center border border-emerald-500/10 text-emerald-500 shrink-0">
+                                  <Video size={14} />
+                                </div>
+                              )}
+                              {pendingMediaToSend.type === 'audio' && (
+                                <div className="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center border border-blue-500/10 text-blue-500 shrink-0">
+                                  <Mic size={14} />
+                                </div>
+                              )}
+                              {pendingMediaToSend.type === 'document' && (
+                                <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center border border-emerald-500/10 text-emerald-500 shrink-0">
+                                  <FileText size={14} />
+                                </div>
+                              )}
+                              
+                              <div className="min-w-0 flex flex-col pr-1">
+                                <span className="text-[9px] uppercase font-black tracking-widest text-emerald-600 dark:text-emerald-400 leading-none">
+                                  Mídia Anexada
+                                </span>
+                                <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate max-w-[180px] mt-0.5" title={pendingMediaToSend.name}>
+                                  {pendingMediaToSend.name}
+                                </span>
+                              </div>
+                              
+                              <button
+                                type="button"
+                                onClick={() => setPendingMediaToSend(null)}
+                                className="p-1 hover:bg-red-500/10 text-gray-400 hover:text-red-500 rounded-lg transition-colors shrink-0 active:scale-90 ml-1"
+                                title="Remover anexo"
+                              >
+                                <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+                              </button>
+                            </div>
                           )}
+
+                          <textarea 
+                            ref={textareaRef}
+                            value={inputText}
+                            spellCheck={true}
+                            lang="pt-BR"
+                            onFocus={() => {
+                              if (activeChatId) {
+                                const activeContact = contacts.find(c => c.id === activeChatId);
+                                if (activeContact && (Number(activeContact.unread || 0) > 0 || activeContact.isManuallyUnread)) {
+                                  useChatStore.getState().markAsRead(activeChatId);
+                                }
+                              }
+                            }}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setInputText(val);
+                              if (val.startsWith('/')) {
+                                setShowQuickReplies(true);
+                                setQuickReplyFilter(val.substring(1).toLowerCase());
+                              } else {
+                                setShowQuickReplies(false);
+                              }
+                              handleUserTyping(val);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                const isCompactMobile = window.innerWidth < 500;
+                                if (isCompactMobile) {
+                                    return;
+                                }
+                                e.preventDefault();
+                                if (inputText.trim()) {
+                                  handleSendHuman(e as any);
+                                }
+                              }
+                            }}
+                            onPaste={(e) => {
+                              const items = e.clipboardData?.items;
+                              if (!items) return;
+                              for (let i = 0; i < items.length; i++) {
+                                if (items[i].type.indexOf('image') !== -1) {
+                                  e.preventDefault();
+                                  const file = items[i].getAsFile();
+                                  if (file) {
+                                    setPastedImage(file);
+                                    setPastedImagePreview(URL.createObjectURL(file));
+                                    setPastedImageCaption('');
+                                  }
+                                  break;
+                                }
+                              }
+                            }}
+                            rows={1}
+                            placeholder="Responda como humano e a IA sera pausada automaticamente..."
+                            className="bg-transparent border-none outline-none w-full text-sm font-sans leading-relaxed resize-none p-0 pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin relative z-10 transition-colors duration-200 text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1]"
+                          />
+                        </div>
+
+                        <button 
+                          type="button" 
+                          onClick={() => setIsGeminiPopoverOpen(!isGeminiPopoverOpen)}
+                          className="ml-2 mb-0.5 p-1.5 text-[#00a884] hover:bg-[#00a884]/10 rounded-full transition-colors flex-shrink-0"
+                          title="Assistente IA"
                         >
-                          {isSendingMessage ? (
-                            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                          ) : (
-                            <Send size={16} className="translate-x-0.5" />
-                          )}
+                          <Sparkles size={20} />
                         </button>
-                      ) : (
-                        chatMode !== 'internal_note' && (
+
+                        {/* Popover UI Gemini */}
+                        {isGeminiPopoverOpen && (
+                          <div className="absolute bottom-full right-0 mb-3 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/5 dark:border-white/5 rounded-2xl shadow-xl w-72 p-2 animate-in fade-in zoom-in duration-200 z-50">
+                            <div className="flex items-center gap-2 px-3 py-2 border-b border-black/5 dark:border-white/5 mb-2">
+                              <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-[#00a884] to-teal-500 flex items-center justify-center text-white shadow-sm">
+                                <Wand2 size={12} />
+                              </div>
+                              <span className="text-xs font-semibold text-[#111b21] dark:text-[#aebac1]">Magia da IA</span>
+                              <button 
+                                onClick={() => {
+                                  setIsGeminiPopoverOpen(false);
+                                  setGeminiPopoverSubView('main');
+                                }} 
+                                className="ml-auto text-[#54656f] hover:text-red-500 p-1"
+                              >
+                                <X size={14}/>
+                              </button>
+                            </div>
+                            
+                            {isGeminiProcessing ? (
+                              <div className="flex flex-col items-center justify-center py-6 px-4 gap-3 text-center">
+                                  <RefreshCw size={24} className="text-[#00a884] animate-spin" />
+                                  <span className="text-xs text-[#111b21] dark:text-[#e9edef] font-medium leading-relaxed animate-pulse">
+                                    {transcriptionProgressText || "A IA está processando..."}
+                                  </span>
+                              </div>
+                            ) : geminiPopoverSubView === 'analyze_period' ? (
+                              <div className="flex flex-col gap-2 p-1">
+                                <button 
+                                  onClick={() => setGeminiPopoverSubView('main')} 
+                                  className="flex items-center gap-1 text-[11px] text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] transition-colors pb-1 border-b border-black/5 dark:border-white/5 mb-1"
+                                >
+                                  <ChevronLeft size={12} /> Voltar para o menu
+                                </button>
+                                
+                                <span className="text-[10px] font-bold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider px-1 mb-1 block">Período de Análise</span>
+                                
+                                <div className="flex flex-col gap-0.5">
+                                  {[
+                                    { id: '2h', label: 'Últimas 2 horas' },
+                                    { id: '24h', label: 'Últimas 24 horas' },
+                                    { id: '3d', label: 'Últimos 3 dias' },
+                                    { id: '7d', label: 'Últimos 7 dias' },
+                                    { id: 'all', label: 'Conversa Toda' }
+                                  ].map(item => (
+                                    <button
+                                      key={item.id}
+                                      onClick={() => setSelectedAnalyzePeriod(item.id as any)}
+                                      className={cn(
+                                        "flex items-center justify-between w-full px-2.5 py-1.5 text-xs text-left rounded-lg transition-all",
+                                        selectedAnalyzePeriod === item.id 
+                                          ? "bg-[#00a884]/15 text-[#00a884] font-bold" 
+                                          : "hover:bg-black/5 dark:hover:bg-white/5 text-[#111b21] dark:text-[#e9edef]"
+                                      )}
+                                    >
+                                      {item.label}
+                                      {selectedAnalyzePeriod === item.id && <Check size={12} className="stroke-[3]" />}
+                                    </button>
+                                  ))}
+                                </div>
+                                
+                                <button 
+                                  onClick={() => handleGeminiAction('analyze')} 
+                                  className="mt-2 flex items-center justify-center gap-2 w-full py-2 bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-700 hover:to-fuchsia-700 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98]"
+                                >
+                                  <BrainCircuit size={14} /> Iniciar Análise
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-1">
+                                <button onClick={() => handleGeminiAction('grammar')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                                  <CheckCircle2 size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Corrigir Gramática & Ortografia
+                                </button>
+                                <button onClick={() => handleGeminiAction('sales')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                                  <ShoppingBag size={16} className="text-emerald-500 group-hover:scale-110 transition-transform" /> Focar em Vendas
+                                </button>
+                                <button onClick={() => handleGeminiAction('enchant')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                                  <HeartHandshake size={16} className="text-pink-500 group-hover:scale-110 transition-transform" /> Encantar Cliente
+                                </button>
+                                <button onClick={() => handleGeminiAction('support')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
+                                  <LifeBuoy size={16} className="text-orange-500 group-hover:scale-110 transition-transform" /> Melhorar Suporte/Dúvida
+                                </button>
+                                
+                                <div className="my-1 border-t border-black/5 dark:border-white/5"></div>
+                                
+                                <button onClick={() => setGeminiPopoverSubView('analyze_period')} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors text-[#111b21] dark:text-[#e9edef] group">
+                                  <BrainCircuit size={16} className="text-purple-500 group-hover:scale-110 transition-transform" /> Analisar Conversa / Dar Feedback
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Botão de Enviar WhatsApp / Mic */}
+                      <div className="flex items-center shrink-0">
+                        {inputText.trim() ? (
+                          <button 
+                            type="submit"
+                            disabled={isSendingMessage}
+                            className={cn(
+                              "w-10 h-10 flex items-center justify-center text-white rounded-full shadow-md transition-all shrink-0 animate-in fade-in zoom-in-95 duration-200 bg-[#00a884] hover:bg-[#00a884]/90 shadow-emerald-500/20",
+                              isSendingMessage ? "opacity-50 cursor-not-allowed" : "hover:scale-105 active:scale-95"
+                            )}
+                          >
+                            {isSendingMessage ? (
+                              <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                            ) : (
+                              <Send size={16} className="translate-x-0.5" />
+                            )}
+                          </button>
+                        ) : (
                           <button 
                             type="button"
                             onClick={handleMicClick}
                             className={cn(
-                               "w-10 h-10 flex items-center justify-center rounded-full shadow-md hover:scale-105 transition-all active:scale-95 shrink-0 animate-in fade-in zoom-in-95 duration-200",
-                               audioState === 'recording' ? "bg-red-500 text-white animate-pulse" : "bg-transparent text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 shadow-none"
+                              "w-10 h-10 flex items-center justify-center rounded-full shadow-md hover:scale-105 transition-all active:scale-95 shrink-0 animate-in fade-in zoom-in-95 duration-200",
+                              audioState === 'recording' ? "bg-red-500 text-white animate-pulse" : "bg-transparent text-[#54656f] dark:text-[#aebac1] hover:bg-black/5 dark:hover:bg-white/5 shadow-none"
                             )}
                           >
                             <Mic size={20} />
                           </button>
-                        )
-                      )}
-                    </div>
-                  </div>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </form>
               </>
             )}

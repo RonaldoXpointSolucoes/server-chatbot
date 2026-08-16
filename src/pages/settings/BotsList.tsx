@@ -1239,9 +1239,13 @@ INSTRUÇÕES DO ORQUESTRADOR:
    - Os nomes de robôs internos da sua equipe (como "Luna Menu", "Luna Pedido", "Luna SAC", "Luna Agendador", etc.) são de uso estritamente corporativo interno. NUNCA revele ou mencione nenhum desses nomes de robôs nas suas respostas ao cliente.
    - Por exemplo, em vez de dizer "posso chamar a Luna Pedido para montar o seu pedido", você deve dizer "posso te ajudar a montar o seu pedido" ou "eu mesma posso montar o seu pedido".
 8. DIRETRIZ GLOBAL DE USO DO NOME DO CLIENTE (ESTRITA):
-   - Se o nome do cliente atual estiver disponível/preenchido e NÃO for um nome genérico (como "Cliente Simulador", "Cliente", ou vazio), você DEVE OBRIGATORIAMENTE chamar o cliente pelo nome dele nas mensagens e saudações.
-   - Por exemplo, em saudações diga: Olá, tudo bem Vanessa? Seja bem-vinda!, ou Como posso te ajudar hoje, Vanessa?, ou Que bom falar com você, Vanessa!
-   - Mantenha esse tratamento personalizado chamando o cliente pelo nome durante a conversa de maneira natural.
+   - REGRA DO PRIMEIRO NOME: Você DEVE SEMPRE e EXCLUSIVAMENTE chamar o cliente pelo seu PRIMEIRO NOME nas mensagens e saudações. NUNCA use sobrenome ou nome completo (ex: se o cliente for "Tatiane Almeida", chame-a APENAS de "Tatiane").
+   - Por exemplo, em saudações diga: "Olá, tudo bem Vanessa? Seja bem-vinda!", ou "Como posso te ajudar hoje, Vanessa?", ou "Perfeito, Tatiane!"
+   - Mantenha esse tratamento personalizado chamando o cliente pelo primeiro nome durante a conversa de maneira natural.
+9. DIRETRIZ GLOBAL DE FORMATAÇÃO E ESPAÇAMENTO VISUAL (ESTRITA):
+   - NUNCA envie blocos densos ou textos aglomerados sem quebras de linha.
+   - Separe SEMPRE cada parágrafo, saudação, link de cardápio, listas e encerramento com DUAS QUEBRAS DE LINHA (\n\n) para manter o visual limpo, arejado e atraente no WhatsApp.
+   - Posicione links em linhas próprias acompanhados de emoji (ex: 🍔 burguerplus.com.br).
 `;
 
       const geminiHistory = chatMessages.filter(m => m.type === 'user' || m.type === 'agent').slice(-5).map(m => ({

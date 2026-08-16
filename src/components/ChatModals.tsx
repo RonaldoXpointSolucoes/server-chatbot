@@ -2631,14 +2631,14 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
       setLoadingGroups(true);
       try {
         const { supabase } = await import('../services/supabase');
-        const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+        const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
         
-        // 1. Fetch explicit companies with document_type = 'cnpj'
+        // 1. Fetch explicit companies with document_type = 'cnpj' OR fantasy_name OR document_number
         const { data: explicitCompanies } = await supabase
           .from('contacts')
-          .select('id, name, fantasy_name, document_number, tags, company_ids')
+          .select('id, name, custom_name, fantasy_name, document_number, document_type, tags, company_ids')
           .eq('tenant_id', tenantId)
-          .eq('document_type', 'cnpj');
+          .or('document_type.eq.cnpj,fantasy_name.neq.,document_number.neq.');
 
         // 2. Fetch all contacts that have company_ids defined to find referenced company IDs
         const { data: contactsWithCompanies } = await supabase
