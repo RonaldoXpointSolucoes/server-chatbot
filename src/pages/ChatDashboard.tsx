@@ -7181,8 +7181,8 @@ export default function ChatDashboard() {
               )}
 
               <div className="hidden lg:flex items-center gap-2">
-                {/* Botão Premium de Controle da I.A (Desktop) */}
-                {globalAiEnabled ? (
+                {/* Botão de Controle da I.A (Desktop) - Exibido apenas quando o Robô I.A estiver ativo globalmente */}
+                {globalAiEnabled && (
                   <div className="relative" ref={pauseMenuRef}>
                     <button 
                     onClick={() => setShowPauseMenu(!showPauseMenu)}
@@ -7274,23 +7274,6 @@ export default function ChatDashboard() {
                       </motion.div>
                     )}
                   </AnimatePresence>
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <button 
-                      className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-3 rounded-full transition-all duration-300 text-xs font-semibold border shadow-sm whitespace-nowrap bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400 hover:scale-105 active:scale-95"
-                      title="O Robô de I.A está desativado globalmente para a empresa. Ative-o na barra lateral esquerda."
-                      onClick={() => alert("O Robô de I.A está desativado globalmente para a empresa. Para utilizá-lo, ligue a chave 'Robô I.A' na barra lateral esquerda.")}
-                    >
-                      <div className="relative flex items-center justify-center">
-                        <BrainCircuit size={14} className="text-rose-500 animate-pulse" />
-                        <span className="absolute -top-1 -right-1 flex h-1.5 w-1.5">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-rose-500"></span>
-                        </span>
-                      </div>
-                      <span className="hidden xl:inline">I.A Inativa (Global)</span>
-                    </button>
                   </div>
                 )}
 

@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useDevStore } from '../store/devStore';
-import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert } from 'lucide-react';
+import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
+import { geminiService } from '../services/geminiService';
 
 export default function DevLogger() {
+  const navigate = useNavigate();
   const { logs, isVisible, isEnabled, toggleVisibility, addLog, clearLogs, showServerLogs, setShowServerLogs } = useDevStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   
@@ -329,6 +332,15 @@ export default function DevLogger() {
     healthScore: number;
     diagnosis: string;
   } | null>(null);
+
+  // Estados da Análise com I.A (Gemini 2.5 Flash) e Criação de Card no CRM Kanban
+  const [isAnalyzingAiLogs, setIsAnalyzingAiLogs] = useState(false);
+  const [aiAnalysisStep, setAiAnalysisStep] = useState<string>('');
+  const [showAiCardModal, setShowAiCardModal] = useState(false);
+  const [generatedAiCard, setGeneratedAiCard] = useState<any>(null);
+  const [createdCardLead, setCreatedCardLead] = useState<any>(null);
+  const [createdCardBoardId, setCreatedCardBoardId] = useState<string>('95be1dee-9d28-47d9-8ccf-d51a337f1572');
+  const [createdCardBoardName, setCreatedCardBoardName] = useState<string>('Desenvolvimento & Roadmap');
 
   const loopContinuousRef = useRef(false);
   const loopTimeoutRef = useRef<any>(null);
@@ -1129,6 +1141,188 @@ export default function DevLogger() {
     addLog({ type: 'success', message: `App React em Execução. Hooks ativos.\nHost: ${window.location.origin}`, source: 'Tester' });
   };
 
+  const handleAnalyzeLogsAndCreateKanbanCard = async () => {
+    if (isAnalyzingAiLogs) return;
+
+    try {
+      setIsAnalyzingAiLogs(true);
+      setAiAnalysisStep('1/4 📥 Coletando logs do DevLogger e Servidor Node.js...');
+
+      // 1. Logs locais do DevLogger
+      const currentLogs = useDevStore.getState().logs || [];
+      const errorAndWarnLogs = currentLogs.filter(l => l.type === 'error' || l.type === 'warn' || l.source?.toLowerCase().includes('server') || l.source?.toLowerCase().includes('node'));
+      const activeLogsToAnalyze = errorAndWarnLogs.length > 0 ? errorAndWarnLogs : currentLogs;
+
+      // 2. Coleta de erros recentes do Servidor Node.js
+      let fetchedServerErrors: any[] = [];
+      try {
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
+        const fetchPromise = fetch(`${engineUrl}/api/v1/system/logs/recent-errors?limit=30`).then(r => r.ok ? r.json() : null);
+        const serverData: any = await Promise.race([fetchPromise, timeoutPromise]);
+        if (serverData?.success && Array.isArray(serverData.errors)) {
+          fetchedServerErrors = serverData.errors;
+        }
+      } catch {
+        // Fallback silencioso
+      }
+
+      // 3. Coleta de logs de erro do Supabase system_logs
+      let supabaseSystemLogs: any[] = [];
+      try {
+        const { data: dbLogs } = await supabase
+          .from('system_logs')
+          .select('*')
+          .or('level.eq.error,level.eq.warn')
+          .order('created_at', { ascending: false })
+          .limit(20);
+        if (dbLogs && Array.isArray(dbLogs)) {
+          supabaseSystemLogs = dbLogs;
+        }
+      } catch {
+        // Fallback
+      }
+
+      // Consolidar erros de backend
+      const combinedServerErrors = [
+        ...fetchedServerErrors,
+        ...supabaseSystemLogs.map(l => ({
+          message: l.message,
+          level: l.level,
+          source: l.source || 'Supabase system_logs',
+          timestamp: l.created_at,
+          details: l.details || l.metadata
+        })),
+        ...currentLogs.filter(l => l.source?.toLowerCase().includes('server') || l.source?.toLowerCase().includes('node'))
+      ];
+
+      setAiAnalysisStep('2/4 🧠 Processando diagnóstico e causa raiz com Gemini 2.5 Flash...');
+
+      // 4. Invocar a IA para diagnosticar e criar o plano
+      const aiPlan = await geminiService.analyzeLogsAndGenerateFixPlan({
+        consoleLogs: activeLogsToAnalyze,
+        serverErrors: combinedServerErrors,
+        gastrofoodLogs: gastrofoodLogs,
+        astsErrors: testErrors,
+        boardName: 'Desenvolvimento & Roadmap'
+      });
+
+      setAiAnalysisStep('3/4 🔍 Localizando quadro Desenvolvimento & Roadmap no CRM...');
+
+      const currentTenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || useChatStore.getState().tenantInfo?.id || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+
+      // 5. Buscar o quadro do CRM
+      let targetBoard: any = null;
+      const targetBoardIdDefault = '95be1dee-9d28-47d9-8ccf-d51a337f1572';
+
+      // Tenta primeiro por ID exato
+      const { data: boardById } = await supabase
+        .from('crm_boards')
+        .select('*')
+        .eq('id', targetBoardIdDefault)
+        .maybeSingle();
+
+      if (boardById) {
+        targetBoard = boardById;
+      } else {
+        // Tenta por nome no tenant
+        const { data: boardsByName } = await supabase
+          .from('crm_boards')
+          .select('*')
+          .eq('tenant_id', currentTenantId)
+          .or('name.ilike.%Desenvolvimento%,name.ilike.%Roadmap%')
+          .limit(1);
+
+        if (boardsByName && boardsByName.length > 0) {
+          targetBoard = boardsByName[0];
+        } else {
+          // Pega o primeiro quadro disponível do tenant
+          const { data: anyBoards } = await supabase
+            .from('crm_boards')
+            .select('*')
+            .eq('tenant_id', currentTenantId)
+            .limit(1);
+          if (anyBoards && anyBoards.length > 0) {
+            targetBoard = anyBoards[0];
+          }
+        }
+      }
+
+      if (!targetBoard) {
+        throw new Error('Nenhum quadro de CRM encontrado para vincular o card de correção.');
+      }
+
+      // 6. Localizar o ID do estágio correspondente à coluna "Em Análise"
+      let targetStageId = 'analysis';
+      if (targetBoard.config?.stages && Array.isArray(targetBoard.config.stages)) {
+        const foundStage = targetBoard.config.stages.find((s: any) => 
+          s.id === 'analysis' || 
+          s.label?.toLowerCase().includes('análise') || 
+          s.label?.toLowerCase().includes('analise')
+        );
+        if (foundStage) {
+          targetStageId = foundStage.id;
+        } else if (targetBoard.config.stages.length > 1) {
+          targetStageId = targetBoard.config.stages[1].id;
+        } else if (targetBoard.config.stages[0]) {
+          targetStageId = targetBoard.config.stages[0].id;
+        }
+      }
+
+      setAiAnalysisStep('4/4 🚀 Publicando card na coluna Em Análise...');
+
+      // 7. Inserir o Card na tabela crm_leads
+      const leadPayload = {
+        tenant_id: targetBoard.tenant_id || currentTenantId,
+        board_id: targetBoard.id,
+        title: aiPlan.title,
+        status: targetStageId,
+        position: 0,
+        estimated_revenue: 0,
+        probability: 80,
+        priority: aiPlan.priority || 3,
+        customer_id: null,
+        agent_id: null,
+        due_date: null,
+        tags: Array.from(new Set([...(aiPlan.tags || []), aiPlan.category || 'Correção', 'IA-PLANO', 'DEVLOGGER'])),
+        notes: `${aiPlan.summary}\n\n${aiPlan.technical_plan}`
+      };
+
+      const { data: insertedLead, error: insertError } = await supabase
+        .from('crm_leads')
+        .insert([leadPayload])
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      // 8. Sucesso e Notificação
+      setCreatedCardLead(insertedLead);
+      setCreatedCardBoardId(targetBoard.id);
+      setCreatedCardBoardName(targetBoard.name || 'Desenvolvimento & Roadmap');
+      setGeneratedAiCard(aiPlan);
+      setShowAiCardModal(true);
+
+      addLog({
+        type: 'success',
+        message: `✨ Card de Correção Criado com Sucesso com I.A!\nQuadro: "${targetBoard.name}" | Coluna: "Em Análise"\nTítulo: ${aiPlan.title}`,
+        source: 'Gemini AI (SRE)',
+        details: { leadId: insertedLead.id, boardId: targetBoard.id, title: aiPlan.title, priority: aiPlan.priority, tags: aiPlan.tags }
+      });
+
+    } catch (err: any) {
+      console.error('Erro na análise de IA e criação do card:', err);
+      addLog({
+        type: 'error',
+        message: `Falha na Análise de Logs com I.A: ${err.message || String(err)}`,
+        source: 'Gemini AI (SRE)'
+      });
+      alert(`Falha ao gerar card com IA: ${err.message || 'Verifique a chave do Gemini em Configurações'}`);
+    } finally {
+      setIsAnalyzingAiLogs(false);
+      setAiAnalysisStep('');
+    }
+  };
+
   const stopApplicationTests = () => {
     setTestLoopContinuous(false);
     setIsTestingApp(false);
@@ -1785,6 +1979,25 @@ export default function DevLogger() {
 
               <div className="w-px h-4 bg-white/15 mx-0.5 shrink-0" />
 
+              {/* Botão de Análise de Logs com IA e Criação de Card no CRM Kanban */}
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleAnalyzeLogsAndCreateKanbanCard(); }} 
+                disabled={isAnalyzingAiLogs}
+                className={`p-1.5 sm:p-2 px-2.5 rounded-xl transition-all cursor-pointer relative active:scale-95 border shrink-0 flex items-center gap-1.5 font-mono text-[10px] font-black ${
+                  isAnalyzingAiLogs 
+                    ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 animate-pulse' 
+                    : 'bg-gradient-to-r from-purple-500/25 via-indigo-500/25 to-pink-500/25 text-purple-200 hover:text-white border-purple-500/40 hover:border-purple-400 hover:shadow-lg hover:shadow-purple-500/20'
+                }`}
+                title="Analisar todos os logs com IA (Gemini 2.5 Flash) e criar Card de Correção no CRM Kanban (Quadro Desenvolvimento & Roadmap)"
+              >
+                {isAnalyzingAiLogs ? (
+                  <Loader2 size={14} className="animate-spin text-purple-300" />
+                ) : (
+                  <Sparkles size={14} className="text-purple-300 animate-pulse" />
+                )}
+                <span className="hidden sm:inline">I.A Card CRM</span>
+              </button>
+
               <a 
                 href={`${engineUrl}/swagger/teste.html`} 
                 target="_blank" 
@@ -2373,15 +2586,57 @@ export default function DevLogger() {
                     ))}
                   </div>
 
-                  {/* Simulação de Erro do Servidor Node */}
-                  <button
-                    onClick={handleSimulateNodeError}
-                    className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-3 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
-                    title="Simular disparo de erro no servidor Node.js para testar o agrupamento"
-                  >
-                    <Bug size={12} className="text-rose-400 animate-pulse" /> + Erro Node
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {/* Botão de Análise de Logs com IA e Criação de Card no CRM Kanban */}
+                    <button
+                      onClick={handleAnalyzeLogsAndCreateKanbanCard}
+                      disabled={isAnalyzingAiLogs}
+                      className={`px-3 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm border ${
+                        isAnalyzingAiLogs
+                          ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 animate-pulse'
+                          : 'bg-gradient-to-r from-purple-500/20 via-indigo-500/20 to-pink-500/20 hover:from-purple-500/30 hover:to-pink-500/30 text-purple-300 border-purple-500/40 hover:border-purple-400 shadow-purple-500/10'
+                      }`}
+                      title="Analisar logs atuais do DevLogger e Servidor Node com Gemini IA e criar card de correção no CRM Kanban"
+                    >
+                      {isAnalyzingAiLogs ? (
+                        <Loader2 size={12} className="animate-spin text-purple-300" />
+                      ) : (
+                        <Sparkles size={12} className="text-purple-400 animate-pulse" />
+                      )}
+                      <span>{isAnalyzingAiLogs ? 'Analisando...' : '✨ Analisar c/ IA & Criar Card CRM'}</span>
+                    </button>
+
+                    {/* Simulação de Erro do Servidor Node */}
+                    <button
+                      onClick={handleSimulateNodeError}
+                      className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-3 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
+                      title="Simular disparo de erro no servidor Node.js para testar o agrupamento"
+                    >
+                      <Bug size={12} className="text-rose-400 animate-pulse" /> + Erro Node
+                    </button>
+                  </div>
                 </div>
+
+                {/* Banner Animado de Progresso da Análise de IA */}
+                {isAnalyzingAiLogs && (
+                  <div className="bg-gradient-to-r from-purple-950/80 via-indigo-950/80 to-purple-950/80 border-b border-purple-500/30 p-3 px-4 flex items-center justify-between gap-3 text-xs font-mono text-purple-200 animate-in fade-in slide-in-from-top-2 duration-200 sticky top-[53px] z-20 backdrop-blur-md">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="relative flex items-center justify-center shrink-0">
+                        <div className="w-6 h-6 rounded-lg bg-purple-500/30 border border-purple-400/50 flex items-center justify-center shadow-lg shadow-purple-500/30 animate-spin">
+                          <BrainCircuit size={14} className="text-purple-300" />
+                        </div>
+                      </div>
+                      <div className="truncate">
+                        <span className="font-black text-white text-[11px] block">{aiAnalysisStep || 'Analisando logs com Inteligência Artificial...'}</span>
+                        <span className="text-[9px] text-purple-300/80">Filtrando ruídos e formulando plano técnico para o Kanban</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0 bg-purple-500/20 px-2.5 py-1 rounded-full border border-purple-500/40 text-[10px] font-bold text-purple-200 animate-pulse">
+                      <Loader2 size={11} className="animate-spin" />
+                      <span>Processando</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Lista de Cards Agrupados / Cronológicos */}
                 <div className="p-4 flex flex-col gap-3 min-h-[240px]">
@@ -2535,6 +2790,157 @@ export default function DevLogger() {
           )}
         </div>
       </div>
+
+      {/* Modal de Card Gerado por I.A & Publicado no CRM Kanban */}
+      {showAiCardModal && generatedAiCard && (
+        <div className="fixed inset-0 z-[100000] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#0a1015] border border-purple-500/30 rounded-3xl shadow-[0_25px_80px_rgba(0,0,0,0.95)] w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden text-[#d1d7db] font-mono relative animate-in zoom-in-95 duration-200">
+            
+            {/* Brilho de Fundo */}
+            <div className="absolute -top-20 -right-20 w-64 h-64 bg-purple-500/15 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+
+            {/* Header do Modal */}
+            <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between gap-3 bg-gradient-to-r from-purple-500/15 via-indigo-500/10 to-transparent relative z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/30 shrink-0">
+                  <Sparkles size={20} className="animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm sm:text-base font-black text-white tracking-tight">Card de Correção Criado no CRM</h3>
+                    <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-full font-bold uppercase">
+                      Gemini 2.5 Flash
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-purple-300/80 font-medium">
+                    Quadro: <strong className="text-white">{createdCardBoardName}</strong> &bull; Coluna: <strong className="text-emerald-400">Em Análise</strong>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowAiCardModal(false)}
+                className="text-[#8696a0] hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors"
+                title="Fechar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Corpo do Modal (Scrollável) */}
+            <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-4 text-xs relative z-10">
+              
+              {/* Título do Card */}
+              <div className="bg-[#101820] border border-white/10 rounded-2xl p-3.5 space-y-2">
+                <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider block">Título do Card</span>
+                <h4 className="text-sm sm:text-base font-bold text-white leading-snug">{generatedAiCard.title}</h4>
+                
+                {/* Metadados: Categoria, Prioridade, Tags */}
+                <div className="flex items-center gap-2 flex-wrap pt-1">
+                  <span className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2.5 py-0.5 rounded-lg text-[10px] font-bold">
+                    {generatedAiCard.category || 'Correção'}
+                  </span>
+                  
+                  <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold border ${
+                    generatedAiCard.priority === 3 
+                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' 
+                      : generatedAiCard.priority === 2 
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  }`}>
+                    Prioridade: {generatedAiCard.priority === 3 ? 'Alta / Crítica' : generatedAiCard.priority === 2 ? 'Média' : 'Baixa'}
+                  </span>
+
+                  {(generatedAiCard.tags || []).map((tag: string, idx: number) => (
+                    <span key={idx} className="bg-white/5 text-[#d1d7db] border border-white/10 px-2 py-0.5 rounded-lg text-[9px] font-bold">
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Estatísticas dos Logs Analisados */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                <div className="bg-[#101820] border border-white/10 rounded-xl p-2.5">
+                  <span className="text-[9px] text-[#8696a0] uppercase block">Console / Logs</span>
+                  <span className="text-xs font-black text-white">{generatedAiCard.analyzed_count?.console || 0} analisados</span>
+                </div>
+                <div className="bg-[#101820] border border-white/10 rounded-xl p-2.5">
+                  <span className="text-[9px] text-[#8696a0] uppercase block">Servidor Node</span>
+                  <span className="text-xs font-black text-purple-300">{generatedAiCard.analyzed_count?.server || 0} erros</span>
+                </div>
+                <div className="bg-[#101820] border border-white/10 rounded-xl p-2.5">
+                  <span className="text-[9px] text-[#8696a0] uppercase block">Gastrofood API</span>
+                  <span className="text-xs font-black text-amber-300">{generatedAiCard.analyzed_count?.gastrofood || 0} logs</span>
+                </div>
+                <div className="bg-[#101820] border border-white/10 rounded-xl p-2.5">
+                  <span className="text-[9px] text-[#8696a0] uppercase block">Auditoria ASTS</span>
+                  <span className="text-xs font-black text-emerald-300">{generatedAiCard.analyzed_count?.asts || 0} itens</span>
+                </div>
+              </div>
+
+              {/* Resumo Executivo */}
+              <div className="bg-gradient-to-r from-purple-950/30 via-[#121c24] to-[#101820] border border-purple-500/30 rounded-2xl p-4 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-purple-300 font-bold text-[11px]">
+                  <BrainCircuit size={14} /> Resumo Diagnóstico da I.A
+                </div>
+                <p className="text-xs text-purple-100/90 leading-relaxed">
+                  {generatedAiCard.summary}
+                </p>
+              </div>
+
+              {/* Plano Técnico Estruturado em Markdown */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[#8696a0] text-[10px] uppercase font-bold">
+                  <span className="flex items-center gap-1"><FileCode size={13} /> Plano Técnico & Arquivos a Modificar</span>
+                  <span>Markdown</span>
+                </div>
+                <pre className="p-4 bg-[#050a0e] border border-white/10 rounded-2xl text-[11px] text-cyan-200 overflow-x-auto max-h-[260px] custom-scrollbar font-mono leading-relaxed whitespace-pre-wrap select-all shadow-inner">
+                  {generatedAiCard.technical_plan}
+                </pre>
+              </div>
+            </div>
+
+            {/* Footer com Ações */}
+            <div className="p-4 sm:p-5 border-t border-white/10 bg-[#070c10] flex items-center justify-between gap-3 relative z-10 flex-wrap">
+              <button
+                onClick={() => {
+                  const fullText = `# ${generatedAiCard.title}\n\n**Resumo:**\n${generatedAiCard.summary}\n\n${generatedAiCard.technical_plan}`;
+                  navigator.clipboard.writeText(fullText);
+                  setCopyFeedback('Plano técnico copiado!');
+                  setTimeout(() => setCopyFeedback(null), 3000);
+                }}
+                className="bg-white/5 hover:bg-white/10 border border-white/15 text-[#d1d7db] hover:text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
+              >
+                <Copy size={14} /> Copiar Plano Técnico
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowAiCardModal(false)}
+                  className="bg-white/5 hover:bg-white/10 text-[#8696a0] hover:text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Fechar
+                </button>
+
+                <button
+                  onClick={() => {
+                    setShowAiCardModal(false);
+                    useDevStore.setState({ isVisible: false });
+                    navigate(`/crm/kanban/${createdCardBoardId}`);
+                  }}
+                  className="bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-black px-5 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 shadow-lg shadow-purple-600/30 active:scale-95 cursor-pointer"
+                >
+                  <ArrowUpRight size={15} /> Abrir no Kanban
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       <ServerLogsTerminal isOpen={showServerLogs} onClose={() => setShowServerLogs(false)} />
     </>
   );

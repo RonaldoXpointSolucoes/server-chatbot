@@ -269,7 +269,9 @@ class SessionManager {
 
             if (currentInstance && currentInstance.lease_until && new Date(currentInstance.lease_until) > now) {
                 if (assignedNodeId && assignedNodeId !== currentNodeId) {
-                    const errorMsg = `Instância ${instanceId} já possui um lock ativo pelo worker ${assignedNodeId} (lease até ${currentInstance.lease_until}). Conexão negada.`;
+                    const leaseExpiry = new Date(currentInstance.lease_until);
+                    const remainingSeconds = Math.max(1, Math.round((leaseExpiry - now) / 1000));
+                    const errorMsg = `Instância ${instanceId} já possui um lock ativo pelo worker ${assignedNodeId} (lease restante: ${remainingSeconds}s até ${currentInstance.lease_until}). Conexão negada.`;
                     console.warn(`[SessionManager] Lock negado: ${errorMsg}`);
                     throw new Error(errorMsg);
                 }
@@ -1226,7 +1228,8 @@ class SessionManager {
             await retryWithBackoff(() =>
                 supabase.from('whatsapp_instances').update({
                     status: 'offline',
-                    assigned_node_id: null
+                    assigned_node_id: null,
+                    lease_until: null
                 }).eq('id', instanceId)
                 .eq('assigned_node_id', NODE_ID)
             );

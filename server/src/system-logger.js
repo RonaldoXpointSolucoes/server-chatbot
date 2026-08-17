@@ -1,4 +1,5 @@
 import express from 'express';
+import { supabase } from './supabase.js';
 
 const MAX_LOGS = 200;
 const MAX_ERRORS = 100;
@@ -19,6 +20,51 @@ function broadcast(logEntry) {
 
 const APP_ENV = (process.env.APP_ENV || 'production').toUpperCase();
 const APP_NODE = process.env.APP_NODE || (APP_ENV === 'ALPHA' ? 'ALFA-A' : 'PROD-C');
+
+/**
+ * Persiste erros de forma não-bloqueante no Supabase (system_logs)
+ */
+export async function persistSystemLog({ type = 'Backend Error', message, level = 'error', payload = null, company_id = null, tenant_id = null }) {
+  try {
+    if (!supabase) return;
+    const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
+    
+    // Evita loops infinitos de recursão com o próprio Supabase
+    if (
+      msgStr.toLowerCase().includes('supabase') || 
+      msgStr.toLowerCase().includes('system_logs') || 
+      msgStr.toLowerCase().includes('db.yzbxsxabzncdzuxvlppt')
+    ) {
+      return;
+    }
+
+    const logPayload = payload || {};
+    if (!logPayload.environment) {
+      logPayload.environment = APP_ENV;
+    }
+    if (!logPayload.node) {
+      logPayload.node = APP_NODE;
+    }
+
+    supabase.from('system_logs').insert([{
+      type: type || 'Backend Error',
+      message: msgStr,
+      level: level || 'error',
+      payload: logPayload,
+      company_id: company_id || tenant_id || null,
+      tenant_id: tenant_id || company_id || null,
+      created_at: new Date().toISOString()
+    }]).then(({ error }) => {
+      if (error && !error.message?.includes('schema cache')) {
+        // Silêncio para evitar loop
+      }
+    }).catch(() => {
+      // Ignora falhas de rede silenciosamente
+    });
+  } catch (err) {
+    // Não-bloqueante
+  }
+}
 
 function interceptConsole() {
   const originalLog = console.log;
@@ -111,6 +157,20 @@ function interceptConsole() {
     if (level === 'error' || level === 'warn') {
       errorBuffer.push(logEntry);
       if (errorBuffer.length > MAX_ERRORS) errorBuffer.shift();
+
+      if (level === 'error') {
+        const errorObj = args.find(a => a instanceof Error);
+        persistSystemLog({
+          type: 'Backend Error',
+          message: text,
+          level: 'error',
+          payload: {
+            stack_trace: errorObj ? errorObj.stack : null,
+            environment: APP_ENV,
+            node: APP_NODE
+          }
+        });
+      }
     }
     
     if (text.includes('[Gastrofood API]')) {
@@ -266,6 +326,51 @@ router.delete('/gastrofood', (req, res) => {
 router.get('/all', (req, res) => {
   try {
     res.json({ success: true, logs: logBuffer });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para recepção e centralização de erros do Frontend e Serviços Externos
+router.post('/error', async (req, res) => {
+  try {
+    const { message, stack_trace, context, level = 'error', source = 'frontend', company_id, tenant_id } = req.body;
+    if (!message) {
+      return res.status(400).json({ error: 'Mensagem de erro obrigatória.' });
+    }
+
+    const payload = {
+      stack_trace: stack_trace || null,
+      context: context || {},
+      source: source || 'frontend',
+      environment: APP_ENV,
+      node: APP_NODE
+    };
+
+    const logEntry = {
+      type: 'log',
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      timestamp: new Date().toISOString(),
+      level: level === 'warn' ? 'warn' : 'error',
+      message: `[${(source || 'FRONTEND').toUpperCase()}] ${message}`
+    };
+    logBuffer.push(logEntry);
+    if (logBuffer.length > MAX_LOGS) logBuffer.shift();
+    if (level === 'error' || level === 'warn') {
+      errorBuffer.push(logEntry);
+      if (errorBuffer.length > MAX_ERRORS) errorBuffer.shift();
+    }
+    broadcast(logEntry);
+
+    persistSystemLog({
+      type: `${source === 'frontend' ? 'Frontend' : 'Backend'} Error`,
+      message,
+      level,
+      payload,
+      company_id: company_id || tenant_id || context?.tenantId || null
+    });
+
+    res.status(200).json({ success: true, message: 'Erro registrado com sucesso no sistema centralizado.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

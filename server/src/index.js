@@ -13,7 +13,7 @@ import morgan from 'morgan';
 import apiGateway from './api-gateway/index.js';
 import publicRestRoutes from './api-gateway/public-rest.js';
 import { setupSwagger } from './api-gateway/swagger.js';
-import systemLogger, { errorBuffer } from './system-logger.js';
+import systemLogger, { errorBuffer, persistSystemLog } from './system-logger.js';
 import { supabase, NODE_ID } from './supabase.js';
 import sessionManager from './session-manager/index.js';
 import snoozeManager from './snooze-manager.js';
@@ -313,6 +313,7 @@ setupSwagger(app);
 app.use('/', publicRestRoutes);
 
 app.use('/api', apiGateway);
+app.use('/api/logs', systemLogger);
 app.use('/api/v1/system/logs', systemLogger);
 
 // Middleware global de tratamento de erros (ex: Multer LIMIT_FILE_SIZE, Client Abort)
@@ -338,6 +339,22 @@ app.use((err, req, res, next) => {
     }
 
     console.error('Erro interno do servidor:', err);
+
+    if (typeof persistSystemLog === 'function') {
+        persistSystemLog({
+            type: 'Express Global Error',
+            message: err.message || 'Erro interno do servidor',
+            level: 'error',
+            payload: {
+                path: req.originalUrl || req.path,
+                method: req.method,
+                ip: req.ip,
+                query: req.query,
+                stack_trace: err.stack
+            }
+        });
+    }
+
     return res.status(500).json({ error: err.message || 'Erro interno no servidor' });
 });
 
@@ -538,11 +555,15 @@ app.listen(PORT, '0.0.0.0', async () => {
                 for (const instance of activeLeases) {
                     const startSessionWithRetry = (attempt = 1) => {
                         sessionManager.createSession(instance.tenant_id, instance.id).catch(e => {
-                            console.error(`Falha Auto-Restart (Tentativa ${attempt}): ${instance.id}`, e);
-                            if ((e.message.includes('lock ativo') || e.message.includes('Lock negado') || e.message.includes('Conexão negada')) && attempt < 3) {
-                                console.log(`[Worker Boot] Agendando retentativa de Auto-Restart para ${instance.id} em 30s devido a lock ativo de outro worker...`);
-                                setTimeout(() => startSessionWithRetry(attempt + 1), 30000);
-                            }
+                             const isLockError = e.message && (e.message.includes('lock ativo') || e.message.includes('Lock negado') || e.message.includes('Conexão negada'));
+                             if (isLockError && attempt < 3) {
+                                 console.log(`[Worker Boot] Instância ${instance.id} sob lease de outro nó. Agendando retentativa silenciosa (${attempt}/3) em 35s...`);
+                                 setTimeout(() => startSessionWithRetry(attempt + 1), 35000);
+                             } else if (isLockError) {
+                                 console.log(`[Worker Boot] Instância ${instance.id} permanece sob responsabilidade de outro nó ativo.`);
+                             } else {
+                                 console.error(`Falha Auto-Restart (Tentativa ${attempt}): ${instance.id} - ${e.message}`);
+                             }
                         });
                     };
                     startSessionWithRetry();

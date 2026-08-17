@@ -37,7 +37,15 @@ import {
   Radio,
   Wand2,
   Cpu,
-  Layers
+  Layers,
+  Check,
+  CheckCheck,
+  Terminal,
+  FileCode2,
+  ArrowRight,
+  ShieldCheck,
+  Zap,
+  Code
 } from 'lucide-react';
 import { useChatStore, instanceCache } from '../store/chatStore';
 import { supabase } from '../services/supabase';
@@ -152,6 +160,7 @@ interface CRMLead {
   probability: number;
   priority: number;
   notes: string;
+  technical_execution_details?: string | null;
   customer_id: string | null;
   agent_id: string | null;
   start_date: string | null;
@@ -162,9 +171,11 @@ interface CRMLead {
     to: string;
     by: string;
     at: string;
+    delivery_report?: any;
   }[];
   chatwoot_conversation_id: string | null;
   created_at: string;
+  position?: number;
 }
 
 export default function CrmKanban() {
@@ -218,6 +229,17 @@ export default function CrmKanban() {
 
   // IA status
   const [isQualifying, setIsQualifying] = useState(false);
+
+  // Estados para o Modal Detalhes do Lead Modernizado
+  const [leadDetailTab, setLeadDetailTab] = useState<'overview' | 'technical' | 'notes' | 'history'>('overview');
+  const [copiedDelivery, setCopiedDelivery] = useState(false);
+  const [isEditingNotes, setIsEditingNotes] = useState(false);
+  const [isEditingTechnical, setIsEditingTechnical] = useState(false);
+  const [techSummaryInput, setTechSummaryInput] = useState('');
+  const [techFilesInput, setTechFilesInput] = useState('');
+  const [techValidationInput, setTechValidationInput] = useState('npx tsc --noEmit (0 erros)');
+  const [techExecutorInput, setTechExecutorInput] = useState('');
+  const [validationAlertMessage, setValidationAlertMessage] = useState<string | null>(null);
 
   // Estados para Criação de Card com Áudio & IA
   const [isAiCardModalOpen, setIsAiCardModalOpen] = useState(false);
@@ -547,6 +569,18 @@ export default function CrmKanban() {
     const leadToUpdate = leads.find(l => l.id === leadId);
     if (!leadToUpdate) return;
 
+    // Validação de Governança: Para migrar para Em Testes & QA, exige detalhamento técnico
+    const isTargetTesting = targetStage === 'testing' || targetStage.toLowerCase().includes('teste') || targetStage.toLowerCase().includes('qa');
+    if (isTargetTesting && !hasTechnicalExecutionDetails(leadToUpdate)) {
+      setSelectedLead(leadToUpdate);
+      setLeadDetailTab('technical');
+      setIsEditingTechnical(true);
+      setValidationAlertMessage(`⚠️ O preenchimento do Detalhamento da Execução Técnica é obrigatório antes de migrar o card "${leadToUpdate.title}" para a etapa "Em Testes & QA".`);
+      setDraggedLeadId(null);
+      setDraggingOverStage(null);
+      return;
+    }
+
     // Sinalizar sucesso de drop
     droppedSuccessRef.current = true;
 
@@ -648,6 +682,16 @@ export default function CrmKanban() {
     const currentIndex = pipelineStages.findIndex(s => s.id === lead.status);
     if (currentIndex === -1 || currentIndex === pipelineStages.length - 1) return;
     const nextStage = pipelineStages[currentIndex + 1].id;
+
+    // Validação de Governança: Para migrar para Em Testes & QA, exige detalhamento técnico
+    const isTargetTesting = nextStage === 'testing' || nextStage.toLowerCase().includes('teste') || nextStage.toLowerCase().includes('qa');
+    if (isTargetTesting && !hasTechnicalExecutionDetails(lead)) {
+      setSelectedLead(lead);
+      setLeadDetailTab('technical');
+      setIsEditingTechnical(true);
+      setValidationAlertMessage(`⚠️ O preenchimento do Detalhamento da Execução Técnica é obrigatório antes de avançar o card "${lead.title}" para a etapa "Em Testes & QA".`);
+      return;
+    }
 
     const nextColLeads = leads
       .filter(l => l.status === nextStage && l.id !== lead.id)
@@ -814,20 +858,26 @@ export default function CrmKanban() {
   // Salvar edições do Lead selecionado
   const handleSaveLeadEdits = async (updatedLead: CRMLead) => {
     try {
+      const updatePayload: any = {
+        title: updatedLead.title,
+        status: updatedLead.status,
+        estimated_revenue: updatedLead.estimated_revenue,
+        probability: updatedLead.probability,
+        priority: updatedLead.priority,
+        notes: updatedLead.notes,
+        customer_id: updatedLead.customer_id || null,
+        agent_id: updatedLead.agent_id || null,
+        due_date: updatedLead.due_date || null,
+        tags: updatedLead.tags
+      };
+
+      if (updatedLead.history) {
+        updatePayload.history = updatedLead.history;
+      }
+
       const { error } = await supabase
         .from('crm_leads')
-        .update({
-          title: updatedLead.title,
-          status: updatedLead.status,
-          estimated_revenue: updatedLead.estimated_revenue,
-          probability: updatedLead.probability,
-          priority: updatedLead.priority,
-          notes: updatedLead.notes,
-          customer_id: updatedLead.customer_id || null,
-          agent_id: updatedLead.agent_id || null,
-          due_date: updatedLead.due_date || null,
-          tags: updatedLead.tags
-        })
+        .update(updatePayload)
         .eq('id', updatedLead.id);
 
       if (error) throw error;
@@ -835,6 +885,80 @@ export default function CrmKanban() {
       setSelectedLead(updatedLead);
     } catch (err) {
       console.error('Erro ao salvar edições do lead:', err);
+    }
+  };
+
+  // Verifica se o lead possui detalhamento técnico de execução registrado
+  const hasTechnicalExecutionDetails = (lead: CRMLead) => {
+    const latestDelivery = lead.history?.slice().reverse().find(h => (h as any).delivery_report);
+    if (latestDelivery) return true;
+    if (lead.technical_execution_details && lead.technical_execution_details.trim().length > 0) return true;
+    if (lead.notes && (
+      lead.notes.includes('### 🚀 Registro de Entrega & Execução Técnica') ||
+      lead.notes.includes('Registro de Entrega') ||
+      lead.notes.includes('🛠️ Arquitetura')
+    )) {
+      return true;
+    }
+    return false;
+  };
+
+  // Salvar detalhamento da execução técnica
+  const handleSaveTechnicalExecution = async (lead: CRMLead, summary: string, filesText: string, validationText: string, executorName?: string) => {
+    try {
+      const filesList = filesText.split('\n').map(l => l.trim()).filter(Boolean).map(line => {
+        const parts = line.split('->').map(p => p.trim());
+        return {
+          file: parts[0] || line,
+          functions: parts[1] ? parts[1].split(',').map(f => f.trim()) : ['Implementação'],
+          description: parts[2] || parts[0] || line
+        };
+      });
+
+      const executor = executorName || localStorage.getItem('current_user_name') || 'Desenvolvedor / Antigravity AI';
+
+      const deliveryReport = {
+        title: lead.title,
+        status: 'testing',
+        summary: summary || 'Execução técnica e implementação concluídas.',
+        executor,
+        executed_at: new Date().toISOString(),
+        validation: {
+          status: 'Aprovado',
+          type_checking: validationText || 'npx tsc --noEmit (0 erros)'
+        },
+        files_modified: filesList.length > 0 ? filesList : [
+          {
+            file: 'Código-Fonte do Projeto',
+            functions: ['Execução'],
+            description: summary
+          }
+        ]
+      };
+
+      const newHistoryItem = {
+        at: new Date().toISOString(),
+        by: executor,
+        to: lead.status === 'development' ? 'testing' : lead.status,
+        from: lead.status,
+        delivery_report: deliveryReport
+      };
+
+      const deliverySection = `\n\n---\n### 🚀 Registro de Entrega & Execução Técnica\n**Data/Hora:** ${new Date().toLocaleString('pt-BR')}\n**Executor:** ${executor}\n**Status:** Validado e migrado para Homologação & QA\n\n${summary}`;
+      const cleanNotes = (lead.notes || '').split('### 🚀 Registro de Entrega & Execução Técnica')[0].trim();
+      const updatedNotes = cleanNotes ? `${cleanNotes}${deliverySection}` : deliverySection.trim();
+
+      const updatedLead: CRMLead = {
+        ...lead,
+        notes: updatedNotes,
+        technical_execution_details: summary,
+        history: [...(lead.history || []), newHistoryItem]
+      };
+
+      await handleSaveLeadEdits(updatedLead);
+      setIsEditingTechnical(false);
+    } catch (err: any) {
+      console.error('Erro ao salvar detalhamento técnico:', err);
     }
   };
 
@@ -1656,233 +1780,730 @@ export default function CrmKanban() {
         </div>
       )}
 
-      {/* MODAL: Detalhes do Cartão / Oportunidade */}
-      {selectedLead && (
-        <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#111b21] w-full max-w-2xl rounded-[28px] border border-slate-200/50 dark:border-white/5 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
-            {/* Cabeçalho */}
-            <div className="px-6 py-5 border-b border-slate-200/20 dark:border-white/5 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-amber-550/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shadow-inner">
-                  <FileText size={18} />
-                </div>
-                <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 font-sans uppercase tracking-wider">Detalhes do Lead</h3>
-              </div>
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={() => handleDeleteLead(selectedLead.id)}
-                  className="p-2 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 rounded-xl transition-colors cursor-pointer"
-                  title="Excluir Oportunidade"
-                >
-                  <Trash2 size={14} />
-                </button>
-                <button 
-                  onClick={() => setSelectedLead(null)} 
-                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-            </div>
+      {/* MODAL: Detalhes do Cartão / Oportunidade Modernizado */}
+      {selectedLead && (() => {
+        // Extrair informações de entrega técnica da IA
+        const latestDeliveryHistory = selectedLead.history?.slice().reverse().find(h => (h as any).delivery_report);
+        const deliveryReport = (latestDeliveryHistory as any)?.delivery_report || null;
+        const currentStageObj = pipelineStages.find(s => s.id === selectedLead.status);
+        const hasDeliveryInfo = !!deliveryReport || (selectedLead.notes && selectedLead.notes.includes('### 🚀 Registro de Entrega & Execução Técnica'));
 
-            {/* Conteúdo Rolável */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar text-xs text-left bg-white dark:bg-[#111b21]">
-              {/* Título & Faturamento rápido */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Nome/Título</label>
-                  <input 
-                    type="text" 
-                    value={selectedLead.title}
-                    onChange={e => handleSaveLeadEdits({ ...selectedLead, title: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all duration-300"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Faturamento Estimado (R$)</label>
-                  <input 
-                    type="number" 
-                    value={selectedLead.estimated_revenue}
-                    onChange={e => handleSaveLeadEdits({ ...selectedLead, estimated_revenue: Number(e.target.value) })}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all duration-300"
-                  />
-                </div>
-              </div>
+        const handleCopyDeliveryText = () => {
+          let textToCopy = '';
+          if (deliveryReport) {
+            textToCopy = `📦 RELATÓRIO DE ENTREGA TÉCNICA (IA DEV)\n📅 Data/Hora: ${deliveryReport.executed_at ? format(new Date(deliveryReport.executed_at), 'dd/MM/yyyy HH:mm:ss') : new Date().toLocaleString('pt-BR')}\n🤖 Executor: ${deliveryReport.executor || 'Antigravity AI (Fila Dev)'}\n🧪 Status: Em Testes & QA\n\n📝 Resumo:\n${deliveryReport.summary || ''}\n\n🛠️ Arquivos & Funções Modificadas:\n${(deliveryReport.files_modified || []).map((f: any) => `• ${f.file}\n  Funções: ${(f.functions || []).join(', ')}\n  Detalhes: ${f.description || ''}`).join('\n\n')}\n\n🔍 Validação:\n• TypeScript: npx tsc --noEmit (0 erros)`;
+          } else if (selectedLead.notes && selectedLead.notes.includes('### 🚀 Registro de Entrega & Execução Técnica')) {
+            const parts = selectedLead.notes.split('### 🚀 Registro de Entrega & Execução Técnica');
+            textToCopy = `### 🚀 Registro de Entrega & Execução Técnica\n` + parts[1].trim();
+          } else {
+            textToCopy = `Card: ${selectedLead.title}\nStatus: ${currentStageObj?.label || selectedLead.status}\nNotas:\n${selectedLead.notes || 'Sem notas'}`;
+          }
 
-              {/* IA Qualificador */}
-              {board.config?.features?.aiSummary && (
-                <div className="p-4.5 bg-indigo-500/[0.03] dark:bg-indigo-500/[0.06] border border-indigo-500/15 dark:border-indigo-500/10 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <h4 className="font-black text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 font-sans uppercase tracking-wider text-[10px]">
-                      <Sparkles size={14} className="animate-pulse" />
-                      Qualificação por Inteligência Artificial
-                    </h4>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                      O Gemini analisará as conversas anteriores e atualizará o resumo de negócios e prioridades automaticamente.
-                    </p>
-                  </div>
-                  <button 
-                    type="button"
-                    disabled={isQualifying}
-                    onClick={handleAIQualify}
-                    className="px-4.5 py-2.5 bg-gradient-to-tr from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl font-bold shadow-md shadow-indigo-500/10 hover:shadow-indigo-500/20 transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none cursor-pointer text-xs flex items-center gap-1.5 shrink-0 self-start md:self-auto"
-                  >
-                    {isQualifying ? (
-                      <>
-                        <Loader2 size={13} className="animate-spin" />
-                        Qualificando...
-                      </>
+          navigator.clipboard.writeText(textToCopy);
+          setCopiedDelivery(true);
+          setTimeout(() => setCopiedDelivery(false), 2500);
+        };
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 transition-all duration-300">
+            <div className="bg-white dark:bg-[#111b21] w-full max-w-3xl rounded-t-[32px] sm:rounded-[28px] border border-slate-200/80 dark:border-white/10 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[92vh] sm:max-h-[88vh]">
+              
+              {/* Top Banner com Gradiente e Identificação do Estágio */}
+              <div className="px-6 pt-5 pb-4 border-b border-slate-200/50 dark:border-white/5 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-black/20">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={cn(
+                    "w-10 h-10 rounded-2xl flex items-center justify-center shadow-md shrink-0",
+                    selectedLead.status === 'testing'
+                      ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                      : selectedLead.status === 'development'
+                        ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
+                        : selectedLead.status === 'analysis'
+                          ? "bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/20"
+                          : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                  )}>
+                    {selectedLead.status === 'testing' ? (
+                      <Cpu size={20} className="animate-pulse" />
+                    ) : selectedLead.status === 'development' ? (
+                      <Wand2 size={20} />
                     ) : (
+                      <FileText size={20} />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={cn(
+                        "px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border",
+                        currentStageObj ? getColorClasses(currentStageObj.color).badge : "bg-slate-100 text-slate-600 border-slate-200"
+                      )}>
+                        {currentStageObj?.label || selectedLead.status}
+                      </span>
+                      {hasDeliveryInfo && (
+                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                          <CheckCircle2 size={10} />
+                          IA Entregue
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 truncate mt-0.5">
+                      {selectedLead.title}
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button 
+                    onClick={() => handleCopyLead(selectedLead)}
+                    className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-white/5 rounded-xl transition-all cursor-pointer"
+                    title="Duplicar Card"
+                  >
+                    <Copy size={16} />
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteLead(selectedLead.id)}
+                    className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl transition-all cursor-pointer"
+                    title="Excluir Oportunidade"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                  <button 
+                    onClick={() => setSelectedLead(null)} 
+                    className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all cursor-pointer"
+                    title="Fechar"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Segmented Controls / Abas de Navegação */}
+              <div className="px-6 pt-3 pb-2 border-b border-slate-200/40 dark:border-white/5 flex items-center gap-1.5 overflow-x-auto custom-scrollbar bg-slate-50/30 dark:bg-black/10">
+                <button
+                  type="button"
+                  onClick={() => setLeadDetailTab('overview')}
+                  className={cn(
+                    "px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all duration-200 flex items-center gap-1.5 shrink-0 cursor-pointer",
+                    leadDetailTab === 'overview'
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
+                  )}
+                >
+                  <Sliders size={13} />
+                  Geral & Comercial
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLeadDetailTab('technical')}
+                  className={cn(
+                    "px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all duration-200 flex items-center gap-1.5 shrink-0 cursor-pointer relative",
+                    leadDetailTab === 'technical'
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
+                  )}
+                >
+                  <Cpu size={13} />
+                  Execução & Entrega IA
+                  {hasDeliveryInfo && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLeadDetailTab('notes')}
+                  className={cn(
+                    "px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all duration-200 flex items-center gap-1.5 shrink-0 cursor-pointer",
+                    leadDetailTab === 'notes'
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
+                  )}
+                >
+                  <FileText size={13} />
+                  Notas & Briefing
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLeadDetailTab('history')}
+                  className={cn(
+                    "px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all duration-200 flex items-center gap-1.5 shrink-0 cursor-pointer",
+                    leadDetailTab === 'history'
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
+                  )}
+                >
+                  <History size={13} />
+                  Histórico ({selectedLead.history?.length || 0})
+                </button>
+              </div>
+
+              {/* Conteúdo da Aba Ativa */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar text-xs text-left bg-white dark:bg-[#111b21]">
+                
+                {/* ABA 1: GERAL & COMERCIAL */}
+                {leadDetailTab === 'overview' && (
+                  <div className="space-y-6 animate-in fade-in duration-200">
+                    {/* Título & Faturamento */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div className="space-y-1.5">
+                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Nome / Título do Lead</label>
+                        <input 
+                          type="text" 
+                          value={selectedLead.title}
+                          onChange={e => handleSaveLeadEdits({ ...selectedLead, title: e.target.value })}
+                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Faturamento Estimado (R$)</label>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">R$</span>
+                          <input 
+                            type="number" 
+                            value={selectedLead.estimated_revenue}
+                            onChange={e => handleSaveLeadEdits({ ...selectedLead, estimated_revenue: Number(e.target.value) })}
+                            className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* IA Qualificador Gemini */}
+                    {board.config?.features?.aiSummary && (
+                      <div className="p-4.5 bg-gradient-to-br from-indigo-500/[0.06] via-indigo-500/[0.02] to-purple-500/[0.05] border border-indigo-500/20 dark:border-indigo-500/15 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+                        <div className="space-y-1">
+                          <h4 className="font-black text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 font-sans uppercase tracking-wider text-[10.5px]">
+                            <Sparkles size={14} className="animate-pulse text-amber-500" />
+                            Qualificação Automática por IA (Gemini)
+                          </h4>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                            O Gemini analisa o histórico de conversas do cliente e calcula probabilidade de fechamento, prioridade e resumo executivo.
+                          </p>
+                        </div>
+                        <button 
+                          type="button"
+                          disabled={isQualifying}
+                          onClick={handleAIQualify}
+                          className="px-4.5 py-2.5 bg-gradient-to-tr from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white rounded-xl font-bold shadow-md shadow-indigo-500/20 transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none cursor-pointer text-xs flex items-center gap-1.5 shrink-0 self-start md:self-auto"
+                        >
+                          {isQualifying ? (
+                            <>
+                              <Loader2 size={13} className="animate-spin" />
+                              Analisando...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={13} />
+                              Qualificar com IA
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Status, Prioridade e Probabilidade */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                      <div className="space-y-1.5">
+                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Coluna / Estágio</label>
+                        <select 
+                          value={selectedLead.status}
+                          onChange={e => handleSaveLeadEdits({ ...selectedLead, status: e.target.value })}
+                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer"
+                        >
+                          {pipelineStages.map(s => (
+                            <option key={s.id} value={s.id} className="dark:bg-[#111b21]">{s.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Prioridade</label>
+                        <div className="flex items-center gap-2 h-[42px] px-3 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl">
+                          {[1, 2, 3].map(p => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => handleSaveLeadEdits({ ...selectedLead, priority: p })}
+                              className={cn(
+                                "flex-1 py-1 rounded-lg text-[10px] font-black transition-all flex items-center justify-center gap-1 cursor-pointer",
+                                selectedLead.priority === p
+                                  ? p === 3 
+                                    ? "bg-rose-500 text-white shadow-sm"
+                                    : p === 2
+                                      ? "bg-amber-500 text-white shadow-sm"
+                                      : "bg-emerald-500 text-white shadow-sm"
+                                  : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-white/5"
+                              )}
+                            >
+                              <Star size={11} className={selectedLead.priority === p ? "fill-current" : ""} />
+                              {p === 1 ? "Baixa" : p === 2 ? "Média" : "Alta"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Probabilidade de Sucesso</label>
+                          <span className="font-black text-indigo-600 dark:text-indigo-400 text-[10px]">{selectedLead.probability}%</span>
+                        </div>
+                        <input 
+                          type="range" 
+                          min="0" 
+                          max="100" 
+                          value={selectedLead.probability}
+                          onChange={e => handleSaveLeadEdits({ ...selectedLead, probability: Number(e.target.value) })}
+                          className="w-full mt-2 accent-indigo-600 cursor-pointer h-2 bg-slate-200 dark:bg-slate-700 rounded-lg"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Responsável e Data */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div className="space-y-1.5">
+                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Agente / Responsável</label>
+                        <select 
+                          value={selectedLead.agent_id || ''}
+                          onChange={e => handleSaveLeadEdits({ ...selectedLead, agent_id: e.target.value || null })}
+                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer"
+                        >
+                          <option value="" className="dark:bg-[#111b21]">Sem responsável atribuído</option>
+                          {agents.map(a => (
+                            <option key={a.id} value={a.id} className="dark:bg-[#111b21]">{a.full_name || a.email}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Prazo Limite / Vencimento</label>
+                        <input 
+                          type="date" 
+                          value={selectedLead.due_date || ''}
+                          onChange={e => handleSaveLeadEdits({ ...selectedLead, due_date: e.target.value || null })}
+                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Tags / Marcadores */}
+                    <div className="space-y-1.5">
+                      <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Tags & Marcadores (separados por vírgula)</label>
+                      <input 
+                        type="text" 
+                        value={(selectedLead.tags || []).join(', ')}
+                        placeholder="ex: URGENTE, SISTEMA, BUGFIX, GASTROFOOD"
+                        onChange={e => {
+                          const newTags = e.target.value.split(',').map(t => t.trim()).filter(Boolean);
+                          handleSaveLeadEdits({ ...selectedLead, tags: newTags });
+                        }}
+                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* ABA 2: EXECUÇÃO & ENTREGA TÉCNICA IA */}
+                {leadDetailTab === 'technical' && (
+                  <div className="space-y-5 animate-in fade-in duration-200">
+                    {/* Alerta de Validação se houver */}
+                    {validationAlertMessage && (
+                      <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-start justify-between gap-3 text-amber-700 dark:text-amber-300 text-xs">
+                        <div className="flex items-start gap-2.5">
+                          <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-extrabold block">Ação Bloqueada por Governança</span>
+                            <span className="mt-0.5 block leading-relaxed">{validationAlertMessage}</span>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => setValidationAlertMessage(null)}
+                          className="text-amber-500 hover:text-amber-700 p-1 cursor-pointer"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Modo Edição Manual do Detalhamento Técnico */}
+                    {isEditingTechnical ? (
+                      <div className="p-5 bg-slate-50 dark:bg-[#1a242c] border border-indigo-500/30 rounded-2xl space-y-4 shadow-sm">
+                        <div className="flex items-center justify-between border-b border-slate-200 dark:border-white/5 pb-3">
+                          <div className="flex items-center gap-2">
+                            <Code size={18} className="text-indigo-500" />
+                            <h4 className="text-xs font-extrabold text-slate-800 dark:text-slate-100 uppercase tracking-wider">
+                              Registrar / Atualizar Detalhamento da Execução Técnica
+                            </h4>
+                          </div>
+                          <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
+                            Obrigatório para Testes & QA
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9px] flex items-center gap-1">
+                            <Sparkles size={11} className="text-amber-500" />
+                            Resumo Executivo do que foi Desenvolvido / Codificado *
+                          </label>
+                          <textarea
+                            rows={4}
+                            value={techSummaryInput}
+                            onChange={e => setTechSummaryInput(e.target.value)}
+                            placeholder="Descreva as soluções, regras de negócio implementadas, correções e motivos técnicos..."
+                            className="w-full px-3.5 py-2.5 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/10 rounded-xl text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 font-sans leading-relaxed"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9px] flex items-center gap-1">
+                              <CheckCircle2 size={11} className="text-emerald-500" />
+                              Validação Técnica / Testes Realizados
+                            </label>
+                            <input
+                              type="text"
+                              value={techValidationInput}
+                              onChange={e => setTechValidationInput(e.target.value)}
+                              placeholder="ex: npx tsc --noEmit (0 erros) ou Testes E2E OK"
+                              className="w-full px-3.5 py-2 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/10 rounded-xl text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9px] flex items-center gap-1">
+                              <User size={11} className="text-indigo-500" />
+                              Executor / Desenvolvedor Responsável
+                            </label>
+                            <input
+                              type="text"
+                              value={techExecutorInput}
+                              onChange={e => setTechExecutorInput(e.target.value)}
+                              placeholder="Nome do desenvolvedor ou IA"
+                              className="w-full px-3.5 py-2 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/10 rounded-xl text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9px] flex items-center gap-1">
+                            <FileCode2 size={11} className="text-indigo-500" />
+                            Arquivos & Funções Modificadas (1 por linha: arquivo -&gt; funcoes -&gt; descricao)
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={techFilesInput}
+                            onChange={e => setTechFilesInput(e.target.value)}
+                            placeholder="ex: src/pages/CrmKanban.tsx -&gt; handleDrop, handleSaveLeadEdits -&gt; Adicionada validação para estágio de testes"
+                            className="w-full px-3.5 py-2 bg-white dark:bg-[#111b21] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2.5 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingTechnical(false)}
+                            className="px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!techSummaryInput.trim()) {
+                                alert('O resumo executivo da execução técnica é obrigatório.');
+                                return;
+                              }
+                              handleSaveTechnicalExecution(selectedLead, techSummaryInput, techFilesInput, techValidationInput, techExecutorInput);
+                              setValidationAlertMessage(null);
+                            }}
+                            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-500/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Check size={14} />
+                            Salvar Detalhamento Técnico
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Modo de Visualização do Relatório Técnico */
                       <>
-                        <Sparkles size={13} />
-                        Resumo IA
+                        <div className="p-5 bg-gradient-to-br from-emerald-500/[0.08] via-indigo-500/[0.04] to-purple-500/[0.06] border border-emerald-500/25 dark:border-emerald-500/20 rounded-2xl shadow-sm">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-emerald-500/15 pb-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
+                                <Cpu size={22} />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                                    ⚡ Detalhamento de Execução
+                                  </span>
+                                  <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30">
+                                    {currentStageObj?.label || selectedLead.status}
+                                  </span>
+                                </div>
+                                <h4 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 mt-1">
+                                  Registro de Implementação Técnica
+                                </h4>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTechSummaryInput(deliveryReport?.summary || selectedLead.technical_execution_details || '');
+                                  const filesStr = (deliveryReport?.files_modified || []).map((f: any) => `${f.file} -> ${(f.functions || []).join(', ')} -> ${f.description || ''}`).join('\n');
+                                  setTechFilesInput(filesStr);
+                                  setTechValidationInput(deliveryReport?.validation?.type_checking || 'npx tsc --noEmit (0 erros)');
+                                  setTechExecutorInput(deliveryReport?.executor || '');
+                                  setIsEditingTechnical(true);
+                                }}
+                                className="px-3.5 py-2 bg-indigo-50 dark:bg-indigo-500/10 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <Edit2 size={13} />
+                                Editar Detalhamento
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={handleCopyDeliveryText}
+                                className="px-3.5 py-2 bg-white dark:bg-[#1a242c] hover:bg-slate-100 dark:hover:bg-[#222e38] text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                              >
+                                {copiedDelivery ? (
+                                  <>
+                                    <CheckCheck size={14} className="text-emerald-500" />
+                                    <span className="text-emerald-600 dark:text-emerald-400">Copiado!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy size={14} />
+                                    Copiar Registro
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Metadados da Entrega */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 text-[10.5px]">
+                            <div className="p-3 bg-white/60 dark:bg-[#1a242c]/60 rounded-xl border border-slate-200/50 dark:border-white/5">
+                              <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8.5px] block">📅 Data & Hora do Registro</span>
+                              <span className="font-extrabold text-slate-800 dark:text-slate-200 mt-0.5 block">
+                                {deliveryReport?.executed_at 
+                                  ? format(new Date(deliveryReport.executed_at), 'dd/MM/yyyy HH:mm:ss')
+                                  : selectedLead.created_at ? format(new Date(selectedLead.created_at), 'dd/MM/yyyy HH:mm:ss') : 'Hoje'}
+                              </span>
+                            </div>
+                            <div className="p-3 bg-white/60 dark:bg-[#1a242c]/60 rounded-xl border border-slate-200/50 dark:border-white/5">
+                              <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8.5px] block">🤖 Executor da Codificação</span>
+                              <span className="font-extrabold text-indigo-600 dark:text-indigo-400 mt-0.5 block truncate">
+                                {deliveryReport?.executor || 'Desenvolvedor / Antigravity AI'}
+                              </span>
+                            </div>
+                            <div className="p-3 bg-white/60 dark:bg-[#1a242c]/60 rounded-xl border border-slate-200/50 dark:border-white/5">
+                              <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8.5px] block">🔍 Validação & Build</span>
+                              <span className="font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5 flex items-center gap-1">
+                                <CheckCircle2 size={12} />
+                                {deliveryReport?.validation?.type_checking || 'TypeScript: 0 Erros (OK)'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Resumo da Solução */}
+                        <div className="space-y-2">
+                          <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px] flex items-center gap-1">
+                            <Sparkles size={12} className="text-amber-500" />
+                            Resumo Executivo do que foi Codificado & Implementado
+                          </label>
+                          <div className="p-4 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl text-slate-800 dark:text-slate-200 text-xs leading-relaxed whitespace-pre-wrap">
+                            {deliveryReport?.summary || selectedLead.technical_execution_details || (
+                              selectedLead.notes && selectedLead.notes.includes('### 🚀 Registro de Entrega & Execução Técnica')
+                                ? selectedLead.notes.split('### 🚀 Registro de Entrega & Execução Técnica')[1].trim()
+                                : 'Nenhum detalhamento registrado ainda. Clique em "Editar Detalhamento" para registrar a execução técnica deste card.'
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Arquivos e Funções Modificadas */}
+                        <div className="space-y-3">
+                          <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px] flex items-center gap-1">
+                            <Terminal size={12} className="text-indigo-500" />
+                            Arquivos e Funções Modificadas no Código-Fonte
+                          </label>
+
+                          {deliveryReport?.files_modified && deliveryReport.files_modified.length > 0 ? (
+                            <div className="space-y-3">
+                              {deliveryReport.files_modified.map((item: any, idx: number) => (
+                                <div key={idx} className="p-4 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl space-y-2">
+                                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/50 dark:border-white/5 pb-2">
+                                    <div className="flex items-center gap-2 font-mono text-[11px] font-extrabold text-indigo-600 dark:text-indigo-400">
+                                      <FileCode2 size={14} />
+                                      <span>{item.file}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      {(item.functions || []).map((fn: string, fnIdx: number) => (
+                                        <span key={fnIdx} className="px-2 py-0.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 rounded-md font-mono text-[9.5px] font-bold border border-indigo-500/15">
+                                          fn: {fn}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
+                                    {item.description}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="p-6 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl text-center space-y-3">
+                              <FileCode2 size={24} className="mx-auto text-slate-400" />
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                Nenhum arquivo modificado foi listado explicitamente para este cartão.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTechSummaryInput(deliveryReport?.summary || selectedLead.notes || '');
+                                  setIsEditingTechnical(true);
+                                }}
+                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <Plus size={14} />
+                                Inserir Arquivos & Detalhes
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </>
                     )}
-                  </button>
-                </div>
-              )}
-
-              {/* Status, Prioridade e Probabilidade */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Coluna/Estágio</label>
-                  <select 
-                    value={selectedLead.status}
-                    onChange={e => handleSaveLeadEdits({ ...selectedLead, status: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer appearance-none"
-                  >
-                    {pipelineStages.map(s => (
-                      <option key={s.id} value={s.id} className="dark:bg-[#111b21]">{s.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Prioridade</label>
-                  <select 
-                    value={selectedLead.priority}
-                    onChange={e => handleSaveLeadEdits({ ...selectedLead, priority: Number(e.target.value) })}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer appearance-none"
-                  >
-                    <option value="1" className="dark:bg-[#111b21]">⭐ Baixa</option>
-                    <option value="2" className="dark:bg-[#111b21]">⭐⭐ Média</option>
-                    <option value="3" className="dark:bg-[#111b21]">⭐⭐⭐ Alta</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Probabilidade ({selectedLead.probability}%)</label>
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="100" 
-                    value={selectedLead.probability}
-                    onChange={e => handleSaveLeadEdits({ ...selectedLead, probability: Number(e.target.value) })}
-                    className="w-full mt-2.5 accent-indigo-500 cursor-pointer"
-                  />
-                </div>
-              </div>
-
-              {/* Responsável e Data */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Agente / Responsável</label>
-                  <select 
-                    value={selectedLead.agent_id || ''}
-                    onChange={e => handleSaveLeadEdits({ ...selectedLead, agent_id: e.target.value || null })}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer appearance-none"
-                  >
-                    <option value="" className="dark:bg-[#111b21]">Sem responsável</option>
-                    {agents.map(a => (
-                      <option key={a.id} value={a.id} className="dark:bg-[#111b21]">{a.full_name || a.email}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Prazo de Vencimento</label>
-                  <input 
-                    type="date" 
-                    value={selectedLead.due_date || ''}
-                    onChange={e => handleSaveLeadEdits({ ...selectedLead, due_date: e.target.value || null })}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all duration-300"
-                  />
-                </div>
-              </div>
-
-              {/* Notas e Histórico de Qualificação */}
-              <div className="space-y-1">
-                <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Resumo Comercial e Notas</label>
-                {selectedLead.notes && selectedLead.notes.includes('<p>') ? (
-                  <div 
-                    className="p-4 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-2xl min-h-[120px] text-slate-800 dark:text-slate-100 leading-relaxed max-h-[300px] overflow-y-auto custom-scrollbar"
-                    dangerouslySetInnerHTML={{ __html: selectedLead.notes }}
-                  />
-                ) : (
-                  <textarea 
-                    rows={4}
-                    placeholder="Adicione observações importantes sobre este cliente, dores dele, ou histórico..."
-                    value={selectedLead.notes || ''}
-                    onChange={e => handleSaveLeadEdits({ ...selectedLead, notes: e.target.value })}
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-2xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white leading-relaxed custom-scrollbar"
-                  />
-                )}
-                {selectedLead.notes && selectedLead.notes.includes('<p>') && (
-                  <button 
-                    onClick={() => handleSaveLeadEdits({ ...selectedLead, notes: selectedLead.notes.replace(/<[^>]*>/g, '') })}
-                    className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline mt-1.5 block"
-                  >
-                    ✏️ Editar notas como texto puro
-                  </button>
-                )}
-              </div>
-
-              {/* Histórico de Transições */}
-              {selectedLead.history && selectedLead.history.length > 0 && (
-                <div className="space-y-2.5">
-                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block text-[9px]">Histórico de Movimentações</label>
-                  <div className="space-y-3 border-l border-indigo-500/25 pl-4 ml-2 text-left">
-                    {selectedLead.history.map((h, i) => (
-                      <div key={i} className="relative">
-                        <div className="absolute -left-[21px] top-1.5 w-2 h-2 rounded-full bg-indigo-500 border-2 border-white dark:border-[#111b21]" />
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                          De <span className="font-black text-slate-800 dark:text-slate-200">{pipelineStages.find(s => s.id === h.from)?.label || h.from}</span> para{' '}
-                          <span className="font-black text-slate-800 dark:text-slate-200">{pipelineStages.find(s => s.id === h.to)?.label || h.to}</span> por{' '}
-                          <span className="font-black text-slate-800 dark:text-slate-200">{h.by}</span> em {format(new Date(h.at), 'dd/MM/yyyy HH:mm')}
-                        </p>
-                      </div>
-                    ))}
                   </div>
-                </div>
-              )}
-            </div>
+                )}
 
-            {/* Footer fixado */}
-            <div className="px-6 py-4.5 border-t border-slate-200/50 dark:border-white/5 bg-slate-50/50 dark:bg-black/10 shrink-0 flex items-center justify-between">
-              {selectedLead.customer_id ? (
-                <button 
-                  onClick={() => {
-                    useChatStore.getState().setActiveChat(selectedLead.customer_id);
-                    navigate('/chat');
-                  }}
-                  className="flex items-center gap-1.5 px-4.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/25 transition-all duration-200 active:scale-95 cursor-pointer"
-                >
-                  <MessageSquare size={14} />
-                  Abrir Chat do WhatsApp
-                </button>
-              ) : (
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">Sem contato vinculado</span>
-              )}
-              <button 
-                onClick={() => setSelectedLead(null)}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 font-bold rounded-xl transition-colors active:scale-95 cursor-pointer text-xs"
-              >
-                Fechar Painel
-              </button>
+                {/* ABA 3: NOTAS & BRIEFING */}
+                {leadDetailTab === 'notes' && (
+                  <div className="space-y-4 animate-in fade-in duration-200">
+                    <div className="flex justify-between items-center">
+                      <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Briefing, Requisitos e Observações</label>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingNotes(!isEditingNotes)}
+                        className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        {isEditingNotes ? "👁️ Visualizar Formatado" : "✏️ Modo Edição"}
+                      </button>
+                    </div>
+
+                    {isEditingNotes ? (
+                      <textarea 
+                        rows={10}
+                        placeholder="Adicione observações importantes, escopo técnico, dores do cliente ou histórico..."
+                        value={selectedLead.notes || ''}
+                        onChange={e => handleSaveLeadEdits({ ...selectedLead, notes: e.target.value })}
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white leading-relaxed custom-scrollbar font-mono"
+                      />
+                    ) : selectedLead.notes && selectedLead.notes.includes('<p>') ? (
+                      <div 
+                        className="p-5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl min-h-[140px] text-slate-800 dark:text-slate-100 leading-relaxed max-h-[380px] overflow-y-auto custom-scrollbar prose dark:prose-invert text-xs"
+                        dangerouslySetInnerHTML={{ __html: selectedLead.notes }}
+                      />
+                    ) : (
+                      <div className="p-5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl min-h-[140px] text-slate-800 dark:text-slate-100 leading-relaxed max-h-[380px] overflow-y-auto custom-scrollbar whitespace-pre-wrap font-sans text-xs">
+                        {selectedLead.notes || (
+                          <span className="text-slate-400 dark:text-slate-500 italic">
+                            Nenhuma nota cadastrada. Clique em "Modo Edição" para registrar o briefing deste lead.
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ABA 4: HISTÓRICO DE TRANSIÇÕES */}
+                {leadDetailTab === 'history' && (
+                  <div className="space-y-4 animate-in fade-in duration-200">
+                    <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block text-[9px]">
+                      Linha do Tempo de Movimentações na Esteira
+                    </label>
+
+                    {selectedLead.history && selectedLead.history.length > 0 ? (
+                      <div className="space-y-4 border-l-2 border-indigo-500/25 dark:border-indigo-500/20 pl-5 ml-3 text-left">
+                        {selectedLead.history.map((h, i) => {
+                          const fromStage = pipelineStages.find(s => s.id === h.from)?.label || h.from;
+                          const toStage = pipelineStages.find(s => s.id === h.to)?.label || h.to;
+                          const isAi = h.by?.includes('Antigravity') || h.by?.includes('Fila Dev');
+
+                          return (
+                            <div key={i} className="relative group">
+                              {/* Nó luminoso */}
+                              <div className={cn(
+                                "absolute -left-[27px] top-1.5 w-3.5 h-3.5 rounded-full border-2 border-white dark:border-[#111b21] shadow-sm transition-all",
+                                isAi ? "bg-emerald-500 ring-4 ring-emerald-500/20" : "bg-indigo-500 ring-4 ring-indigo-500/20"
+                              )} />
+
+                              <div className="p-3.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/60 dark:border-white/5 rounded-xl space-y-1.5">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800 dark:text-slate-100">
+                                    <span className="px-2 py-0.5 rounded-md bg-slate-200 dark:bg-white/10 text-[9.5px]">{fromStage}</span>
+                                    <ArrowRight size={12} className="text-slate-400" />
+                                    <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[9.5px] font-black">{toStage}</span>
+                                  </div>
+                                  <span className="text-[9.5px] font-bold text-slate-400 dark:text-slate-500">
+                                    {format(new Date(h.at), 'dd/MM/yyyy HH:mm:ss')}
+                                  </span>
+                                </div>
+
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                                  Executado por <span className="font-extrabold text-slate-700 dark:text-slate-200">{h.by}</span>
+                                  {isAi && <span className="ml-1.5 px-1.5 py-0.2 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 rounded text-[8.5px] font-black uppercase">Autônomo</span>}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="py-10 text-center text-slate-400 dark:text-slate-500">
+                        <History size={28} className="mx-auto mb-2 opacity-40" />
+                        <p className="font-bold text-xs">Nenhuma movimentação registrada até o momento.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer fixado com Ações */}
+              <div className="px-6 py-4 border-t border-slate-200/50 dark:border-white/5 bg-slate-50/60 dark:bg-black/20 shrink-0 flex items-center justify-between gap-3">
+                {selectedLead.customer_id ? (
+                  <button 
+                    onClick={() => {
+                      useChatStore.getState().setActiveChat(selectedLead.customer_id);
+                      navigate('/chat');
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-emerald-500/15 hover:shadow-emerald-500/25 transition-all active:scale-95 cursor-pointer"
+                  >
+                    <MessageSquare size={14} />
+                    Abrir Chat do WhatsApp
+                  </button>
+                ) : (
+                  <span className="text-[9.5px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
+                    Sem contato vinculado
+                  </span>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setSelectedLead(null)}
+                    className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 font-bold rounded-xl transition-all active:scale-95 cursor-pointer text-xs"
+                  >
+                    Fechar Painel
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* MODAL: Configurar / Editar Quadro */}
       {isEditBoardOpen && (

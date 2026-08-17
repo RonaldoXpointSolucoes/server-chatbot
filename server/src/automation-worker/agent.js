@@ -81,18 +81,20 @@ function formatAiMessageForWhatsApp(text) {
 }
 
 function injectStoreId(payloadObj, storeId) {
-    if (!storeId || !payloadObj || typeof payloadObj !== 'object') return payloadObj;
+    if (!payloadObj || typeof payloadObj !== 'object') return payloadObj;
+    const effectiveStoreId = storeId || payloadObj.AGuidEstab || payloadObj.AIdEstab || payloadObj.jsOrder?.fkStore || '';
     const clone = Array.isArray(payloadObj) ? [...payloadObj] : { ...payloadObj };
     
     if (!Array.isArray(clone)) {
-        // Sempre injeta ou sobrescreve o ID global
-        clone.AGuidEstab = storeId;
-        clone.AIdEstab = storeId;
+        if (effectiveStoreId) {
+            clone.AGuidEstab = effectiveStoreId;
+            clone.AIdEstab = effectiveStoreId;
+        }
         
         if (clone.jsOrder && typeof clone.jsOrder === 'object') {
             clone.jsOrder = { 
                 ...clone.jsOrder,
-                fkStore: storeId 
+                fkStore: effectiveStoreId || clone.jsOrder.fkStore || ''
             };
         }
     }

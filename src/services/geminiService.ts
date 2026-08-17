@@ -903,6 +903,145 @@ ${historyText}
       };
     }
   }
+
+  async analyzeLogsAndGenerateFixPlan(params: {
+    consoleLogs: any[];
+    serverErrors: any[];
+    gastrofoodLogs?: any[];
+    astsErrors?: any[];
+    boardName?: string;
+  }): Promise<{
+    title: string;
+    category: string;
+    priority: number;
+    tags: string[];
+    summary: string;
+    suggested_stage_label: string;
+    technical_plan: string;
+    analyzed_count: {
+      console: number;
+      server: number;
+      gastrofood: number;
+      asts: number;
+    };
+  }> {
+    if (!this.isConfigured()) {
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
+    }
+
+    const model = this.getGenAI().getGenerativeModel({
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            title: {
+              type: "string",
+              description: "Título conciso, técnico e profissional do card de correção (ex: '[Sistema / Correção] Resolução de Concorrência de Lock no SessionManager e Estabilização de Socket Baileys')."
+            },
+            category: {
+              type: "string",
+              description: "Categoria do card: 'Correção', 'Backend / API', 'Sistema / SaaS', 'Chat' ou 'Integração'."
+            },
+            priority: {
+              type: "integer",
+              description: "Prioridade: 1 (Baixa), 2 (Média) ou 3 (Alta/Crítica se houver erros de conexão, locks ou exceções de servidor)."
+            },
+            tags: {
+              type: "array",
+              description: "Lista de 4 a 6 tags técnicas em maiúsculas (ex: ['BACKEND', 'NODE.JS', 'SESSION-MANAGER', 'ERROR HANDLING', 'IA-PLANO']).",
+              items: { type: "string" }
+            },
+            summary: {
+              type: "string",
+              description: "Resumo executivo de 2 a 3 linhas com o diagnóstico consolidado das falhas e a solução recomendada."
+            },
+            suggested_stage_label: {
+              type: "string",
+              description: "Coluna de destino no Kanban (deve ser 'Em Análise')."
+            },
+            technical_plan: {
+              type: "string",
+              description: "Plano técnico completo em Markdown com seções detalhadas: 🚨 Diagnóstico & Causa Raiz, 🎯 Objetivo da Correção, 🛠️ Arquivos & Modificações Necessárias, 🧪 Critérios de Aceite & Testes, e 📜 Extrato Chave dos Logs."
+            }
+          },
+          required: ["title", "category", "priority", "tags", "summary", "suggested_stage_label", "technical_plan"]
+        }
+      }
+    });
+
+    // Consolidar e limpar logs para o prompt
+    const sanitizeLogsForPrompt = (list: any[], maxCount: number = 30) => {
+      if (!list || !Array.isArray(list)) return [];
+      return list.slice(0, maxCount).map(item => {
+        if (typeof item === 'string') return item;
+        const type = item.type || item.level || 'log';
+        const src = item.source || item.type || 'App';
+        const msg = item.message || item.error || '';
+        const dt = item.details ? JSON.stringify(item.details).substring(0, 300) : '';
+        return `[${type.toUpperCase()}] (${src}): ${msg}${dt ? ` | Detalhes: ${dt}` : ''}`;
+      });
+    };
+
+    const sanitizedConsole = sanitizeLogsForPrompt(params.consoleLogs, 35);
+    const sanitizedServer = sanitizeLogsForPrompt(params.serverErrors, 35);
+    const sanitizedGastrofood = sanitizeLogsForPrompt(params.gastrofoodLogs || [], 15);
+    const sanitizedAsts = sanitizeLogsForPrompt(params.astsErrors || [], 15);
+
+    const systemPrompt = `Você é um Engenheiro de Software Sênior Staff / SRE & Arquiteto de Sistemas Fullstack especializado em NodeJS, React/Vite, Supabase Postgres, Baileys WhatsApp Engine e APIs REST.
+
+Sua tarefa é analisar profundamente o conjunto de logs de diagnóstico e erros capturados no Antigravity DevLogger e no Servidor Node.js.
+
+Quadro Kanban de Destino: ${params.boardName || 'Desenvolvimento & Roadmap'}
+Coluna Destino Obrigatória: 'Em Análise'
+
+=== LOGS DO SERVIDOR NODE.JS (${params.serverErrors.length} capturados) ===
+${sanitizedServer.length > 0 ? sanitizedServer.join('\n') : 'Nenhum erro direto do servidor Node.'}
+
+=== LOGS DO CONSOLE / DEVLOGGER FRONTEND (${params.consoleLogs.length} capturados) ===
+${sanitizedConsole.length > 0 ? sanitizedConsole.join('\n') : 'Nenhum erro de console.'}
+
+=== LOGS DE API GASTROFOOD / INTEGRAÇÕES (${(params.gastrofoodLogs || []).length} capturados) ===
+${sanitizedGastrofood.length > 0 ? sanitizedGastrofood.join('\n') : 'Nenhuma falha Gastrofood.'}
+
+=== AUDITORIA ASTS (${(params.astsErrors || []).length} capturados) ===
+${sanitizedAsts.length > 0 ? sanitizedAsts.join('\n') : 'Nenhuma anomalia ASTS.'}
+
+DIRETRIZES PARA A ANÁLISE:
+1. Identifique os problemas REAIS que precisam de ajuste ou correção no código-fonte (ex: locks ativos de instâncias, desconexões 409/socket zumbi, erros de RLS/Supabase, chamadas de endpoints com falha, loops de chamada ou memory leak).
+2. Ignore ruídos benignos e logs rotineiros esperados.
+3. Elabore um plano técnico extremamente acionável para a IA Antigravity executar depois.
+4. Estruture o "technical_plan" em Markdown profissional contendo:
+   - 🚨 **Diagnóstico e Causa Raiz dos Erros Identificados**
+   - 🎯 **Objetivo da Correção**
+   - 🛠️ **Arquivos do Projeto & Passo a Passo de Código** (mencione os arquivos como 'server/src/session-manager/index.js', 'server/src/event-processor/index.js', etc., e as funções a ajustar)
+   - 🧪 **Critérios de Aceite & Validação** (o que deve ser verificado após o fix)
+   - 📜 **Extrato Relevante dos Logs Analisados** (incluindo traces e IDs de sessão se houver)
+`;
+
+    const result = await model.generateContent(systemPrompt);
+    const response = await result.response;
+    const text = response.text().trim();
+    
+    try {
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      return {
+        ...parsed,
+        suggested_stage_label: 'Em Análise',
+        analyzed_count: {
+          console: params.consoleLogs.length,
+          server: params.serverErrors.length,
+          gastrofood: (params.gastrofoodLogs || []).length,
+          asts: (params.astsErrors || []).length
+        }
+      };
+    } catch (e) {
+      console.error("Erro ao analisar JSON retornado da IA:", text);
+      throw new Error("Falha ao analisar a resposta da IA para os logs.");
+    }
+  }
 }
 
 export const geminiService = new GeminiService();

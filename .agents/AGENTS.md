@@ -98,6 +98,18 @@ Sempre que o usuário digitar `teste envios` (ou variações como `teste envios.
    `node .agents/skills/baileys-e2e-testing/scripts/run_baileys_e2e.cjs`
 3. **Acompanhamento e Relatório**: Acompanhar a execução dos 3 ciclos bidirecionais de envio e recebimento de mensagens entre as caixas **FoodNext** (`11 94775-8860`) e **Ronaldo-Web** (`11 97596-0999`) e apresentar a tabela de evidências e o resultado final ao usuário.
 
+## Regra do Comando da Esteira de Desenvolvimento "Fila dev"
+
+Sempre que o usuário digitar `Fila dev` (ou variações como `fila dev`, `Fila Dev`, `/fila-dev`, `fila dev.` ou `Desenvolver Fila`):
+1. **Acionamento Automático**: A IA deve invocar a skill `fila-dev` e executar `node .agents/skills/fila-dev/scripts/get_dev_queue.cjs list` para inspecionar os cards do quadro **Desenvolvimento & Roadmap** (`95be1dee-9d28-47d9-8ccf-d51a337f1572`).
+2. **Governança da Coluna "Em Análise" (`analysis`)**:
+   - **PROIBIDO INICIAR DESENVOLVIMENTO**: A IA **NÃO PODE** alterar código nem iniciar tarefas que estejam nesta coluna.
+   - **VISUALIZAÇÃO COMPLETA**: Exibir a listagem clara dos cards em análise, informando ao usuário que aguardam autorização prévia.
+3. **Autonomia da Coluna "Em Desenvolvimento" (`development`)**:
+   - **EXECUÇÃO AUTÔNOMA TOTAL**: Se houver itens nesta coluna, a IA deve ler os requisitos técnicos do card (`notes`), codificar as soluções no projeto, validar compilação/testes e migrar o card no banco para a coluna **"Em Testes & QA"** (`node .agents/skills/fila-dev/scripts/get_dev_queue.cjs move <CARD_ID> testing`).
+   - Apresentar o relatório da entrega e confirmação da migração do card.
+
+
 
 
 
