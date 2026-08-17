@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap } from 'lucide-react';
 import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
 import { useChatStore, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey } from '../store/chatStore';
@@ -2024,6 +2024,15 @@ export default function ChatDashboard() {
     originalText: string;
     suggestedText: string;
     intent: 'grammar' | 'sales' | 'enchant' | 'support' | 'analyze' | null;
+    analysisMetadata?: {
+      analyzed_from?: string;
+      analyzed_until?: string;
+      analyzed_from_text?: string;
+      analyzed_until_text?: string;
+      period_label?: string;
+      is_incremental?: boolean;
+      previous_note_id?: string;
+    };
   }>({
     isOpen: false,
     originalText: '',
@@ -2032,7 +2041,7 @@ export default function ChatDashboard() {
   });
 
   const [geminiPopoverSubView, setGeminiPopoverSubView] = useState<'main' | 'analyze_period'>('main');
-  const [selectedAnalyzePeriod, setSelectedAnalyzePeriod] = useState<'2h' | '24h' | '3d' | '7d' | 'all'>('24h');
+  const [selectedAnalyzePeriod, setSelectedAnalyzePeriod] = useState<'incremental' | '2h' | '24h' | '3d' | '7d' | 'all'>('incremental');
   const [transcriptionProgressText, setTranscriptionProgressText] = useState<string | null>(null);
 
   // AI Reasoning Corrections States
@@ -3756,6 +3765,72 @@ export default function ChatDashboard() {
     }
   };
 
+  const getLatestAiAnalysisNote = (chat: any) => {
+    if (!chat || !chat.messages || !Array.isArray(chat.messages)) return null;
+    const aiNotes = chat.messages.filter((m: any) => 
+      m.sender === 'internal_note' && 
+      !m.mediaMetadata?.is_deleted &&
+      (m.mediaMetadata?.is_ai_analysis || m.mediaType === 'ai_analysis' || (typeof m.text === 'string' && m.text.includes('ANÁLISE & AUDITORIA DE CONVERSA (IA)')))
+    );
+    if (aiNotes.length === 0) return null;
+    return [...aiNotes].sort((a: any, b: any) => {
+      const timeA = a.mediaMetadata?.analyzed_until ? new Date(a.mediaMetadata.analyzed_until).getTime() : new Date(a.timestamp).getTime();
+      const timeB = b.mediaMetadata?.analyzed_until ? new Date(b.mediaMetadata.analyzed_until).getTime() : new Date(b.timestamp).getTime();
+      return timeB - timeA;
+    })[0];
+  };
+
+  const handleSaveAnalysisAsNote = async (analysisData: {
+    summary: string;
+    feedback: string;
+    formattedMarkdown: string;
+    metadata: any;
+  }) => {
+    if (!activeChatId) return;
+
+    try {
+      const fromText = analysisData.metadata?.analyzed_from_text || 'Início da conversa';
+      const untilText = analysisData.metadata?.analyzed_until_text || new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const isIncremental = !!analysisData.metadata?.is_incremental;
+
+      const noteMetadata = {
+        is_ai_analysis: true,
+        analyzed_from: analysisData.metadata?.analyzed_from,
+        analyzed_until: analysisData.metadata?.analyzed_until,
+        analyzed_from_text: fromText,
+        analyzed_until_text: untilText,
+        period_label: analysisData.metadata?.period_label || `De ${fromText} até ${untilText}`,
+        is_incremental: isIncremental,
+        summary: analysisData.summary,
+        feedback: analysisData.feedback,
+        created_at_time: new Date().toISOString()
+      };
+
+      await useChatStore.getState().createInternalNote(
+        activeChatId,
+        analysisData.formattedMarkdown,
+        undefined,
+        'ai_analysis',
+        noteMetadata,
+        false,
+        null,
+        []
+      );
+
+      window.dispatchEvent(new CustomEvent('toast', {
+        detail: {
+          message: `✨ Análise da conversa salva como anotação interna no histórico! (Período: até ${untilText})`,
+          type: 'success'
+        }
+      }));
+    } catch (err) {
+      console.error('[handleSaveAnalysisAsNote] Erro ao salvar nota interna de análise:', err);
+      window.dispatchEvent(new CustomEvent('toast', {
+        detail: { message: 'Erro ao salvar a análise como anotação interna.', type: 'error' }
+      }));
+    }
+  };
+
   const handleGeminiAction = async (type: 'grammar' | 'sales' | 'enchant' | 'support' | 'analyze') => {
     if (!activeChat) return;
     if (type !== 'analyze' && !inputText.trim()) return;
@@ -3763,34 +3838,118 @@ export default function ChatDashboard() {
     setIsGeminiProcessing(true);
     try {
       if (type === 'analyze') {
+        const latestAnalysis = getLatestAiAnalysisNote(activeChat);
         const now = Date.now();
         let cutoffTime = 0;
-        switch (selectedAnalyzePeriod) {
-          case '2h':
-            cutoffTime = now - 2 * 60 * 60 * 1000;
-            break;
-          case '24h':
-            cutoffTime = now - 24 * 60 * 60 * 1000;
-            break;
-          case '3d':
-            cutoffTime = now - 3 * 24 * 60 * 60 * 1000;
-            break;
-          case '7d':
-            cutoffTime = now - 7 * 24 * 60 * 60 * 1000;
-            break;
-          case 'all':
-          default:
-            cutoffTime = 0;
-            break;
+        let isIncremental = false;
+        let previousAnalysisData: { summary: string; feedback: string; periodInfo?: string } | undefined = undefined;
+
+        const allValidChatMessages = (activeChat.messages || []).filter((m: any) => m.sender !== 'internal_note');
+
+        if (allValidChatMessages.length === 0) {
+          alert('Não há mensagens de clientes ou atendentes na conversa para analisar.');
+          return;
         }
 
-        let messagesToAnalyze = activeChat.messages || [];
-        if (cutoffTime > 0) {
-          messagesToAnalyze = messagesToAnalyze.filter(m => new Date(m.timestamp).getTime() >= cutoffTime);
+        let messagesToAnalyze = allValidChatMessages;
+        let analyzedFromText = '';
+        let analyzedUntilText = '';
+        let analyzedFromISO = '';
+        let analyzedUntilISO = '';
+
+        if (selectedAnalyzePeriod === 'incremental' && latestAnalysis) {
+          isIncremental = true;
+          const lastUntilTime = latestAnalysis.mediaMetadata?.analyzed_until 
+            ? new Date(latestAnalysis.mediaMetadata.analyzed_until).getTime() 
+            : new Date(latestAnalysis.timestamp).getTime();
+          
+          const lastUntilText = latestAnalysis.mediaMetadata?.analyzed_until_text 
+            || new Date(lastUntilTime).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+          const newMessages = allValidChatMessages.filter((m: any) => new Date(m.timestamp).getTime() > lastUntilTime);
+
+          if (newMessages.length === 0) {
+            // Se não há novas mensagens, abre a análise salva informando o usuário
+            const savedSummary = latestAnalysis.mediaMetadata?.summary || '';
+            const savedFeedback = latestAnalysis.mediaMetadata?.feedback || '';
+            const fallbackSuggestion = JSON.stringify({ summary: savedSummary || latestAnalysis.text, feedback: savedFeedback || 'Diagnóstico previamente salvo.' });
+            
+            setGeminiModalState({
+              isOpen: true,
+              originalText: `Análise salva anteriormente até ${lastUntilText}`,
+              suggestedText: fallbackSuggestion,
+              intent: 'analyze',
+              analysisMetadata: {
+                analyzed_from: latestAnalysis.mediaMetadata?.analyzed_from,
+                analyzed_until: latestAnalysis.mediaMetadata?.analyzed_until,
+                analyzed_from_text: latestAnalysis.mediaMetadata?.analyzed_from_text || 'Início da conversa',
+                analyzed_until_text: lastUntilText,
+                period_label: latestAnalysis.mediaMetadata?.period_label || `Do início até ${lastUntilText}`,
+                is_incremental: true,
+                previous_note_id: latestAnalysis.id
+              }
+            });
+            return;
+          }
+
+          messagesToAnalyze = newMessages;
+          previousAnalysisData = {
+            summary: latestAnalysis.mediaMetadata?.summary || latestAnalysis.text,
+            feedback: latestAnalysis.mediaMetadata?.feedback || '',
+            periodInfo: `do início até ${lastUntilText}`
+          };
+
+          analyzedFromText = latestAnalysis.mediaMetadata?.analyzed_from_text || 'Início da conversa';
+          const newestMsgDate = new Date(newMessages[newMessages.length - 1].timestamp);
+          analyzedUntilText = newestMsgDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+          analyzedFromISO = latestAnalysis.mediaMetadata?.analyzed_from || (allValidChatMessages[0]?.timestamp ? new Date(allValidChatMessages[0].timestamp).toISOString() : new Date().toISOString());
+          analyzedUntilISO = newestMsgDate.toISOString();
+
+        } else {
+          // Modo por janela ou conversa completa
+          switch (selectedAnalyzePeriod) {
+            case '2h':
+              cutoffTime = now - 2 * 60 * 60 * 1000;
+              break;
+            case '24h':
+              cutoffTime = now - 24 * 60 * 60 * 1000;
+              break;
+            case '3d':
+              cutoffTime = now - 3 * 24 * 60 * 60 * 1000;
+              break;
+            case '7d':
+              cutoffTime = now - 7 * 24 * 60 * 60 * 1000;
+              break;
+            case 'all':
+            default:
+              cutoffTime = 0;
+              break;
+          }
+
+          if (cutoffTime > 0) {
+            messagesToAnalyze = allValidChatMessages.filter((m: any) => new Date(m.timestamp).getTime() >= cutoffTime);
+          }
+
+          if (messagesToAnalyze.length === 0) {
+            alert('Não há mensagens no período selecionado para analisar.');
+            return;
+          }
+
+          const firstMsgDate = new Date(messagesToAnalyze[0].timestamp);
+          const lastMsgDate = new Date(messagesToAnalyze[messagesToAnalyze.length - 1].timestamp);
+
+          analyzedFromText = (selectedAnalyzePeriod === 'all' || cutoffTime === 0)
+            ? `início (${firstMsgDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })})`
+            : firstMsgDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+          
+          analyzedUntilText = lastMsgDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+          
+          analyzedFromISO = firstMsgDate.toISOString();
+          analyzedUntilISO = lastMsgDate.toISOString();
         }
 
         // Transcrever áudios sem transcrição com mais de 10 segundos no intervalo
-        const audiosToTranscribe = messagesToAnalyze.filter(m => m.mediaType === 'audio' && m.mediaUrl && !m.transcription);
+        const audiosToTranscribe = messagesToAnalyze.filter((m: any) => m.mediaType === 'audio' && m.mediaUrl && !m.transcription);
         
         if (audiosToTranscribe.length > 0) {
           setTranscriptionProgressText("Verificando duração dos áudios...");
@@ -3811,7 +3970,7 @@ export default function ChatDashboard() {
 
           // Obter durações em paralelo
           const audiosWithDurations = await Promise.all(
-            audiosToTranscribe.map(async (msg) => {
+            audiosToTranscribe.map(async (msg: any) => {
               const duration = await getAudioDuration(msg.mediaUrl!);
               return { msg, duration };
             })
@@ -3837,14 +3996,21 @@ export default function ChatDashboard() {
         // Atualizar mensagens com novas transcrições da store
         const updatedChat = useChatStore.getState().contacts.find(c => c.id === activeChat.id);
         if (updatedChat) {
-          messagesToAnalyze = updatedChat.messages || [];
-          if (cutoffTime > 0) {
-            messagesToAnalyze = messagesToAnalyze.filter(m => new Date(m.timestamp).getTime() >= cutoffTime);
+          const updatedValid = (updatedChat.messages || []).filter((m: any) => m.sender !== 'internal_note');
+          if (isIncremental && latestAnalysis) {
+            const lastUntilTime = latestAnalysis.mediaMetadata?.analyzed_until 
+              ? new Date(latestAnalysis.mediaMetadata.analyzed_until).getTime() 
+              : new Date(latestAnalysis.timestamp).getTime();
+            messagesToAnalyze = updatedValid.filter((m: any) => new Date(m.timestamp).getTime() > lastUntilTime);
+          } else if (cutoffTime > 0) {
+            messagesToAnalyze = updatedValid.filter((m: any) => new Date(m.timestamp).getTime() >= cutoffTime);
+          } else {
+            messagesToAnalyze = updatedValid;
           }
         }
 
         // Formatar histórico para o Gemini
-        const formattedHistory = messagesToAnalyze.map(m => {
+        const formattedHistory = messagesToAnalyze.map((m: any) => {
           const senderName = m.sender === 'bot' ? 'IA (ChatBoot)' : m.sender === 'human' ? 'Atendente' : m.sender === 'system' ? 'Sistema' : 'Cliente';
           
           let textContent = m.text || '';
@@ -3857,7 +4023,7 @@ export default function ChatDashboard() {
           return {
             role: senderName,
             text: textContent,
-            time: new Date(m.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+            time: new Date(m.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
           };
         });
 
@@ -3866,13 +4032,24 @@ export default function ChatDashboard() {
           return;
         }
 
-        const suggestion = await geminiService.analyzeConversationWithFeedback(formattedHistory);
+        const suggestion = await geminiService.analyzeConversationWithFeedback(formattedHistory, previousAnalysisData);
+
+        const periodLabel = `De ${analyzedFromText} até ${analyzedUntilText}`;
 
         setGeminiModalState({
           isOpen: true,
-          originalText: `Período analisado: ${selectedAnalyzePeriod === '2h' ? 'Últimas 2 horas' : selectedAnalyzePeriod === '24h' ? 'Últimas 24 horas' : selectedAnalyzePeriod === '3d' ? 'Últimos 3 dias' : selectedAnalyzePeriod === '7d' ? 'Últimos 7 dias' : 'Conversa Completa'}`,
+          originalText: `Período analisado: ${periodLabel}`,
           suggestedText: JSON.stringify(suggestion),
-          intent: 'analyze'
+          intent: 'analyze',
+          analysisMetadata: {
+            analyzed_from: analyzedFromISO,
+            analyzed_until: analyzedUntilISO,
+            analyzed_from_text: analyzedFromText,
+            analyzed_until_text: analyzedUntilText,
+            period_label: periodLabel,
+            is_incremental: isIncremental,
+            previous_note_id: latestAnalysis?.id
+          }
         });
 
       } else {
@@ -5159,6 +5336,8 @@ export default function ChatDashboard() {
         suggestedText={geminiModalState.suggestedText}
         intent={geminiModalState.intent}
         isInternalNote={chatMode === 'internal_note'}
+        analysisMetadata={geminiModalState.analysisMetadata}
+        onSaveAnalysisAsNote={handleSaveAnalysisAsNote}
         onApply={(finalText) => {
           setInputText(finalText);
           if (textareaRef.current) {
@@ -8585,7 +8764,6 @@ export default function ChatDashboard() {
                             >
                               <Wand2 size={18} />
                             </button>
-
                             {/* Popover UI Gemini */}
                             {isGeminiPopoverOpen && (
                               <div className="absolute bottom-full left-0 mb-3 bg-white/95 dark:bg-[#202c33]/95 backdrop-blur-xl border border-black/5 dark:border-white/5 rounded-2xl shadow-xl w-72 p-2 animate-in fade-in zoom-in duration-200 z-50">
@@ -8612,49 +8790,85 @@ export default function ChatDashboard() {
                                         {transcriptionProgressText || "A IA está processando..."}
                                       </span>
                                   </div>
-                                ) : geminiPopoverSubView === 'analyze_period' ? (
-                                  <div className="flex flex-col gap-2 p-1">
-                                    <button 
-                                      onClick={() => setGeminiPopoverSubView('main')} 
-                                      className="flex items-center gap-1 text-[11px] text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] transition-colors pb-1 border-b border-black/5 dark:border-white/5 mb-1"
-                                    >
-                                      <ChevronLeft size={12} /> Voltar para o menu
-                                    </button>
-                                    
-                                    <span className="text-[10px] font-bold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider px-1 mb-1 block">Período de Análise</span>
-                                    
-                                    <div className="flex flex-col gap-0.5">
-                                      {[
-                                        { id: '2h', label: 'Últimas 2 horas' },
-                                        { id: '24h', label: 'Últimas 24 horas' },
-                                        { id: '3d', label: 'Últimos 3 dias' },
-                                        { id: '7d', label: 'Últimos 7 dias' },
-                                        { id: 'all', label: 'Conversa Toda' }
-                                      ].map(item => (
-                                        <button
-                                          key={item.id}
-                                          onClick={() => setSelectedAnalyzePeriod(item.id as any)}
-                                          className={cn(
-                                            "flex items-center justify-between w-full px-2.5 py-1.5 text-xs text-left rounded-lg transition-all",
-                                            selectedAnalyzePeriod === item.id 
-                                              ? "bg-[#00a884]/15 text-[#00a884] font-bold" 
-                                              : "hover:bg-black/5 dark:hover:bg-white/5 text-[#111b21] dark:text-[#e9edef]"
-                                          )}
-                                        >
-                                          {item.label}
-                                          {selectedAnalyzePeriod === item.id && <Check size={12} className="stroke-[3]" />}
-                                        </button>
-                                      ))}
+                                ) : geminiPopoverSubView === 'analyze_period' ? (() => {
+                                  const latestAiNote = getLatestAiAnalysisNote(activeChat);
+                                  const lastAnalyzedUntilTime = latestAiNote 
+                                    ? (latestAiNote.mediaMetadata?.analyzed_until ? new Date(latestAiNote.mediaMetadata.analyzed_until).getTime() : new Date(latestAiNote.timestamp).getTime())
+                                    : 0;
+                                  const lastAnalyzedDateText = latestAiNote
+                                    ? (latestAiNote.mediaMetadata?.analyzed_until_text || new Date(lastAnalyzedUntilTime).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))
+                                    : '';
+                                  const newMessagesCount = latestAiNote
+                                    ? (activeChat.messages || []).filter((m: any) => m.sender !== 'internal_note' && new Date(m.timestamp).getTime() > lastAnalyzedUntilTime).length
+                                    : 0;
+
+                                  return (
+                                    <div className="flex flex-col gap-2 p-1">
+                                      <button 
+                                        onClick={() => setGeminiPopoverSubView('main')} 
+                                        className="flex items-center gap-1 text-[11px] text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] transition-colors pb-1 border-b border-black/5 dark:border-white/5 mb-1"
+                                      >
+                                        <ChevronLeft size={12} /> Voltar para o menu
+                                      </button>
+                                      
+                                      <span className="text-[10px] font-bold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider px-1 mb-0.5 block">Período de Análise</span>
+                                      
+                                      <div className="flex flex-col gap-1 max-h-[220px] overflow-y-auto custom-scrollbar">
+                                        {latestAiNote && (
+                                          <button
+                                            onClick={() => setSelectedAnalyzePeriod('incremental')}
+                                            className={cn(
+                                              "flex flex-col items-start w-full px-2.5 py-1.5 text-xs rounded-xl transition-all border text-left",
+                                              selectedAnalyzePeriod === 'incremental'
+                                                ? "bg-purple-500/15 border-purple-500/30 text-purple-700 dark:text-purple-300 font-bold shadow-sm"
+                                                : "bg-purple-500/5 border-purple-500/15 hover:bg-purple-500/10 text-[#111b21] dark:text-[#e9edef]"
+                                            )}
+                                          >
+                                            <div className="flex items-center justify-between w-full">
+                                              <span className="flex items-center gap-1 font-bold text-[11px]">
+                                                <Zap size={12} className="text-amber-500 fill-current" />
+                                                Continuar da última análise
+                                              </span>
+                                              {selectedAnalyzePeriod === 'incremental' && <Check size={12} className="stroke-[3] text-purple-600 dark:text-purple-400" />}
+                                            </div>
+                                            <span className="text-[10px] opacity-75 font-normal ml-4">
+                                              Até {lastAnalyzedDateText} • {newMessagesCount} nova(s) msg(s)
+                                            </span>
+                                          </button>
+                                        )}
+
+                                        {[
+                                          { id: 'all', label: 'Conversa Toda (Do Início)' },
+                                          { id: '24h', label: 'Últimas 24 horas' },
+                                          { id: '3d', label: 'Últimos 3 dias' },
+                                          { id: '7d', label: 'Últimos 7 dias' },
+                                          { id: '2h', label: 'Últimas 2 horas' }
+                                        ].map(item => (
+                                          <button
+                                            key={item.id}
+                                            onClick={() => setSelectedAnalyzePeriod(item.id as any)}
+                                            className={cn(
+                                              "flex items-center justify-between w-full px-2.5 py-1.5 text-xs text-left rounded-lg transition-all",
+                                              selectedAnalyzePeriod === item.id 
+                                                ? "bg-[#00a884]/15 text-[#00a884] font-bold" 
+                                                : "hover:bg-black/5 dark:hover:bg-white/5 text-[#111b21] dark:text-[#e9edef]"
+                                            )}
+                                          >
+                                            {item.label}
+                                            {selectedAnalyzePeriod === item.id && <Check size={12} className="stroke-[3]" />}
+                                          </button>
+                                        ))}
+                                      </div>
+                                      
+                                      <button 
+                                        onClick={() => handleGeminiAction('analyze')} 
+                                        className="mt-2 flex items-center justify-center gap-2 w-full py-2 bg-gradient-to-r from-purple-600 via-fuchsia-600 to-amber-600 hover:from-purple-700 hover:to-amber-700 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98]"
+                                      >
+                                        <BrainCircuit size={14} /> Iniciar Análise
+                                      </button>
                                     </div>
-                                    
-                                    <button 
-                                      onClick={() => handleGeminiAction('analyze')} 
-                                      className="mt-2 flex items-center justify-center gap-2 w-full py-2 bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-700 hover:to-fuchsia-700 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98]"
-                                    >
-                                      <BrainCircuit size={14} /> Iniciar Análise
-                                    </button>
-                                  </div>
-                                ) : (
+                                  );
+                                })() : (
                                   <div className="flex flex-col gap-1">
                                     <button onClick={() => handleGeminiAction('grammar')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
                                       <CheckCircle2 size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Corrigir Gramática & Ortografia
@@ -8971,49 +9185,85 @@ export default function ChatDashboard() {
                                     {transcriptionProgressText || "A IA está processando..."}
                                   </span>
                               </div>
-                            ) : geminiPopoverSubView === 'analyze_period' ? (
-                              <div className="flex flex-col gap-2 p-1">
-                                <button 
-                                  onClick={() => setGeminiPopoverSubView('main')} 
-                                  className="flex items-center gap-1 text-[11px] text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] transition-colors pb-1 border-b border-black/5 dark:border-white/5 mb-1"
-                                >
-                                  <ChevronLeft size={12} /> Voltar para o menu
-                                </button>
-                                
-                                <span className="text-[10px] font-bold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider px-1 mb-1 block">Período de Análise</span>
-                                
-                                <div className="flex flex-col gap-0.5">
-                                  {[
-                                    { id: '2h', label: 'Últimas 2 horas' },
-                                    { id: '24h', label: 'Últimas 24 horas' },
-                                    { id: '3d', label: 'Últimos 3 dias' },
-                                    { id: '7d', label: 'Últimos 7 dias' },
-                                    { id: 'all', label: 'Conversa Toda' }
-                                  ].map(item => (
-                                    <button
-                                      key={item.id}
-                                      onClick={() => setSelectedAnalyzePeriod(item.id as any)}
-                                      className={cn(
-                                        "flex items-center justify-between w-full px-2.5 py-1.5 text-xs text-left rounded-lg transition-all",
-                                        selectedAnalyzePeriod === item.id 
-                                          ? "bg-[#00a884]/15 text-[#00a884] font-bold" 
-                                          : "hover:bg-black/5 dark:hover:bg-white/5 text-[#111b21] dark:text-[#e9edef]"
-                                      )}
-                                    >
-                                      {item.label}
-                                      {selectedAnalyzePeriod === item.id && <Check size={12} className="stroke-[3]" />}
-                                    </button>
-                                  ))}
+                            ) : geminiPopoverSubView === 'analyze_period' ? (() => {
+                              const latestAiNote = getLatestAiAnalysisNote(activeChat);
+                              const lastAnalyzedUntilTime = latestAiNote 
+                                ? (latestAiNote.mediaMetadata?.analyzed_until ? new Date(latestAiNote.mediaMetadata.analyzed_until).getTime() : new Date(latestAiNote.timestamp).getTime())
+                                : 0;
+                              const lastAnalyzedDateText = latestAiNote
+                                ? (latestAiNote.mediaMetadata?.analyzed_until_text || new Date(lastAnalyzedUntilTime).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))
+                                : '';
+                              const newMessagesCount = latestAiNote
+                                ? (activeChat.messages || []).filter((m: any) => m.sender !== 'internal_note' && new Date(m.timestamp).getTime() > lastAnalyzedUntilTime).length
+                                : 0;
+
+                              return (
+                                <div className="flex flex-col gap-2 p-1">
+                                  <button 
+                                    onClick={() => setGeminiPopoverSubView('main')} 
+                                    className="flex items-center gap-1 text-[11px] text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] transition-colors pb-1 border-b border-black/5 dark:border-white/5 mb-1"
+                                  >
+                                    <ChevronLeft size={12} /> Voltar para o menu
+                                  </button>
+                                  
+                                  <span className="text-[10px] font-bold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider px-1 mb-0.5 block">Período de Análise</span>
+                                  
+                                  <div className="flex flex-col gap-1 max-h-[220px] overflow-y-auto custom-scrollbar">
+                                    {latestAiNote && (
+                                      <button
+                                        onClick={() => setSelectedAnalyzePeriod('incremental')}
+                                        className={cn(
+                                          "flex flex-col items-start w-full px-2.5 py-1.5 text-xs rounded-xl transition-all border text-left",
+                                          selectedAnalyzePeriod === 'incremental'
+                                            ? "bg-purple-500/15 border-purple-500/30 text-purple-700 dark:text-purple-300 font-bold shadow-sm"
+                                            : "bg-purple-500/5 border-purple-500/15 hover:bg-purple-500/10 text-[#111b21] dark:text-[#e9edef]"
+                                        )}
+                                      >
+                                        <div className="flex items-center justify-between w-full">
+                                          <span className="flex items-center gap-1 font-bold text-[11px]">
+                                            <Zap size={12} className="text-amber-500 fill-current" />
+                                            Continuar da última análise
+                                          </span>
+                                          {selectedAnalyzePeriod === 'incremental' && <Check size={12} className="stroke-[3] text-purple-600 dark:text-purple-400" />}
+                                        </div>
+                                        <span className="text-[10px] opacity-75 font-normal ml-4">
+                                          Até {lastAnalyzedDateText} • {newMessagesCount} nova(s) msg(s)
+                                        </span>
+                                      </button>
+                                    )}
+
+                                    {[
+                                      { id: 'all', label: 'Conversa Toda (Do Início)' },
+                                      { id: '24h', label: 'Últimas 24 horas' },
+                                      { id: '3d', label: 'Últimos 3 dias' },
+                                      { id: '7d', label: 'Últimos 7 dias' },
+                                      { id: '2h', label: 'Últimas 2 horas' }
+                                    ].map(item => (
+                                      <button
+                                        key={item.id}
+                                        onClick={() => setSelectedAnalyzePeriod(item.id as any)}
+                                        className={cn(
+                                          "flex items-center justify-between w-full px-2.5 py-1.5 text-xs text-left rounded-lg transition-all",
+                                          selectedAnalyzePeriod === item.id 
+                                            ? "bg-[#00a884]/15 text-[#00a884] font-bold" 
+                                            : "hover:bg-black/5 dark:hover:bg-white/5 text-[#111b21] dark:text-[#e9edef]"
+                                        )}
+                                      >
+                                        {item.label}
+                                        {selectedAnalyzePeriod === item.id && <Check size={12} className="stroke-[3]" />}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  
+                                  <button 
+                                    onClick={() => handleGeminiAction('analyze')} 
+                                    className="mt-2 flex items-center justify-center gap-2 w-full py-2 bg-gradient-to-r from-purple-600 via-fuchsia-600 to-amber-600 hover:from-purple-700 hover:to-amber-700 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98]"
+                                  >
+                                    <BrainCircuit size={14} /> Iniciar Análise
+                                  </button>
                                 </div>
-                                
-                                <button 
-                                  onClick={() => handleGeminiAction('analyze')} 
-                                  className="mt-2 flex items-center justify-center gap-2 w-full py-2 bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-700 hover:to-fuchsia-700 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98]"
-                                >
-                                  <BrainCircuit size={14} /> Iniciar Análise
-                                </button>
-                              </div>
-                            ) : (
+                              );
+                            })() : (
                               <div className="flex flex-col gap-1">
                                 <button onClick={() => handleGeminiAction('grammar')} disabled={!inputText.trim()} className="flex items-center gap-3 w-full p-2.5 text-sm text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-[#111b21] dark:text-[#e9edef] group">
                                   <CheckCircle2 size={16} className="text-blue-500 group-hover:scale-110 transition-transform" /> Corrigir Gramática & Ortografia

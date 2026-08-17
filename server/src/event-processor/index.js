@@ -785,7 +785,17 @@ class EventProcessor {
                           phone: targetPhone,
                           name: finalName,
                           whatsapp_jid: finalJid,
-                          instance_id: c.instance_id || null
+                          instance_id: c.instance_id || ex?.instance_id || null,
+                          ...(ex ? {
+                              custom_name: ex.custom_name || null,
+                              company_ids: ex.company_ids || [],
+                              tags: ex.tags || [],
+                              notes: ex.notes || null,
+                              email: ex.email || null,
+                              document_number: ex.document_number || null,
+                              document_type: ex.document_type || null,
+                              fantasy_name: ex.fantasy_name || null
+                          } : {})
                       });
                   }
               }

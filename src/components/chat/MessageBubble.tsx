@@ -5,7 +5,7 @@ import {
   MessageSquareReply, Camera, Video, VideoOff, Mic, 
   FileText, MapPin, Sparkles, Check, CheckCheck, RefreshCw,
   LayoutTemplate, Smartphone, Eye, EyeOff, ClipboardList, CheckSquare,
-  UserCheck, Copy, Ticket
+  UserCheck, Copy, Ticket, BrainCircuit, Calendar, Zap
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { cn, getContactDisplayName, formatPhoneNumber } from '../../pages/ChatDashboard';
@@ -184,6 +184,12 @@ export const MessageBubble = memo(({
       : null;
     const assignedName = assignedAgent ? assignedAgent.full_name : 'Qualquer Operador';
 
+    const isAiAnalysis = !!(
+      msg.mediaMetadata?.is_ai_analysis || 
+      msg.mediaType === 'ai_analysis' || 
+      (typeof msg.text === 'string' && msg.text.includes('ANÁLISE & AUDITORIA DE CONVERSA (IA)'))
+    );
+
     return (
       <div 
         key={msg.id} 
@@ -194,15 +200,29 @@ export const MessageBubble = memo(({
         <div className="flex justify-center my-3.5 px-4 w-full">
           <div className={cn(
             "rounded-2xl p-4 max-w-[85%] md:max-w-[70%] w-full backdrop-blur-md relative group/note border transition-all duration-300",
-            msg.isTask
-              ? "bg-amber-500/10 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200 border-amber-500/40 ring-1 ring-amber-500/20 shadow-[0_8px_30px_rgba(245,158,11,0.15)]"
-              : "bg-amber-500/10 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200 border-amber-500/30 shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]"
+            isAiAnalysis
+              ? "bg-gradient-to-br from-purple-500/10 via-fuchsia-500/5 to-indigo-500/10 dark:from-purple-950/30 dark:via-fuchsia-950/20 dark:to-indigo-950/30 text-purple-950 dark:text-purple-100 border-purple-500/30 ring-1 ring-purple-500/20 shadow-[0_8px_30px_rgba(168,85,247,0.12)]"
+              : msg.isTask
+                ? "bg-amber-500/10 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200 border-amber-500/40 ring-1 ring-amber-500/20 shadow-[0_8px_30px_rgba(245,158,11,0.15)]"
+                : "bg-amber-500/10 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200 border-amber-500/30 shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]"
           )}>
             
             {/* Cabeçalho da Nota */}
-            <div className="flex items-center justify-between mb-2.5 text-[10px] text-amber-700 dark:text-amber-400 opacity-90 font-bold uppercase tracking-wider select-none border-b border-amber-500/20 pb-2 flex-wrap gap-2">
+            <div className={cn(
+              "flex items-center justify-between mb-2.5 text-[10px] opacity-90 font-bold uppercase tracking-wider select-none border-b pb-2 flex-wrap gap-2",
+              isAiAnalysis
+                ? "text-purple-700 dark:text-purple-300 border-purple-500/20"
+                : "text-amber-700 dark:text-amber-400 border-amber-500/20"
+            )}>
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span>{msg.isTask ? "📌 Tarefa Interna CRM" : "📝 Anotação Interna"}</span>
+                {isAiAnalysis ? (
+                  <span className="flex items-center gap-1 text-purple-700 dark:text-purple-300 font-extrabold">
+                    <BrainCircuit size={13} className="text-purple-600 dark:text-purple-400" />
+                    Auditoria & Análise de IA
+                  </span>
+                ) : (
+                  <span>{msg.isTask ? "📌 Tarefa Interna CRM" : "📝 Anotação Interna"}</span>
+                )}
                 {(msg.created_by_name || msg.payload?.created_by_name) && (
                   <>
                     <span className="opacity-40">•</span>
@@ -212,6 +232,20 @@ export const MessageBubble = memo(({
               </div>
               
               <div className="flex items-center gap-2">
+                {/* Badges de Análise de IA */}
+                {isAiAnalysis && (
+                  <>
+                    <span className="flex items-center gap-1 bg-purple-500/10 text-purple-800 dark:text-purple-300 px-2 py-0.5 rounded-full text-[9px] font-bold border border-purple-500/20 shrink-0">
+                      <Calendar size={10} /> {msg.mediaMetadata?.analyzed_until_text ? `Até ${msg.mediaMetadata.analyzed_until_text}` : format(new Date(msg.timestamp), "dd/MM 'às' HH:mm")}
+                    </span>
+                    {msg.mediaMetadata?.is_incremental && (
+                      <span className="flex items-center gap-1 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full text-[9px] font-black border border-emerald-500/20 shrink-0 shadow-sm">
+                        <Zap size={10} className="fill-current text-amber-500" /> Incremental
+                      </span>
+                    )}
+                  </>
+                )}
+
                 {/* Badges de Tarefa CRM (Status e Atribuído) */}
                 {msg.isTask && (
                   <>
@@ -238,6 +272,23 @@ export const MessageBubble = memo(({
                   </>
                 )}
 
+                {/* Botão de Copiar Análise */}
+                {isAiAnalysis && (
+                  <button 
+                    type="button"
+                    title="Copiar análise"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigator.clipboard.writeText(msg.text || '');
+                      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Análise copiada para a área de transferência!', type: 'info' } }));
+                    }}
+                    className="opacity-0 group-hover/note:opacity-100 p-1 hover:bg-purple-500/20 active:scale-95 rounded-lg transition-all duration-300 flex items-center gap-1 text-[9px] font-bold shrink-0 text-purple-700 dark:text-purple-300 border border-purple-500/10 hover:border-purple-500/30"
+                  >
+                    <Copy size={11} className="text-purple-700 dark:text-purple-300" />
+                    copiar
+                  </button>
+                )}
+
                 {/* Botão de Edição (Somente quando passa o mouse) */}
                 <button 
                   type="button"
@@ -247,9 +298,14 @@ export const MessageBubble = memo(({
                       (window as any).openEditNoteModal(msg);
                     }
                   }}
-                  className="opacity-0 group-hover/note:opacity-100 p-1 hover:bg-amber-500/20 active:scale-95 rounded-lg transition-all duration-300 flex items-center gap-1 text-[9px] lowercase font-bold shrink-0 text-amber-700 dark:text-amber-400 border border-amber-500/10 hover:border-amber-500/30"
+                  className={cn(
+                    "opacity-0 group-hover/note:opacity-100 p-1 active:scale-95 rounded-lg transition-all duration-300 flex items-center gap-1 text-[9px] lowercase font-bold shrink-0 border",
+                    isAiAnalysis
+                      ? "text-purple-700 dark:text-purple-300 hover:bg-purple-500/20 border-purple-500/10 hover:border-purple-500/30"
+                      : "text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 border-amber-500/10 hover:border-amber-500/30"
+                  )}
                 >
-                  <Edit2 size={11} className="text-amber-700 dark:text-amber-400" />
+                  <Edit2 size={11} className={isAiAnalysis ? "text-purple-700 dark:text-purple-300" : "text-amber-700 dark:text-amber-400"} />
                   editar
                 </button>
               </div>

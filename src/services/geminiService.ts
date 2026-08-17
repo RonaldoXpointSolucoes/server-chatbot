@@ -422,7 +422,10 @@ Retorne APENAS o JSON cru, sem marcações markdown ou blocos de código.`;
     }
   }
 
-  async analyzeConversationWithFeedback(history: {role: string, text: string, time: string}[]): Promise<{ summary: string, feedback: string }> {
+  async analyzeConversationWithFeedback(
+    history: {role: string, text: string, time: string}[],
+    previousAnalysis?: { summary: string; feedback: string; periodInfo?: string }
+  ): Promise<{ summary: string, feedback: string }> {
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
@@ -449,7 +452,30 @@ Retorne APENAS o JSON cru, sem marcações markdown ou blocos de código.`;
 
     const historyText = history.map(m => `[${m.time}] ${m.role}: ${m.text}`).join('\n');
 
-    const prompt = `Você é um supervisor de qualidade e especialista em Customer Experience (CX) de altíssimo nível.
+    let prompt = '';
+    if (previousAnalysis && (previousAnalysis.summary || previousAnalysis.feedback)) {
+      prompt = `Você é um supervisor de qualidade e especialista sênior em Customer Experience (CX).
+O cliente já possui uma ANÁLISE PRÉVIA consolidada até ${previousAnalysis.periodInfo || 'a última auditoria'}:
+
+[RESUMO ANTERIOR CONSOLIDADO]:
+${previousAnalysis.summary || 'Nenhum resumo anterior'}
+
+[AUDITORIA E FALHAS ANTERIORES]:
+${previousAnalysis.feedback || 'Nenhum feedback anterior'}
+
+Abaixo estão as NOVAS MENSAGENS que ocorreram na conversa APÓS a data dessa última auditoria:
+${historyText || '(Nenhuma mensagem adicional)'}
+
+Sua tarefa é UNIFICAR e ATUALIZAR a análise e auditoria de forma contínua, integrando o contexto consolidado anterior com as novas ocorrências recentes:
+1. "summary": Resumo cronológico completo e fluido da conversa inteira em português (com uso sutil de emojis e tópicos para fácil visualização pelo atendente). Mantenha os pontos-chave do passado e incorpore as novas mensagens recentes de maneira contínua e coesa.
+2. "feedback": Uma análise diagnóstica interna e honesta atualizada da conversa. Avalie a evolução do caso: se as falhas anteriores foram corrigidas, se o cliente continua satisfeito/frustrado, se surgiram novos problemas ou falhas da empresa (demora, respostas erradas da IA, falta de empatia, problemas técnicos, etc.), ou se a tratativa recente foi assertiva. Use tópicos e emojis.
+
+Regras importantes de retorno:
+- Retorne EXATAMENTE e APENAS o JSON contendo as chaves "summary" e "feedback".
+- NUNCA coloque blocos de marcação markdown (\`\`\`json ou \`\`\$) na resposta, nem saudações/explicações antes ou depois. Retorne apenas o objeto JSON cru e limpo para que possamos fazer JSON.parse imediatamente.
+- Não deixe nenhuma chave do JSON vazia.`;
+    } else {
+      prompt = `Você é um supervisor de qualidade e especialista em Customer Experience (CX) de altíssimo nível.
 Analise o histórico da conversa abaixo entre o Cliente, o Atendente (ou IA) e o Sistema de forma detalhada e gere dois relatórios estruturados.
 
 Histórico de mensagens a analisar:
@@ -463,6 +489,7 @@ Regras importantes de retorno:
 - Retorne EXATAMENTE e APENAS o JSON contendo as chaves "summary" e "feedback".
 - NUNCA coloque blocos de marcação markdown (\`\`\`json ou \`\`\$) na resposta, nem saudações/explicações antes ou depois. Retorne apenas o objeto JSON cru e limpo para que possamos fazer JSON.parse imediatamente.
 - Não deixe nenhuma chave do JSON vazia.`;
+    }
 
     try {
       const result = await model.generateContent(prompt);

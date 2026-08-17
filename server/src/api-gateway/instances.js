@@ -113,6 +113,9 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
 
         sessionManager.createSession(tenantId, instanceId).catch(console.error);
 
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
         res.json({ ok: true, status: 'connecting', instanceId });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -888,6 +891,10 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
         const hasValidCredsInDb = Boolean(authCreds?.creds_data?.me?.id || authCreds?.creds_data?.me?.jid);
         const isAuthInMemory = sessionManager.authenticatedSessions.has(instanceId) || hasValidCredsInDb;
 
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+
         const { data, error } = await supabase
             .from('whatsapp_instances')
             .select('status, phone_number, display_name, last_error, whatsapp_instance_runtime(qr_code, pairing_code)')
@@ -914,8 +921,11 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
                 }
             }
 
-            const qrCode = data.whatsapp_instance_runtime?.qr_code || null;
-            const pairingCode = data.whatsapp_instance_runtime?.pairing_code || null;
+            const runtimeData = Array.isArray(data.whatsapp_instance_runtime)
+                ? data.whatsapp_instance_runtime[0]
+                : data.whatsapp_instance_runtime;
+            const qrCode = runtimeData?.qr_code || null;
+            const pairingCode = runtimeData?.pairing_code || null;
             return res.json({
                 data: {
                     ...data,

@@ -44,6 +44,31 @@ const waitForSocketOpen = (sock, timeoutMs = 20000) => {
     });
 };
 
+let cachedBaileysVersion = null;
+let lastVersionFetchTime = 0;
+
+async function getCachedBaileysVersion() {
+    const now = Date.now();
+    if (cachedBaileysVersion && (now - lastVersionFetchTime < 24 * 60 * 60 * 1000)) {
+        return cachedBaileysVersion;
+    }
+    try {
+        const fetchPromise = fetchLatestBaileysVersion();
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 4000));
+        const res = await Promise.race([fetchPromise, timeoutPromise]);
+        if (res && res.version) {
+            cachedBaileysVersion = res;
+            lastVersionFetchTime = now;
+            return res;
+        }
+    } catch (e) {
+        console.warn('[SessionManager] Usando versão fallback do Baileys:', e.message);
+    }
+    cachedBaileysVersion = { version: [2, 3000, 1043857760], isLatest: true };
+    lastVersionFetchTime = now;
+    return cachedBaileysVersion;
+}
+
 class SessionManager {
     constructor() {
         this.sessions = new Map();
@@ -284,7 +309,7 @@ class SessionManager {
             const { state, saveCreds } = await useSupabaseAuthState(tenantId, instanceId, isPairing);
             const wasAuthenticatedOnBoot = !isPairing && Boolean(state?.creds?.me?.id || state?.creds?.me?.jid);
             // authenticatedSessions só deve ser populado quando o evento connection === 'open' for realmente emitido pelo Baileys com sucesso
-            const { version, isLatest } = await fetchLatestBaileysVersion();
+            const { version, isLatest } = await getCachedBaileysVersion();
             
             console.log(`[SessionManager] Usando WA v${version.join('.')}, isLatest: ${isLatest}`);
 
@@ -516,9 +541,15 @@ class SessionManager {
                                         });
                                     }
                                 }
+
+                                // 3. Adota automaticamente conversas e mensagens órfãs do mesmo tenant (ex: caixas que foram recriadas)
+                                Promise.all([
+                                    supabase.from('conversations').update({ instance_id: instanceId }).eq('tenant_id', tenantId).is('instance_id', null),
+                                    supabase.from('messages').update({ instance_id: instanceId }).eq('tenant_id', tenantId).is('instance_id', null)
+                                ]).then(() => {}).catch(() => {});
                             });
 
-                        // 3. Varre o cache em memória buscando outras sessões ativas com o mesmo telefone para desconectar colisão
+                        // 4. Varre o cache em memória buscando outras sessões ativas com o mesmo telefone para desconectar colisão
                         for (const [otherInstanceId, otherSession] of this.sessions.entries()) {
                             if (otherInstanceId !== instanceId) {
                                 const otherSock = otherSession.sock;
@@ -861,19 +892,23 @@ class SessionManager {
                                 lastDisconnect: { error: { output: { statusCode: 503 } } } 
                             });
                         } else {
-                            const delayMap = [30000, 60000, 300000, 900000, 1800000]; // 30s, 1m, 5m, 15m, 30m
-                            const delay = delayMap[nextAttempt - 1] || 1800000;
+                            const delayMap = isFullyAuthenticated
+                                ? [30000, 60000, 300000, 900000, 1800000] // 30s, 1m, 5m, 15m, 30m para sessões ativas
+                                : [2000, 3000, 5000, 8000, 12000]; // 2s, 3s, 5s, 8s, 12s para geração de QR Code
+                            const delay = delayMap[nextAttempt - 1] || (isFullyAuthenticated ? 1800000 : 15000);
 
-                            console.log(`[SessionManager] Instância ${instanceId} fechou. Tentativa ${nextAttempt}/5. Reconectando em ${delay / 1000}s...`);
+                            console.log(`[SessionManager] Instância ${instanceId} fechou (${isFullyAuthenticated ? 'autenticada' : 'geração de QR'}). Tentativa ${nextAttempt}/5. Reconectando em ${delay / 1000}s...`);
 
                             await retryWithBackoff(() =>
                                 supabase.from('whatsapp_instances')
                                     .update({ 
                                         reconnect_attempts: nextAttempt,
-                                        status: 'reconnecting',
+                                        status: isFullyAuthenticated ? 'reconnecting' : 'connecting',
                                         last_disconnected_at: new Date().toISOString(),
                                         last_disconnect_reason: reason || `status_${status}`,
-                                        last_error: `Conexão instável. Tentando reconectar em ${delay / 1000}s (Tentativa ${nextAttempt}/5).`
+                                        last_error: isFullyAuthenticated 
+                                            ? `Conexão instável. Tentando reconectar em ${delay / 1000}s (Tentativa ${nextAttempt}/5).`
+                                            : null
                                     })
                                     .eq('id', instanceId)
                             );
