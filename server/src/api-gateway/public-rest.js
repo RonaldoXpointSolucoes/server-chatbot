@@ -324,7 +324,7 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
         if (!sock) return res.status(400).json({ error: 'WhatsApp socket offline or not authenticated for this instance.' });
         
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
-        const msgResult = await sock.sendMessage(remoteJid, { text });
+        const msgResult = await sock.sendMessage(remoteJid, { text }, { isAutomation: true });
 
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
@@ -463,7 +463,7 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
         else if (mediatype === 'document') { sendPayload.document = file.buffer; sendPayload.mimetype = file.mimetype; sendPayload.fileName = file.originalname; }
         else return res.status(400).json({ error: 'Unsupported mediatype' });
 
-        const msgResult = await sock.sendMessage(remoteJid, sendPayload);
+        const msgResult = await sock.sendMessage(remoteJid, sendPayload, { isAutomation: true });
 
         // Armazena URL no eventProcessor (opcional, só p renderizar imagem no UI frontend se ele assinar o socket interno)
         try {
@@ -538,7 +538,7 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         const msgResult = await sock.sendMessage(remoteJid, {
             location: { degreesLatitude: latitude, degreesLongitude: longitude, name, address }
-        });
+        }, { isAutomation: true });
 
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
@@ -605,7 +605,7 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
                 displayName: contactName,
                 contacts: [{ vcard }]
             }
-        });
+        }, { isAutomation: true });
 
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
@@ -674,7 +674,7 @@ router.post('/message/sendReaction', requireApiKey, async (req, res) => {
                 text: reaction,
                 key: { id: messageId, remoteJid, fromMe }
             }
-        });
+        }, { isAutomation: true });
 
         try {
             const { EventProcessor } = await import('../event-processor/index.js');

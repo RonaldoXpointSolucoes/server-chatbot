@@ -1039,6 +1039,33 @@ class SessionManager {
                                     }
                                     
                                     const result = await sendFn(targetJid, content, options);
+
+                                    // Auto-persiste e sincroniza imediatamente no EventProcessor
+                                    // (Garante que mensagens disparadas por APIs REST externas, workers ou integrações
+                                    // sejam gravadas no Supabase messages, vinculadas à conversa e emitidas via Realtime para a tela do chat)
+                                    try {
+                                        const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
+                                        if (result && result.key && result.key.id) {
+                                            const isAuto = options?.isAutomation || options?.senderType === 'automation' || content?.isAutomation;
+                                            if (isAuto && EventProcessor && EventProcessor.automationMessagesCache) {
+                                                EventProcessor.automationMessagesCache.set(`${instanceId}_${result.key.id}`, true);
+                                            }
+                                            if ((options?.isHuman || options?.senderType === 'human' || content?.isHuman) && EventProcessor && EventProcessor.humanMessagesCache) {
+                                                EventProcessor.humanMessagesCache.set(`${instanceId}_${result.key.id}`, true);
+                                            }
+                                            
+                                            const mockUpsert = {
+                                                messages: [result],
+                                                type: 'notify'
+                                            };
+                                            eventProcessor.handleMessageUpsert(tenantId, instanceId, activeSock || sock, mockUpsert).catch(err => {
+                                                console.error('[SessionManager - AutoPersist] Erro ao sincronizar mensagem enviada:', err.message);
+                                            });
+                                        }
+                                    } catch (persistErr) {
+                                        console.error('[SessionManager - AutoPersist] Falha ao despachar mensagem enviada para eventProcessor:', persistErr.message);
+                                    }
+
                                     resolve(result);
                                     return; // Sucesso, interrompe o loop
                                 } catch (error) {
