@@ -3183,9 +3183,12 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                     return linked.length > 0 ? (
                                       <div className="flex flex-wrap gap-1.5">
                                         {linked.map((comp: any) => (
-                                          <span key={comp.id} className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 pl-2.5 pr-1 py-0.5 rounded-full text-[10px] font-bold shadow-sm">
-                                            <Building2 size={9} className="shrink-0" />
-                                            <span className="truncate max-w-[120px]">{comp.fantasy_name || comp.name}</span>
+                                          <span key={comp.id} className="inline-flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 pl-2.5 pr-1.5 py-1 rounded-xl text-[10.5px] font-bold shadow-sm">
+                                            <Building2 size={11} className="shrink-0" />
+                                            <span className="truncate max-w-[140px]">{comp.fantasy_name || comp.name}</span>
+                                            {comp.document_number && (
+                                              <span className="text-[9px] font-mono opacity-80 font-semibold">({formatDocument(comp.document_number)})</span>
+                                            )}
                                             <button
                                               onClick={(e) => {
                                                 e.stopPropagation();
@@ -3194,7 +3197,7 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                               className="p-0.5 hover:bg-emerald-500/20 rounded text-emerald-600 dark:text-emerald-400 shrink-0"
                                               title="Desvincular"
                                             >
-                                              <X size={9} strokeWidth={2.5} />
+                                              <X size={10} strokeWidth={2.5} />
                                             </button>
                                           </span>
                                         ))}
@@ -3234,6 +3237,63 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                               </div>
                             )}
                           </div>
+                        </div>
+
+                        <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-200/60 dark:via-gray-800 to-transparent my-1"></div>
+
+                        {/* Documento (CNPJ / CPF) para contatos */}
+                        <div className="flex items-start justify-between group">
+                          <div className="flex items-start gap-3.5 w-full">
+                            <div className="p-2.5 bg-white dark:bg-white/5 rounded-xl shadow-sm text-emerald-600 dark:text-emerald-500 shrink-0 mt-0.5">
+                              <FileText size={16} />
+                            </div>
+                            {editingCnpj ? (
+                              <div className="flex items-center gap-2 w-full pr-2">
+                                <input
+                                  type="text"
+                                  placeholder="CNPJ ou CPF do contato"
+                                  value={cnpjInput}
+                                  onChange={e => setCnpjInput(e.target.value)}
+                                  className="w-full bg-white dark:bg-[#202c33] border border-emerald-500/40 rounded-lg px-2.5 py-1 text-xs text-[#111b21] dark:text-[#e9edef] font-mono focus:outline-none focus:border-emerald-500"
+                                  autoFocus
+                                />
+                                <button 
+                                  onClick={handleSaveCnpj} 
+                                  disabled={savingCnpj} 
+                                  className="p-1.5 rounded bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
+                                >
+                                  {savingCnpj ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                                </button>
+                                <button 
+                                  onClick={() => { setEditingCnpj(false); setCnpjInput(contact.document_number || ''); }} 
+                                  className="p-1.5 rounded bg-slate-200 dark:bg-white/5 hover:bg-slate-300 dark:hover:bg-white/10 text-gray-500 transition-colors"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col w-full min-w-0">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400">CNPJ / CPF do Contato</span>
+                                  <button 
+                                    onClick={() => { setEditingCnpj(true); setCnpjInput(contact.document_number || ''); }}
+                                    className="p-1 text-slate-400 hover:text-emerald-500 transition-colors rounded hover:bg-black/5 dark:hover:bg-white/5"
+                                    title="Editar Documento"
+                                  >
+                                    <Pencil size={11} />
+                                  </button>
+                                </div>
+                                <span className="text-xs font-mono font-semibold text-[#111b21] dark:text-[#e9edef] mt-0.5">
+                                  {contact.document_number ? formatDocument(contact.document_number) : 'Não informado'}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          {!editingCnpj && contact.document_number && (
+                            <button onClick={handleCopyDoc} className="p-2 text-slate-400 hover:text-emerald-500 transition-all bg-white dark:bg-[#202c33] rounded-lg shadow-sm border border-slate-100 dark:border-white/5 opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0">
+                              {copiedDoc ? <CheckCircle2 size={15} className="text-emerald-500 animate-in zoom-in-50" /> : <Copy size={15} />}
+                            </button>
+                          )}
                         </div>
 
                         <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-200/60 dark:via-gray-800 to-transparent my-1"></div>

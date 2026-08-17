@@ -2437,23 +2437,31 @@ export default function ChatDashboard() {
     if (contact) {
       const realContactId = contact.id.includes('_') ? contact.id.split('_')[0] : contact.id;
 
-      // 1. Caso o próprio contato seja uma empresa (está em allCompanies) e não tenha CNPJ
-      const isSelfCompany = allCompanies.some(c => c.id === realContactId);
-      if (isSelfCompany && !contact.document_number) {
-        alert(`O CNPJ da empresa "${contact.fantasy_name || contact.name}" é obrigatório para resolver o ticket. Por favor, cadastre o CNPJ na ficha da empresa.`);
-        setCompanyDetailsOpen(contact);
-        return;
-      }
-      
-      // 2. Caso o contato tenha empresas vinculadas e alguma não tenha CNPJ cadastrado
-      const linkedCompanies = (contact.company_ids || [])
+      // 1. Resolve empresas vinculadas via company_ids ou auto-match
+      let linkedCompanies = (Array.isArray(contact.company_ids) ? contact.company_ids : [])
         .map((id: string) => allCompanies.find((c: any) => c.id === id))
         .filter(Boolean) || [];
-      const companyWithMissingCnpj = linkedCompanies.find((c: any) => !c.document_number);
-      
-      if (companyWithMissingCnpj) {
-        alert(`O CNPJ da empresa "${companyWithMissingCnpj.fantasy_name || companyWithMissingCnpj.name}" é obrigatório para resolver o ticket. Por favor, cadastre o CNPJ na ficha da empresa.`);
-        setCompanyDetailsOpen(companyWithMissingCnpj);
+
+      if (linkedCompanies.length === 0 && (contact.document_number || contact.phone)) {
+        const cleanDoc = contact.document_number ? contact.document_number.replace(/\D/g, '') : null;
+        const cleanPhone = contact.phone ? contact.phone.replace(/\D/g, '').slice(-8) : null;
+        const matched = allCompanies.find((c: any) => {
+          if (c.id === contact.id) return false;
+          const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
+          const compPhone = c.phone ? c.phone.replace(/\D/g, '').slice(-8) : null;
+          return (cleanDoc && compDoc && cleanDoc === compDoc) || (cleanPhone && compPhone && cleanPhone === compPhone);
+        });
+        if (matched) linkedCompanies = [matched];
+      }
+
+      const isDirectCompany = !!(contact.fantasy_name || (contact.document_type === 'cnpj' && (contact.custom_name || contact.name)));
+      const hasCnpj = !!(contact.document_number || linkedCompanies.some((c: any) => !!c.document_number));
+
+      // Se for uma empresa direta ou possuir empresas vinculadas, mas NENHUMA tiver CNPJ cadastrado
+      if ((isDirectCompany || linkedCompanies.length > 0) && !hasCnpj) {
+        const targetComp = linkedCompanies[0] || contact;
+        alert(`O CNPJ da empresa "${targetComp.fantasy_name || targetComp.name}" é obrigatório para resolver o ticket. Por favor, cadastre o CNPJ na ficha da empresa.`);
+        setCompanyDetailsOpen(targetComp);
         return;
       }
       // Check if instance has ticket_mode enabled
