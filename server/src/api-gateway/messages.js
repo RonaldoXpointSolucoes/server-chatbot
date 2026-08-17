@@ -83,7 +83,7 @@ router.post('/messages/send', requireTenant, async (req, res) => {
             .single();
 
         let nextStatus = convData?.status || 'open';
-        if (convData?.status === 'resolved' || convData?.status === 'closed' || convData?.status === 'snoozed') {
+        if (!isAuto && (convData?.status === 'resolved' || convData?.status === 'closed' || convData?.status === 'snoozed')) {
             nextStatus = convData?.ai_paused ? 'open' : 'bot';
         }
 
@@ -101,9 +101,9 @@ router.post('/messages/send', requireTenant, async (req, res) => {
                 status: nextStatus
             }).eq('id', conversationId);
         } else {
+            // Automação: apenas atualiza timestamp sem alterar o status da conversa (NÃO reabre ticket)
             await supabase.from('conversations').update({
-                updated_at: new Date().toISOString(),
-                status: nextStatus
+                updated_at: new Date().toISOString()
             }).eq('id', conversationId);
         }
 

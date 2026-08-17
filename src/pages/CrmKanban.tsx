@@ -31,7 +31,13 @@ import {
   ChevronLeft,
   Copy,
   Sliders,
-  X
+  X,
+  Mic,
+  Square,
+  Radio,
+  Wand2,
+  Cpu,
+  Layers
 } from 'lucide-react';
 import { useChatStore, instanceCache } from '../store/chatStore';
 import { supabase } from '../services/supabase';
@@ -212,6 +218,164 @@ export default function CrmKanban() {
 
   // IA status
   const [isQualifying, setIsQualifying] = useState(false);
+
+  // Estados para Criação de Card com Áudio & IA
+  const [isAiCardModalOpen, setIsAiCardModalOpen] = useState(false);
+  const [isAiRecording, setIsAiRecording] = useState(false);
+  const [aiRecordingSeconds, setAiRecordingSeconds] = useState(0);
+  const [aiCardPrompt, setAiCardPrompt] = useState('');
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [generatedPlan, setGeneratedPlan] = useState<{
+    title: string;
+    category: string;
+    priority: number;
+    tags: string[];
+    technical_plan: string;
+    summary: string;
+    suggested_stage_label: string;
+  } | null>(null);
+  const [selectedTargetStage, setSelectedTargetStage] = useState<string>('');
+
+  const aiMediaRecorderRef = React.useRef<MediaRecorder | null>(null);
+  const aiAudioChunksRef = React.useRef<Blob[]>([]);
+  const aiTimerIntervalRef = React.useRef<any>(null);
+
+  const startAiAudioRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      aiAudioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      aiMediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          aiAudioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(aiAudioChunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = async () => {
+          const base64Audio = (reader.result as string).split(',')[1];
+          try {
+            setIsGeneratingPlan(true);
+            const plan = await geminiService.generateFeaturePlanFromAudioOrText({
+              audioBase64: base64Audio,
+              audioMimeType: 'audio/webm',
+              boardName: board?.name
+            });
+            setGeneratedPlan(plan);
+            if (pipelineStages.length > 0) {
+              const matched = pipelineStages.find(s => 
+                s.label.toLowerCase().includes(plan.suggested_stage_label.toLowerCase()) ||
+                plan.suggested_stage_label.toLowerCase().includes(s.label.toLowerCase())
+              );
+              setSelectedTargetStage(matched?.id || pipelineStages[0].id);
+            }
+          } catch (err: any) {
+            console.error('Erro ao gerar plano via áudio:', err);
+            alert('Falha ao processar áudio: ' + (err?.message || 'Tente gravar novamente.'));
+          } finally {
+            setIsGeneratingPlan(false);
+          }
+        };
+        stream.getTracks().forEach(t => t.stop());
+      };
+
+      mediaRecorder.start();
+      setIsAiRecording(true);
+      setAiRecordingSeconds(0);
+      aiTimerIntervalRef.current = setInterval(() => {
+        setAiRecordingSeconds(prev => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.error('Erro ao abrir microfone:', err);
+      alert('Permissão de microfone negada ou indisponível no navegador.');
+    }
+  };
+
+  const stopAiAudioRecording = () => {
+    if (aiMediaRecorderRef.current && isAiRecording) {
+      aiMediaRecorderRef.current.stop();
+      setIsAiRecording(false);
+      if (aiTimerIntervalRef.current) {
+        clearInterval(aiTimerIntervalRef.current);
+      }
+    }
+  };
+
+  const handleGeneratePlanFromText = async () => {
+    if (!aiCardPrompt.trim()) return;
+    try {
+      setIsGeneratingPlan(true);
+      const plan = await geminiService.generateFeaturePlanFromAudioOrText({
+        textPrompt: aiCardPrompt,
+        boardName: board?.name
+      });
+      setGeneratedPlan(plan);
+      if (pipelineStages.length > 0) {
+        const matched = pipelineStages.find(s => 
+          s.label.toLowerCase().includes(plan.suggested_stage_label.toLowerCase()) ||
+          plan.suggested_stage_label.toLowerCase().includes(s.label.toLowerCase())
+        );
+        setSelectedTargetStage(matched?.id || pipelineStages[0].id);
+      }
+    } catch (err: any) {
+      console.error('Erro ao gerar plano via texto:', err);
+      alert('Falha ao gerar plano: ' + (err?.message || 'Tente detalhar mais a ideia.'));
+    } finally {
+      setIsGeneratingPlan(false);
+    }
+  };
+
+  const handleConfirmCreateAiCard = async () => {
+    if (!generatedPlan || !boardId || !tenantId) return;
+    try {
+      setLoading(true);
+      const targetStatus = selectedTargetStage || pipelineStages[0]?.id || 'backlog';
+      const colLeads = leads.filter(l => l.status === targetStatus);
+      let newPosition = 0;
+      if (colLeads.length > 0) {
+        newPosition = (colLeads[colLeads.length - 1].position || 0) + 1000;
+      }
+
+      const payload = {
+        tenant_id: tenantId,
+        board_id: boardId,
+        title: generatedPlan.title,
+        status: targetStatus,
+        position: newPosition,
+        estimated_revenue: 0,
+        probability: 80,
+        priority: generatedPlan.priority || 2,
+        customer_id: null,
+        agent_id: null,
+        due_date: null,
+        tags: Array.from(new Set([...(generatedPlan.tags || []), generatedPlan.category, 'IA-PLANO'])),
+        notes: `${generatedPlan.summary}\n\n${generatedPlan.technical_plan}`
+      };
+
+      const { data, error } = await supabase
+        .from('crm_leads')
+        .insert([payload])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setLeads(prev => [...prev, data]);
+      setIsAiCardModalOpen(false);
+      setGeneratedPlan(null);
+      setAiCardPrompt('');
+    } catch (err: any) {
+      console.error('Erro ao salvar card gerado por IA:', err);
+      alert('Erro ao criar card: ' + (err?.message || 'Falha no banco'));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Buscar dados do Quadro e Leads
   const fetchData = async () => {
@@ -879,13 +1043,26 @@ export default function CrmKanban() {
           </button>
           <button 
             onClick={() => {
+              setGeneratedPlan(null);
+              setAiCardPrompt('');
+              setSelectedTargetStage(pipelineStages[0]?.id || '');
+              setIsAiCardModalOpen(true);
+            }}
+            className="flex items-center gap-2 px-4.5 py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer"
+          >
+            <Mic size={14} className="text-amber-300 animate-pulse" />
+            <span>Criar com Áudio & IA</span>
+            <Sparkles size={12} className="text-amber-300" />
+          </button>
+          <button 
+            onClick={() => {
               setLeadForm(prev => ({ ...prev, status: pipelineStages[0]?.id || '' }));
               setIsAddLeadOpen(true);
             }}
-            className="flex items-center gap-1.5 px-5 py-2.5 bg-gradient-to-tr from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white rounded-xl text-xs font-black shadow-md shadow-indigo-500/10 hover:shadow-indigo-500/25 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer"
+            className="flex items-center gap-1.5 px-4.5 py-2.5 bg-white dark:bg-[#202c33]/70 text-slate-800 dark:text-slate-200 border border-slate-200/60 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5 rounded-xl text-xs font-black shadow-sm transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer"
           >
             <Plus size={13} strokeWidth={2.5} />
-            Adicionar Oportunidade
+            Novo Cartão
           </button>
         </div>
       </header>
@@ -1825,6 +2002,229 @@ export default function CrmKanban() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Criação Inteligente com Áudio & IA Gemini */}
+      {isAiCardModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#111b21] w-full max-w-2xl rounded-[32px] border border-slate-200/50 dark:border-white/10 overflow-hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] flex flex-col max-h-[90vh] transition-all">
+            
+            {/* Header */}
+            <div className="px-6 py-5 border-b border-slate-200/20 dark:border-white/5 bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-transparent flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                  <Mic size={20} className="animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white font-sans uppercase tracking-wider flex items-center gap-2">
+                    Criar Card com Áudio & IA
+                    <span className="text-[9px] px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 font-extrabold border border-indigo-500/30">
+                      Gemini 2.5 Pro
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Fale ou digite sua ideia de funcionalidade. A IA criará o plano de engenharia e estruturará o card.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  stopAiAudioRecording();
+                  setIsAiCardModalOpen(false);
+                }} 
+                className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-all"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Conteúdo Rolável */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar text-xs">
+              
+              {/* Gravador de Áudio */}
+              <div className="p-5 rounded-2xl border border-dashed border-indigo-500/30 bg-gradient-to-br from-indigo-500/[0.04] via-purple-500/[0.02] to-transparent flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className={cn(
+                    "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
+                    isAiRecording 
+                      ? "bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-500/40 ring-4 ring-rose-500/20" 
+                      : "bg-gradient-to-tr from-purple-500/20 to-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                  )}>
+                    {isAiRecording ? <Radio size={24} /> : <Mic size={24} />}
+                  </div>
+                  <div>
+                    <h5 className="font-black text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                      {isAiRecording ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                          Gravando Áudio... ({aiRecordingSeconds}s)
+                        </>
+                      ) : (
+                        'Gravar Ideia por Áudio'
+                      )}
+                    </h5>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      {isAiRecording 
+                        ? 'Descreva a funcionalidade para o sistema ou chat e clique em concluir' 
+                        : 'Clique para falar pelo microfone e deixar a IA transcrever e planejar'}
+                    </p>
+                  </div>
+                </div>
+
+                {isAiRecording ? (
+                  <button
+                    type="button"
+                    onClick={stopAiAudioRecording}
+                    className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black shadow-lg shadow-rose-500/25 flex items-center gap-2 text-xs transition-all active:scale-95 cursor-pointer uppercase tracking-wider"
+                  >
+                    <Square size={14} />
+                    Parar e Criar Plano
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isGeneratingPlan}
+                    onClick={startAiAudioRecording}
+                    className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl font-black shadow-md shadow-indigo-500/20 flex items-center gap-2 text-xs transition-all active:scale-95 cursor-pointer uppercase tracking-wider"
+                  >
+                    <Mic size={14} />
+                    Gravar por Voz
+                  </button>
+                )}
+              </div>
+
+              {/* Entrada de Texto Alternativa */}
+              <div className="space-y-2">
+                <label className="font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider text-[10px]">
+                  Ou digite o que precisa ser desenvolvido / corrigido:
+                </label>
+                <textarea 
+                  rows={3}
+                  value={aiCardPrompt}
+                  onChange={e => setAiCardPrompt(e.target.value)}
+                  placeholder="Ex: Quero adicionar no chat um botão de envio de áudio gravado que seja automaticamente salvo no banco e gere transcrição em tempo real..."
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500/30 text-slate-900 dark:text-white leading-relaxed custom-scrollbar transition-all"
+                />
+                
+                <button
+                  type="button"
+                  disabled={isGeneratingPlan || !aiCardPrompt.trim() || isAiRecording}
+                  onClick={handleGeneratePlanFromText}
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-md shadow-indigo-500/15 flex items-center justify-center gap-2 text-xs transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                  {isGeneratingPlan ? (
+                    <>
+                      <Loader2 size={15} className="animate-spin" />
+                      Analisando e Gerando Plano de Desenvolvimento com IA...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={15} />
+                      Gerar Plano Técnico com IA
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Plano Gerado / Preview Estruturado */}
+              {generatedPlan && (
+                <div className="p-5 bg-gradient-to-br from-indigo-500/[0.06] via-purple-500/[0.03] to-transparent border border-indigo-500/25 rounded-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="flex items-center justify-between border-b border-indigo-500/15 pb-3">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                      🎯 Plano de Engenharia Estruturado
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-400">
+                      Prioridade: {generatedPlan.priority === 3 ? '🔴 Alta' : generatedPlan.priority === 2 ? '🟡 Média' : '🟢 Normal'}
+                    </span>
+                  </div>
+
+                  {/* Título & Coluna de Destino */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9px]">Título do Card</label>
+                      <input 
+                        type="text" 
+                        value={generatedPlan.title}
+                        onChange={e => setGeneratedPlan({ ...generatedPlan, title: e.target.value })}
+                        className="w-full px-3.5 py-2 bg-white dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9px]">Coluna no Quadro</label>
+                      <select 
+                        value={selectedTargetStage}
+                        onChange={e => setSelectedTargetStage(e.target.value)}
+                        className="w-full px-3.5 py-2 bg-white dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                      >
+                        {pipelineStages.map(s => (
+                          <option key={s.id} value={s.id} className="dark:bg-[#111b21]">{s.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Tags */}
+                  <div className="flex gap-1.5 flex-wrap">
+                    {generatedPlan.tags.map((t, idx) => (
+                      <span key={idx} className="text-[9px] font-black uppercase px-2.5 py-0.5 rounded-md bg-white dark:bg-white/10 text-indigo-600 dark:text-indigo-300 border border-indigo-500/20">
+                        #{t}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Resumo */}
+                  <div className="p-3 bg-white/60 dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5">
+                    <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200 leading-relaxed">
+                      {generatedPlan.summary}
+                    </p>
+                  </div>
+
+                  {/* Plano Detalhado em Markdown */}
+                  <div className="space-y-1.5">
+                    <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9px]">Especificação Técnica & Requisitos</label>
+                    <div className="p-4 bg-white dark:bg-[#0c1317] border border-slate-200 dark:border-white/10 rounded-xl max-h-[220px] overflow-y-auto custom-scrollbar text-[11px] text-slate-800 dark:text-slate-200 whitespace-pre-wrap font-mono leading-relaxed select-text">
+                      {generatedPlan.technical_plan}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-slate-200/20 dark:border-white/5 bg-slate-50/50 dark:bg-black/10 shrink-0 flex gap-3 justify-end">
+              <button 
+                type="button" 
+                onClick={() => {
+                  stopAiAudioRecording();
+                  setIsAiCardModalOpen(false);
+                }}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 font-bold rounded-xl transition-all duration-200 text-xs active:scale-95 cursor-pointer uppercase tracking-wider"
+              >
+                Cancelar
+              </button>
+              <button 
+                type="button"
+                disabled={!generatedPlan || loading}
+                onClick={handleConfirmCreateAiCard}
+                className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black rounded-xl shadow-lg shadow-indigo-500/25 transition-all duration-200 text-xs active:scale-95 disabled:opacity-50 cursor-pointer uppercase tracking-wider flex items-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Salvando no Quadro...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={14} />
+                    Confirmar e Criar Card no Kanban
+                  </>
+                )}
+              </button>
+            </div>
+
           </div>
         </div>
       )}

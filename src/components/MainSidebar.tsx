@@ -1049,7 +1049,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
             ))}
             <NavItem 
               icon={<Plus size={16} className="text-amber-500" />} 
-              title="➕ Criar Novo Quadro" 
+              title="Criar Novo Quadro" 
               isSub
               onClick={() => setIsBoardCreatorOpen(true)}
             />

@@ -882,9 +882,11 @@ class EventProcessor {
                           unread_count: 0,
                           last_message_preview: b.textMessage,
                           last_message_at: b.timestamp,
-                          status: 'bot',
+                          status: 'resolved',
                           has_inbound: false,
-                          has_human_outbound: false
+                          has_human_outbound: false,
+                          has_automation_outbound: false,
+                          only_automation_outbound: true
                       });
                   }
                   
@@ -897,17 +899,24 @@ class EventProcessor {
                       if (b.direction === 'inbound') {
                           conv.unread_count += 1;
                           conv.has_inbound = true;
+                          conv.only_automation_outbound = false;
                       }
-                      if (b.direction === 'outbound' && b.senderType === 'human') {
-                           conv.has_human_outbound = true;
-                           AutomationWorker.cancelPendingMessage(b.conversationId);
-                           AutomationWorker.cancelPendingMessage(b.jid);
+                      if (b.direction === 'outbound') {
+                          if (b.senderType === 'automation') {
+                              conv.has_automation_outbound = true;
+                          } else if (b.senderType === 'human') {
+                              conv.has_human_outbound = true;
+                              conv.only_automation_outbound = false;
+                              AutomationWorker.cancelPendingMessage(b.conversationId);
+                              AutomationWorker.cancelPendingMessage(b.jid);
+                          } else {
+                              conv.only_automation_outbound = false;
+                          }
                       }
                   }
               }
              
              // Verifica quais conversas já existem no banco
-// Verifica quais conversas já existem no banco
              const contactIds = Array.from(new Set(Array.from(convMap.values()).map(c => c.contact_id)));
              const { data: existingConvs, error: existError } = await supabase.from('conversations')
                   .select('id, tenant_id, instance_id, contact_id, unread_count, status, ai_paused')
@@ -929,18 +938,22 @@ class EventProcessor {
              
              for(const [key, data] of convMap.entries()) {
                  const exist = existingConvMap.get(key);
-                 let finalStatus = 'bot';
+                 let finalStatus = 'resolved';
                  let finalAiPaused = false;
                  
                  if(exist) {
-                     let nextStatus = exist.status || 'bot';
+                     let nextStatus = exist.status || 'resolved';
                      let nextAiPaused = exist.ai_paused || false;
                      const isOldHistory = data.last_message_at && (Date.now() - new Date(data.last_message_at).getTime() > 24 * 60 * 60 * 1000);
                       
-                     if ((exist.status === 'resolved' || exist.status === 'closed' || exist.status === 'snoozed') && !isOldHistory) {
+                     // Regra Estrita: Se o lote não possuir mensagem recebida do cliente (inbound) nem envio humano expresso,
+                     // MANTÉM intacto o status existente (se estava 'resolved', continua 'resolved', NUNCA reabre ticket!)
+                     if (!data.has_inbound && !data.has_human_outbound) {
+                         nextStatus = exist.status || 'resolved';
+                     } else if ((exist.status === 'resolved' || exist.status === 'closed' || exist.status === 'snoozed') && !isOldHistory) {
                           if (data.has_inbound && !exist.ai_paused) {
                               nextStatus = 'bot';
-                          } else {
+                          } else if (data.has_human_outbound) {
                               nextStatus = 'open';
                           }
                       }
@@ -983,9 +996,12 @@ class EventProcessor {
                      if (!isOldHistory) {
                          if (data.has_inbound) {
                              initialStatus = 'bot';
-                         } else {
+                         } else if (data.has_human_outbound) {
                              initialStatus = 'open';
-                             if (data.has_human_outbound) initialAiPaused = true;
+                             initialAiPaused = true;
+                         } else {
+                             // Qualquer mensagem outbound (automação, status de pedido, notificação) inicia como 'resolved' (SEM abrir ticket!)
+                             initialStatus = 'resolved';
                          }
                      }
                      

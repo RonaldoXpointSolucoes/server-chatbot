@@ -648,6 +648,103 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
     }
   }
 
+  async generateFeaturePlanFromAudioOrText(params: {
+    textPrompt?: string;
+    audioBase64?: string;
+    audioMimeType?: string;
+    boardName?: string;
+  }): Promise<{
+    title: string;
+    category: string;
+    priority: number;
+    tags: string[];
+    technical_plan: string;
+    summary: string;
+    suggested_stage_label: string;
+  }> {
+    if (!this.isConfigured()) {
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
+    }
+    const model = this.getGenAI().getGenerativeModel({ 
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            title: {
+              type: "string",
+              description: "Título curto, claro e profissional da funcionalidade ou melhoria (ex: '[Chat] Envio de Áudio com Transcrição')."
+            },
+            category: {
+              type: "string",
+              description: "Categoria principal: 'Chat', 'Sistema / SaaS', 'Backend / API', 'I.A / Gemini', 'Integração' ou 'Correção'."
+            },
+            priority: {
+              type: "integer",
+              description: "1 (Normal/Baixa), 2 (Média/Importante) ou 3 (Alta/Crítica)."
+            },
+            tags: {
+              type: "array",
+              description: "Lista de 3 a 5 tags curtas (ex: ['Frontend', 'Chat', 'IA', 'Supabase']).",
+              items: { type: "string" }
+            },
+            summary: {
+              type: "string",
+              description: "Resumo executivo de 1 a 2 linhas explicando o que será feito e o valor agregado."
+            },
+            suggested_stage_label: {
+              type: "string",
+              description: "Etapa recomendada para o card (ex: 'Backlog / Ideias' ou 'Em Análise')."
+            },
+            technical_plan: {
+              type: "string",
+              description: "Plano técnico completo e estruturado em Markdown contendo: 🎯 Objetivo, 📋 Requisitos e Regras de Negócio, 🛠️ Passo a Passo Técnico de Implementação (arquivos e lógica a alterar), 🧪 Critérios de Aceite & Testes."
+            }
+          },
+          required: ["title", "category", "priority", "tags", "summary", "suggested_stage_label", "technical_plan"]
+        }
+      }
+    });
+
+    const systemPrompt = `Você é um Engenheiro de Software Sênior & Arquiteto de Sistemas Fullstack especializado em SaaS, Chatbots WhatsApp, React, Node.js e Inteligência Artificial.
+Sua missão é ouvir o áudio ou ler o texto do desenvolvedor/gestor que descreve uma nova funcionalidade, ideia, melhoria ou correção para o sistema ou chat, e gerar um plano técnico de desenvolvimento de software de altíssimo nível.
+
+Quadro de destino: ${params.boardName || 'Desenvolvimento & Roadmap'}
+${params.textPrompt ? `Instrução ou descrição fornecida: "${params.textPrompt}"` : 'Analise o áudio anexo com a instrução do desenvolvedor.'}
+
+REGRAS PARA O PLANO TÉCNICO (technical_plan em Markdown):
+1. Use emojis para destacar cada seção.
+2. Divida claramente em:
+   - 🎯 **Objetivo & Visão Geral**
+   - 📋 **Requisitos Funcionais & Regras de Negócio**
+   - 🛠️ **Arquitetura & Passo a Passo de Código** (componentes frontend, endpoints backend, banco Supabase se necessário)
+   - 🧪 **Critérios de Aceite & Validação**
+3. Seja extremamente prático, direto e com código/arquitetura limpa.`;
+
+    const parts: any[] = [{ text: systemPrompt }];
+
+    if (params.audioBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: params.audioMimeType || 'audio/webm',
+          data: params.audioBase64
+        }
+      });
+    }
+
+    const result = await model.generateContent(parts);
+    const response = await result.response;
+    const text = response.text().trim();
+    try {
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      return JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Erro no parse do plano técnico:", text);
+      throw new Error("Falha ao estruturar o plano técnico com a IA.");
+    }
+  }
+
   async qualifyCrmLead(historyText: string, additionalNotes?: string): Promise<{ customerName: string, mainInterest: string, businessType: string, priority: number, summaryHTML: string }> {
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
