@@ -973,97 +973,117 @@ export default function CrmKanban() {
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-[#0c1317] overflow-hidden">
       
-      {/* Cabeçalho Kanban Premium */}
-      <header className="shrink-0 flex flex-col xl:flex-row xl:items-center justify-between gap-4.5 px-8 py-5 border-b border-slate-200/50 dark:border-white/5 bg-white/40 dark:bg-[#0c1317]/50 backdrop-blur-xl select-none z-10">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-500 text-white flex items-center justify-center shadow-lg shadow-indigo-500/10 shrink-0">
-            <CircleDot size={20} className="animate-pulse" />
+      {/* Cabeçalho Kanban SaaS Premium (Estilo Linear / Notion / Vercel) */}
+      <header className="shrink-0 flex flex-col gap-3.5 px-6 lg:px-8 py-4.5 border-b border-slate-200/60 dark:border-white/10 bg-white/70 dark:bg-[#0c1317]/80 backdrop-blur-2xl select-none z-10 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
+        {/* Linha 1: Identidade do Quadro & Botões Principais de Criação */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-cyan-500 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0 ring-4 ring-indigo-500/10">
+              <Sparkles size={20} className="animate-pulse" />
+            </div>
+            <div className="text-left min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-base lg:text-lg font-black tracking-tight text-slate-900 dark:text-white font-sans truncate">
+                  {board.name}
+                </h1>
+                <span className="text-[9px] px-2.5 py-0.5 bg-gradient-to-r from-purple-500/10 to-indigo-500/10 dark:from-purple-500/20 dark:to-indigo-500/20 text-purple-600 dark:text-purple-300 font-black uppercase rounded-lg border border-purple-500/20 tracking-wider flex items-center gap-1">
+                  <Layers size={10} />
+                  Kanban
+                </span>
+                <span className="text-[9px] px-2 py-0.5 bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400 font-bold rounded-lg border border-slate-200/60 dark:border-white/5">
+                  {leads.length} {leads.length === 1 ? 'cartão' : 'cartões'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-sans font-medium mt-0.5 truncate max-w-2xl">
+                {board.config?.description || 'Arraste e solte cartões para gerenciar tarefas e avançar fluxos'}
+              </p>
+            </div>
           </div>
-          <div className="text-left">
-            <h1 className="text-base font-extrabold tracking-tight text-slate-800 dark:text-slate-100 font-sans flex items-center gap-2">
-              {board.name}
-              <span className="text-[9px] px-2.5 py-0.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-black uppercase rounded-lg border border-indigo-500/15">Kanban</span>
-            </h1>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-sans font-bold mt-0.5">
-              {board.config?.description || 'Arraste e solte cartões para avançar oportunidades e fechar negócios'}
-            </p>
+
+          {/* Botões de Ação Primária em Destaque */}
+          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
+            <button 
+              onClick={() => {
+                setGeneratedPlan(null);
+                setAiCardPrompt('');
+                setSelectedTargetStage(pipelineStages[0]?.id || '');
+                setIsAiCardModalOpen(true);
+              }}
+              className="flex items-center gap-2 px-4.5 py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer ring-2 ring-white/10"
+            >
+              <Mic size={14} className="text-amber-300 animate-pulse" />
+              <span>Criar com Áudio & IA</span>
+              <Sparkles size={13} className="text-amber-300" />
+            </button>
+
+            <button 
+              onClick={() => {
+                setLeadForm(prev => ({ ...prev, status: pipelineStages[0]?.id || '' }));
+                setIsAddLeadOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-black shadow-md transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer"
+            >
+              <Plus size={14} strokeWidth={2.5} />
+              Novo Cartão
+            </button>
           </div>
         </div>
 
-        {/* Controles de Filtros, Criação e Edição */}
-        <div className="flex items-center gap-2.5 flex-wrap xl:flex-nowrap">
-          {/* Busca */}
-          <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={13} />
-            <input 
-              type="text" 
-              placeholder="Pesquisar cartão..." 
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2.5 w-[190px] bg-slate-100/80 dark:bg-[#202c33]/40 border border-slate-200/40 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-300"
-            />
+        {/* Linha 2: Barra de Ferramentas (Busca, Filtros, Configurações do Quadro) */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-100 dark:border-white/5">
+          <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
+            {/* Busca */}
+            <div className="relative flex-1 sm:flex-initial">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={13} />
+              <input 
+                type="text" 
+                placeholder="Pesquisar cartão..." 
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="pl-8.5 pr-4 py-1.5 w-full sm:w-[210px] bg-slate-100/80 dark:bg-[#182229]/60 border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-200"
+              />
+            </div>
+
+            {/* Filtro de Agente */}
+            <div className="relative cursor-pointer select-none">
+              <select 
+                value={selectedAgentFilter}
+                onChange={e => setSelectedAgentFilter(e.target.value)}
+                className="px-3 pr-7 py-1.5 bg-slate-100/80 dark:bg-[#182229]/60 border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 text-slate-700 dark:text-slate-300 cursor-pointer appearance-none"
+              >
+                <option value="all">👥 Todos os Agentes</option>
+                {agents.map(a => (
+                  <option key={a.id} value={a.id}>👤 {a.full_name?.split(' ')[0] || a.email}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          {/* Filtro de Agente */}
-          <div className="relative cursor-pointer select-none">
-            <select 
-              value={selectedAgentFilter}
-              onChange={e => setSelectedAgentFilter(e.target.value)}
-              className="px-3.5 pr-8 py-2.5 bg-slate-100/80 dark:bg-[#202c33]/40 border border-slate-200/40 dark:border-white/5 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 cursor-pointer appearance-none"
+          {/* Ações de Gestão do Quadro */}
+          <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+            <button 
+              onClick={() => setIsCreatorOpen(true)}
+              className="flex items-center gap-1 px-3 py-1.5 bg-slate-100/80 dark:bg-[#182229]/60 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-bold transition-all hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer"
             >
-              <option value="all">👥 Todos os Agentes</option>
-              {agents.map(a => (
-                <option key={a.id} value={a.id}>👤 {a.full_name?.split(' ')[0] || a.email}</option>
-              ))}
-            </select>
+              <Plus size={12} strokeWidth={2.5} />
+              Novo Quadro
+            </button>
+            <button 
+              onClick={() => setIsEditBoardOpen(true)}
+              className="flex items-center gap-1 px-3 py-1.5 bg-slate-100/80 dark:bg-[#182229]/60 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-bold transition-all hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer"
+            >
+              <Settings size={12} />
+              Configurar
+            </button>
+            <button 
+              onClick={handleDeleteBoard}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-rose-500/80 hover:text-rose-600 dark:text-rose-400/80 dark:hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
+              title="Excluir este quadro permanentemente"
+            >
+              <Trash2 size={12} />
+              Excluir
+            </button>
           </div>
-
-          {/* Ações */}
-          <button 
-            onClick={handleDeleteBoard}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 active:scale-95 cursor-pointer"
-            title="Excluir este quadro permanentemente"
-          >
-            <Trash2 size={13} />
-            Excluir Quadro
-          </button>
-          <button 
-            onClick={() => setIsEditBoardOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-white dark:bg-[#202c33]/70 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 hover:bg-slate-50 dark:hover:bg-white/5 active:scale-95 cursor-pointer"
-          >
-            <Settings size={13} />
-            Configurar
-          </button>
-          <button 
-            onClick={() => setIsCreatorOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-white dark:bg-[#202c33]/70 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 hover:bg-slate-50 dark:hover:bg-white/5 active:scale-95 cursor-pointer"
-          >
-            <Plus size={13} />
-            Novo Quadro
-          </button>
-          <button 
-            onClick={() => {
-              setGeneratedPlan(null);
-              setAiCardPrompt('');
-              setSelectedTargetStage(pipelineStages[0]?.id || '');
-              setIsAiCardModalOpen(true);
-            }}
-            className="flex items-center gap-2 px-4.5 py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer"
-          >
-            <Mic size={14} className="text-amber-300 animate-pulse" />
-            <span>Criar com Áudio & IA</span>
-            <Sparkles size={12} className="text-amber-300" />
-          </button>
-          <button 
-            onClick={() => {
-              setLeadForm(prev => ({ ...prev, status: pipelineStages[0]?.id || '' }));
-              setIsAddLeadOpen(true);
-            }}
-            className="flex items-center gap-1.5 px-4.5 py-2.5 bg-white dark:bg-[#202c33]/70 text-slate-800 dark:text-slate-200 border border-slate-200/60 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5 rounded-xl text-xs font-black shadow-sm transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer"
-          >
-            <Plus size={13} strokeWidth={2.5} />
-            Novo Cartão
-          </button>
         </div>
       </header>
 
@@ -1112,21 +1132,21 @@ export default function CrmKanban() {
               onDragEnter={e => e.preventDefault()}
               onDrop={e => handleDrop(e, stage.id)}
               className={cn(
-                "w-[290px] shrink-0 flex flex-col h-full bg-slate-50/60 dark:bg-[#182229]/40 backdrop-blur-md rounded-[28px] border border-slate-200/50 dark:border-white/5 overflow-hidden transition-all duration-300",
-                isOver && "border-indigo-500/45 dark:border-indigo-500/30 bg-indigo-500/[0.01] dark:bg-indigo-500/[0.02]"
+                "w-[300px] shrink-0 flex flex-col h-full bg-slate-100/70 dark:bg-[#182229]/40 backdrop-blur-xl rounded-[28px] border border-slate-200/60 dark:border-white/10 overflow-hidden transition-all duration-300 shadow-sm",
+                isOver && "border-indigo-500/50 dark:border-indigo-500/40 bg-indigo-500/[0.02] dark:bg-indigo-500/[0.04]"
               )}
             >
               {/* Cabeçalho da Coluna - Minimalist Premium */}
               <div 
                 className={cn(
-                  "p-4 flex items-center justify-between shrink-0 select-none border-b border-slate-200/40 dark:border-white/5 transition-all relative border-t-4",
+                  "p-4 flex items-center justify-between shrink-0 select-none border-b border-slate-200/50 dark:border-white/5 transition-all relative border-t-4",
                   colors.borderTop
                 )}
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <span className={cn("w-2 h-2 rounded-full shrink-0", stage.color || "bg-indigo-500")} />
+                  <span className={cn("w-2.5 h-2.5 rounded-full shrink-0 shadow-sm ring-2 ring-white/20", stage.color || "bg-indigo-500")} />
                   <div className="min-w-0 text-left">
-                    <h3 className="text-xs font-black truncate font-sans tracking-wide leading-tight flex items-center gap-1.5 text-slate-800 dark:text-slate-200">
+                    <h3 className="text-xs font-black truncate font-sans tracking-wide leading-tight flex items-center gap-1.5 text-slate-900 dark:text-slate-100">
                       {stage.label}
                       <span className={cn("px-2 py-0.5 rounded-lg text-[9px] font-black shrink-0", colors.badge)}>
                         {colLeads.length}
@@ -1186,7 +1206,7 @@ export default function CrmKanban() {
                 onDragOver={e => handleDragOver(e, stage.id)}
                 onDragEnter={e => e.preventDefault()}
                 onDrop={e => handleDrop(e, stage.id)}
-                className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar"
+                className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar flex flex-col"
               >
                 {(() => {
                   const itemsToRender: React.ReactNode[] = [];
@@ -1230,7 +1250,7 @@ export default function CrmKanban() {
                           onDragOver={e => handleCardDragOver(e, lead.id)}
                           onClick={() => setSelectedLead(lead)}
                           className={cn(
-                            "group/card bg-white/80 dark:bg-[#111b21]/75 backdrop-blur-md p-4.5 rounded-2xl border border-slate-200/50 dark:border-white/5 shadow-sm hover:shadow-[0_12px_24px_rgba(0,0,0,0.04)] dark:hover:shadow-[0_12px_24px_rgba(0,0,0,0.25)] hover:border-slate-300 dark:hover:border-indigo-500/20 hover:-translate-y-0.5 transition-all duration-300 cursor-grab active:cursor-grabbing relative overflow-hidden",
+                            "group/card bg-white/90 dark:bg-[#111b21]/80 backdrop-blur-md p-4.5 rounded-2xl border border-slate-200/60 dark:border-white/5 shadow-sm hover:shadow-[0_12px_24px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_12px_24px_rgba(0,0,0,0.3)] hover:border-slate-300 dark:hover:border-indigo-500/30 hover:-translate-y-0.5 transition-all duration-300 cursor-grab active:cursor-grabbing relative overflow-hidden",
                             priorityBorder,
                             isBeingDragged && "border-2 border-dashed border-indigo-500/40 dark:border-indigo-400/30 bg-indigo-50/40 dark:bg-indigo-950/20 opacity-40 shadow-inner rotate-[1.5deg] scale-[0.98]"
                           )}
@@ -1344,15 +1364,17 @@ export default function CrmKanban() {
                             </div>
                           </div>
 
-                          {/* Informações de Faturamento */}
-                          <div className="flex items-center justify-between mt-3 pl-1 text-[10px]">
-                            <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8px]">
-                              Faturamento
-                            </span>
-                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black text-[10px] rounded-lg border border-emerald-500/15 shrink-0">
-                              R$ {Number(lead.estimated_revenue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </span>
-                          </div>
+                          {/* Informações de Faturamento (se houver valor) */}
+                          {Number(lead.estimated_revenue || 0) > 0 && (
+                            <div className="flex items-center justify-between mt-3 pl-1 text-[10px]">
+                              <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8px]">
+                                Faturamento
+                              </span>
+                              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black text-[10px] rounded-lg border border-emerald-500/15 shrink-0">
+                                R$ {Number(lead.estimated_revenue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          )}
 
                           {/* Tags */}
                           {lead.tags && lead.tags.length > 0 && (
@@ -1415,6 +1437,34 @@ export default function CrmKanban() {
                     }
                   });
 
+                  // Empty State Ilustrado quando a coluna não tiver cartões
+                  if (colLeads.length === 0 && !placeholderRendered && !isDraggingOverThisStage) {
+                    itemsToRender.push(
+                      <div 
+                        key="empty-state" 
+                        onClick={() => {
+                          setLeadForm(prev => ({ ...prev, status: stage.id }));
+                          setIsAddLeadOpen(true);
+                        }}
+                        className="my-auto py-8 px-4 border-2 border-dashed border-slate-200/80 dark:border-white/10 rounded-2xl flex flex-col items-center justify-center text-center cursor-pointer hover:border-indigo-500/40 hover:bg-indigo-500/[0.02] dark:hover:bg-indigo-500/[0.04] transition-all group/empty"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center text-slate-400 dark:text-slate-500 group-hover/empty:scale-110 group-hover/empty:text-indigo-500 transition-all mb-2">
+                          <Layers size={18} />
+                        </div>
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                          Nenhum item nesta etapa
+                        </p>
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                          Arraste ou clique para criar
+                        </p>
+                        <span className="mt-3 inline-flex items-center gap-1 text-[9px] font-black uppercase text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20 group-hover/empty:bg-indigo-500 group-hover/empty:text-white transition-all">
+                          <Plus size={10} strokeWidth={3} />
+                          Criar Cartão
+                        </span>
+                      </div>
+                    );
+                  }
+
                   if (isDraggingOverThisStage && !placeholderRendered) {
                     itemsToRender.push(
                       <motion.div 
@@ -1430,12 +1480,20 @@ export default function CrmKanban() {
                 })()}
               </div>
 
-              {/* Rodapé da Coluna com Faturamento Total */}
-              <div className="p-4 border-t border-black/[0.03] dark:border-white/[0.03] bg-black/[0.01] dark:bg-white/[0.01] shrink-0 flex items-center justify-between text-[10px]">
-                <span className="text-gray-400 dark:text-gray-500 font-bold uppercase tracking-wider">Total Estimado</span>
-                <span className="font-extrabold text-gray-800 dark:text-gray-200">
-                  R$ {colRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              {/* Rodapé da Coluna Inteligente */}
+              <div className="p-3.5 border-t border-slate-200/40 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] shrink-0 flex items-center justify-between text-[10px]">
+                <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8.5px]">
+                  {colRevenue > 0 ? 'Total Estimado' : 'Total de Itens'}
                 </span>
+                {colRevenue > 0 ? (
+                  <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black rounded-lg border border-emerald-500/20">
+                    R$ {colRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                ) : (
+                  <span className="font-extrabold text-slate-600 dark:text-slate-400 text-[10px]">
+                    {colLeads.length} {colLeads.length === 1 ? 'item' : 'itens'}
+                  </span>
+                )}
               </div>
             </div>
           );

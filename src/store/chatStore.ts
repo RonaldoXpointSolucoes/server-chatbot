@@ -773,10 +773,15 @@ function parseAdvancedMsgMetadata(m: any) {
 
 function sanitizeContactName(targetName: string | null | undefined, fallbackPhone: string | null | undefined, tenantName: string | null | undefined): string | null {
   if (!targetName) return fallbackPhone || null;
-  const lname = targetName.toLowerCase();
+  const trimmed = targetName.trim();
+  const lname = trimmed.toLowerCase();
   const tname = tenantName ? tenantName.toLowerCase().trim() : '';
-  if ((tname && lname === tname) || (tname && lname.includes(tname)) || lname.includes('x point') || lname.includes('x-point') || lname === 'empresa' || lname.includes('soluções')) {
+  // Apenas limpa se for EXATAMENTE o nome da empresa isolado (evita que nomes de clientes/contatos que contêm o nome da empresa sejam apagados)
+  if (tname && (lname === tname || lname === tname.replace(/\s+/g, ''))) {
       return fallbackPhone || targetName; 
+  }
+  if (lname === 'empresa' || lname === 'sem nome' || lname === 'null' || lname === 'undefined') {
+      return fallbackPhone || targetName;
   }
   return targetName;
 }
@@ -2703,7 +2708,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             
             const tname = get().tenantInfo?.name || '';
             let finalName = finalCustomName || fallbackName;
-            finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
+            if (!finalCustomName) {
+              finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
+            }
 
             // Converter a coluna tags (array de IDs) em conv_labels usando tenantLabels da store
             const updatedTags = Array.isArray(contact.tags) ? contact.tags : (Array.isArray(c.tags) ? c.tags : []);
@@ -2728,7 +2735,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
          const compositeId = contact.id.includes('_') ? contact.id : `${contact.id}_${effectiveInstanceId}`;
          const tname = get().tenantInfo?.name || '';
          let finalName = contact.custom_name || contact.name;
-         finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
+         if (!contact.custom_name) {
+           finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
+         }
          
          const updatedTags = Array.isArray(contact.tags) ? contact.tags : [];
          const conv_labels = get().tenantLabels.filter(tl => updatedTags.includes(tl.id));
@@ -2794,9 +2803,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const beforeState = currentState ? { ...currentState } : null;
 
     // UI Otimista: atualiza todas as caixas/conversas correspondentes a este contato no state
+    const targetPhone = currentState?.phone;
     set((state) => ({
       contacts: state.contacts.map((c) => {
-         if (getRealContactId(c.id) === realContactId) {
+         const isSameId = getRealContactId(c.id) === realContactId;
+         const isSamePhone = targetPhone && c.phone && isSameBrPhone(c.phone, targetPhone);
+         if (isSameId || isSamePhone) {
              const customNameUpdate = payload.name ? { custom_name: payload.name, name: payload.name } : {};
              return { ...c, ...payload, ...customNameUpdate };
          }
@@ -2827,6 +2839,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const { error } = await supabase.from('contacts').update(dbPayload).eq('id', realContactId);
       if (error) throw error;
+
+      // Propaga a atualização para variações do mesmo telefone (8/9 dígitos) no tenant
+      const effectivePhone = rawBeforeState?.phone || targetPhone;
+      if (effectivePhone) {
+        const phoneVars = getBrPhoneVariations(effectivePhone);
+        const tenantId = rawBeforeState?.tenant_id || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+        if (phoneVars.length > 0 && tenantId) {
+          await supabase.from('contacts')
+            .update(dbPayload)
+            .eq('tenant_id', tenantId)
+            .in('phone', phoneVars);
+        }
+      }
 
       // Log Operation
       if (rawBeforeState) {
@@ -3695,7 +3720,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   
                   const tname = tenant?.name || '';
                   let finalName = dbC.custom_name || dbC.name || dbC.push_name || phoneMatch || dbC.phone;
-                  finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
+                  if (!dbC.custom_name) {
+                     finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
+                  }
                   
                   const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName)}&background=random&color=fff`;
                   
@@ -3711,7 +3738,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      const existing = newContacts[idx];
                      const finalCustomName = dbC.custom_name || existing.custom_name;
                      let finalName = finalCustomName || dbC.name || existing.name;
-                     finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
+                     if (!finalCustomName) {
+                        finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
+                     }
                      
                      const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || dbC.phone)}&background=random&color=fff`;
                      
@@ -3756,7 +3785,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                      }
                   } else {
                      const finalCustomName = dbC.custom_name;
-                     const finalName = finalCustomName || dbC.name || dbC.push_name;
+                     let finalName = finalCustomName || dbC.name || dbC.push_name || phoneMatch || dbC.phone;
+                     if (!finalCustomName) {
+                        finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
+                     }
                      const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || dbC.phone)}&background=random&color=fff`;
 
                      newContacts.push({
