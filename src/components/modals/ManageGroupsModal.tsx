@@ -106,34 +106,10 @@ export function ManageGroupsModal({
         }
       });
 
-      // 3. Busca contatos no Supabase (tabela contacts)
-      const { data: dbGroupContacts } = await supabase
-        .from('contacts')
-        .select('id, name, push_name, whatsapp_jid, instance_id, avatar_url')
-        .eq('instance_id', instanceId)
-        .ilike('whatsapp_jid', '%@g.us');
-
-      if (dbGroupContacts && dbGroupContacts.length > 0) {
-        dbGroupContacts.forEach((c: any) => {
-          const jid = c.whatsapp_jid;
-          if (jid && !groupContactsMap.has(jid)) {
-            const isEnabled = hasConfiguredGroups ? enabledGroupsList.includes(jid) : false;
-            groupContactsMap.set(jid, {
-              id: c.id,
-              jid,
-              name: c.name || c.push_name || 'Grupo Sem Nome',
-              phone: jid,
-              avatar_url: c.avatar_url,
-              enabled: isEnabled
-            });
-          }
-        });
-      }
-
-      // 4. Busca conversas existentes no Supabase (tabela conversations)
-      const { data: dbGroupConvs } = await supabase
+      // 3. Busca conversas e grupos existentes no Supabase (tabela conversations com join em contacts)
+      const { data: dbGroupConvs, error: convsErr } = await supabase
         .from('conversations')
-        .select('id, whatsapp_jid, instance_id, contact_id, contacts(name, push_name, avatar_url)')
+        .select('id, whatsapp_jid, instance_id, contact_id, contacts(id, name, custom_name, profile_picture_url)')
         .eq('instance_id', instanceId)
         .ilike('whatsapp_jid', '%@g.us');
 
@@ -142,13 +118,13 @@ export function ManageGroupsModal({
           const jid = conv.whatsapp_jid;
           if (jid && !groupContactsMap.has(jid)) {
             const isEnabled = hasConfiguredGroups ? enabledGroupsList.includes(jid) : false;
-            const cName = conv.contacts?.name || conv.contacts?.push_name || 'Grupo Sem Nome';
+            const cName = conv.contacts?.custom_name || conv.contacts?.name || 'Grupo Sem Nome';
             groupContactsMap.set(jid, {
               id: conv.contact_id || conv.id,
               jid,
               name: cName,
               phone: jid,
-              avatar_url: conv.contacts?.avatar_url,
+              avatar_url: conv.contacts?.profile_picture_url,
               enabled: isEnabled
             });
           }

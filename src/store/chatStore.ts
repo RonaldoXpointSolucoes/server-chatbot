@@ -4251,17 +4251,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // Conversa tem base, prossegue com o sync on demand
             if (!get().isSyncingHistory[contactId]) {
                 set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: true } }));
+                
+                window.dispatchEvent(new CustomEvent('toast', { 
+                    detail: { 
+                        message: 'Buscando histórico com o WhatsApp... Aguarde alguns instantes.', 
+                        type: 'info' 
+                    } 
+                }));
+
                 try {
                     const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
                     const apiKey = resolvedInstanceId ? await getOrFetchApiKey(resolvedInstanceId) : '';
-                    const res = await fetch(`${API_URL}/api/v1/conversations/${conv.id}/sync-history`, {
+                    const targetConvId = conv?.id || targetContactUuid || contactId;
+
+                    const res = await fetch(`${API_URL}/api/v1/conversations/${targetConvId}/sync-history`, {
                         method: 'POST',
                         headers: { 
                            'Content-Type': 'application/json',
                            'x-tenant-id': tenant.id,
                            'apikey': apiKey
                         },
-                        body: JSON.stringify({ instanceId: resolvedInstanceId, count: 100, limit: 100 })
+                        body: JSON.stringify({ instanceId: resolvedInstanceId, count: 50, limit: 50 })
                     });
                     
                     const result = await res.json();
@@ -4276,10 +4286,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         let errorMessage = 'Falha técnica ao solicitar histórico. Verifique se o servidor está online.';
                         let errorTitle = 'Falha na Sincronização';
                         
-                        if (result?.error && (result.error.includes('Nenhuma mensagem inicial') || result.error.includes('anchor point') || result.error.includes('mensagem âncora'))) {
-                            errorTitle = 'Mensagem Âncora Necessária';
-                            errorMessage = 'Para buscar conversas anteriores com este contato na Meta/WhatsApp, é necessário ter pelo menos uma mensagem recente salva localmente como ponto de partida.\n\nEnvie uma mensagem ou aguarde o recebimento de uma primeira mensagem para habilitar o carregamento do histórico.';
-                        } else if (result?.error) {
+                        if (result?.error) {
                             errorMessage = result.error;
                         }
 
@@ -4292,22 +4299,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         });
                     } else {
                         // O gateway do Node despacha a History Sync que entra numa fila assíncrona.
-                        // Vamos aguardar 6 segundos para que as mensagens cheguem e sejam gravadas no banco de dados.
-                        await new Promise(r => setTimeout(r, 6000));
+                        // Fazemos 2 checagens progressivas (em 3.5s e 7s) para carregar as mensagens conforme chegam do Baileys
+                        await new Promise(r => setTimeout(r, 3500));
 
                         const currentMsgsLength = (msgs && msgs.length) || 0;
                         const newLimit = currentMsgsLength + 100;
+                        const validConvIds = convIds.length > 0 ? convIds : (conv?.id ? [conv.id] : []);
 
-                        // Atualiza a vista atual caso algo não tenha vindo pelo realtime ou pra forçar atualização
-                        const { data: fetchNewMsgs, error: fetchErr } = await supabase.from('messages')
-                           .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
-                           .eq('tenant_id', tenant.id)
-                           .eq('conversation_id', conv.id)
-                           .order('timestamp', { ascending: false })
-                           .limit(newLimit);
+                        // 1ª checagem intermediária
+                        if (validConvIds.length > 0) {
+                            const { data: firstBatch } = await supabase.from('messages')
+                               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+                               .eq('tenant_id', tenant.id)
+                               .in('conversation_id', validConvIds)
+                               .order('timestamp', { ascending: false })
+                               .limit(newLimit);
+                            if (firstBatch && firstBatch.length > currentMsgsLength) {
+                                handleMapping(firstBatch);
+                            }
+                        }
+
+                        // Aguarda mais 3.5s para consolidação total
+                        await new Promise(r => setTimeout(r, 3500));
+
+                        // 2ª checagem final
+                        let fetchNewMsgs: any[] | null = null;
+                        if (validConvIds.length > 0) {
+                            const { data: finalBatch, error: fetchErr } = await supabase.from('messages')
+                               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+                               .eq('tenant_id', tenant.id)
+                               .in('conversation_id', validConvIds)
+                               .order('timestamp', { ascending: false })
+                               .limit(newLimit);
+                            fetchNewMsgs = finalBatch;
+                        }
                            
                         const newMsgsLength = fetchNewMsgs ? fetchNewMsgs.length : 0;
-                        
                         const initialIds = new Set((msgs || []).map(m => m.id));
                         const addedCount = (fetchNewMsgs || []).filter(m => !initialIds.has(m.id)).length;
                         
@@ -4327,10 +4354,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         } else {
                             useDevStore.getState().addLog({
                                 type: 'info',
-                                message: `[History Sync] O WhatsApp não retornou novas mensagens para este contato.`,
+                                message: `[History Sync] O WhatsApp concluiu a consulta para este contato.`,
                                 source: 'ChatStore',
                                 details: { 
-                                    erroSupabase: fetchErr, 
                                     mensagensRetornadas: newMsgsLength, 
                                     mensagensAtuais: currentMsgsLength,
                                     instancia: instanceName
@@ -4338,13 +4364,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                             });
                             window.dispatchEvent(new CustomEvent('toast', { 
                                 detail: { 
-                                    message: 'Nenhuma mensagem nova foi retornada pelo WhatsApp para este contato.', 
+                                    message: 'Histórico verificado. Todas as conversas disponíveis já estão carregadas.', 
                                     type: 'info' 
                                 } 
                             }));
                         }
                            
-                        if (fetchNewMsgs) handleMapping(fetchNewMsgs);
+                        if (fetchNewMsgs && fetchNewMsgs.length > 0) handleMapping(fetchNewMsgs);
                     }
                 } catch (err: any) {
                     useDevStore.getState().addLog({

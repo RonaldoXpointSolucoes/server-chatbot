@@ -6311,59 +6311,14 @@ export default function ChatDashboard() {
                           {(() => {
                             const contactGroups = tenantInfo?.settings?.contactGroups || [];
 
-                            // 1. Caso o próprio contato tenha fantasy_name ou seja uma empresa CNPJ
-                            if (contact.fantasy_name || (contact.document_type === 'cnpj' && (contact.custom_name || contact.name))) {
-                              const matchingGroups = contactGroups.filter((g: any) => 
-                                Array.isArray(contact.tags) && contact.tags.includes(g.id)
-                              );
-                              const hasGroup = matchingGroups.length > 0;
-                              const hasCnpj = !!contact.document_number;
-                              const missingCnpj = !hasCnpj && !hasGroup;
-                              const compName = contact.fantasy_name || contact.custom_name || contact.name;
-
-                              return (
-                                <div 
-                                  className="flex items-center gap-1.5 truncate mt-0.5 cursor-pointer hover:opacity-80 transition-opacity"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setCompanyDetailsOpen(contact);
-                                  }}
-                                  title={`Empresa: ${compName}. Clique para ver ou editar.`}
-                                >
-                                  <span className={cn("text-[11px] truncate flex items-center gap-1 font-medium", missingCnpj ? "text-rose-500 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>
-                                    {missingCnpj ? <AlertTriangle size={10} className="shrink-0 text-rose-500 animate-pulse" /> : <Building2 size={10} className="shrink-0" />}
-                                    <span className="truncate hover:underline">{compName}</span>
-                                  </span>
-                                  {missingCnpj && (
-                                    <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-1.5 py-[1px] rounded border border-rose-500/20 shrink-0">FALTA CNPJ</span>
-                                  )}
-                                  {hasGroup && matchingGroups.map((g: any) => (
-                                    <span 
-                                      key={g.id} 
-                                      className="text-[9px] font-bold px-1.5 py-[1px] rounded border shrink-0"
-                                      style={{
-                                        backgroundColor: `${g.color}15`,
-                                        borderColor: `${g.color}30`,
-                                        color: g.color
-                                      }}
-                                    >
-                                      {g.name}
-                                    </span>
-                                  ))}
-                                </div>
-                              );
-                            }
-
-                            // 2. Caso o contato esteja associado a uma ou mais empresas via company_ids ou auto-match
+                            // 1. Resolve empresas vinculadas via company_ids ou auto-match
                             let linkedCompanies = (Array.isArray(contact.company_ids) ? contact.company_ids : [])
                               .map((id: string) => allCompanies.find((c: any) => c.id === id))
                               .filter(Boolean);
 
-                            // Fallback auto-match por documento ou telefone compartilhado
                             if (linkedCompanies.length === 0 && (contact.document_number || contact.phone)) {
                               const cleanDoc = contact.document_number ? contact.document_number.replace(/\D/g, '') : null;
                               const cleanPhone = contact.phone ? contact.phone.replace(/\D/g, '').slice(-8) : null;
-                              
                               const matched = allCompanies.find((c: any) => {
                                 if (c.id === contact.id) return false;
                                 const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
@@ -6373,52 +6328,60 @@ export default function ChatDashboard() {
                               if (matched) linkedCompanies = [matched];
                             }
 
-                            if (linkedCompanies.length > 0) {
-                              const primaryComp = linkedCompanies[0];
-                              const matchingGroups = contactGroups.filter((g: any) => 
-                                (Array.isArray(contact.tags) && contact.tags.includes(g.id)) ||
-                                linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
-                              );
-                              const hasGroup = matchingGroups.length > 0;
-                              const hasCnpj = !!contact.document_number || linkedCompanies.some((c: any) => !!c.document_number);
-                              const missingCnpj = !hasCnpj && !hasGroup;
-                              const primaryName = primaryComp.fantasy_name || primaryComp.custom_name || primaryComp.name;
+                            // 2. Resolve grupos empresariais vinculados ao contato ou às empresas vinculadas
+                            const matchingGroups = contactGroups.filter((g: any) => 
+                              (Array.isArray(contact.tags) && contact.tags.includes(g.id)) ||
+                              linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
+                            );
 
-                              return (
-                                <div 
-                                  className="flex items-center gap-1.5 truncate mt-0.5 cursor-pointer hover:opacity-80 transition-opacity"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setCompanyDetailsOpen(primaryComp);
-                                  }}
-                                  title={`Empresa Vinculada: ${primaryName}. Clique para ver detalhes.`}
-                                >
-                                  <span className={cn("text-[11px] font-medium truncate flex items-center gap-1", missingCnpj ? "text-rose-500 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>
-                                    {missingCnpj ? <AlertTriangle size={10} className="shrink-0 text-rose-500 animate-pulse" /> : <Building2 size={10} className="shrink-0" />}
-                                    <span className="truncate hover:underline">{primaryName}</span>
-                                    {linkedCompanies.length > 1 && ` (+${linkedCompanies.length - 1})`}
-                                  </span>
-                                  {missingCnpj && (
-                                    <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-1.5 py-[1px] rounded border border-rose-500/20 shrink-0">FALTA CNPJ</span>
-                                  )}
-                                  {hasGroup && matchingGroups.map((g: any) => (
-                                    <span 
-                                      key={g.id} 
-                                      className="text-[9px] font-bold px-1.5 py-[1px] rounded border shrink-0"
-                                      style={{
-                                        backgroundColor: `${g.color}15`,
-                                        borderColor: `${g.color}30`,
-                                        color: g.color
-                                      }}
-                                    >
-                                      {g.name}
-                                    </span>
-                                  ))}
-                                </div>
-                              );
+                            const hasGroup = matchingGroups.length > 0;
+                            const isDirectCompany = !!(contact.fantasy_name || (contact.document_type === 'cnpj' && (contact.custom_name || contact.name)));
+                            const hasLinkedCompany = linkedCompanies.length > 0;
+
+                            if (!isDirectCompany && !hasLinkedCompany && !hasGroup) {
+                              return null;
                             }
 
-                            return null;
+                            const primaryComp = isDirectCompany ? contact : (linkedCompanies[0] || null);
+                            const primaryName = primaryComp ? (primaryComp.fantasy_name || primaryComp.custom_name || primaryComp.name) : null;
+                            const hasCnpj = !!(contact.document_number || linkedCompanies.some((c: any) => !!c.document_number));
+                            const missingCnpj = (isDirectCompany || hasLinkedCompany) && !hasCnpj && !hasGroup;
+
+                            return (
+                              <div 
+                                className="flex items-center gap-1.5 truncate mt-0.5 cursor-pointer hover:opacity-80 transition-opacity flex-wrap"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCompanyDetailsOpen(primaryComp || contact);
+                                }}
+                                title={primaryName ? `Empresa: ${primaryName}${hasGroup ? ` | Grupo: ${matchingGroups.map((g: any) => g.name).join(', ')}` : ''}` : `Grupo Empresarial: ${matchingGroups.map((g: any) => g.name).join(', ')}`}
+                              >
+                                {primaryName && (
+                                  <span className={cn("text-[11px] truncate flex items-center gap-1 font-medium", missingCnpj ? "text-rose-500 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>
+                                    {missingCnpj ? <AlertTriangle size={10} className="shrink-0 text-rose-500 animate-pulse" /> : <Building2 size={10} className="shrink-0" />}
+                                    <span className="truncate hover:underline">{primaryName}</span>
+                                    {linkedCompanies.length > 1 && !isDirectCompany && ` (+${linkedCompanies.length - 1})`}
+                                  </span>
+                                )}
+                                {missingCnpj && (
+                                  <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-1.5 py-[1px] rounded border border-rose-500/20 shrink-0">FALTA CNPJ</span>
+                                )}
+                                {hasGroup && matchingGroups.map((g: any) => (
+                                  <span 
+                                    key={g.id} 
+                                    className="text-[9px] font-bold px-1.5 py-[1px] rounded-md border shrink-0 flex items-center gap-1 shadow-xs transition-transform duration-150 hover:scale-105"
+                                    style={{
+                                      backgroundColor: `${g.color}18`,
+                                      borderColor: `${g.color}35`,
+                                      color: g.color
+                                    }}
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
+                                    <span>{g.name}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            );
                           })()}
                            
                          
@@ -6848,62 +6811,7 @@ export default function ChatDashboard() {
                           </button>
                         )}
 
-                        {/* Empresas Vinculadas via company_ids ou auto-match */}
-                        {(() => {
-                          let linkedCompanies = (Array.isArray(activeChat.company_ids) ? activeChat.company_ids : [])
-                            .map((id: string) => allCompanies.find((c: any) => c.id === id))
-                            .filter(Boolean);
-
-                          if (linkedCompanies.length === 0 && (activeChat.document_number || activeChat.phone)) {
-                            const cleanDoc = activeChat.document_number ? activeChat.document_number.replace(/\D/g, '') : null;
-                            const cleanPhone = activeChat.phone ? activeChat.phone.replace(/\D/g, '').slice(-8) : null;
-                            const matched = allCompanies.find((c: any) => {
-                              if (c.id === activeChat.id) return false;
-                              const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
-                              const compPhone = c.phone ? c.phone.replace(/\D/g, '').slice(-8) : null;
-                              return (cleanDoc && compDoc && cleanDoc === compDoc) || (cleanPhone && compPhone && cleanPhone === compPhone);
-                            });
-                            if (matched) linkedCompanies = [matched];
-                          }
-
-                          if (linkedCompanies.length > 0) {
-                            return linkedCompanies.map((comp: any) => (
-                              <button
-                                key={comp.id}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setCompanyDetailsOpen(comp);
-                                }}
-                                className="flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold transition-all duration-200 shadow-sm"
-                                title={`Empresa Vinculada: ${comp.fantasy_name || comp.name}`}
-                              >
-                                <Building2 size={11} className="shrink-0" />
-                                <span className="truncate max-w-[140px]">{comp.fantasy_name || comp.custom_name || comp.name}</span>
-                              </button>
-                            ));
-                          }
-
-                          // Se não tem empresa nem fantasy_name, botão para associar empresa
-                          if (!activeChat.fantasy_name && activeChat.document_type !== 'cnpj') {
-                            return (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setCompanyDetailsOpen(activeChat);
-                                }}
-                                className="flex items-center gap-1 bg-gray-500/10 hover:bg-[#00a884]/15 px-2 py-0.5 rounded-full border border-dashed border-gray-400/40 hover:border-[#00a884]/40 text-gray-500 dark:text-gray-400 hover:text-[#00a884] text-[10.5px] font-medium transition-all duration-200"
-                                title="Associar Empresa a este Contato"
-                              >
-                                <Building2 size={10} className="shrink-0" />
-                                <span>+ Empresa</span>
-                              </button>
-                            );
-                          }
-
-                          return null;
-                        })()}
-
-                        {/* Grupos Empresariais */}
+                        {/* Empresas Vinculadas via company_ids ou auto-match & Grupos & Botão + Empresa */}
                         {(() => {
                           const contactGroups = tenantInfo?.settings?.contactGroups || [];
                           let linkedCompanies = (Array.isArray(activeChat.company_ids) ? activeChat.company_ids : [])
@@ -6927,26 +6835,66 @@ export default function ChatDashboard() {
                             linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
                           );
 
-                          if (matchingGroups.length === 0) return null;
+                          const hasGroup = matchingGroups.length > 0;
+                          const isDirectCompany = !!(activeChat.fantasy_name || (activeChat.document_type === 'cnpj' && (activeChat.custom_name || activeChat.name)));
+                          const hasLinkedCompany = linkedCompanies.length > 0;
+                          const hasAssociatedEntity = isDirectCompany || hasLinkedCompany || hasGroup;
 
-                          return matchingGroups.map((g: any) => (
-                            <button
-                              key={g.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setCompanyDetailsOpen(linkedCompanies[0] || activeChat);
-                              }}
-                              className="flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold shadow-sm transition-all duration-200 hover:scale-105"
-                              style={{
-                                backgroundColor: `${g.color}15`,
-                                borderColor: `${g.color}30`,
-                                color: g.color
-                              }}
-                              title={`Grupo Empresarial: ${g.name}. Clique para detalhes.`}
-                            >
-                              <span>{g.name}</span>
-                            </button>
-                          ));
+                          return (
+                            <>
+                              {/* Empresas Vinculadas */}
+                              {linkedCompanies.map((comp: any) => (
+                                <button
+                                  key={comp.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setCompanyDetailsOpen(comp);
+                                  }}
+                                  className="flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold transition-all duration-200 shadow-sm hover:scale-105 active:scale-95"
+                                  title={`Empresa Vinculada: ${comp.fantasy_name || comp.name}`}
+                                >
+                                  <Building2 size={11} className="shrink-0" />
+                                  <span className="truncate max-w-[140px]">{comp.fantasy_name || comp.custom_name || comp.name}</span>
+                                </button>
+                              ))}
+
+                              {/* Botão + Empresa (Apenas se NÃO houver nenhuma empresa e NENHUM grupo empresarial associado) */}
+                              {!hasAssociatedEntity && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setCompanyDetailsOpen(activeChat);
+                                  }}
+                                  className="flex items-center gap-1 bg-gray-500/10 hover:bg-[#00a884]/15 px-2 py-0.5 rounded-full border border-dashed border-gray-400/40 hover:border-[#00a884]/40 text-gray-500 dark:text-gray-400 hover:text-[#00a884] text-[10.5px] font-medium transition-all duration-200 active:scale-95"
+                                  title="Associar Empresa a este Contato"
+                                >
+                                  <Building2 size={10} className="shrink-0" />
+                                  <span>+ Empresa</span>
+                                </button>
+                              )}
+
+                              {/* Grupos Empresariais */}
+                              {matchingGroups.map((g: any) => (
+                                <button
+                                  key={g.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setCompanyDetailsOpen(linkedCompanies[0] || activeChat);
+                                  }}
+                                  className="flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold shadow-sm transition-all duration-200 hover:scale-105 active:scale-95"
+                                  style={{
+                                    backgroundColor: `${g.color}15`,
+                                    borderColor: `${g.color}30`,
+                                    color: g.color
+                                  }}
+                                  title={`Grupo Empresarial: ${g.name}. Clique para detalhes.`}
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
+                                  <span>{g.name}</span>
+                                </button>
+                              ))}
+                            </>
+                          );
                         })()}
 
                         {/* Documento CNPJ / CPF e Acesso a Faturamento */}

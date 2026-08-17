@@ -98,7 +98,8 @@ class SessionManager {
                         'failed to sync state',
                         'failed to find key',
                         'critical_unblock',
-                        'Closing session:'
+                        'Closing session:',
+                        'url generation failed'
                     ];
                     
                     if (parsed.msg && ignoredLogs.some(text => parsed.msg.includes(text))) {

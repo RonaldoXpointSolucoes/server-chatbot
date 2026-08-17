@@ -77,6 +77,13 @@ export async function resolveTargetJid(sock, jid, tenantId) {
   let clean = jid.split('@')[0].replace(/\D/g, '');
   if (!clean) return jid;
 
+  // Remove zero à esquerda do DDD se presente (ex: 55011... -> 5511... ou 011... -> 11...)
+  if (clean.startsWith('550') && clean.length >= 13) {
+    clean = '55' + clean.substring(3);
+  } else if (clean.startsWith('0') && (clean.length === 11 || clean.length === 12)) {
+    clean = clean.substring(1);
+  }
+
   // Se a entrada tiver 10 ou 11 dígitos sem o DDI 55, adiciona o 55
   if (!clean.startsWith('55') && (clean.length === 10 || clean.length === 11)) {
     clean = '55' + clean;

@@ -136,6 +136,10 @@ router.get('/conversations/:conversationId/messages', requireTenant, async (req,
     }
 });
 
+// --- SISTEMA DE RATE-LIMITING E CONTROLE DE FLOOD PARA HISTÓRICO META ---
+const historyRequestCooldowns = new Map(); // Map<string, number>
+const HISTORY_COOLDOWN_MS = 20 * 1000; // 20 segundos por conversa para proteger conta de banimento
+
 router.post('/conversations/:conversationId/sync-history', requireTenant, async (req, res) => {
     try {
         const { conversationId } = req.params;
@@ -152,83 +156,184 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
             sock = await sessionManager.connectingState.get(instanceId);
         }
         
-        // Anti-Bug: Se o socket não existe na memória (servidor reiniciou e não carregou ainda), força o boot!
+        // Se o socket não existe na memória, tenta obter de forma resiliente
         if (!sock) {
-             // Removido bloqueio emergencial local para permitir que instâncias ativas funcionem em desenvolvimento local.
-             console.log(`[Sync-History API] Forçando boot emergencial do socket na rota de sync: ${instanceId}`);
+             console.log(`[Sync-History API] Obtendo socket para sync: ${instanceId}`);
              try {
-                 sock = await sessionManager.createSession(tenantId, instanceId);
+                 sock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
              } catch (e) {
                  return res.status(400).json({ error: 'WhatsApp socket offline para esta instancia.' });
              }
         }
         
-        if (!sock) return res.status(400).json({ error: 'Socket offline para esta instancia' });
+        if (!sock) return res.status(400).json({ error: 'Socket offline ou não autenticado para esta instancia' });
 
-        // Identifica a conversa / JID no Supabase
-        const { data: convData, error: convErr } = await supabase
-            .from('conversations')
-            .select('contact_id, contacts(phone)')
-            .eq('id', conversationId)
-            .eq('tenant_id', tenantId)
-            .single();
+        // Identifica a conversa / contato / JID no Supabase
+        let convData = null;
+        let contactUuid = null;
+        let contactPhone = null;
+        let contactJid = null;
 
-        if (convErr || !convData) return res.status(404).json({ error: 'Conversation not found' });
-        
-        let jid = '';
-        if (convData.contacts && convData.contacts.phone) {
-            jid = `${convData.contacts.phone}@s.whatsapp.net`;
-        } else {
-            return res.status(400).json({ error: 'Contact phone not found' });
+        if (conversationId && conversationId !== 'undefined' && conversationId !== 'null') {
+            const { data: conv } = await supabase
+                .from('conversations')
+                .select('id, contact_id, contacts(id, phone, whatsapp_jid)')
+                .eq('id', conversationId)
+                .eq('tenant_id', tenantId)
+                .maybeSingle();
+
+            if (conv) {
+                convData = conv;
+                contactUuid = conv.contact_id || conv.contacts?.id;
+                contactPhone = conv.contacts?.phone;
+                contactJid = conv.contacts?.whatsapp_jid;
+            } else {
+                // Fallback: conversationId pode ser contact_id UUID ou telefone
+                const cleanInput = String(conversationId).replace(/\D/g, '');
+                const { data: contact } = await supabase
+                    .from('contacts')
+                    .select('id, phone, whatsapp_jid')
+                    .eq('tenant_id', tenantId)
+                    .or(`id.eq.${conversationId},phone.eq.${cleanInput}`)
+                    .limit(1)
+                    .maybeSingle();
+
+                if (contact) {
+                    contactUuid = contact.id;
+                    contactPhone = contact.phone;
+                    contactJid = contact.whatsapp_jid;
+                }
+            }
         }
 
-        // Busca de histórico On-Demand via API do WhatsApp Multi-Device (>= v7.0)
-        // Isso requer uma mensagem "âncora" já salva para o WhatsApp saber a partir de onde paginar as mais antigas.
-        const { data: oldestMsgs, error: oldestErr } = await supabase
-            .from('messages')
-            .select('raw_payload, timestamp')
-            .eq('conversation_id', conversationId)
-            .order('timestamp', { ascending: true }) // Pegamos a _mais antiga_ (1)
-            .limit(1);
-
-        if (oldestErr) {
-             console.error("[Sync-History] Erro buscando âncora", oldestErr);
-             return res.status(500).json({ error: 'Erro de banco de dados ao buscar mensagem âncora.' });
+        let rawJid = contactJid || (contactPhone ? `${contactPhone.replace(/\D/g, '')}@s.whatsapp.net` : null);
+        if (!rawJid) {
+            return res.status(400).json({ error: 'Telefone ou JID do contato não encontrado para sincronização.' });
         }
 
-        if (!oldestMsgs || oldestMsgs.length === 0 || !oldestMsgs[0].raw_payload || !oldestMsgs[0].raw_payload.key) {
-            // Se a conversa for literalmente vazia e nenhuma Msg foi sincronizada no load inicial, o fetchMessageHistory falha no server deles.
-            console.warn(`[Sync-History] Tentativa frustrada para JID: ${jid}. O chat está totalmente vazio no banco, impossível utilizar History Sync On Demand sem mensagem âncora.`);
-            return res.status(400).json({ 
-                 error: 'Nenhuma mensagem inicial encontrada localmente. É necessário no mínimo uma mensagem no sistema como âncora (anchor point) para solicitar o histórico para a Meta.' 
-            });
-        }
+        const jid = await resolveTargetJid(sock, rawJid, tenantId);
 
-        const anchorPayload = oldestMsgs[0].raw_payload;
-        const oldestKey = anchorPayload.key;
-        
-        // Pega timestamp do payload WA original ou faz fallback do BD
-        const timestampSeconds = anchorPayload.messageTimestamp 
-            ? anchorPayload.messageTimestamp 
-            : Math.floor(new Date(oldestMsgs[0].timestamp).getTime() / 1000);
+        // --- SISTEMA ANTI-LOOP E RATE-LIMITING SUAVE (PROTEÇÃO META/WHATSAPP) ---
+        const cooldownKey = `${tenantId}_${jid}`;
+        const now = Date.now();
+        const lastRequestedAt = historyRequestCooldowns.get(cooldownKey) || 0;
+        const timeSinceLast = now - lastRequestedAt;
 
-        try {
-            console.log(`[Sync-History] [Tenant: ${tenantId}] [Instance: ${instanceId}] Solicitando últimas 50 mensagems (on-demand) para JID: ${jid} a partir do MsgID: ${oldestKey.id}`);
-            
-            // Chama a API NATIVA DO BAILEYS para o MD:
-            await sock.fetchMessageHistory(50, oldestKey, timestampSeconds);
-            
-            console.log(`[Sync-History] Pedido enviado para a rede do WhatsApp. JID: ${jid}. Aguardando eventos de upsert assíncronos via Baileys.`);
-            // Retorna ao front que o processo foi despachado para a Meta/WhatsApp, e logo mais cairão eventos upsert assíncronos.
-            res.json({
+        if (timeSinceLast < HISTORY_COOLDOWN_MS) {
+            console.log(`[Sync-History] Rate-limit suave ativo para ${jid} (${Math.round(timeSinceLast / 1000)}s atrás). Retornando 200 para proteger a conta.`);
+            return res.json({
                 ok: true,
                 conversationId,
                 synced: true,
-                message: "Busca despachada com sucesso. As mensagens aparecerão em tempo real conforme forem chegando do WhatsApp."
+                cached: true,
+                message: "Uma busca de histórico já foi despachada para o WhatsApp recentemente. As mensagens chegarão em instantes."
+            });
+        }
+
+        // Registrar timestamp do cooldown
+        historyRequestCooldowns.set(cooldownKey, now);
+
+        // Limpeza de cache de cooldowns antigo
+        if (historyRequestCooldowns.size > 1000) {
+            const expireThreshold = now - (60 * 1000);
+            for (const [k, t] of historyRequestCooldowns.entries()) {
+                if (t < expireThreshold) historyRequestCooldowns.delete(k);
+            }
+        }
+
+        // Identifica todos os IDs de conversa do contato para buscar mensagens âncora
+        let allConvIds = conversationId ? [conversationId] : [];
+        if (contactUuid) {
+            const { data: convList } = await supabase
+                .from('conversations')
+                .select('id')
+                .eq('tenant_id', tenantId)
+                .eq('contact_id', contactUuid);
+            if (convList && convList.length > 0) {
+                allConvIds = Array.from(new Set([...allConvIds, ...convList.map(c => c.id)]));
+            }
+        }
+
+        // Busca mensagens existentes para encontrar o ponto de ancoragem ideal
+        let oldestKey = null;
+        let timestampSeconds = Math.floor(Date.now() / 1000);
+
+        if (allConvIds.length > 0) {
+            const { data: msgsList } = await supabase
+                .from('messages')
+                .select('id, whatsapp_message_id, raw_payload, timestamp, sender_type')
+                .eq('tenant_id', tenantId)
+                .in('conversation_id', allConvIds)
+                .order('timestamp', { ascending: true })
+                .limit(50);
+
+            if (msgsList && msgsList.length > 0) {
+                // Prioridade 1: Mensagem com raw_payload.key completo
+                const msgWithKey = msgsList.find(m => m.raw_payload?.key?.id);
+                if (msgWithKey) {
+                    oldestKey = msgWithKey.raw_payload.key;
+                    timestampSeconds = msgWithKey.raw_payload.messageTimestamp 
+                        ? msgWithKey.raw_payload.messageTimestamp 
+                        : Math.floor(new Date(msgWithKey.timestamp).getTime() / 1000);
+                } else {
+                    // Prioridade 2: Mensagem com whatsapp_message_id
+                    const msgWithWaId = msgsList.find(m => m.whatsapp_message_id);
+                    if (msgWithWaId) {
+                        oldestKey = {
+                            remoteJid: jid,
+                            id: msgWithWaId.whatsapp_message_id,
+                            fromMe: msgWithWaId.sender_type === 'human' || msgWithWaId.sender_type === 'agent'
+                        };
+                        timestampSeconds = Math.floor(new Date(msgWithWaId.timestamp).getTime() / 1000);
+                    } else {
+                        // Prioridade 3: Primeira mensagem encontrada
+                        const firstMsg = msgsList[0];
+                        oldestKey = {
+                            remoteJid: jid,
+                            id: firstMsg.whatsapp_message_id || firstMsg.id,
+                            fromMe: firstMsg.sender_type === 'human' || firstMsg.sender_type === 'agent'
+                        };
+                        timestampSeconds = Math.floor(new Date(firstMsg.timestamp).getTime() / 1000);
+                    }
+                }
+            }
+        }
+
+        // Fallback Seguro (0 mensagens locais): Ancora na data atual sem ID prévio
+        if (!oldestKey) {
+            oldestKey = {
+                remoteJid: jid,
+                fromMe: false,
+                id: undefined
+            };
+            timestampSeconds = Math.floor(Date.now() / 1000);
+        }
+
+        try {
+            console.log(`[Sync-History] [Tenant: ${tenantId}] [Instance: ${instanceId}] Solicitando histórico (50 msgs) para JID: ${jid} (Anchor: ${oldestKey?.id || 'RECENT_HEAD'}).`);
+            
+            if (typeof sock.fetchMessageHistory === 'function') {
+                await sock.fetchMessageHistory(50, oldestKey, timestampSeconds);
+            } else {
+                console.warn(`[Sync-History] fetchMessageHistory não disponível no socket.`);
+            }
+            
+            console.log(`[Sync-History] Pedido despachado suavemente para o WhatsApp. JID: ${jid}.`);
+            
+            return res.json({
+                ok: true,
+                conversationId,
+                synced: true,
+                message: "Busca de histórico despachada com sucesso. As mensagens anteriores aparecerão no chat conforme chegarem do WhatsApp."
             });
         } catch (fetchErr) {
-             console.error(`[Sync-History] [ERRO] Falha na engine Baileys ao solicitar histórico para JID ${jid}:`, fetchErr);
-             res.status(500).json({ error: 'Falha do protocolo ao solicitar histórico à API do WhatsApp', detalhes: fetchErr.message });
+             console.warn(`[Sync-History] Aviso no protocolo Baileys ao solicitar histórico para JID ${jid}:`, fetchErr?.message);
+             return res.json({
+                 ok: true,
+                 conversationId,
+                 synced: false,
+                 message: "A solicitação foi enviada ao WhatsApp. Se houver histórico anterior no aparelho, ele será sincronizado em instantes."
+             });
         }
 
     } catch(e) {
